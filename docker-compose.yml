@@ -1,0 +1,13 @@
+services:
+  hermes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rsg-hermes
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    command: ["hermes", "--slack"]

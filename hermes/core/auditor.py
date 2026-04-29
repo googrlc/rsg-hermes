@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from hermes.core.client import EspoClient, EspoClientError
@@ -59,3 +62,60 @@ def quick_kpis(client: EspoClient) -> list[KPIReport]:
         except EspoClientError as e:
             reports.append(KPIReport(entity, None, str(e)))
     return reports
+
+
+class SchemaAuditor:
+    """Best-effort schema map builder for Hermes command tuning."""
+
+    DEFAULT_HIGHLIGHT_FIELDS = ("agentOfAgencyCode", "carrierCode", "totalPremium")
+
+    def __init__(self, client: EspoClient, output_path: str | Path | None = None) -> None:
+        self.client = client
+        self.output_path = Path(output_path or os.environ.get("HERMES_SCHEMA_MAP", "schema_map.json"))
+
+    def _metadata(self) -> dict[str, Any]:
+        scopes: dict[str, Any] | None = None
+        try:
+            raw_scopes = self.client.get_metadata("scopes")
+            if isinstance(raw_scopes, dict):
+                scopes = raw_scopes
+        except EspoClientError:
+            pass
+        metadata = self.client.get_metadata()
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if scopes is not None:
+            metadata.setdefault("scopes", scopes)
+        return metadata
+
+    @staticmethod
+    def _entity_defs(metadata: dict[str, Any]) -> dict[str, Any]:
+        entity_defs = metadata.get("entityDefs")
+        if isinstance(entity_defs, dict):
+            return entity_defs
+        scopes = metadata.get("scopes")
+        return scopes if isinstance(scopes, dict) else {}
+
+    def run_field_audit(self) -> dict[str, Any]:
+        metadata = self._metadata()
+        entity_defs = self._entity_defs(metadata)
+        highlight_fields = list(self.DEFAULT_HIGHLIGHT_FIELDS)
+        field_locations: dict[str, list[str]] = {field: [] for field in highlight_fields}
+
+        for entity_name, entity_def in entity_defs.items():
+            if not isinstance(entity_def, dict):
+                continue
+            fields = entity_def.get("fields")
+            if not isinstance(fields, dict):
+                continue
+            for field in highlight_fields:
+                if field in fields:
+                    field_locations[field].append(str(entity_name))
+
+        schema_map = {
+            "rsg_highlight_fields": highlight_fields,
+            "rsg_field_locations": field_locations,
+            "entity_count": len(entity_defs),
+        }
+        self.output_path.write_text(json.dumps(schema_map, indent=2, sort_keys=True) + "\n")
+        return schema_map

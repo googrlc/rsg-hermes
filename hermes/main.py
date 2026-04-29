@@ -8,7 +8,9 @@ import sys
 
 from dotenv import load_dotenv
 
-from hermes.core.auditor import quick_kpis
+import os
+
+from hermes.core.auditor import SchemaAuditor, quick_kpis
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher
 
@@ -19,6 +21,8 @@ def main() -> int:
     parser.add_argument("command", nargs="*", help="One-shot command (omit for REPL)")
     parser.add_argument("--ping", action="store_true", help="Test API key and exit")
     parser.add_argument("--kpi", action="store_true", help="Print quick entity counts")
+    parser.add_argument("--audit-fields", action="store_true", help="Build schema_map.json field audit")
+    parser.add_argument("--audit-schema", action="store_true", help="Build schema_map.json schema audit")
     parser.add_argument(
         "--slack",
         action="store_true",
@@ -31,6 +35,12 @@ def main() -> int:
     except EspoClientError as e:
         print(e, file=sys.stderr)
         return 2
+
+    if args.audit_fields or args.audit_schema:
+        schema = SchemaAuditor(client).run_field_audit()
+        print(f"Schema audit wrote {os.environ.get('HERMES_SCHEMA_MAP', 'schema_map.json')}")
+        print(schema)
+        return 0
 
     if args.slack:
         from hermes.integrations.slack_socket import run_slack_socket
@@ -51,7 +61,8 @@ def main() -> int:
             print(f"{r.label}: {r.value}" + (f" — {r.detail}" if r.detail else ""))
         return 0
 
-    dispatcher = Dispatcher()
+    use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
+    dispatcher = Dispatcher(use_openai=use_openai)
     if args.command:
         line = " ".join(args.command)
         result = dispatcher.dispatch(client, line)

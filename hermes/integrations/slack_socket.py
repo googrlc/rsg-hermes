@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import logging
 from typing import Any
 
 from slack_bolt import App
@@ -13,6 +14,7 @@ from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher
 
 _SLACK_MSG_LIMIT = 3500
+log = logging.getLogger(__name__)
 
 
 def _strip_leading_mention(text: str) -> str:
@@ -51,7 +53,8 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
         except EspoClientError as e:
             raise RuntimeError(str(e)) from e
 
-    dispatcher = Dispatcher()
+    use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
+    dispatcher = Dispatcher(use_openai=use_openai)
     app = App(token=bot_token)
 
     def _handle_text(text: str, say: Any, thread_ts: str | None) -> None:
@@ -80,7 +83,21 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             return
         text = event.get("text") or ""
         thread_ts = event.get("thread_ts") or event.get("ts")
-        _handle_text(text, say, thread_ts)
+        files = event.get("files") or []
+        pdfs = [
+            f
+            for f in files
+            if isinstance(f, dict)
+            and (
+                f.get("mimetype") == "application/pdf"
+                or str(f.get("name") or "").lower().endswith(".pdf")
+            )
+        ]
+        if pdfs:
+            log.info("pdf_folder_ingest placeholder received %s PDF(s)", len(pdfs))
+            say("PDF received. The pdf_folder_ingest pipeline is queued as a follow-up placeholder.", thread_ts=thread_ts)
+        if text.strip():
+            _handle_text(text, say, thread_ts)
 
     handler = SocketModeHandler(app, app_token)
     handler.start()

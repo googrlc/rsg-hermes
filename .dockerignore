@@ -1,0 +1,8 @@
+.DS_Store
+.env
+.git
+.venv
+.venv-*
+__pycache__/
+*.pyc
+schema_map.json

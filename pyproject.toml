@@ -3,11 +3,12 @@ name = "rsg-hermes"
 version = "0.1.0"
 description = "Hermes — EspoCRM coordinator (CLI, Slack, REST client)"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "requests>=2.28.0",
   "python-dotenv>=1.0.0",
   "slack-bolt>=1.18.0",
+  "openai>=1.30.0",
 ]
 
 [project.scripts]
