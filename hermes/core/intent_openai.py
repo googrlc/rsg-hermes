@@ -23,12 +23,22 @@ def command_from_intent(text: str) -> str | None:
     client = OpenAI(api_key=api_key)
     prompt = (
         "Convert the user request into one Hermes command line. "
-        "Use only these command shapes: "
-        "add contact <name> [email <email>] [to account <account>]; "
-        "what is <name> phone; "
-        "total premium for <account>; "
-        "renewal audit; "
-        "cross-sell opportunities. "
+        "Use only these command shapes:\n"
+        "  add contact <name> [email <email>] [to account <account>]\n"
+        "  what is <name> phone\n"
+        "  total premium for <account>\n"
+        "  renewal audit\n"
+        "  cross-sell opportunities\n"
+        "  intake <casual description of a meeting or lead>\n"
+        "  pipeline\n"
+        "  kpi\n"
+        "  premium by lob\n"
+        "  commission snapshot\n"
+        "  stale leads\n"
+        "  my accounts\n"
+        "  account list\n"
+        "If the message describes meeting someone, a new lead, or dictating client info, "
+        "use 'intake <the original message>'. "
         "Return only the command line."
     )
     try:
