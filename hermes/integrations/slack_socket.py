@@ -40,6 +40,12 @@ def _is_direct_im(event: dict[str, Any]) -> bool:
     return isinstance(ch, str) and ch.startswith("D")
 
 
+def _is_command_channel(event: dict[str, Any], command_channel: str | None) -> bool:
+    if not command_channel:
+        return False
+    return event.get("channel") == command_channel
+
+
 def run_slack_socket(espo: EspoClient | None = None) -> None:
     bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
     app_token = os.environ.get("SLACK_APP_TOKEN", "")
@@ -58,6 +64,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
     dispatcher = Dispatcher(use_openai=use_openai)
     app = App(token=bot_token)
     fallback_channel = os.environ.get("HERMES_SLACK_FALLBACK_CHANNEL", "C0AFHN83ZE3")
+    command_channel = os.environ.get("HERMES_SLACK_COMMAND_CHANNEL") or fallback_channel
 
     def _send_reply(
         *,
@@ -166,7 +173,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
 
     @app.event("message")
     def on_message(event: dict[str, Any], say: Any) -> None:
-        if not _is_direct_im(event):
+        if not _is_direct_im(event) and not _is_command_channel(event, command_channel):
             return
         if event.get("subtype") in ("message_changed", "message_deleted", "channel_join", "channel_leave"):
             return
