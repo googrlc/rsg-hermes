@@ -21,6 +21,9 @@ class ReconciliationResult:
     posted: bool
     message: str
     discrepancies: list[dict[str, Any]]
+    matched_count: int
+    unmatched_count: int
+    unmatched_policy_numbers: list[str]
     warnings: list[str]
 
 
@@ -33,20 +36,55 @@ def run_reconciliation(
 ) -> ReconciliationResult:
     path = Path(statement_path).expanduser()
     if not path.exists():
-        return ReconciliationResult(False, False, f"Statement file not found: {path}", [], [])
+        return ReconciliationResult(False, False, f"Statement file not found: {path}", [], 0, 0, [], [])
     parsed_rows, parse_warnings = _parse_statement(path)
     policy_index, fetch_warnings = _policy_index(client)
-    discrepancies = _find_discrepancies(parsed_rows, policy_index)
+    discrepancies, matched_count, unmatched_policy_numbers = _analyze_statement(parsed_rows, policy_index)
     warnings = [*parse_warnings, *fetch_warnings]
-    text, blocks = _build_slack_payload(discrepancies, statement_name=path.name)
+    text, blocks = _build_slack_payload(
+        discrepancies,
+        statement_name=path.name,
+        matched_count=matched_count,
+        unmatched_policy_numbers=unmatched_policy_numbers,
+    )
     if dry_run:
-        return ReconciliationResult(True, False, text, discrepancies, warnings)
+        return ReconciliationResult(
+            True,
+            False,
+            text,
+            discrepancies,
+            matched_count,
+            len(unmatched_policy_numbers),
+            unmatched_policy_numbers,
+            warnings,
+        )
     active_notifier = notifier or SlackNotifier(channel=os.environ.get("HERMES_COMMISSION_RECON_CHANNEL", "").strip() or None)
     try:
         active_notifier.post_message(text=text, blocks=blocks)
     except SlackNotifierError as e:
-        return ReconciliationResult(False, False, f"Commission reconciliation Slack post failed: {e}", discrepancies, warnings)
-    return ReconciliationResult(True, True, f"Commission reconciliation posted ({len(discrepancies)} discrepancies).", discrepancies, warnings)
+        return ReconciliationResult(
+            False,
+            False,
+            f"Commission reconciliation Slack post failed: {e}",
+            discrepancies,
+            matched_count,
+            len(unmatched_policy_numbers),
+            unmatched_policy_numbers,
+            warnings,
+        )
+    return ReconciliationResult(
+        True,
+        True,
+        (
+            f"Commission reconciliation posted ({len(discrepancies)} discrepancies; "
+            f"matched {matched_count}, unmatched {len(unmatched_policy_numbers)})."
+        ),
+        discrepancies,
+        matched_count,
+        len(unmatched_policy_numbers),
+        unmatched_policy_numbers,
+        warnings,
+    )
 
 
 def build_dispute_action_value(*, policy_id: str, policy_number: str, carrier: str) -> str:
@@ -198,11 +236,13 @@ def _policy_index(client: EspoClient) -> tuple[dict[str, dict[str, Any]], list[s
     return index, warnings
 
 
-def _find_discrepancies(
+def _analyze_statement(
     statement_rows: list[dict[str, Any]],
     policy_index: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], int, list[str]]:
     discrepancies: list[dict[str, Any]] = []
+    matched_count = 0
+    unmatched: list[str] = []
     mode = os.environ.get("HERMES_COMMISSION_RECON_RULE", "any_difference").strip().lower()
     percent_threshold = _as_percent(os.environ.get("HERMES_COMMISSION_RECON_PERCENT_THRESHOLD", "1"))
     amount_threshold = _as_money(os.environ.get("HERMES_COMMISSION_RECON_AMOUNT_THRESHOLD", "25"))
@@ -213,7 +253,9 @@ def _find_discrepancies(
         paid = _as_money(row.get("paid_commission"))
         policy = policy_index.get(policy_number.upper())
         if not policy:
+            unmatched.append(policy_number)
             continue
+        matched_count += 1
         expected = _as_money(policy.get("expected_commission"))
         delta = expected - paid
         abs_delta = abs(delta)
@@ -234,18 +276,47 @@ def _find_discrepancies(
             }
         )
     discrepancies.sort(key=lambda r: abs(_as_money(r.get("delta"))), reverse=True)
-    return discrepancies
+    return discrepancies, matched_count, sorted(set(unmatched))
 
 
 def _build_slack_payload(
     discrepancies: list[dict[str, Any]],
     *,
     statement_name: str,
+    matched_count: int,
+    unmatched_policy_numbers: list[str],
 ) -> tuple[str, list[dict[str, Any]]]:
+    summary_line = (
+        f"Matched: {matched_count} | Unmatched: {len(unmatched_policy_numbers)} | "
+        f"Discrepancies: {len(discrepancies)}"
+    )
     if not discrepancies:
-        text = f"Commission reconciliation complete for `{statement_name}`: no discrepancies found."
-        return text, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
-    lines = ["🚨 COMMISSION DISCREPANCY", "", f"Statement: {statement_name}", ""]
+        lines = [
+            f"Commission reconciliation complete for `{statement_name}`: no discrepancies found.",
+            summary_line,
+        ]
+        if unmatched_policy_numbers:
+            preview = ", ".join(unmatched_policy_numbers[:10])
+            lines.append(f"Unmatched policy numbers: {preview}")
+        text = "\n".join(lines)
+        blocks = [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"{lines[0]}\n{summary_line}"},
+            }
+        ]
+        if unmatched_policy_numbers:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f":warning: *Unmatched policy numbers:* {', '.join(unmatched_policy_numbers[:20])}",
+                    },
+                }
+            )
+        return text, blocks
+    lines = ["🚨 COMMISSION DISCREPANCY", "", f"Statement: {statement_name}", summary_line, ""]
     for row in discrepancies[:12]:
         lines.append(
             (
@@ -259,10 +330,20 @@ def _build_slack_payload(
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*🚨 COMMISSION DISCREPANCY*\nStatement: `{statement_name}`",
+                "text": f"*🚨 COMMISSION DISCREPANCY*\nStatement: `{statement_name}`\n{summary_line}",
             },
         }
     ]
+    if unmatched_policy_numbers:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f":warning: *Unmatched policy numbers:* {', '.join(unmatched_policy_numbers[:20])}",
+                },
+            }
+        )
     for row in discrepancies[:12]:
         blocks.append(
             {

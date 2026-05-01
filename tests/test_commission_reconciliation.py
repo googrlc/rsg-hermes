@@ -54,7 +54,9 @@ class CommissionReconciliationTests(unittest.TestCase):
     def test_csv_reconciliation_flags_any_difference(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             statement = Path(tmp) / "carrier.csv"
-            statement.write_text("policy_number,carrier,commission_paid\n12345,Progressive,420\n88888,Travelers,290\n")
+            statement.write_text(
+                "policy_number,carrier,commission_paid\n12345,Progressive,420\n88888,Travelers,290\n40404,Unknown,100\n"
+            )
             result = commission_reconciliation.run_reconciliation(
                 FakeClient(),
                 statement_path=str(statement),
@@ -63,6 +65,9 @@ class CommissionReconciliationTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(len(result.discrepancies), 2)
         self.assertIn("COMMISSION DISCREPANCY", result.message)
+        self.assertEqual(result.matched_count, 2)
+        self.assertEqual(result.unmatched_count, 1)
+        self.assertIn("40404", result.unmatched_policy_numbers)
 
     def test_percent_threshold_rule_filters_small_delta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -83,6 +88,8 @@ class CommissionReconciliationTests(unittest.TestCase):
                 )
         self.assertTrue(result.ok)
         self.assertEqual(len(result.discrepancies), 0)
+        self.assertEqual(result.matched_count, 1)
+        self.assertEqual(result.unmatched_count, 0)
 
     def test_dispute_action_creates_task(self) -> None:
         client = FakeClient()
@@ -115,6 +122,7 @@ class CommissionReconciliationTests(unittest.TestCase):
         self.assertTrue(result.posted)
         self.assertEqual(len(notifier.calls), 1)
         self.assertGreater(result.discrepancies[0]["delta"], Decimal("0"))
+        self.assertIn("matched 1", result.message.lower())
 
 
 if __name__ == "__main__":
