@@ -21,7 +21,7 @@ class FakeClient:
                 "list": [
                     {
                         "id": "pol-1",
-                        "policyNumber": "12345",
+                        "policyNumber": "AB-12345",
                         "carrier": "Progressive",
                         "premiumAmount": "4200",
                         "commissionRate": "12",
@@ -55,7 +55,7 @@ class CommissionReconciliationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             statement = Path(tmp) / "carrier.csv"
             statement.write_text(
-                "policy_number,carrier,commission_paid\n12345,Progressive,420\n88888,Travelers,290\n40404,Unknown,100\n"
+                "policy_number,carrier,commission_paid\nAB12345,Progressive,420\n88888,Travelers,290\n40404,Unknown,100\n"
             )
             result = commission_reconciliation.run_reconciliation(
                 FakeClient(),
@@ -68,11 +68,12 @@ class CommissionReconciliationTests(unittest.TestCase):
         self.assertEqual(result.matched_count, 2)
         self.assertEqual(result.unmatched_count, 1)
         self.assertIn("40404", result.unmatched_policy_numbers)
+        self.assertIn("AB-12345", result.message)
 
     def test_percent_threshold_rule_filters_small_delta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             statement = Path(tmp) / "carrier.csv"
-            statement.write_text("policy_number,carrier,commission_paid\n12345,Progressive,503\n")
+            statement.write_text("policy_number,carrier,commission_paid\nAB12345,Progressive,503\n")
             with patch.dict(
                 os.environ,
                 {
@@ -111,7 +112,7 @@ class CommissionReconciliationTests(unittest.TestCase):
         notifier = FakeNotifier()
         with tempfile.TemporaryDirectory() as tmp:
             statement = Path(tmp) / "carrier.csv"
-            statement.write_text("policy_number,carrier,commission_paid\n12345,Progressive,420\n")
+            statement.write_text("policy_number,carrier,commission_paid\nAB12345,Progressive,420\n")
             result = commission_reconciliation.run_reconciliation(
                 FakeClient(),
                 statement_path=str(statement),
@@ -121,6 +122,7 @@ class CommissionReconciliationTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertTrue(result.posted)
         self.assertEqual(len(notifier.calls), 1)
+        self.assertEqual(len(result.discrepancies), 1)
         self.assertGreater(result.discrepancies[0]["delta"], Decimal("0"))
         self.assertIn("matched 1", result.message.lower())
 

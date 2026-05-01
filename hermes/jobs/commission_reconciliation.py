@@ -219,20 +219,30 @@ def _policy_index(client: EspoClient) -> tuple[dict[str, dict[str, Any]], list[s
     for row in rows:
         if not isinstance(row, dict):
             continue
-        policy_number = str(_pick(row, "policyNumber", "policy_number", "name", "id") or "").strip()
-        if not policy_number:
+        raw_candidates = [
+            _pick(row, "policyNumber", "policy_number"),
+            _pick(row, "caCurrentPolicyNum", "currentPolicyNumber", "current_policy_number"),
+            _pick(row, "name"),
+            _pick(row, "id"),
+        ]
+        candidates = [str(x).strip() for x in raw_candidates if x not in ("", None)]
+        if not candidates:
             continue
         expected = _as_money(_pick(row, "commissionAmount", "commission_amount"))
         if expected <= 0:
             premium = _as_money(_pick(row, "premiumAmount", "premium_amount", "amount"))
             rate = _as_percent(_pick(row, "commissionRate", "commission_rate"))
             expected = (premium * rate) / Decimal("100")
-        index[policy_number.upper()] = {
+        canonical = candidates[0]
+        payload = {
             "policy_id": str(row.get("id") or ""),
-            "policy_number": policy_number,
+            "policy_number": canonical,
             "carrier": str(_pick(row, "carrier") or ""),
             "expected_commission": expected,
         }
+        for candidate in candidates:
+            for key in _matching_keys(candidate):
+                index[key] = payload
     return index, warnings
 
 
@@ -251,7 +261,7 @@ def _analyze_statement(
         if not policy_number:
             continue
         paid = _as_money(row.get("paid_commission"))
-        policy = policy_index.get(policy_number.upper())
+        policy = _lookup_policy(policy_index, policy_number)
         if not policy:
             unmatched.append(policy_number)
             continue
@@ -401,6 +411,26 @@ def _pick(row: dict[str, Any], *keys: str) -> Any:
             if actual_key.lower() == key.lower() and row[actual_key] not in ("", None):
                 return row[actual_key]
     return None
+
+
+def _lookup_policy(policy_index: dict[str, dict[str, Any]], policy_number: str) -> dict[str, Any] | None:
+    for key in _matching_keys(policy_number):
+        hit = policy_index.get(key)
+        if hit:
+            return hit
+    return None
+
+
+def _matching_keys(value: str) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    upper = raw.upper()
+    compact = re.sub(r"[^A-Z0-9]", "", upper)
+    keys = [upper]
+    if compact and compact != upper:
+        keys.append(compact)
+    return keys
 
 
 def _as_percent(value: Any) -> Decimal:
