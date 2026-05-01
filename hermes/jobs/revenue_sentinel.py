@@ -219,21 +219,8 @@ def handle_slack_action(
 
 def _query_stale_opportunities(*, client: EspoClient, now_local: datetime) -> SentinelQueryResult:
     cutoff = now_local - timedelta(days=int(os.environ.get("HERMES_SENTINEL_STALE_DAYS", "14")))
-    cutoff_text = cutoff.strftime("%Y-%m-%d %H:%M:%S")
-    select = (
-        "id,name,accountName,lineOfBusiness,line_of_business,amount,premium_amount,"
-        "stage,status,modifiedAt"
-    )
     try:
-        body = client.get(
-            "Opportunity",
-            params={
-                "maxSize": 200,
-                "select": select,
-                "orderBy": [["modifiedAt", "asc"]],
-                "where": [{"type": "lessThan", "attribute": "modifiedAt", "value": cutoff_text}],
-            },
-        )
+        body = client.get("Opportunity", params={"maxSize": 200})
     except EspoClientError as e:
         return SentinelQueryResult(label="STALE LEADS", rows=[], error=str(e))
     rows = _list_rows(body)
@@ -241,6 +228,9 @@ def _query_stale_opportunities(*, client: EspoClient, now_local: datetime) -> Se
     for row in rows:
         pipeline_state = _pick(row, "status", "stage")
         if pipeline_state not in STALE_STATUSES:
+            continue
+        modified = _parse_datetime(_pick(row, "modifiedAt"), now_local)
+        if not modified or modified >= cutoff:
             continue
         filtered.append(
             {
@@ -259,27 +249,15 @@ def _query_stale_opportunities(*, client: EspoClient, now_local: datetime) -> Se
 
 def _query_renewals(*, client: EspoClient, now_local: datetime) -> SentinelQueryResult:
     checkpoints = _renewal_checkpoints()
-    select = (
-        "id,name,accountId,accountName,line_of_business,lineOfBusiness,premium_amount,amount,"
-        "expiration_date,expirationDate,status"
-    )
     try:
-        body = client.get(
-            "Policy",
-            params={
-                "maxSize": 200,
-                "select": select,
-                "orderBy": [["expirationDate", "asc"]],
-                "where": [
-                    {"type": "equals", "attribute": "status", "value": "Active"},
-                ],
-            },
-        )
+        body = client.get("Policy", params={"maxSize": 200})
     except EspoClientError as e:
         return SentinelQueryResult(label="PROJECT 85 RENEWALS", rows=[], error=str(e))
     rows = _list_rows(body)
     filtered: list[dict[str, Any]] = []
     for row in rows:
+        if str(row.get("status") or "").lower() != "active":
+            continue
         expiration = _parse_iso_date(str(_pick(row, "expirationDate", "expiration_date") or ""))
         if not expiration:
             continue
@@ -349,24 +327,17 @@ def _query_x_date_entity(
     entity: str,
     target_date: str,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    select = (
-        "id,name,lineOfBusiness,line_of_business,xDate,x_date,modifiedAt,lostToCarrier,carrier,amount,premium_amount,stage,status"
-    )
-    where = [
-        {
-            "type": "or",
-            "value": [
-                {"type": "equals", "attribute": "xDate", "value": target_date},
-                {"type": "equals", "attribute": "x_date", "value": target_date},
-            ],
-        }
-    ]
     try:
-        body = client.get(entity, params={"maxSize": 200, "select": select, "where": where})
+        body = client.get(entity, params={"maxSize": 200})
     except EspoClientError as e:
         return [], str(e)
-    mapped = [
-        {
+    mapped: list[dict[str, Any]] = []
+    for row in _list_rows(body):
+        x_date = _format_date(_pick(row, "xDate", "x_date"))
+        if x_date != target_date:
+            continue
+        mapped.append(
+            {
             "entity": entity,
             "record_id": str(row.get("id") or ""),
             "name": str(row.get("name") or "Unknown"),
@@ -379,8 +350,7 @@ def _query_x_date_entity(
             "carrier": _pick(row, "lostToCarrier", "carrier"),
             "stage": _pick(row, "stage", "status"),
         }
-        for row in _list_rows(body)
-    ]
+        )
     return mapped, None
 
 
@@ -674,6 +644,19 @@ def _parse_iso_date(value: str) -> date | None:
         return None
 
 
+def _parse_datetime(value: Any, now_local: datetime) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip().replace("T", " ").replace("Z", "")
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(text[:19] if pattern == "%Y-%m-%d %H:%M:%S" else text[:10], pattern)
+            return parsed.replace(tzinfo=now_local.tzinfo)
+        except ValueError:
+            continue
+    return None
+
+
 def _expected_latest_business_day(today_local: date) -> date:
     weekday = today_local.weekday()
     if weekday <= 4:
@@ -715,21 +698,8 @@ def _account_renewal_stages(*, client: EspoClient, account_ids: list[str]) -> di
     unique_ids = sorted({account_id for account_id in account_ids if account_id})
     if not unique_ids:
         return {}
-    where = [
-        {
-            "type": "or",
-            "value": [{"type": "equals", "attribute": "id", "value": account_id} for account_id in unique_ids],
-        }
-    ]
     try:
-        body = client.get(
-            "Account",
-            params={
-                "maxSize": min(len(unique_ids), 200),
-                "select": "id,renewalOutreachStage,renewalDate,nextRenewalDate",
-                "where": where,
-            },
-        )
+        body = client.get("Account", params={"maxSize": 200})
     except EspoClientError:
         return {}
     rows = _list_rows(body)
