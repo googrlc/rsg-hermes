@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -50,7 +51,7 @@ def snapshot_system_health(supa: SupabaseClient) -> list[dict[str, Any]]:
     guardrails_recent = supa.select(
         "guardrail_logs",
         columns="id",
-        params={"created_at": "gte.now()-interval '24 hours'"},
+        params={"created_at": f"gte.{(datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}"},
         limit=1000,
     )
     results.append(

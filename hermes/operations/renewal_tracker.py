@@ -20,6 +20,7 @@ VALID_ACTION_TYPES = (
     "PROPOSAL_SENT",
     "BOUND",
     "MANUAL_NOTE",
+    "RISK_ESCALATION",
 )
 
 
@@ -98,14 +99,13 @@ def get_renewals_expiring_within(
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Fetch renewals expiring within the next N days."""
-    target = date.today().isoformat()
     from datetime import timedelta
+    target = date.today().isoformat()
     cutoff = (date.today() + timedelta(days=days)).isoformat()
     return supa.select(
         "project_85_renewals",
         params={
-            "expiration_date": f"gte.{target}",
-            "and": f"(expiration_date.lte.{cutoff})",
+            "and": f"(expiration_date.gte.{target},expiration_date.lte.{cutoff})",
             "order": "expiration_date.asc",
         },
         limit=limit,

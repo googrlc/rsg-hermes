@@ -64,7 +64,6 @@ def run_ops_doctor(supa: SupabaseClient) -> OpsDoctorReport:
 
     for table in HERMES_TABLES:
         try:
-            rows = supa.select(table, columns="id", limit=1)
             count_rows = supa.select(table, columns="id", limit=1000)
             report.checks.append(
                 OpsCheckResult(table=table, ok=True, row_count=len(count_rows))

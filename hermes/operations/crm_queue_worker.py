@@ -74,7 +74,7 @@ def process_queue(
         queue_id = item["id"]
         entity_type = item["entity_type"]
         entity_id = item.get("entity_id")
-        payload = item.get("payload") or {}
+        payload = dict(item.get("payload") or {})
         attempt_count = (item.get("attempt_count") or 0) + 1
         role = item.get("created_by_role", "unknown")
 
@@ -133,10 +133,11 @@ def _apply_to_espo(
     payload: dict[str, Any],
 ) -> dict[str, Any] | list[Any]:
     """Dispatch create or update based on whether entity_id is present."""
-    intent = str(payload.pop("intent", "")).strip()
-    properties = payload.pop("properties", payload)
+    work = dict(payload)
+    intent = str(work.pop("intent", "")).strip()
+    properties = work.pop("properties", work)
     if isinstance(properties, dict) and not properties:
-        properties = payload
+        properties = work
 
     if entity_id and intent in ("update", "annotate", ""):
         return espo.update(entity_type, entity_id, properties)
