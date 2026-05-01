@@ -4,3 +4,4 @@
 .venv/
 .venv-*/
 schema_map.json
+__pycache__/
