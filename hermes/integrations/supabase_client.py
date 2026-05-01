@@ -29,7 +29,7 @@ class SupabaseClient:
         self.timeout = timeout
         if not self.url or not self.key:
             raise SupabaseClientError(
-                "SUPABASE_URL and SUPABASE_KEY must be set (env or constructor)."
+                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_KEY) must be set (env or constructor)."
             )
 
     def _headers(self, *, prefer: str = "return=representation") -> dict[str, str]:

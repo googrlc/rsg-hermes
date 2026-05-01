@@ -61,6 +61,7 @@ def process_queue(
         "crm_write_queue",
         params={
             "status": "eq.PENDING",
+            "target_system": "eq.EspoCRM",
             "order": "created_at.asc",
         },
         limit=batch_size,
