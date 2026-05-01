@@ -37,8 +37,18 @@ def command_from_intent(text: str) -> str | None:
         "  stale leads\n"
         "  my accounts\n"
         "  account list\n"
+        "  data quality\n"
+        "  report personal\n"
+        "  bulk normalize\n"
+        "  find the <field> for <name> (works for any CRM field: fein, dot number, carrier, policy number, etc.)\n"
+        "  find account <name>\n"
+        "  find policy <name or number>\n"
         "If the message describes meeting someone, a new lead, or dictating client info, "
         "use 'intake <the original message>'. "
+        "If they ask about a specific field on a record, use 'find the <field> for <name>'. "
+        "If they ask about data quality, missing fields audit, DQ report, CRM audit, "
+        "or cleanliness of CRM data, return exactly 'data quality' "
+        "(do not substitute kpi, dashboard, or pipeline). "
         "Return only the command line."
     )
     try:

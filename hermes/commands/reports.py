@@ -237,6 +237,124 @@ def _account_list(client: "EspoClient") -> DispatchResult:
     return DispatchResult(True, "\n".join(lines), {"rows": rows, "total": total})
 
 
+def _looks_non_canonical(name: str) -> bool:
+    letters = [c for c in name if c.isalpha()]
+    if not letters:
+        return False
+    # SHOUT_CASE, all lower, or obvious spacing anomalies.
+    return (
+        name.isupper()
+        or name.islower()
+        or "  " in name
+        or name != name.strip()
+    )
+
+
+def _canonicalize_name(name: str) -> str:
+    # Keep common business suffixes uppercase.
+    keep_upper = {"LLC", "INC", "LTD", "CO", "LP", "LLP", "USA"}
+    words = [w for w in name.strip().split() if w]
+    normalized: list[str] = []
+    for w in words:
+        up = w.upper().strip(",.")
+        if up in keep_upper:
+            normalized.append(up)
+            continue
+        normalized.append(w.capitalize())
+    return " ".join(normalized)
+
+
+def _report_personal(client: "EspoClient") -> DispatchResult:
+    """Report suspect name rows for manual cleanup (report-first workflow)."""
+    account_body = client.get(
+        "Account",
+        params={"maxSize": 500, "select": "id,name,accountType"},
+    )
+    contact_body = client.get(
+        "Contact",
+        params={"maxSize": 500, "select": "id,name,firstName,lastName,emailAddress"},
+    )
+
+    accounts = account_body.get("list", []) if isinstance(account_body, dict) else []
+    contacts = contact_body.get("list", []) if isinstance(contact_body, dict) else []
+
+    account_issues: list[dict[str, Any]] = []
+    contact_issues: list[dict[str, Any]] = []
+
+    for row in accounts:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name or not _looks_non_canonical(name):
+            continue
+        account_issues.append(
+            {
+                "id": row.get("id"),
+                "name": name,
+                "suggested": _canonicalize_name(name),
+                "accountType": row.get("accountType"),
+            }
+        )
+
+    for row in contacts:
+        if not isinstance(row, dict):
+            continue
+        full_name = str(row.get("name") or "").strip()
+        if not full_name:
+            first = str(row.get("firstName") or "").strip()
+            last = str(row.get("lastName") or "").strip()
+            full_name = " ".join([p for p in [first, last] if p]).strip()
+        if not full_name or not _looks_non_canonical(full_name):
+            continue
+        contact_issues.append(
+            {
+                "id": row.get("id"),
+                "name": full_name,
+                "suggested": _canonicalize_name(full_name),
+                "email": row.get("emailAddress"),
+            }
+        )
+
+    lines = ["*Personal Data Cleanup Report*"]
+    lines.append(f"Accounts scanned: {len(accounts)} | suspect rows: {len(account_issues)}")
+    for r in account_issues[:20]:
+        lines.append(f"  - Account: {r['name']} -> {r['suggested']} (id: {r['id']})")
+    if len(account_issues) > 20:
+        lines.append(f"  ... +{len(account_issues) - 20} more account rows")
+
+    lines.append("")
+    lines.append(f"Contacts scanned: {len(contacts)} | suspect rows: {len(contact_issues)}")
+    for r in contact_issues[:20]:
+        email = r.get("email") or "no email"
+        lines.append(f"  - Contact: {r['name']} -> {r['suggested']} ({email})")
+    if len(contact_issues) > 20:
+        lines.append(f"  ... +{len(contact_issues) - 20} more contact rows")
+
+    lines.append("")
+    lines.append("Recommended workflow:")
+    lines.append("1) Run `report personal`")
+    lines.append("2) Fix rows deliberately in UI/export using canonical spelling")
+    lines.append("3) Run `bulk normalize` (dry-run preview) before any apply step")
+    return DispatchResult(
+        True,
+        "\n".join(lines),
+        {"accounts": account_issues, "contacts": contact_issues},
+    )
+
+
+def _bulk_normalize_preview(client: "EspoClient") -> DispatchResult:
+    """Dry-run normalization preview only (no writes)."""
+    report = _report_personal(client)
+    if not report.ok:
+        return report
+    lines = ["*Bulk Normalize (Dry Run)*", "No changes were applied.", ""]
+    lines.append("Preview generated from `report personal` candidates.")
+    lines.append("If this looks right, apply manually in UI/export first.")
+    lines.append("")
+    lines.append(report.message)
+    return DispatchResult(True, "\n".join(lines), report.data)
+
+
 def handle(
     client: "EspoClient",
     text: str,
@@ -257,4 +375,12 @@ def handle(
         return _stale_leads(client)
     if re.search(r"\b(account\s*list|my\s*accounts)\b", t):
         return _account_list(client)
-    return _kpi_dashboard(client)
+    if re.search(r"\b(report\s*[- ]?personal|personal\s*report|cleanup\s*report)\b", t):
+        return _report_personal(client)
+    if re.search(r"\b(bulk\s*[- ]?normalize|normalize\s*preview)\b", t):
+        return _bulk_normalize_preview(client)
+    return DispatchResult(
+        False,
+        "Unknown report. Try: *pipeline*, *premium by lob*, *kpi*, *dashboard*, "
+        "*commission snapshot*, *stale leads*, *my accounts*, *report personal*, or *bulk normalize*.",
+    )

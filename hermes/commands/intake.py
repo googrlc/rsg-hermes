@@ -98,7 +98,10 @@ def _write_espo(
     if data.get("lastName"):
         contact_payload["lastName"] = data["lastName"]
     if data.get("phone"):
-        contact_payload["phoneNumber"] = data["phone"]
+        digits = "".join(c for c in data["phone"] if c.isdigit())
+        if len(digits) == 10:
+            digits = "1" + digits
+        contact_payload["phoneNumber"] = f"+{digits}"
     if data.get("email"):
         contact_payload["emailAddress"] = data["email"]
     if account_id:

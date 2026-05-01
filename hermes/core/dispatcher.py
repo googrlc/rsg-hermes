@@ -14,6 +14,15 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_DATA_QUALITY_HINT = re.compile(
+    r"(^\s*dq\s*$)|(\b(?:data\s+quality|dq\s+report|audit\s+crm|crm\s+audit|quality\s+check)\b)",
+    re.I,
+)
+
+
+def _looks_like_data_quality(text: str) -> bool:
+    return bool(_DATA_QUALITY_HINT.search(text.strip()))
+
 
 @dataclass
 class DispatchResult:
@@ -45,10 +54,20 @@ class Dispatcher:
                 re.compile(r"\b(expir(?:e|ing|y)|renewal[-\s]?audit|renewals?|cross-?sell|revenue|opportunit)", re.I),
                 revenue.handle,
             ),
+            # Data quality BEFORE reports — intent LLM sometimes rewrites “data quality” as “kpi”.
+            (
+                re.compile(
+                    r"\b(data\s+quality|dq\s+report|audit\s+crm|crm\s+audit|quality\s+check)\b",
+                    re.I,
+                ),
+                "data_quality",
+            ),
             (
                 re.compile(
                     r"\b(pipeline|lob\s+break|premium\s+by\s+lob|kpi|dashboard"
-                    r"|commission\s+snap|stale|account\s*list|my\s+accounts)\b",
+                    r"|commission\s+snap|stale|account\s*list|my\s+accounts"
+                    r"|report\s*[- ]?personal|personal\s*report|cleanup\s*report"
+                    r"|bulk\s*[- ]?normalize|normalize\s*preview)\b",
                     re.I,
                 ),
                 "reports",
@@ -100,6 +119,9 @@ class Dispatcher:
         if handler == "reports":
             from hermes.commands.reports import handle as reports_handle
             return reports_handle(client, text, supa=self.supa)
+        if handler == "data_quality":
+            from hermes.commands.data_quality import handle as dq_handle
+            return dq_handle(client, text, supa=self.supa)
         return handler(client, text)
 
     def dispatch(
@@ -112,6 +134,9 @@ class Dispatcher:
         text = line.strip()
         if not text:
             return DispatchResult(False, "Empty command.")
+        # Never route “data quality” through OpenAI intent as “kpi” — handle explicitly first.
+        if _looks_like_data_quality(text):
+            return self._call_handler("data_quality", client, text)
         for pattern, handler in self._routes:
             if pattern.search(text):
                 return self._call_handler(handler, client, text)
@@ -124,5 +149,6 @@ class Dispatcher:
         return DispatchResult(
             False,
             "No handler matched. Try: add … | what/find/lookup … | cross-sell/renewals … | "
-            "intake <lead info> | pipeline | kpi | stale leads | my accounts",
+            "intake <lead info> | pipeline | kpi | stale leads | my accounts | data quality | "
+            "report personal | bulk normalize",
         )
