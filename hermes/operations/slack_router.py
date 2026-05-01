@@ -25,6 +25,11 @@ class RegistryAwareSlackRouter:
 
     def _get_notifier(self, channel_id: str) -> SlackNotifier:
         if self._notifier:
+            if self._notifier.channel != channel_id:
+                raise ValueError(
+                    f"Injected notifier targets channel {self._notifier.channel} "
+                    f"but registry validated {channel_id}"
+                )
             return self._notifier
         return SlackNotifier(channel=channel_id)
 
