@@ -24,6 +24,10 @@ hermes --slack        # needs SLACK_* tokens in .env
 hermes --revenue-sentinel
 hermes --revenue-sentinel-dry-run
 hermes --revenue-sentinel-health
+hermes --commission-audit
+hermes --commission-audit-dry-run
+hermes --eom-scorecard
+hermes --eom-scorecard-dry-run
 hermes 'What is Jane phone'
 hermes 'total premium for Acme'
 hermes 'renewal audit'

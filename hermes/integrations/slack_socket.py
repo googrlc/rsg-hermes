@@ -14,6 +14,7 @@ from slack_sdk.errors import SlackApiError
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher, DispatchResult
 from hermes.jobs import revenue_sentinel
+from hermes.jobs import revenue_integrity
 
 _SLACK_MSG_LIMIT = 3500
 log = logging.getLogger(__name__)
@@ -224,6 +225,27 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
         except (ValueError, EspoClientError) as e:
             log.exception("Sentinel action failed user=%s action=%s", user_id, action_id)
             result = f"Sentinel action failed: {e}"
+        respond(
+            text=result,
+            response_type="ephemeral",
+            replace_original=False,
+        )
+
+    @app.action(re.compile(r"^commission_"))
+    def on_commission_action(ack: Any, body: dict[str, Any], action: dict[str, Any], respond: Any) -> None:
+        ack()
+        action_id = str(action.get("action_id") or "")
+        value = str(action.get("value") or "")
+        user_id = ((body.get("user") or {}).get("id") if isinstance(body, dict) else None) or "unknown"
+        try:
+            result = revenue_integrity.handle_commission_action(
+                client=espo,
+                action=action_id,
+                action_value=value,
+            )
+        except (ValueError, EspoClientError) as e:
+            log.exception("Commission action failed user=%s action=%s", user_id, action_id)
+            result = f"Commission action failed: {e}"
         respond(
             text=result,
             response_type="ephemeral",

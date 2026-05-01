@@ -45,6 +45,36 @@ def main() -> int:
         help="Check sentinel freshness/config status without posting",
     )
     parser.add_argument(
+        "--commission-audit",
+        action="store_true",
+        help="Run Revenue Integrity commission blind-spot audit once",
+    )
+    parser.add_argument(
+        "--commission-audit-dry-run",
+        action="store_true",
+        help="Render commission audit briefing without posting to Slack",
+    )
+    parser.add_argument(
+        "--commission-audit-force",
+        action="store_true",
+        help="Bypass daily idempotency guard for commission audit",
+    )
+    parser.add_argument(
+        "--eom-scorecard",
+        action="store_true",
+        help="Post end-of-month revenue scorecard for previous month",
+    )
+    parser.add_argument(
+        "--eom-scorecard-dry-run",
+        action="store_true",
+        help="Render EOM scorecard without posting",
+    )
+    parser.add_argument(
+        "--eom-scorecard-force",
+        action="store_true",
+        help="Bypass monthly idempotency guard for EOM scorecard",
+    )
+    parser.add_argument(
         "--slack",
         action="store_true",
         help="Run Slack Socket Mode bot (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)",
@@ -110,6 +140,36 @@ def main() -> int:
         for key, value in status.details.items():
             print(f"{key}: {value}")
         return 0 if status.ok else 1
+
+    if args.commission_audit or args.commission_audit_dry_run:
+        from hermes.jobs import revenue_integrity
+
+        result = revenue_integrity.run_commission_audit(
+            client,
+            dry_run=args.commission_audit_dry_run,
+            force=args.commission_audit_force,
+        )
+        print(result.message)
+        if result.warnings:
+            print("Warnings:")
+            for warning in result.warnings:
+                print(f"- {warning}")
+        return 0 if result.ok else 1
+
+    if args.eom_scorecard or args.eom_scorecard_dry_run:
+        from hermes.jobs import revenue_integrity
+
+        result = revenue_integrity.run_eom_scorecard(
+            client,
+            dry_run=args.eom_scorecard_dry_run,
+            force=args.eom_scorecard_force,
+        )
+        print(result.message)
+        if result.warnings:
+            print("Warnings:")
+            for warning in result.warnings:
+                print(f"- {warning}")
+        return 0 if result.ok else 1
 
     use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
     dispatcher = Dispatcher(use_openai=use_openai)
