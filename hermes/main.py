@@ -89,6 +89,27 @@ def main() -> int:
         action="store_true",
         help="Run Slack Socket Mode bot (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)",
     )
+    # --- Hermes Operations Center commands ---
+    parser.add_argument(
+        "--ops-doctor",
+        action="store_true",
+        help="Check Supabase connectivity and Hermes table health",
+    )
+    parser.add_argument(
+        "--process-crm-queue",
+        action="store_true",
+        help="Dequeue pending CRM writes and apply to EspoCRM",
+    )
+    parser.add_argument(
+        "--process-crm-queue-dry-run",
+        action="store_true",
+        help="Preview CRM queue processing without writing to EspoCRM",
+    )
+    parser.add_argument(
+        "--snapshot-kpis",
+        action="store_true",
+        help="Record system health, finance, and renewal KPI snapshots",
+    )
     args = parser.parse_args()
 
     try:
@@ -180,6 +201,59 @@ def main() -> int:
             for warning in result.warnings:
                 print(f"- {warning}")
         return 0 if result.ok else 1
+
+    if args.ops_doctor:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.operations.ops_doctor import run_ops_doctor
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        report = run_ops_doctor(supa)
+        print("\n".join(report.format_lines()))
+        return 0 if report.ok else 1
+
+    if args.process_crm_queue or args.process_crm_queue_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.operations.crm_queue_worker import process_queue
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        result = process_queue(
+            supa,
+            client,
+            dry_run=args.process_crm_queue_dry_run,
+        )
+        print(result.message)
+        if result.errors:
+            print("Errors:")
+            for err in result.errors:
+                print(f"- {err}")
+        return 0 if result.ok else 1
+
+    if args.snapshot_kpis:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.operations.kpi_writer import (
+            snapshot_finance,
+            snapshot_renewals,
+            snapshot_system_health,
+        )
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        results = snapshot_system_health(supa)
+        results.extend(snapshot_finance(supa))
+        results.extend(snapshot_renewals(supa))
+        print(f"Recorded {len(results)} KPI data points.")
+        return 0
 
     if args.commission_reconcile_file:
         from hermes.jobs import commission_reconciliation
