@@ -25,6 +25,26 @@ def main() -> int:
     parser.add_argument("--audit-fields", action="store_true", help="Build schema_map.json field audit")
     parser.add_argument("--audit-schema", action="store_true", help="Build schema_map.json schema audit")
     parser.add_argument(
+        "--revenue-sentinel",
+        action="store_true",
+        help="Run Project 85 daily revenue guardrail briefing once",
+    )
+    parser.add_argument(
+        "--revenue-sentinel-dry-run",
+        action="store_true",
+        help="Render sentinel briefing without posting to Slack",
+    )
+    parser.add_argument(
+        "--revenue-sentinel-force",
+        action="store_true",
+        help="Bypass daily idempotency guard and post even if already sent",
+    )
+    parser.add_argument(
+        "--revenue-sentinel-health",
+        action="store_true",
+        help="Check sentinel freshness/config status without posting",
+    )
+    parser.add_argument(
         "--slack",
         action="store_true",
         help="Run Slack Socket Mode bot (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)",
@@ -66,6 +86,30 @@ def main() -> int:
         for r in quick_kpis(client):
             print(f"{r.label}: {r.value}" + (f" — {r.detail}" if r.detail else ""))
         return 0
+
+    if args.revenue_sentinel or args.revenue_sentinel_dry_run:
+        from hermes.jobs import revenue_sentinel
+
+        result = revenue_sentinel.run(
+            client,
+            dry_run=args.revenue_sentinel_dry_run,
+            force=args.revenue_sentinel_force,
+        )
+        print(result.message)
+        if result.warnings:
+            print("Warnings:")
+            for warning in result.warnings:
+                print(f"- {warning}")
+        return 0 if result.ok else 1
+
+    if args.revenue_sentinel_health:
+        from hermes.jobs import revenue_sentinel
+
+        status = revenue_sentinel.health_status()
+        print(status.summary)
+        for key, value in status.details.items():
+            print(f"{key}: {value}")
+        return 0 if status.ok else 1
 
     use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
     dispatcher = Dispatcher(use_openai=use_openai)
