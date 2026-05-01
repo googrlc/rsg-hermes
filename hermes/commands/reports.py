@@ -182,19 +182,20 @@ def _stale_leads(client: "EspoClient", days: int = 14) -> DispatchResult:
     body = client.get(
         "Opportunity",
         params={
-            "maxSize": 25,
+            "maxSize": 200,
             "select": "id,name,stage,accountName,modifiedAt",
-            "orderBy": [["modifiedAt", "asc"]],
-            "where": [
-                {"type": "before", "attribute": "modifiedAt", "value": f"{cutoff} 00:00:00"},
-                {
-                    "type": "not",
-                    "value": [{"type": "in", "attribute": "stage", "value": ["Closed Won", "Closed Lost"]}],
-                },
-            ],
         },
     )
     rows = body.get("list", []) if isinstance(body, dict) else []
+    rows = [
+        r
+        for r in rows
+        if isinstance(r, dict)
+        and str(r.get("modifiedAt") or "")[:10] < cutoff
+        and r.get("stage") not in ("Closed Won", "Closed Lost")
+    ]
+    rows.sort(key=lambda r: str(r.get("modifiedAt") or ""))
+    rows = rows[:25]
     if not rows:
         return DispatchResult(True, f"No stale leads (>{days} days untouched). Nice.", {"rows": []})
 

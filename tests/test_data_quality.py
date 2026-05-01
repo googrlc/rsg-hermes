@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from hermes.commands.data_quality import AUDIT_RULES, handle
+from hermes.commands.reports import handle as reports_handle
 from hermes.core.client import EspoClientError
 
 
@@ -31,6 +32,40 @@ class DataQualityTests(unittest.TestCase):
         self.assertIn("Overall score", result.message)
         self.assertNotIn("error scanning", result.message)
         self.assertEqual(result.data["scan_errors"], 0)
+
+    def test_stale_leads_uses_simple_list_read_and_filters_locally(self) -> None:
+        class Client:
+            def __init__(self) -> None:
+                self.params = None
+
+            def get(self, entity: str, **kwargs):
+                self.params = kwargs.get("params")
+                return {
+                    "list": [
+                        {
+                            "id": "1",
+                            "name": "Old Open",
+                            "stage": "Qualification",
+                            "accountName": "Acme",
+                            "modifiedAt": "2026-01-01 00:00:00",
+                        },
+                        {
+                            "id": "2",
+                            "name": "Old Closed",
+                            "stage": "Closed Won",
+                            "modifiedAt": "2026-01-01 00:00:00",
+                        },
+                    ],
+                    "total": 2,
+                }
+
+        client = Client()
+        result = reports_handle(client, "stale leads")
+
+        self.assertTrue(result.ok)
+        self.assertIn("Old Open", result.message)
+        self.assertNotIn("Old Closed", result.message)
+        self.assertNotIn("where", client.params)
 
 
 if __name__ == "__main__":

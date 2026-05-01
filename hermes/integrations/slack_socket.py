@@ -57,11 +57,13 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
     use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
     dispatcher = Dispatcher(use_openai=use_openai)
     app = App(token=bot_token)
+    fallback_channel = os.environ.get("HERMES_SLACK_FALLBACK_CHANNEL", "C0AFHN83ZE3")
 
     def _send_reply(
         *,
         say: Any,
         channel_id: str | None,
+        user_id: str | None,
         text: str,
         thread_ts: str | None,
     ) -> None:
@@ -73,13 +75,41 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
                     thread_ts=thread_ts,
                 )
                 return
-            except SlackApiError:
-                log.exception("Slack chat_postMessage failed")
-                return
+            except SlackApiError as e:
+                error = e.response.get("error") if getattr(e, "response", None) else "unknown"
+                log.exception("Slack chat_postMessage failed channel=%s user=%s error=%s", channel_id, user_id, error)
+                if user_id:
+                    try:
+                        dm = app.client.conversations_open(users=user_id)
+                        dm_channel = (dm.get("channel") or {}).get("id")
+                        if dm_channel:
+                            app.client.chat_postMessage(
+                                channel=dm_channel,
+                                text=text,
+                            )
+                            return
+                    except SlackApiError as dm_error:
+                        dm_code = dm_error.response.get("error") if getattr(dm_error, "response", None) else "unknown"
+                        log.exception("Slack DM fallback failed user=%s error=%s", user_id, dm_code)
+                if fallback_channel:
+                    try:
+                        app.client.chat_postMessage(
+                            channel=fallback_channel,
+                            text=f"Hermes could not reply in channel `{channel_id}` for <@{user_id}>.\n\n{text}",
+                        )
+                        return
+                    except SlackApiError as fallback_error:
+                        fallback_code = (
+                            fallback_error.response.get("error")
+                            if getattr(fallback_error, "response", None)
+                            else "unknown"
+                        )
+                        log.exception("Slack fallback channel failed channel=%s error=%s", fallback_channel, fallback_code)
         try:
             say(text, thread_ts=thread_ts)
-        except SlackApiError:
-            log.exception("Slack say failed")
+        except SlackApiError as e:
+            error = e.response.get("error") if getattr(e, "response", None) else "unknown"
+            log.exception("Slack say failed channel=%s user=%s error=%s", channel_id, user_id, error)
 
     def _handle_text(
         text: str,
@@ -95,6 +125,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             _send_reply(
                 say=say,
                 channel_id=channel_id,
+                user_id=user_id,
                 text="Send a Hermes command after the mention, or DM me directly.",
                 thread_ts=thread_ts,
             )
@@ -117,6 +148,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             _send_reply(
                 say=say,
                 channel_id=channel_id,
+                user_id=user_id,
                 text=chunk,
                 thread_ts=thread_ts,
             )
@@ -157,6 +189,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             _send_reply(
                 say=say,
                 channel_id=event.get("channel"),
+                user_id=event.get("user"),
                 text="PDF received. The pdf_folder_ingest pipeline is queued as a follow-up placeholder.",
                 thread_ts=thread_ts,
             )

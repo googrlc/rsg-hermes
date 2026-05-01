@@ -37,6 +37,8 @@ The container defaults to `hermes --slack`, reads `.env`, and uses host networki
 
 Use `docker exec rsg-hermes hermes --doctor` after credential or permission changes. `--ping` only proves the API key can authenticate; `--doctor` proves Hermes can read Account, Contact, Opportunity, and metadata without writing anything.
 
+Slack fallback replies default to `#systems-check` (`C0AFHN83ZE3`). Set `HERMES_SLACK_FALLBACK_CHANNEL` when moving Hermes to a dedicated CRM officer channel.
+
 If you run `hermes --audit-schema` outside the Slack service, run it in the same mounted project directory or copy the generated `schema_map.json` beside the running container. The file is intentionally gitignored because it is runtime cache.
 
 ## TLS Note
