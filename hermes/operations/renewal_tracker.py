@@ -67,6 +67,8 @@ def log_renewal_action(
     performed_by_role: str = "HermesRenewalSpecialist",
 ) -> dict[str, Any]:
     """Append an action record to ``renewal_actions``."""
+    if action_type not in VALID_ACTION_TYPES:
+        raise ValueError(f"Invalid action_type: {action_type}; must be one of {VALID_ACTION_TYPES}")
     return supa.insert(
         "renewal_actions",
         {
