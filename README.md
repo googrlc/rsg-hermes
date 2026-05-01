@@ -28,6 +28,7 @@ hermes --commission-audit
 hermes --commission-audit-dry-run
 hermes --eom-scorecard
 hermes --eom-scorecard-dry-run
+hermes --commission-reconcile-file ./statements/carrier.csv
 hermes 'What is Jane phone'
 hermes 'total premium for Acme'
 hermes 'renewal audit'

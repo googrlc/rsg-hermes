@@ -13,6 +13,7 @@ from slack_sdk.errors import SlackApiError
 
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher, DispatchResult
+from hermes.jobs import commission_reconciliation
 from hermes.jobs import revenue_sentinel
 from hermes.jobs import revenue_integrity
 
@@ -238,11 +239,18 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
         value = str(action.get("value") or "")
         user_id = ((body.get("user") or {}).get("id") if isinstance(body, dict) else None) or "unknown"
         try:
-            result = revenue_integrity.handle_commission_action(
-                client=espo,
-                action=action_id,
-                action_value=value,
-            )
+            if action_id == "commission_create_dispute":
+                result = commission_reconciliation.handle_dispute_action(
+                    client=espo,
+                    action=action_id,
+                    action_value=value,
+                )
+            else:
+                result = revenue_integrity.handle_commission_action(
+                    client=espo,
+                    action=action_id,
+                    action_value=value,
+                )
         except (ValueError, EspoClientError) as e:
             log.exception("Commission action failed user=%s action=%s", user_id, action_id)
             result = f"Commission action failed: {e}"

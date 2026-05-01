@@ -45,3 +45,22 @@ Config:
 - `HERMES_EOM_SCORECARD_STATE_FILE`
 - `HERMES_NORTH_STAR_PREMIUM_GOAL` (default `1000000`)
 
+## Commission Reconciliation (Carrier Hunter)
+
+`hermes --commission-reconcile-file <path>` compares carrier statement payouts against expected CRM commission.
+
+Supported input formats:
+
+- CSV/TXT
+- XLSX (requires `openpyxl` in runtime)
+- PDF (requires `pypdf` in runtime; parsed heuristically)
+
+Discrepancies are posted to Slack with a `Create dispute task` button.
+
+Config:
+
+- `HERMES_COMMISSION_RECON_CHANNEL`
+- `HERMES_COMMISSION_RECON_RULE` (`any_difference`, `percent_over_1`, `dollar_over_25`, `hybrid_1pct_or_25`)
+- `HERMES_COMMISSION_RECON_PERCENT_THRESHOLD`
+- `HERMES_COMMISSION_RECON_AMOUNT_THRESHOLD`
+

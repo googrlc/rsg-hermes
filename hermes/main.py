@@ -75,6 +75,16 @@ def main() -> int:
         help="Bypass monthly idempotency guard for EOM scorecard",
     )
     parser.add_argument(
+        "--commission-reconcile-file",
+        type=str,
+        help="Reconcile a carrier statement file (csv/xlsx/pdf) against Espo commissions",
+    )
+    parser.add_argument(
+        "--commission-reconcile-dry-run",
+        action="store_true",
+        help="Run reconciliation without posting Slack alert",
+    )
+    parser.add_argument(
         "--slack",
         action="store_true",
         help="Run Slack Socket Mode bot (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)",
@@ -163,6 +173,21 @@ def main() -> int:
             client,
             dry_run=args.eom_scorecard_dry_run,
             force=args.eom_scorecard_force,
+        )
+        print(result.message)
+        if result.warnings:
+            print("Warnings:")
+            for warning in result.warnings:
+                print(f"- {warning}")
+        return 0 if result.ok else 1
+
+    if args.commission_reconcile_file:
+        from hermes.jobs import commission_reconciliation
+
+        result = commission_reconciliation.run_reconciliation(
+            client,
+            statement_path=args.commission_reconcile_file,
+            dry_run=args.commission_reconcile_dry_run,
         )
         print(result.message)
         if result.warnings:
