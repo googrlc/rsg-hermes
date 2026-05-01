@@ -17,6 +17,7 @@ cp .env.example .env   # then set ESPO_URL and ESPO_API_KEY
 
 ```bash
 hermes --ping
+hermes --doctor       # auth + core CRM read + metadata readiness
 hermes --kpi
 hermes --audit-schema  # writes schema_map.json
 hermes --slack        # needs SLACK_* tokens in .env
@@ -33,6 +34,8 @@ docker compose logs -f hermes
 ```
 
 The container defaults to `hermes --slack`, reads `.env`, and uses host networking so it can reach Tailscale/IP-only services from the VPS host.
+
+Use `docker exec rsg-hermes hermes --doctor` after credential or permission changes. `--ping` only proves the API key can authenticate; `--doctor` proves Hermes can read Account, Contact, Opportunity, and metadata without writing anything.
 
 If you run `hermes --audit-schema` outside the Slack service, run it in the same mounted project directory or copy the generated `schema_map.json` beside the running container. The file is intentionally gitignored because it is runtime cache.
 

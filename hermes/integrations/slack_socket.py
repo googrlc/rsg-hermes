@@ -9,9 +9,10 @@ from typing import Any
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk.errors import SlackApiError
 
 from hermes.core.client import EspoClient, EspoClientError
-from hermes.core.dispatcher import Dispatcher
+from hermes.core.dispatcher import Dispatcher, DispatchResult
 
 _SLACK_MSG_LIMIT = 3500
 log = logging.getLogger(__name__)
@@ -57,6 +58,29 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
     dispatcher = Dispatcher(use_openai=use_openai)
     app = App(token=bot_token)
 
+    def _send_reply(
+        *,
+        say: Any,
+        channel_id: str | None,
+        text: str,
+        thread_ts: str | None,
+    ) -> None:
+        if channel_id:
+            try:
+                app.client.chat_postMessage(
+                    channel=channel_id,
+                    text=text,
+                    thread_ts=thread_ts,
+                )
+                return
+            except SlackApiError:
+                log.exception("Slack chat_postMessage failed")
+                return
+        try:
+            say(text, thread_ts=thread_ts)
+        except SlackApiError:
+            log.exception("Slack say failed")
+
     def _handle_text(
         text: str,
         say: Any,
@@ -68,17 +92,34 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
     ) -> None:
         line = _strip_leading_mention(text)
         if not line:
-            say("Send a Hermes command after the mention, or DM me directly.", thread_ts=thread_ts)
+            _send_reply(
+                say=say,
+                channel_id=channel_id,
+                text="Send a Hermes command after the mention, or DM me directly.",
+                thread_ts=thread_ts,
+            )
             return
         dispatcher.set_slack_context(
             channel_id=channel_id,
             user_id=user_id,
             message_ts=message_ts,
         )
-        result = dispatcher.dispatch(espo, line)
+        try:
+            result = dispatcher.dispatch(espo, line)
+        except EspoClientError as e:
+            log.exception("Hermes CRM command failed")
+            result = DispatchResult(False, f"CRM command failed: {e}")
+        except Exception as e:
+            log.exception("Hermes command failed")
+            result = DispatchResult(False, f"Hermes command failed: {e}")
         prefix = "" if result.ok else ":warning: "
         for chunk in _chunk(prefix + result.message):
-            say(chunk, thread_ts=thread_ts)
+            _send_reply(
+                say=say,
+                channel_id=channel_id,
+                text=chunk,
+                thread_ts=thread_ts,
+            )
 
     @app.event("app_mention")
     def on_mention(event: dict[str, Any], say: Any) -> None:
@@ -113,7 +154,12 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
         ]
         if pdfs:
             log.info("pdf_folder_ingest placeholder received %s PDF(s)", len(pdfs))
-            say("PDF received. The pdf_folder_ingest pipeline is queued as a follow-up placeholder.", thread_ts=thread_ts)
+            _send_reply(
+                say=say,
+                channel_id=event.get("channel"),
+                text="PDF received. The pdf_folder_ingest pipeline is queued as a follow-up placeholder.",
+                thread_ts=thread_ts,
+            )
         if text.strip():
             _handle_text(
                 text, say, thread_ts,

@@ -24,7 +24,7 @@ AUDIT_RULES: dict[str, list[dict[str, Any]]] = {
         {"field": "fein", "label": "FEIN", "severity": "high"},
         {"field": "phoneNumber", "label": "Phone", "severity": "medium"},
         {"field": "billingAddressStreet", "label": "Address", "severity": "medium"},
-        {"field": "accountStatus", "label": "Account Status", "severity": "low"},
+        {"field": "account_status", "label": "Account Status", "severity": "low"},
         {"field": "industry", "label": "Industry", "severity": "low"},
     ],
     "Contact": [
@@ -39,10 +39,10 @@ AUDIT_RULES: dict[str, list[dict[str, Any]]] = {
         {"field": "accountId", "label": "Linked Account", "severity": "high"},
     ],
     "Policy": [
-        {"field": "policyNumber", "label": "Policy Number", "severity": "high"},
+        {"field": "policy_number", "label": "Policy Number", "severity": "high"},
         {"field": "carrier", "label": "Carrier", "severity": "high"},
-        {"field": "effectiveDate", "label": "Effective Date", "severity": "high"},
-        {"field": "premium", "label": "Premium", "severity": "medium"},
+        {"field": "effective_date", "label": "Effective Date", "severity": "high"},
+        {"field": "premium_amount", "label": "Premium", "severity": "medium"},
     ],
     "Lead": [
         {"field": "firstName", "label": "First Name", "severity": "medium"},
@@ -67,7 +67,7 @@ def _scan_missing_records(
     entity: str,
     field_name: str,
     *,
-    max_scan: int = 500,
+    max_scan: int = 200,
 ) -> list[dict[str, Any]]:
     """Fetch records and count missing values locally.
 
@@ -107,7 +107,7 @@ def _run_audit(client: "EspoClient") -> dict[str, Any]:
 
         for rule in rules:
             try:
-                violations = _scan_missing_records(client, entity, rule["field"], max_scan=500)
+                violations = _scan_missing_records(client, entity, rule["field"], max_scan=200)
                 count = len(violations)
             except EspoClientError:
                 count = -1

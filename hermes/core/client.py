@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 from urllib.parse import urljoin
 
 import requests
+from requests import Session
 from urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
@@ -24,18 +26,38 @@ class EspoClient:
         api_key: str | None = None,
         timeout: float = 60.0,
         verify: bool | None = None,
+        session: Session | None = None,
+        max_retries: int | None = None,
+        retry_sleep: float | None = None,
+        max_list_size: int | None = None,
     ) -> None:
         raw = (base_url or os.environ.get("ESPO_URL", "")).rstrip("/")
-        self.base_url = raw if raw.endswith("/api/v1") else f"{raw}/api/v1"
         self.api_key = api_key or os.environ.get("ESPO_API_KEY", "")
+        if not raw or not self.api_key:
+            raise EspoClientError("ESPO_URL and ESPO_API_KEY must be set (env or constructor).")
+        self.base_url = raw if raw.endswith("/api/v1") else f"{raw}/api/v1"
         self.timeout = timeout
         self.verify = (
             verify
             if verify is not None
             else os.environ.get("HERMES_VERIFY_TLS", "").strip().lower() in ("1", "true", "yes")
         )
-        if not self.base_url or not self.api_key:
-            raise EspoClientError("ESPO_URL and ESPO_API_KEY must be set (env or constructor).")
+        self.session = session or requests.Session()
+        self.max_retries = (
+            max_retries
+            if max_retries is not None
+            else int(os.environ.get("HERMES_READ_RETRIES", "2"))
+        )
+        self.retry_sleep = (
+            retry_sleep
+            if retry_sleep is not None
+            else float(os.environ.get("HERMES_RETRY_SLEEP", "0.5"))
+        )
+        self.max_list_size = (
+            max_list_size
+            if max_list_size is not None
+            else int(os.environ.get("HERMES_MAX_LIST_SIZE", "200"))
+        )
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -44,13 +66,17 @@ class EspoClient:
             "Content-Type": "application/json",
         }
 
-    @staticmethod
-    def _query_params(params: dict[str, Any] | None) -> dict[str, str] | None:
+    def _query_params(self, params: dict[str, Any] | None) -> dict[str, str] | None:
         """EspoCRM expects JSON-encoded complex GET params (where, orderBy, select)."""
         if not params:
             return None
         flat: dict[str, str] = {}
         for key, val in params.items():
+            if key == "maxSize":
+                try:
+                    val = min(int(val), self.max_list_size)
+                except (TypeError, ValueError):
+                    pass
             if isinstance(val, (list, dict)):
                 flat[key] = json.dumps(val)
             else:
@@ -65,22 +91,83 @@ class EspoClient:
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | list[Any] | None = None,
     ) -> dict[str, Any] | list[Any]:
+        method_upper = method.upper()
         url = urljoin(f"{self.base_url}/", path.lstrip("/"))
-        resp = requests.request(
-            method.upper(),
-            url,
-            headers=self._headers(),
-            params=self._query_params(params),
-            json=json,
-            timeout=self.timeout,
-            verify=self.verify,
-        )
+        last_error: EspoClientError | None = None
+        attempts = self.max_retries + 1 if self._is_retryable_method(method_upper) else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                resp = self.session.request(
+                    method=method_upper,
+                    url=url,
+                    headers=self._headers(),
+                    params=self._query_params(params),
+                    json=json,
+                    timeout=self.timeout,
+                    verify=self.verify,
+                )
+            except requests.RequestException as e:
+                last_error = EspoClientError(
+                    f"Network error {method_upper} {path}: {e}. "
+                    "Check EspoCRM reachability, DNS/Tailscale/VPS networking, and ESPO_URL."
+                )
+                if attempt < attempts:
+                    self._sleep_before_retry()
+                    continue
+                raise last_error from e
+
+            if self._should_retry_status(resp.status_code) and attempt < attempts:
+                self._sleep_before_retry()
+                continue
+            return self._parse_response(resp, method_upper, path, url)
+
+        if last_error:
+            raise last_error
+        raise EspoClientError(f"Request failed without a response: {method_upper} {path}")
+
+    @staticmethod
+    def _is_retryable_method(method: str) -> bool:
+        """Retry reads, not writes, to avoid duplicate CRM data entry."""
+        return method in {"GET", "HEAD", "OPTIONS"}
+
+    @staticmethod
+    def _should_retry_status(status_code: int) -> bool:
+        return status_code in {429, 500, 502, 503, 504}
+
+    def _sleep_before_retry(self) -> None:
+        if self.retry_sleep > 0:
+            time.sleep(self.retry_sleep)
+
+    @staticmethod
+    def _status_hint(status_code: int) -> str:
+        if status_code == 401:
+            return "Authentication failed: check ESPO_API_KEY and the EspoCRM API user."
+        if status_code == 403:
+            return (
+                "EspoCRM API user lacks permission for this entity/action. "
+                "Fix the API user's Role/Team, then verify with `hermes --doctor` or `hermes --kpi`."
+            )
+        if status_code == 404:
+            return "Endpoint or entity not found: verify the entity name and EspoCRM route."
+        if status_code == 422:
+            return "EspoCRM rejected the payload: verify field names, enum values, and required fields."
+        if status_code in {429, 500, 502, 503, 504}:
+            return "Transient EspoCRM/server failure after retries."
+        return "EspoCRM request failed."
+
+    def _parse_response(
+        self,
+        resp: requests.Response,
+        method: str,
+        path: str,
+        url: str,
+    ) -> dict[str, Any] | list[Any]:
         try:
             body = resp.json() if resp.content else {}
         except ValueError as e:
             raise EspoClientError(f"Invalid JSON from {url}: {resp.text[:500]}") from e
         if not resp.ok:
-            raise EspoClientError(f"{resp.status_code} {method} {path}: {body}")
+            raise EspoClientError(f"{resp.status_code} {method} {path}: {self._status_hint(resp.status_code)} Body: {body}")
         return body
 
     def get(self, path: str, **kwargs: Any) -> dict[str, Any] | list[Any]:

@@ -18,6 +18,40 @@ class KPIReport:
     detail: str | None = None
 
 
+@dataclass
+class CRMReadinessCheck:
+    name: str
+    ok: bool
+    critical: bool
+    message: str
+    detail: str | None = None
+
+
+@dataclass
+class CRMReadinessReport:
+    checks: list[CRMReadinessCheck]
+
+    @property
+    def failed_critical(self) -> int:
+        return sum(1 for check in self.checks if check.critical and not check.ok)
+
+    @property
+    def ok(self) -> bool:
+        return self.failed_critical == 0
+
+    def format_lines(self) -> list[str]:
+        lines = ["Hermes CRM readiness"]
+        for check in self.checks:
+            marker = "OK" if check.ok else "FAIL"
+            suffix = f" — {check.detail}" if check.detail else ""
+            lines.append(f"{marker}: {check.message}{suffix}")
+        if self.ok:
+            lines.append("READY: Hermes can authenticate, read core CRM data, and load metadata.")
+        else:
+            lines.append(f"NOT READY: {self.failed_critical} critical check(s) failed.")
+        return lines
+
+
 def count_entity(client: EspoClient, entity: str, where: list[dict[str, Any]] | None = None) -> int:
     """Return total from a list request (Espo returns `total` on collection GET)."""
     params: dict[str, Any] = {"maxSize": 1}
@@ -62,6 +96,93 @@ def quick_kpis(client: EspoClient) -> list[KPIReport]:
         except EspoClientError as e:
             reports.append(KPIReport(entity, None, str(e)))
     return reports
+
+
+def _readiness_user_name(body: Any) -> str:
+    if isinstance(body, dict):
+        user = body.get("user")
+        if isinstance(user, dict):
+            return str(user.get("userName") or user.get("name") or user.get("id") or "unknown")
+        return str(body.get("userName") or body.get("name") or body.get("id") or "unknown")
+    return "unknown"
+
+
+def crm_readiness(client: EspoClient, entities: tuple[str, ...] = ("Account", "Contact", "Opportunity")) -> CRMReadinessReport:
+    """Run a non-mutating readiness gate for CRM officer work.
+
+    This checks the real paths Hermes needs for reports and safe data operations:
+    API auth, core entity list reads, and metadata availability. It intentionally
+    does not create/update records; write commands remain single-attempt to avoid
+    duplicates when a network failure happens after EspoCRM receives the payload.
+    """
+    checks: list[CRMReadinessCheck] = []
+
+    try:
+        ping = client.ping()
+        user_name = _readiness_user_name(ping)
+        checks.append(
+            CRMReadinessCheck(
+                name="auth",
+                ok=True,
+                critical=True,
+                message=f"Authenticated as {user_name}",
+            )
+        )
+    except EspoClientError as e:
+        checks.append(
+            CRMReadinessCheck(
+                name="auth",
+                ok=False,
+                critical=True,
+                message=f"Authentication failed: {e}",
+            )
+        )
+
+    for entity in entities:
+        try:
+            total = count_entity(client, entity)
+            checks.append(
+                CRMReadinessCheck(
+                    name=f"read_{entity}",
+                    ok=True,
+                    critical=True,
+                    message=f"{entity} read ok ({total} records)",
+                )
+            )
+        except EspoClientError as e:
+            checks.append(
+                CRMReadinessCheck(
+                    name=f"read_{entity}",
+                    ok=False,
+                    critical=True,
+                    message=f"{entity} read failed: {e}",
+                )
+            )
+
+    try:
+        metadata = client.get_metadata()
+        entity_defs = SchemaAuditor._entity_defs(metadata if isinstance(metadata, dict) else {})
+        entity_count = len(entity_defs)
+        checks.append(
+            CRMReadinessCheck(
+                name="metadata",
+                ok=entity_count > 0,
+                critical=True,
+                message="Metadata loaded" if entity_count > 0 else "Metadata returned no entity definitions",
+                detail=f"{entity_count} entities",
+            )
+        )
+    except EspoClientError as e:
+        checks.append(
+            CRMReadinessCheck(
+                name="metadata",
+                ok=False,
+                critical=True,
+                message=f"Metadata failed: {e}",
+            )
+        )
+
+    return CRMReadinessReport(checks)
 
 
 class SchemaAuditor:

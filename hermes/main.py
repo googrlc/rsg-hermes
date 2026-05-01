@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 import os
 
-from hermes.core.auditor import SchemaAuditor, quick_kpis
+from hermes.core.auditor import SchemaAuditor, crm_readiness, quick_kpis
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher
 
@@ -20,6 +20,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Hermes — EspoCRM coordinator")
     parser.add_argument("command", nargs="*", help="One-shot command (omit for REPL)")
     parser.add_argument("--ping", action="store_true", help="Test API key and exit")
+    parser.add_argument("--doctor", action="store_true", help="Run non-mutating CRM readiness checks")
     parser.add_argument("--kpi", action="store_true", help="Print quick entity counts")
     parser.add_argument("--audit-fields", action="store_true", help="Build schema_map.json field audit")
     parser.add_argument("--audit-schema", action="store_true", help="Build schema_map.json schema audit")
@@ -55,6 +56,11 @@ def main() -> int:
     if args.ping:
         print(client.ping())
         return 0
+
+    if args.doctor:
+        report = crm_readiness(client)
+        print("\n".join(report.format_lines()))
+        return 0 if report.ok else 1
 
     if args.kpi:
         for r in quick_kpis(client):
