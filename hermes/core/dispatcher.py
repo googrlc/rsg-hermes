@@ -47,7 +47,9 @@ class Dispatcher:
         self._init_supabase()
 
         self._routes: list[tuple[re.Pattern[str], Handler | str]] = [
+            (re.compile(r"^\s*(create|update)\s+", re.I), data_entry.handle),
             (re.compile(r"^\s*add\s+", re.I), data_entry.handle),
+            (re.compile(r"^\s*move\s+opportunit(?:y|ie)\s+", re.I), data_entry.handle),
             (re.compile(r"\b(total\s+premium|sum\s+premium|premium\s+for)\b", re.I), lookup.handle),
             (re.compile(r"^\s*(what|who|find|lookup|search)\b", re.I), lookup.handle),
             (

@@ -4,6 +4,7 @@ import unittest
 
 from hermes.commands.data_quality import AUDIT_RULES, handle
 from hermes.commands.reports import handle as reports_handle
+from hermes.commands.revenue import handle as revenue_handle
 from hermes.core.client import EspoClientError
 
 
@@ -66,6 +67,56 @@ class DataQualityTests(unittest.TestCase):
         self.assertIn("Old Open", result.message)
         self.assertNotIn("Old Closed", result.message)
         self.assertNotIn("where", client.params)
+
+    def test_renewal_sentinel_flags_90_day_policy_without_completed_review_task(self) -> None:
+        class Client:
+            def get(self, entity: str, **kwargs):
+                if entity == "Policy":
+                    return {
+                        "list": [
+                            {
+                                "id": "p1",
+                                "name": "Atlas Auto",
+                                "accountId": "a1",
+                                "accountName": "Atlas Protection Group",
+                                "line_of_business": "Commercial Auto",
+                                "carrier": "Progressive",
+                                "premium_amount": "25000",
+                                "expiration_date": "2026-06-15",
+                                "status": "Active",
+                            },
+                            {
+                                "id": "p2",
+                                "name": "Reviewed WC",
+                                "accountId": "a2",
+                                "accountName": "Reviewed Co",
+                                "line_of_business": "Workers Comp",
+                                "expiration_date": "2026-06-20",
+                                "status": "Active",
+                            },
+                        ],
+                        "total": 2,
+                    }
+                if entity == "Task":
+                    return {
+                        "list": [
+                            {
+                                "id": "t1",
+                                "name": "Renewal Review - Reviewed Co",
+                                "status": "Completed",
+                                "accountId": "a2",
+                            }
+                        ],
+                        "total": 1,
+                    }
+                return {"list": [], "total": 0}
+
+        result = revenue_handle(Client(), "renewals")
+
+        self.assertTrue(result.ok)
+        self.assertIn("Retention Risk", result.message)
+        self.assertIn("Atlas Protection Group", result.message)
+        self.assertNotIn("Reviewed Co", result.message)
 
 
 if __name__ == "__main__":
