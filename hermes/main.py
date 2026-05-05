@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from dotenv import load_dotenv
@@ -17,6 +18,11 @@ from hermes.core.dispatcher import Dispatcher
 
 def main() -> int:
     load_dotenv()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stderr,
+    )
     parser = argparse.ArgumentParser(description="Hermes — EspoCRM coordinator")
     parser.add_argument("command", nargs="*", help="One-shot command (omit for REPL)")
     parser.add_argument("--ping", action="store_true", help="Test API key and exit")
