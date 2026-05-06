@@ -38,7 +38,7 @@ class Dispatcher:
     """Order matters: first matching pattern wins."""
 
     def __init__(self, *, use_openai: bool = False) -> None:
-        from hermes.commands import data_entry, lookup, revenue
+        from hermes.commands import data_entry, lookup, merge, revenue
 
         self.use_openai = use_openai
         self.supa: SupabaseClient | None = None
@@ -47,6 +47,9 @@ class Dispatcher:
         self._init_supabase()
 
         self._routes: list[tuple[re.Pattern[str], Handler | str]] = [
+            (re.compile(r"^\s*(ping|health|status)\s*$", re.I), "ping"),
+            (re.compile(r"^\s*merge\s+", re.I), merge.handle),
+            (re.compile(r"\bcan\s+be\s+merged\b", re.I), merge.handle),
             (re.compile(r"^\s*(create|update)\s+", re.I), data_entry.handle),
             (re.compile(r"^\s*add\s+", re.I), data_entry.handle),
             (re.compile(r"^\s*move\s+opportunit(?:y|ie)\s+", re.I), data_entry.handle),
@@ -124,6 +127,8 @@ class Dispatcher:
         if handler == "data_quality":
             from hermes.commands.data_quality import handle as dq_handle
             return dq_handle(client, text, supa=self.supa)
+        if handler == "ping":
+            return DispatchResult(True, "Hermes is online and connected to CRM.")
         return handler(client, text)
 
     def dispatch(
@@ -152,5 +157,5 @@ class Dispatcher:
             False,
             "No handler matched. Try: add … | what/find/lookup … | cross-sell/renewals … | "
             "intake <lead info> | pipeline | kpi | stale leads | my accounts | data quality | "
-            "report personal | bulk normalize",
+            "report personal | bulk normalize | merge <entity> <id1> into <id2> | ping",
         )
