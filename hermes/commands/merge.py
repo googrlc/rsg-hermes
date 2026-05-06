@@ -44,7 +44,7 @@ _NATURAL_MERGE = re.compile(
 )
 
 _ENTITY_HINT = re.compile(
-    r"\b(contact|account|lead|opportunity)\b",
+    r"\b(contacts?|accounts?|leads?|opportunit(?:y|ies))\b",
     re.I,
 )
 
@@ -109,7 +109,7 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
 
 
 def _infer_entity_type(client: "EspoClient", record_id: str) -> str | None:
-    for entity in ("Contact", "Account", "Lead"):
+    for entity in ("Contact", "Account", "Lead", "Opportunity"):
         try:
             result = client.get(f"{entity}/{record_id}", params={"select": "id"})
             if isinstance(result, dict) and result.get("id"):
