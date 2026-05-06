@@ -11,3 +11,15 @@ services:
       - .:/app
     restart: unless-stopped
     command: ["hermes", "--slack"]
+  hermes-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rsg-hermes-api
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    command: ["hermes-api", "--host", "127.0.0.1", "--port", "8787"]

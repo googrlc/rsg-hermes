@@ -78,6 +78,20 @@ class SupabaseClient:
         body = resp.json()
         return body if isinstance(body, list) else []
 
+    def rpc(self, name: str, payload: dict[str, Any]) -> list[dict[str, Any]] | dict[str, Any]:
+        """Call a Supabase PostgREST RPC."""
+        resp = requests.post(
+            f"{self.url}/rest/v1/rpc/{name}",
+            headers=self._headers(prefer=""),
+            json=payload,
+            timeout=self.timeout,
+        )
+        if not resp.ok:
+            log.error("Supabase rpc %s failed: %s %s", name, resp.status_code, resp.text[:500])
+            raise SupabaseClientError(f"{resp.status_code} RPC {name}: {resp.text[:500]}")
+        body = resp.json() if resp.content else {}
+        return body
+
     def log_slack_intake(
         self,
         *,

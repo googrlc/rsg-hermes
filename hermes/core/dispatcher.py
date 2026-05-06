@@ -38,7 +38,7 @@ class Dispatcher:
     """Order matters: first matching pattern wins."""
 
     def __init__(self, *, use_openai: bool = False) -> None:
-        from hermes.commands import data_entry, lookup, revenue
+        from hermes.commands import business_research, data_entry, lookup, revenue
 
         self.use_openai = use_openai
         self.supa: SupabaseClient | None = None
@@ -47,6 +47,10 @@ class Dispatcher:
         self._init_supabase()
 
         self._routes: list[tuple[re.Pattern[str], Handler | str]] = [
+            (
+                re.compile(r"^\s*(research|enrich|investigate|look\s+up|web\s+research)\s+(business|account|company)?\b", re.I),
+                business_research.handle,
+            ),
             (re.compile(r"^\s*(create|update)\s+", re.I), data_entry.handle),
             (re.compile(r"^\s*add\s+", re.I), data_entry.handle),
             (re.compile(r"^\s*move\s+opportunit(?:y|ie)\s+", re.I), data_entry.handle),

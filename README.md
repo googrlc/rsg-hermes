@@ -21,6 +21,7 @@ hermes --doctor       # auth + core CRM read + metadata readiness
 hermes --kpi
 hermes --audit-schema  # writes schema_map.json
 hermes --slack        # needs SLACK_* tokens in .env
+hermes-api            # private HTTP bridge for Open WebUI/tools
 hermes --revenue-sentinel
 hermes --revenue-sentinel-dry-run
 hermes --revenue-sentinel-health
@@ -32,6 +33,8 @@ hermes --commission-reconcile-file ./statements/carrier.csv
 hermes 'What is Jane phone'
 hermes 'total premium for Acme'
 hermes 'renewal audit'
+hermes 'research business Acme Plumbing Atlanta'
+hermes 'research business Acme Plumbing Atlanta and save to crm'
 ```
 
 ## Docker
@@ -48,6 +51,21 @@ Use `docker exec rsg-hermes hermes --doctor` after credential or permission chan
 Slack fallback replies default to `#systems-check` (`C0AFHN83ZE3`). Set `HERMES_SLACK_FALLBACK_CHANNEL` when moving Hermes to a dedicated CRM officer channel.
 
 If you run `hermes --audit-schema` outside the Slack service, run it in the same mounted project directory or copy the generated `schema_map.json` beside the running container. The file is intentionally gitignored because it is runtime cache.
+
+## Private API Bridge
+
+`hermes-api` exposes a small Tailnet-only HTTP API for tools like Open WebUI:
+
+```bash
+hermes-api --host 127.0.0.1 --port 8787
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/openapi.json
+curl -X POST http://127.0.0.1:8787/command \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"find Acme"}'
+```
+
+Commands that may write CRM data, such as `create`, `add`, `update`, `move opportunity`, and `intake`, return `requires_confirmation` unless called with `confirm=true`. Set `HERMES_API_TOKEN` to require `Authorization: Bearer <token>`.
 
 ## Project 85 Sentinel (Revenue Guardrail)
 
