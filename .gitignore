@@ -5,3 +5,4 @@
 .venv-*/
 schema_map.json
 __pycache__/
+*.egg-info/
