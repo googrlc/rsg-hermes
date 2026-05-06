@@ -165,6 +165,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
 
     @app.event("app_mention")
     def on_mention(event: dict[str, Any], say: Any) -> None:
+        log.info("app_mention received: channel=%s user=%s", event.get("channel"), event.get("user"))
         text = event.get("text") or ""
         thread_ts = event.get("thread_ts") or event.get("ts")
         _handle_text(
@@ -176,6 +177,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
 
     @app.event("message")
     def on_message(event: dict[str, Any], say: Any) -> None:
+        log.info("message event: channel=%s type=%s is_dm=%s is_cmd=%s", event.get("channel"), event.get("channel_type"), _is_direct_im(event), _is_command_channel(event, command_channel))
         if not _is_direct_im(event) and not _is_command_channel(event, command_channel):
             return
         if event.get("subtype") in ("message_changed", "message_deleted", "channel_join", "channel_leave"):
