@@ -10,7 +10,7 @@ from typing import Any
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-DEFAULT_SENTINEL_CHANNEL = "D0AUTEYHBDH"
+DEFAULT_SENTINEL_CHANNEL = "D0B2PJYLGQG"
 
 
 class SlackNotifierError(Exception):
