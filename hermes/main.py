@@ -215,6 +215,15 @@ def main() -> int:
         print(f"Recorded {len(results)} KPI data points.")
         return 0
 
+    # --- API server (manages its own clients lazily) ---
+    if args.api:
+        import uvicorn
+        from hermes.api import app as api_app
+
+        print(f"Starting Hermes API on port {args.api_port}...")
+        uvicorn.run(api_app, host="0.0.0.0", port=args.api_port)
+        return 0
+
     # --- Commands requiring EspoCRM ---
     try:
         client = EspoClient()
@@ -236,14 +245,6 @@ def main() -> int:
         except RuntimeError as e:
             print(e, file=sys.stderr)
             return 2
-        return 0
-
-    if args.api:
-        import uvicorn
-        from hermes.api import app as api_app
-
-        print(f"Starting Hermes API on port {args.api_port}...")
-        uvicorn.run(api_app, host="0.0.0.0", port=args.api_port)
         return 0
 
     if args.ping:

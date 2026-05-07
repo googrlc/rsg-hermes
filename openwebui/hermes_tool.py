@@ -9,6 +9,7 @@ version: 0.1.0
 licence: MIT
 """
 
+import asyncio
 import requests
 from pydantic import BaseModel, Field
 
@@ -40,7 +41,7 @@ class Tools:
         """
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": "Starting NowCerts sync...", "done": False}})
-        result = self._dispatch("sync nowcerts")
+        result = await asyncio.to_thread(self._dispatch, "sync nowcerts")
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": "Sync complete", "done": True}})
         return result
@@ -52,7 +53,7 @@ class Tools:
         """
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": "Running dry-run sync...", "done": False}})
-        result = self._dispatch("sync nowcerts dry-run")
+        result = await asyncio.to_thread(self._dispatch, "sync nowcerts dry-run")
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": "Dry run complete", "done": True}})
         return result
@@ -62,34 +63,34 @@ class Tools:
         Show recent NowCerts sync run history with record counts and status.
         Returns the last 5 sync runs.
         """
-        return self._dispatch("sync status")
+        return await asyncio.to_thread(self._dispatch, "sync status")
 
     async def sync_conflicts(self, __event_emitter__=None) -> str:
         """
         Show unresolved sync conflicts where NowCerts and EspoCRM data disagree.
         These need manual review before the conflicting fields are overwritten.
         """
-        return self._dispatch("sync conflicts")
+        return await asyncio.to_thread(self._dispatch, "sync conflicts")
 
     async def sync_errors(self, __event_emitter__=None) -> str:
         """
         Show recent sync errors from the NowCerts → EspoCRM pipeline.
         """
-        return self._dispatch("sync errors")
+        return await asyncio.to_thread(self._dispatch, "sync errors")
 
     async def find_account(self, query: str, __event_emitter__=None) -> str:
         """
         Search for an account in EspoCRM by name, FEIN, or other fields.
         :param query: The search query (e.g. account name, FEIN, DOT number)
         """
-        return self._dispatch(f"find account {query}")
+        return await asyncio.to_thread(self._dispatch, f"find account {query}")
 
     async def lookup(self, query: str, __event_emitter__=None) -> str:
         """
         Look up any CRM record — contacts, accounts, policies, opportunities.
         :param query: Natural language query (e.g. "what is the FEIN for Acme Corp")
         """
-        return self._dispatch(f"what {query}")
+        return await asyncio.to_thread(self._dispatch, f"what {query}")
 
     async def data_quality(self, __event_emitter__=None) -> str:
         """
@@ -98,7 +99,7 @@ class Tools:
         """
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": "Running CRM data quality audit...", "done": False}})
-        result = self._dispatch("data quality")
+        result = await asyncio.to_thread(self._dispatch, "data quality")
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": "Audit complete", "done": True}})
         return result
@@ -107,7 +108,7 @@ class Tools:
         """
         Show the current sales pipeline summary with stage counts and values.
         """
-        return self._dispatch("pipeline")
+        return await asyncio.to_thread(self._dispatch, "pipeline")
 
     async def hermes_command(self, command: str, __event_emitter__=None) -> str:
         """
@@ -116,7 +117,7 @@ class Tools:
         """
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": f"Running: {command}", "done": False}})
-        result = self._dispatch(command)
+        result = await asyncio.to_thread(self._dispatch, command)
         if __event_emitter__:
             await __event_emitter__({"type": "status", "data": {"description": "Done", "done": True}})
         return result
@@ -125,7 +126,7 @@ class Tools:
         """
         Check if Hermes and the CRM connection are online.
         """
-        return self._dispatch("ping")
+        return await asyncio.to_thread(self._dispatch, "ping")
 
     def _dispatch(self, command: str) -> str:
         """Send a command to the Hermes API and return the response."""
