@@ -19,6 +19,7 @@ cp .env.example .env   # then set ESPO_URL and ESPO_API_KEY
 hermes --ping
 hermes --doctor       # auth + core CRM read + metadata readiness
 hermes --kpi
+hermes --commands      # print Open WebUI command catalog
 hermes --audit-schema  # writes schema_map.json
 hermes --slack        # needs SLACK_* tokens in .env
 hermes --revenue-sentinel
