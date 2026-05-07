@@ -127,7 +127,6 @@ def _execute_merge(
 ) -> DispatchResult:
     source_name = _get_record_name(client, entity_type, source_id)
     target_name = _get_record_name(client, entity_type, target_id)
-
     try:
         _merge_via_api(client, entity_type, source_id, target_id)
     except Exception as e:
@@ -145,7 +144,11 @@ def _execute_merge(
         f"• Kept: {target_name} (`{target_id}`)\n"
         f"• Discarded: {source_name} (`{source_id}`)\n"
         f"All related records from the discarded entry have been moved to the kept record.",
-        data={"entity_type": entity_type, "source_id": source_id, "target_id": target_id},
+        data={
+            "entity_type": entity_type,
+            "source_id": source_id,
+            "target_id": target_id,
+        },
     )
 
 
@@ -157,3 +160,14 @@ def _get_record_name(client: "EspoClient", entity_type: str, record_id: str) -> 
     except Exception:
         pass
     return record_id
+
+
+def execute_approved_merge(
+    client: "EspoClient",
+    *,
+    entity_type: str,
+    source_id: str,
+    target_id: str,
+) -> dict:
+    """Execute approved Espo merge action."""
+    return _merge_via_api(client, entity_type, source_id, target_id)
