@@ -271,7 +271,8 @@ def _fetch_modified_accounts(espo: EspoClient, cutoff: str) -> list[dict[str, An
             "order": "desc",
             "where": [{"type": "after", "attribute": "modifiedAt", "value": cutoff}],
         })
-        return body.get("list", []) if isinstance(body, dict) else []
+        items = body.get("list") if isinstance(body, dict) else None
+        return items if isinstance(items, list) else []
     except EspoClientError as exc:
         log.warning("Failed to fetch modified accounts: %s", exc)
         return []
@@ -286,7 +287,8 @@ def _fetch_modified_policies(espo: EspoClient, cutoff: str) -> list[dict[str, An
             "order": "desc",
             "where": [{"type": "after", "attribute": "modifiedAt", "value": cutoff}],
         })
-        return body.get("list", []) if isinstance(body, dict) else []
+        items = body.get("list") if isinstance(body, dict) else None
+        return items if isinstance(items, list) else []
     except EspoClientError as exc:
         log.warning("Failed to fetch modified policies: %s", exc)
         return []
