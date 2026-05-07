@@ -286,3 +286,20 @@ def handle(client: EspoClient, text: str) -> DispatchResult:
     if isinstance(record, dict) and record.get("id"):
         return DispatchResult(True, f"{action} Contact {record['id']}{suffix}.", {"record": record})
     return DispatchResult(True, f"{action} contact submitted{suffix}.", {"record": record})
+
+
+def execute_approved_data_entry(client: EspoClient, operations: list[dict[str, Any]]) -> list[dict[str, Any] | list[Any]]:
+    """Execute approved generic data-entry operations."""
+    results: list[dict[str, Any] | list[Any]] = []
+    for op in operations:
+        action = str(op.get("action") or "")
+        entity = str(op.get("entity") or "")
+        record_id = op.get("record_id")
+        fields = op.get("fields") or {}
+        if action == "create":
+            results.append(client.create(entity, fields))
+        elif action == "update" and record_id:
+            results.append(client.update(entity, str(record_id), fields))
+        elif action == "upsert_contact":
+            results.append(client.upsert_contact(fields))
+    return results
