@@ -71,7 +71,7 @@ def run(
     """Execute the nightly changelog pipeline."""
     local_now = _now_in_timezone(now)
     target_day = local_now.date()
-    hours = lookback_hours or int(os.environ.get("HERMES_CHANGELOG_LOOKBACK_HOURS", "24"))
+    hours = lookback_hours if lookback_hours is not None else int(os.environ.get("HERMES_CHANGELOG_LOOKBACK_HOURS", "24"))
     cutoff = local_now - timedelta(hours=hours)
 
     if not force and _already_sent_today(target_day):
