@@ -145,6 +145,43 @@ def main() -> int:
         default=None,
         help="Lookback window in hours (default: 24)",
     )
+    # --- Bidirectional Sync ---
+    parser.add_argument(
+        "--sync-bidirectional",
+        action="store_true",
+        help="Run full bidirectional sync: NowCerts↔Supabase↔EspoCRM",
+    )
+    parser.add_argument(
+        "--sync-bidirectional-dry-run",
+        action="store_true",
+        help="Preview bidirectional sync without writing to any system",
+    )
+    parser.add_argument(
+        "--sync-crm-to-hub",
+        action="store_true",
+        help="Mirror EspoCRM changes to Supabase golden record",
+    )
+    parser.add_argument(
+        "--sync-crm-to-hub-dry-run",
+        action="store_true",
+        help="Preview CRM-to-hub mirror without writing",
+    )
+    parser.add_argument(
+        "--sync-hub-to-nowcerts",
+        action="store_true",
+        help="Push Supabase outbound queue to NowCerts AMS",
+    )
+    parser.add_argument(
+        "--sync-hub-to-nowcerts-dry-run",
+        action="store_true",
+        help="Preview hub-to-NowCerts push without writing",
+    )
+    parser.add_argument(
+        "--sync-hours",
+        type=int,
+        default=24,
+        help="Lookback window in hours for sync (default: 24)",
+    )
     # --- Hermes Operations Center commands ---
     parser.add_argument(
         "--ops-doctor",
@@ -203,6 +240,63 @@ def main() -> int:
             for err in sync_result.errors:
                 print(f"- {err}")
         return 0 if sync_result.ok else 1
+
+    # --- Bidirectional sync (requires NowCerts + Supabase + EspoCRM) ---
+    _bidi = args.sync_bidirectional or args.sync_bidirectional_dry_run
+    _crm_hub = args.sync_crm_to_hub or args.sync_crm_to_hub_dry_run
+    _hub_nc = args.sync_hub_to_nowcerts or args.sync_hub_to_nowcerts_dry_run
+    if _bidi or _crm_hub or _hub_nc:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            espo = EspoClient()
+        except EspoClientError as e:
+            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
+            return 2
+
+        if _crm_hub:
+            from hermes.sync.bidirectional import run_crm_to_hub
+            bidi_result = run_crm_to_hub(
+                espo, supa,
+                dry_run=args.sync_crm_to_hub_dry_run,
+                since_hours=args.sync_hours,
+            )
+        elif _hub_nc:
+            from hermes.sync.bidirectional import run_hub_to_nowcerts
+            from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+            try:
+                nc = NowCertsClient()
+            except NowCertsClientError as e:
+                print(f"NowCerts connection failed: {e}", file=sys.stderr)
+                return 2
+            bidi_result = run_hub_to_nowcerts(
+                nc, supa,
+                dry_run=args.sync_hub_to_nowcerts_dry_run,
+            )
+        else:
+            from hermes.sync.bidirectional import run_bidirectional
+            from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+            try:
+                nc = NowCertsClient()
+            except NowCertsClientError as e:
+                print(f"NowCerts connection failed: {e}", file=sys.stderr)
+                return 2
+            bidi_result = run_bidirectional(
+                nc, espo, supa,
+                dry_run=args.sync_bidirectional_dry_run,
+                since_hours=args.sync_hours,
+            )
+        print(bidi_result.message)
+        if bidi_result.errors:
+            print("Errors:")
+            for err in bidi_result.errors:
+                print(f"- {err}")
+        return 0 if bidi_result.ok else 1
 
     # --- Supabase-only commands (no EspoCRM credentials required) ---
     if args.ops_doctor:

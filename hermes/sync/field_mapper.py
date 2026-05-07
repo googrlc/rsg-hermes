@@ -210,3 +210,167 @@ def payload_hash(payload: dict[str, Any]) -> str:
     """SHA-256 hash of a JSON-serialized payload for dedup/change detection."""
     canonical = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Reverse mapping: EspoCRM Account → NowCerts Insured
+# ---------------------------------------------------------------------------
+
+ACCOUNT_TYPE_REVERSE_MAP: dict[str, str] = {
+    "Commercial Lines": "Commercial",
+    "Personal Lines": "Personal",
+    "Group Benefits": "Benefits",
+}
+
+ACCOUNT_TO_INSURED_FIELD_MAP: list[dict[str, Any]] = [
+    {"src": "name", "dst": "CommercialName", "transform": "direct"},
+    {"src": "primaryFirstName", "dst": "FirstName", "transform": "direct"},
+    {"src": "primaryLastName", "dst": "LastName", "transform": "direct"},
+    {"src": "fein", "dst": "FEIN", "transform": "direct"},
+    {"src": "billingAddressStreet", "dst": "AddressLine1", "transform": "direct"},
+    {"src": "billingAddressCity", "dst": "City", "transform": "direct"},
+    {"src": "billingAddressState", "dst": "State", "transform": "direct"},
+    {"src": "billingAddressPostalCode", "dst": "ZipCode", "transform": "direct"},
+    {"src": "emailAddress", "dst": "EMail", "transform": "direct"},
+    {"src": "phoneNumber", "dst": "Phone", "transform": "direct"},
+    {"src": "accountType", "dst": "Type", "transform": "enum_map", "map": ACCOUNT_TYPE_REVERSE_MAP},
+    {"src": "businessEntity", "dst": "TypeOfBusiness", "transform": "direct"},
+    {"src": "cYearBusinessEst", "dst": "YearBusinessStarted", "transform": "direct"},
+    {"src": "website", "dst": "Website", "transform": "direct"},
+    {"src": "spouseFirstName", "dst": "CoInsured_FirstName", "transform": "direct"},
+    {"src": "spouseLastName", "dst": "CoInsured_LastName", "transform": "direct"},
+    {"src": "dateOfBirth", "dst": "DateOfBirth", "transform": "date_only"},
+    {"src": "spouseDob", "dst": "CoInsured_DateOfBirth", "transform": "date_only"},
+]
+
+
+def map_account_to_insured(
+    espo_record: dict[str, Any],
+    *,
+    nowcerts_database_id: str | None = None,
+) -> dict[str, Any]:
+    """Transform an EspoCRM Account record into a NowCerts Insured payload.
+
+    Args:
+        espo_record: EspoCRM Account dict.
+        nowcerts_database_id: If known, include DatabaseId for upsert matching.
+
+    Returns:
+        Dict ready for NowCerts POST /api/Insured/Insert.
+    """
+    result: dict[str, Any] = {}
+
+    if nowcerts_database_id:
+        result["DatabaseId"] = nowcerts_database_id
+
+    for mapping in ACCOUNT_TO_INSURED_FIELD_MAP:
+        src_key = mapping["src"]
+        dst_key = mapping["dst"]
+        transform = mapping["transform"]
+        raw_val = espo_record.get(src_key)
+
+        if raw_val is None or raw_val == "":
+            continue
+
+        if transform == "direct":
+            result[dst_key] = raw_val
+        elif transform == "date_only":
+            stripped = _strip_date(raw_val)
+            if stripped:
+                result[dst_key] = stripped
+        elif transform == "enum_map":
+            enum_map = mapping.get("map", {})
+            mapped = enum_map.get(str(raw_val), raw_val)
+            if mapped:
+                result[dst_key] = mapped
+
+    # Ensure Active flag
+    result.setdefault("Active", True)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# EspoCRM Account → Supabase golden record
+# ---------------------------------------------------------------------------
+
+def map_account_to_golden(espo_record: dict[str, Any]) -> dict[str, Any]:
+    """Transform an EspoCRM Account into a crm_accounts row."""
+    return {
+        "espocrm_id": espo_record.get("id", ""),
+        "name": espo_record.get("name", ""),
+        "first_name": espo_record.get("primaryFirstName"),
+        "last_name": espo_record.get("primaryLastName"),
+        "account_type": espo_record.get("accountType"),
+        "fein": espo_record.get("fein"),
+        "address_street": espo_record.get("billingAddressStreet"),
+        "address_city": espo_record.get("billingAddressCity"),
+        "address_state": espo_record.get("billingAddressState"),
+        "address_zip": espo_record.get("billingAddressPostalCode"),
+        "email": espo_record.get("emailAddress"),
+        "phone": espo_record.get("phoneNumber"),
+        "website": espo_record.get("website"),
+        "business_entity": espo_record.get("businessEntity"),
+        "year_business_started": espo_record.get("cYearBusinessEst"),
+        "nowcerts_id": espo_record.get("momentumClientId"),
+        "source_system": "espocrm",
+        "raw_espo_payload": espo_record,
+    }
+
+
+def map_policy_to_commission(
+    policy_record: dict[str, Any],
+    account_id: str | None = None,
+) -> dict[str, Any]:
+    """Transform an EspoCRM Policy (or Opportunity) into a crm_commissions row."""
+    return {
+        "account_id": account_id,
+        "policy_number": policy_record.get("policyNumber") or policy_record.get("name"),
+        "carrier": policy_record.get("carrier") or policy_record.get("carrierName"),
+        "line_of_business": (
+            policy_record.get("lineOfBusiness")
+            or policy_record.get("line_of_business")
+            or policy_record.get("lineOfBusinessName")
+        ),
+        "premium": policy_record.get("premium") or policy_record.get("premium_amount") or policy_record.get("amount"),
+        "commission_rate": policy_record.get("commissionRate") or policy_record.get("agencyCommissionPercent"),
+        "commission_amount": policy_record.get("commissionAmount") or policy_record.get("agencyCommissionValue"),
+        "agency_fee": policy_record.get("agencyFee"),
+        "effective_date": _strip_date(policy_record.get("effectiveDate")),
+        "expiration_date": _strip_date(policy_record.get("expirationDate") or policy_record.get("expiration_date")),
+        "policy_status": policy_record.get("status"),
+        "source_system": "espocrm",
+        "espocrm_id": policy_record.get("id"),
+    }
+
+
+def map_commission_to_nowcerts_policy(
+    commission: dict[str, Any],
+    insured_database_id: str | None = None,
+) -> dict[str, Any]:
+    """Transform a crm_commissions row into a NowCerts Policy/Insert payload."""
+    payload: dict[str, Any] = {}
+
+    if insured_database_id:
+        payload["InsuredDatabaseId"] = insured_database_id
+
+    if commission.get("policy_number"):
+        payload["Number"] = commission["policy_number"]
+    if commission.get("carrier"):
+        payload["CarrierName"] = commission["carrier"]
+    if commission.get("line_of_business"):
+        payload["LineOfBusinessName"] = commission["line_of_business"]
+    if commission.get("premium") is not None:
+        payload["Premium"] = float(commission["premium"])
+    if commission.get("commission_rate") is not None:
+        payload["AgencyCommissionPercent"] = float(commission["commission_rate"])
+    if commission.get("commission_amount") is not None:
+        payload["AgencyCommissionValue"] = float(commission["commission_amount"])
+    if commission.get("agency_fee") is not None:
+        payload["AgencyFee"] = float(commission["agency_fee"])
+    if commission.get("effective_date"):
+        payload["EffectiveDate"] = str(commission["effective_date"])
+    if commission.get("expiration_date"):
+        payload["ExpirationDate"] = str(commission["expiration_date"])
+
+    return payload

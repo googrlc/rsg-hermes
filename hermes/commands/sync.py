@@ -23,6 +23,9 @@ _STATUS_RE = re.compile(r"\b(status|last\s+run|history|runs)\b", re.I)
 _CONFLICTS_RE = re.compile(r"\bconflicts?\b", re.I)
 _ERRORS_RE = re.compile(r"\berrors?\b", re.I)
 _SINCE_RE = re.compile(r"\bsince\s+(\S+)", re.I)
+_BIDI_RE = re.compile(r"\b(bidirectional|bidi|full[\s-]?sync|all[\s-]?directions)\b", re.I)
+_CRM_TO_HUB_RE = re.compile(r"\b(crm[\s-]?to[\s-]?hub|mirror|espo[\s-]?to[\s-]?supa)\b", re.I)
+_HUB_TO_NC_RE = re.compile(r"\b(hub[\s-]?to[\s-]?nowcerts|push[\s-]?to[\s-]?nowcerts|push[\s-]?to[\s-]?ams)\b", re.I)
 
 
 def handle(
@@ -42,8 +45,17 @@ def handle(
     if _ERRORS_RE.search(text):
         return _sync_errors(supa)
 
-    # Trigger sync
     dry_run = bool(_DRY_RUN_RE.search(text))
+
+    # Bidirectional sync commands
+    if _BIDI_RE.search(text):
+        return _trigger_bidirectional(client, supa, dry_run=dry_run)
+    if _CRM_TO_HUB_RE.search(text):
+        return _trigger_crm_to_hub(client, supa, dry_run=dry_run)
+    if _HUB_TO_NC_RE.search(text):
+        return _trigger_hub_to_nowcerts(supa, dry_run=dry_run)
+
+    # Default: NowCerts → EspoCRM
     since_match = _SINCE_RE.search(text)
     since = since_match.group(1) if since_match else None
     return _trigger_sync(client, supa, dry_run=dry_run, since=since)
@@ -140,6 +152,82 @@ def _sync_conflicts(supa: "SupabaseClient") -> DispatchResult:
         lines.append(f"  • *{field}*: NowCerts=`{src}` vs EspoCRM=`{dst}`")
 
     return DispatchResult(True, "\n".join(lines))
+
+
+def _trigger_crm_to_hub(
+    client: "EspoClient",
+    supa: "SupabaseClient",
+    *,
+    dry_run: bool,
+) -> DispatchResult:
+    """Mirror EspoCRM → Supabase golden record."""
+    try:
+        from hermes.sync.bidirectional import run_crm_to_hub
+    except ImportError as exc:
+        return DispatchResult(False, f"Bidirectional sync module not available: {exc}")
+
+    result = run_crm_to_hub(client, supa, dry_run=dry_run)
+    lines = [result.message]
+    if result.errors:
+        lines.append(f"Errors ({len(result.errors)}):")
+        for err in result.errors[:5]:
+            lines.append(f"  • {err}")
+    return DispatchResult(result.ok, "\n".join(lines))
+
+
+def _trigger_hub_to_nowcerts(
+    supa: "SupabaseClient",
+    *,
+    dry_run: bool,
+) -> DispatchResult:
+    """Push Supabase → NowCerts."""
+    try:
+        from hermes.sync.bidirectional import run_hub_to_nowcerts
+        from hermes.sync.nowcerts_client import NowCertsClient
+    except ImportError as exc:
+        return DispatchResult(False, f"Bidirectional sync module not available: {exc}")
+
+    try:
+        nc = NowCertsClient()
+    except Exception as exc:
+        return DispatchResult(False, f"NowCerts connection failed: {exc}")
+
+    result = run_hub_to_nowcerts(nc, supa, dry_run=dry_run)
+    lines = [result.message]
+    if result.errors:
+        lines.append(f"Errors ({len(result.errors)}):")
+        for err in result.errors[:5]:
+            lines.append(f"  • {err}")
+    return DispatchResult(result.ok, "\n".join(lines))
+
+
+def _trigger_bidirectional(
+    client: "EspoClient",
+    supa: "SupabaseClient",
+    *,
+    dry_run: bool,
+) -> DispatchResult:
+    """Run all three sync directions."""
+    try:
+        from hermes.sync.bidirectional import run_bidirectional
+        from hermes.sync.nowcerts_client import NowCertsClient
+    except ImportError as exc:
+        return DispatchResult(False, f"Bidirectional sync module not available: {exc}")
+
+    try:
+        nc = NowCertsClient()
+    except Exception as exc:
+        return DispatchResult(False, f"NowCerts connection failed: {exc}")
+
+    result = run_bidirectional(nc, client, supa, dry_run=dry_run)
+    lines = [result.message]
+    if result.errors:
+        lines.append(f"Errors ({len(result.errors)}):")
+        for err in result.errors[:5]:
+            lines.append(f"  • {err}")
+        if len(result.errors) > 5:
+            lines.append(f"  … and {len(result.errors) - 5} more")
+    return DispatchResult(result.ok, "\n".join(lines))
 
 
 def _sync_errors(supa: "SupabaseClient") -> DispatchResult:
