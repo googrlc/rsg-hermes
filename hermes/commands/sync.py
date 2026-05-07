@@ -88,7 +88,7 @@ def _sync_status(supa: "SupabaseClient") -> DispatchResult:
     try:
         runs = supa.select(
             "sync_runs",
-            columns="id,workflow_name,status,records_pulled,records_created,records_updated,records_failed,finished_at",
+            columns="id,workflow_name,status,records_processed,records_created,records_updated,records_failed,finished_at",
             params={"order": "created_at.desc"},
             limit=5,
         )
@@ -102,7 +102,7 @@ def _sync_status(supa: "SupabaseClient") -> DispatchResult:
     for r in runs:
         status = r.get("status", "?")
         wf = r.get("workflow_name", "?")
-        pulled = r.get("records_pulled", 0)
+        processed = r.get("records_processed", 0)
         created = r.get("records_created", 0)
         updated = r.get("records_updated", 0)
         failed = r.get("records_failed", 0)
@@ -110,7 +110,7 @@ def _sync_status(supa: "SupabaseClient") -> DispatchResult:
         emoji = "✅" if status == "success" else "⚠️" if status == "partial" else "❌" if status == "failed" else "🔄"
         lines.append(
             f"{emoji} *{wf}* — {status} | "
-            f"pulled:{pulled} created:{created} updated:{updated} failed:{failed} | "
+            f"processed:{processed} created:{created} updated:{updated} failed:{failed} | "
             f"{finished}"
         )
 

@@ -64,14 +64,14 @@ class SyncRunResultTests(unittest.TestCase):
     def test_message_includes_counts(self) -> None:
         r = SyncRunResult(
             run_id="abc",
-            records_pulled=10,
+            records_processed=10,
             records_created=5,
             records_updated=3,
             records_skipped=1,
             records_failed=1,
         )
         msg = r.message
-        self.assertIn("pulled=10", msg)
+        self.assertIn("processed=10", msg)
         self.assertIn("created=5", msg)
         self.assertIn("failed=1", msg)
 
@@ -88,7 +88,7 @@ class DryRunPipelineTests(unittest.TestCase):
 
         result = run_insured_to_account_sync(nc, espo, supa, dry_run=True)
         self.assertTrue(result.ok)
-        self.assertEqual(result.records_pulled, 0)
+        self.assertEqual(result.records_processed, 0)
         espo.create.assert_not_called()
         espo.update.assert_not_called()
 
@@ -101,7 +101,7 @@ class DryRunPipelineTests(unittest.TestCase):
 
         result = run_insured_to_account_sync(nc, espo, supa, dry_run=True)
         self.assertTrue(result.ok)
-        self.assertEqual(result.records_pulled, 1)
+        self.assertEqual(result.records_processed, 1)
         self.assertEqual(result.records_created, 1)
         # Verify no actual EspoCRM writes in dry run
         espo.create.assert_not_called()
@@ -148,7 +148,7 @@ class QueuedPipelineTests(unittest.TestCase):
         ]
 
         result = run_insured_to_account_sync(nc, espo, supa, dry_run=False)
-        self.assertEqual(result.records_pulled, 1)
+        self.assertEqual(result.records_processed, 1)
         self.assertEqual(result.records_created, 1)
         espo.create.assert_called_once()
 

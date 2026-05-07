@@ -47,7 +47,7 @@ class TestSyncStatus:
                 "id": "run-1",
                 "workflow_name": "insured_to_account",
                 "status": "success",
-                "records_pulled": 10,
+                "records_processed": 10,
                 "records_created": 5,
                 "records_updated": 3,
                 "records_failed": 0,
@@ -57,7 +57,7 @@ class TestSyncStatus:
                 "id": "run-2",
                 "workflow_name": "dry_run:insured_to_account",
                 "status": "partial",
-                "records_pulled": 8,
+                "records_processed": 8,
                 "records_created": 2,
                 "records_updated": 1,
                 "records_failed": 2,
@@ -135,7 +135,7 @@ class TestSyncTrigger:
         from hermes.sync.pipeline import SyncRunResult
 
         mock_pipeline.return_value = SyncRunResult(
-            run_id="run-dry", records_pulled=5, dry_run=True,
+            run_id="run-dry", records_processed=5, dry_run=True,
         )
         result = handle(_mock_espo(), "sync nowcerts dry-run", supa=_mock_supa())
         assert result.ok
@@ -150,7 +150,7 @@ class TestSyncTrigger:
         from hermes.sync.pipeline import SyncRunResult
 
         mock_pipeline.return_value = SyncRunResult(
-            run_id="run-live", records_pulled=10, records_created=3,
+            run_id="run-live", records_processed=10, records_created=3,
         )
         result = handle(_mock_espo(), "sync nowcerts", supa=_mock_supa())
         assert result.ok
@@ -178,7 +178,7 @@ class TestSyncTrigger:
 
         mock_pipeline.return_value = SyncRunResult(
             run_id="run-err",
-            records_pulled=5,
+            records_processed=5,
             records_failed=2,
             errors=["q1: timeout", "q2: 500 error"],
         )
