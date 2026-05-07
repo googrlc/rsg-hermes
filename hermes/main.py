@@ -95,6 +95,17 @@ def main() -> int:
         action="store_true",
         help="Run Slack Socket Mode bot (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)",
     )
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Run Hermes REST API server (default port 8484)",
+    )
+    parser.add_argument(
+        "--api-port",
+        type=int,
+        default=8484,
+        help="Port for the REST API server (default: 8484)",
+    )
     # --- NowCerts ↔ EspoCRM Sync commands ---
     parser.add_argument(
         "--sync-nowcerts",
@@ -225,6 +236,14 @@ def main() -> int:
         except RuntimeError as e:
             print(e, file=sys.stderr)
             return 2
+        return 0
+
+    if args.api:
+        import uvicorn
+        from hermes.api import app as api_app
+
+        print(f"Starting Hermes API on port {args.api_port}...")
+        uvicorn.run(api_app, host="0.0.0.0", port=args.api_port)
         return 0
 
     if args.ping:
