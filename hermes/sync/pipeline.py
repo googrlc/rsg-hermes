@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from hermes.core.client import EspoClient, EspoClientError
@@ -203,10 +204,11 @@ def run_insured_to_account_sync(
 def _start_run(
     supa: SupabaseClient, *, workflow_name: str, dry_run: bool,
 ) -> dict[str, Any]:
+    wf_name = f"dry_run:{workflow_name}" if dry_run else workflow_name
     return supa.insert(
         "sync_runs",
         {
-            "workflow_name": workflow_name,
+            "workflow_name": wf_name,
             "source_system": "nowcerts",
             "destination_system": "espocrm",
             "direction": "nowcerts_to_espocrm",
@@ -237,7 +239,7 @@ def _finish_run(
         "records_updated": result.records_updated,
         "records_skipped": result.records_skipped,
         "records_failed": result.records_failed,
-        "finished_at": "now()",
+        "finished_at": datetime.now(timezone.utc).isoformat(),
     }
     if error_summary:
         data["error_summary"] = error_summary[:2000]
@@ -369,7 +371,7 @@ def _find_espo_account(
 ) -> dict[str, Any] | None:
     """Search EspoCRM for an Account by a specific field value."""
     try:
-        return espo._find_one_by_field("Account", field, value)
+        return espo.find_one_by_field("Account", field, value)
     except EspoClientError:
         log.warning("EspoCRM lookup failed: Account.%s = %s", field, value)
         return None
@@ -470,9 +472,10 @@ def _process_outbound_queue(
         action = item["action"]
         payload = dict(item.get("payload") or {})
         mapping_id = item.get("mapping_id")
+        attempt = (item.get("attempt_count") or 0) + 1
 
         # Mark processing
-        _update_queue_status(supa, queue_id, "processing")
+        _update_queue_status(supa, queue_id, "processing", attempt_count=attempt)
 
         try:
             if action == "update" and object_id:
@@ -487,21 +490,21 @@ def _process_outbound_queue(
                     try:
                         supa.update("sync_mappings", mapping_id, {
                             "espocrm_id": new_id,
-                            "last_synced_at": "now()",
+                            "last_synced_at": datetime.now(timezone.utc).isoformat(),
                         })
                     except SupabaseClientError:
                         log.exception("Failed to update mapping %s with new Espo ID", mapping_id)
             else:
                 result.records_skipped += 1
-                _update_queue_status(supa, queue_id, "completed")
+                _update_queue_status(supa, queue_id, "completed", attempt_count=attempt)
                 continue
 
-            _update_queue_status(supa, queue_id, "completed")
+            _update_queue_status(supa, queue_id, "completed", attempt_count=attempt)
 
             # Update mapping last_synced_at
             if mapping_id:
                 try:
-                    supa.update("sync_mappings", mapping_id, {"last_synced_at": "now()"})
+                    supa.update("sync_mappings", mapping_id, {"last_synced_at": datetime.now(timezone.utc).isoformat()})
                 except SupabaseClientError:
                     pass
 
@@ -525,7 +528,7 @@ def _process_outbound_queue(
             log.warning("Outbound %s failed for queue %s: %s", action, queue_id, exc)
             result.records_failed += 1
             result.errors.append(f"{queue_id}: {exc}")
-            _update_queue_status(supa, queue_id, "failed", last_error=str(exc))
+            _update_queue_status(supa, queue_id, "failed", last_error=str(exc), attempt_count=attempt)
 
             # Log error
             _log_error(
@@ -556,8 +559,9 @@ def _update_queue_status(
     queue_id: str,
     status: str,
     last_error: str | None = None,
+    attempt_count: int = 1,
 ) -> None:
-    data: dict[str, Any] = {"status": status, "attempt_count": 1}
+    data: dict[str, Any] = {"status": status, "attempt_count": attempt_count}
     if last_error:
         data["last_error"] = last_error[:2000]
     try:

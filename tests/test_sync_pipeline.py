@@ -27,7 +27,7 @@ def _mock_espo() -> MagicMock:
     espo = MagicMock()
     espo.create.return_value = {"id": "espo-new-123"}
     espo.update.return_value = {"id": "espo-existing-456"}
-    espo._find_one_by_field.return_value = None
+    espo.find_one_by_field.return_value = None
     return espo
 
 
@@ -205,7 +205,7 @@ class ResolveMappingTests(unittest.TestCase):
     def test_creates_new_mapping_when_no_match(self) -> None:
         supa = _mock_supa()
         espo = _mock_espo()
-        espo._find_one_by_field.return_value = None
+        espo.find_one_by_field.return_value = None
         supa.select.return_value = []
         supa.upsert.return_value = {"id": "map-new", "espocrm_id": None, "match_method": "none"}
 
@@ -221,8 +221,8 @@ class ResolveMappingTests(unittest.TestCase):
         espo = _mock_espo()
         supa.select.return_value = []  # no existing mapping
 
-        # _find_one_by_field returns a match on dedup key
-        espo._find_one_by_field.return_value = {"id": "espo-dedup-match", "name": "Acme"}
+        # find_one_by_field returns a match on dedup key
+        espo.find_one_by_field.return_value = {"id": "espo-dedup-match", "name": "Acme"}
         supa.upsert.return_value = {"id": "map-dedup", "espocrm_id": "espo-dedup-match", "match_method": "dedup_key"}
 
         result = _resolve_mapping(
