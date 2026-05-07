@@ -32,7 +32,7 @@ class SyncRunResult:
     """Summary of a complete sync pipeline execution."""
 
     run_id: str = ""
-    records_pulled: int = 0
+    records_processed: int = 0
     records_created: int = 0
     records_updated: int = 0
     records_skipped: int = 0
@@ -49,7 +49,7 @@ class SyncRunResult:
         prefix = "DRY RUN: " if self.dry_run else ""
         return (
             f"{prefix}NowCerts→EspoCRM sync complete: "
-            f"pulled={self.records_pulled} created={self.records_created} "
+            f"processed={self.records_processed} created={self.records_created} "
             f"updated={self.records_updated} skipped={self.records_skipped} "
             f"failed={self.records_failed} run_id={self.run_id}"
         )
@@ -86,8 +86,8 @@ def run_insured_to_account_sync(
     try:
         # ── B. Pull from NowCerts ────────────────────────────────────────
         raw_insureds = nc.fetch_insureds(since=since)
-        result.records_pulled = len(raw_insureds)
-        _update_run(supa, run_id, {"records_pulled": len(raw_insureds)})
+        result.records_processed = len(raw_insureds)
+        _update_run(supa, run_id, {"records_processed": len(raw_insureds)})
 
         if not raw_insureds:
             log.info("No insureds to sync")
@@ -234,7 +234,7 @@ def _finish_run(
 ) -> None:
     data: dict[str, Any] = {
         "status": status,
-        "records_pulled": result.records_pulled,
+        "records_processed": result.records_processed,
         "records_created": result.records_created,
         "records_updated": result.records_updated,
         "records_skipped": result.records_skipped,

@@ -48,6 +48,9 @@ class Dispatcher:
 
         self._routes: list[tuple[re.Pattern[str], Handler | str]] = [
             (re.compile(r"^\s*(ping|health|status)\s*$", re.I), "ping"),
+            (re.compile(r"\b(changelog|crm\s+changes|nightly\s+report|daily\s+changes|what\s+changed)\b", re.I), "changelog"),
+            (re.compile(r"\bsync\b.*\b(nowcerts|status|conflicts?|errors?|runs?)\b", re.I), "sync"),
+            (re.compile(r"^\s*sync\s", re.I), "sync"),
             (re.compile(r"^\s*merge\s+", re.I), merge.handle),
             (re.compile(r"\bcan\s+be\s+merged\b", re.I), merge.handle),
             (re.compile(r"^\s*(create|update)\s+", re.I), data_entry.handle),
@@ -127,6 +130,12 @@ class Dispatcher:
         if handler == "data_quality":
             from hermes.commands.data_quality import handle as dq_handle
             return dq_handle(client, text, supa=self.supa)
+        if handler == "sync":
+            from hermes.commands.sync import handle as sync_handle
+            return sync_handle(client, text, supa=self.supa)
+        if handler == "changelog":
+            from hermes.commands.changelog import handle as changelog_handle
+            return changelog_handle(client, text)
         if handler == "ping":
             return DispatchResult(True, "Hermes is online and connected to CRM.")
         return handler(client, text)
@@ -157,5 +166,7 @@ class Dispatcher:
             False,
             "No handler matched. Try: add … | what/find/lookup … | cross-sell/renewals … | "
             "intake <lead info> | pipeline | kpi | stale leads | my accounts | data quality | "
-            "report personal | bulk normalize | merge <entity> <id1> into <id2> | ping",
+            "report personal | bulk normalize | merge <entity> <id1> into <id2> | "
+            "sync nowcerts | sync status | sync conflicts | sync errors | "
+            "changelog | what changed | ping",
         )
