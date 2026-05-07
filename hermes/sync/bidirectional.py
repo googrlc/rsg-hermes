@@ -193,8 +193,14 @@ def run_hub_to_nowcerts(
                     continue
 
                 if not dry_run:
-                    nc.insert_policy(nc_policy_payload)
-                    _mark_commission_pushed(supa, comm["id"])
+                    policy_resp = nc.insert_policy(nc_policy_payload)
+                    nc_policy_id = (
+                        policy_resp.get("DatabaseId")
+                        or policy_resp.get("databaseId")
+                        or policy_resp.get("id")
+                        or "pushed"
+                    ) if isinstance(policy_resp, dict) else "pushed"
+                    _mark_commission_pushed(supa, comm["id"], str(nc_policy_id))
 
                 result.commissions_pushed += 1
 
@@ -372,7 +378,7 @@ def _link_nowcerts_id(supa: SupabaseClient, espo_id: str, nowcerts_id: str) -> N
                 "nowcerts_id": nowcerts_id,
                 "espocrm_entity_type": "Account",
                 "espocrm_id": espo_id,
-                "match_method": "crm_originated",
+                "match_method": "manual",
                 "match_confidence": 1.0,
                 "active": True,
             },
@@ -389,9 +395,9 @@ def _get_golden_account_by_id(supa: SupabaseClient, account_id: str) -> dict[str
     return rows[0] if rows else None
 
 
-def _mark_commission_pushed(supa: SupabaseClient, commission_id: str) -> None:
+def _mark_commission_pushed(supa: SupabaseClient, commission_id: str, nowcerts_id: str = "pushed") -> None:
     supa.update("crm_commissions", commission_id, {
-        "nowcerts_id": "pushed",
+        "nowcerts_id": nowcerts_id,
         "last_synced_at": datetime.now(timezone.utc).isoformat(),
     })
 
@@ -421,12 +427,13 @@ _ACTION_MAP = {"mirror": "create", "push": "update"}
 
 
 def _start_run(supa: SupabaseClient, workflow: str, dry_run: bool) -> dict[str, Any]:
+    wf_name = f"dry_run:{workflow}" if dry_run else workflow
     try:
         return supa.insert("sync_runs", {
-            "workflow_name": workflow,
+            "workflow_name": wf_name,
             "source_system": "espocrm" if "crm" in workflow else "supabase",
             "destination_system": "nowcerts" if "nowcerts" in workflow else "supabase",
-            "status": "dry_run" if dry_run else "running",
+            "status": "running",
         })
     except SupabaseClientError as exc:
         log.warning("Failed to start sync run: %s", exc)
@@ -436,7 +443,7 @@ def _start_run(supa: SupabaseClient, workflow: str, dry_run: bool) -> dict[str, 
 def _finish_run(supa: SupabaseClient, run_id: str, result: BidiSyncResult, dry_run: bool) -> None:
     if not run_id:
         return
-    status = "dry_run" if dry_run else ("success" if result.ok else "failed")
+    status = "success" if result.ok else "failed"
     try:
         supa.update("sync_runs", run_id, {
             "status": status,

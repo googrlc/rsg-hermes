@@ -318,6 +318,15 @@ def map_account_to_golden(espo_record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _first_non_none(record: dict[str, Any], *keys: str) -> Any:
+    """Return the first value that is not None from a sequence of dict keys."""
+    for key in keys:
+        val = record.get(key)
+        if val is not None:
+            return val
+    return None
+
+
 def map_policy_to_commission(
     policy_record: dict[str, Any],
     account_id: str | None = None,
@@ -327,17 +336,17 @@ def map_policy_to_commission(
         "account_id": account_id,
         "policy_number": policy_record.get("policyNumber") or policy_record.get("name"),
         "carrier": policy_record.get("carrier") or policy_record.get("carrierName"),
-        "line_of_business": (
-            policy_record.get("lineOfBusiness")
-            or policy_record.get("line_of_business")
-            or policy_record.get("lineOfBusinessName")
+        "line_of_business": _first_non_none(
+            policy_record, "lineOfBusiness", "line_of_business", "lineOfBusinessName",
         ),
-        "premium": policy_record.get("premium") or policy_record.get("premium_amount") or policy_record.get("amount"),
-        "commission_rate": policy_record.get("commissionRate") or policy_record.get("agencyCommissionPercent"),
-        "commission_amount": policy_record.get("commissionAmount") or policy_record.get("agencyCommissionValue"),
+        "premium": _first_non_none(policy_record, "premium", "premium_amount", "amount"),
+        "commission_rate": _first_non_none(policy_record, "commissionRate", "agencyCommissionPercent"),
+        "commission_amount": _first_non_none(policy_record, "commissionAmount", "agencyCommissionValue"),
         "agency_fee": policy_record.get("agencyFee"),
         "effective_date": _strip_date(policy_record.get("effectiveDate")),
-        "expiration_date": _strip_date(policy_record.get("expirationDate") or policy_record.get("expiration_date")),
+        "expiration_date": _strip_date(
+            _first_non_none(policy_record, "expirationDate", "expiration_date"),
+        ),
         "policy_status": policy_record.get("status"),
         "source_system": "espocrm",
         "espocrm_id": policy_record.get("id"),
