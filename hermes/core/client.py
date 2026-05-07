@@ -239,7 +239,7 @@ class EspoClient:
     def update(self, entity: str, record_id: str, payload: dict[str, Any]) -> dict[str, Any] | list[Any]:
         return self.put(f"{entity}/{record_id}", json=payload)
 
-    def _find_one_by_field(
+    def find_one_by_field(
         self,
         entity: str,
         field: str,
@@ -267,7 +267,7 @@ class EspoClient:
             payload = {**payload, "emailAddress": email}
         existing = None
         if email:
-            existing = self._find_one_by_field(
+            existing = self.find_one_by_field(
                 "Contact",
                 "emailAddress",
                 email,
@@ -289,7 +289,7 @@ class EspoClient:
         existing = None
         if fein:
             try:
-                existing = self._find_one_by_field(
+                existing = self.find_one_by_field(
                     "Account",
                     fein_attr,
                     fein,
