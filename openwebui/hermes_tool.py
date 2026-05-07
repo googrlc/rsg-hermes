@@ -5,7 +5,7 @@ author_url: https://github.com/googrlc/rsg-hermes
 description: EspoCRM coordination middleware — sync NowCerts, lookup accounts, run data quality audits, and more. Connects to the Hermes API server.
 required_open_webui_version: 0.4.0
 requirements: requests
-version: 0.1.0
+version: 0.3.0
 licence: MIT
 """
 
@@ -109,6 +109,59 @@ class Tools:
         Show the current sales pipeline summary with stage counts and values.
         """
         return await asyncio.to_thread(self._dispatch, "pipeline")
+
+    async def crm_changelog(self, hours: int = 24, __event_emitter__=None) -> str:
+        """
+        Show recent CRM changes — new and updated records across all entity types.
+        :param hours: Lookback window in hours (default: 24)
+        """
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": f"Fetching CRM changes (last {hours}h)...", "done": False}})
+        result = await asyncio.to_thread(self._dispatch, f"changelog {hours} hours")
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": "Done", "done": True}})
+        return result
+
+    async def sync_bidirectional(self, dry_run: bool = False, __event_emitter__=None) -> str:
+        """
+        Run full bidirectional sync: NowCerts ↔ Supabase ↔ EspoCRM.
+        Syncs all three directions in sequence.
+        :param dry_run: If True, preview without writing to any system (default: False)
+        """
+        cmd = "sync bidirectional dry-run" if dry_run else "sync bidirectional"
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": "Running bidirectional sync...", "done": False}})
+        result = await asyncio.to_thread(self._dispatch, cmd)
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": "Bidirectional sync complete", "done": True}})
+        return result
+
+    async def sync_crm_to_hub(self, dry_run: bool = False, __event_emitter__=None) -> str:
+        """
+        Mirror EspoCRM changes to Supabase golden record.
+        Captures new clients and commission data from the CRM.
+        :param dry_run: If True, preview without writing (default: False)
+        """
+        cmd = "sync crm-to-hub dry-run" if dry_run else "sync crm-to-hub"
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": "Mirroring CRM to Supabase...", "done": False}})
+        result = await asyncio.to_thread(self._dispatch, cmd)
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": "CRM mirror complete", "done": True}})
+        return result
+
+    async def sync_hub_to_nowcerts(self, dry_run: bool = False, __event_emitter__=None) -> str:
+        """
+        Push new CRM-originated clients and commissions from Supabase to NowCerts AMS.
+        :param dry_run: If True, preview without writing (default: False)
+        """
+        cmd = "sync push-to-nowcerts dry-run" if dry_run else "sync push-to-nowcerts"
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": "Pushing to NowCerts...", "done": False}})
+        result = await asyncio.to_thread(self._dispatch, cmd)
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": "NowCerts push complete", "done": True}})
+        return result
 
     async def hermes_command(self, command: str, __event_emitter__=None) -> str:
         """

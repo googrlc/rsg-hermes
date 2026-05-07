@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS public.sync_runs (
     destination_system VARCHAR(50) NOT NULL DEFAULT 'espocrm',
     direction       sync_direction NOT NULL DEFAULT 'nowcerts_to_espocrm',
     status          sync_run_status NOT NULL DEFAULT 'running',
-    records_pulled  INT DEFAULT 0,
+    records_processed INT DEFAULT 0,
     records_created INT DEFAULT 0,
     records_updated INT DEFAULT 0,
     records_skipped INT DEFAULT 0,
