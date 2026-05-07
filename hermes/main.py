@@ -123,6 +123,28 @@ def main() -> int:
         default=None,
         help="Only sync records changed since this ISO datetime (e.g. 2026-05-01T00:00:00)",
     )
+    # --- Nightly CRM Changelog ---
+    parser.add_argument(
+        "--changelog",
+        action="store_true",
+        help="Run nightly CRM changelog: post changes to Slack + log in EspoCRM",
+    )
+    parser.add_argument(
+        "--changelog-dry-run",
+        action="store_true",
+        help="Render CRM changelog without posting to Slack or logging to CRM",
+    )
+    parser.add_argument(
+        "--changelog-force",
+        action="store_true",
+        help="Bypass daily idempotency guard for changelog",
+    )
+    parser.add_argument(
+        "--changelog-hours",
+        type=int,
+        default=None,
+        help="Lookback window in hours (default: 24)",
+    )
     # --- Hermes Operations Center commands ---
     parser.add_argument(
         "--ops-doctor",
@@ -214,6 +236,29 @@ def main() -> int:
         results.extend(snapshot_renewals(supa))
         print(f"Recorded {len(results)} KPI data points.")
         return 0
+
+    # --- Nightly CRM Changelog (requires EspoCRM + Slack) ---
+    if args.changelog or args.changelog_dry_run:
+        from hermes.jobs import nightly_changelog
+
+        try:
+            espo = EspoClient()
+        except EspoClientError as e:
+            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
+            return 2
+
+        result = nightly_changelog.run(
+            espo,
+            dry_run=args.changelog_dry_run,
+            force=getattr(args, "changelog_force", False),
+            lookback_hours=args.changelog_hours,
+        )
+        print(result.message)
+        if result.warnings:
+            print("Warnings:")
+            for w in result.warnings:
+                print(f"- {w}")
+        return 0 if result.ok else 1
 
     # --- API server (manages its own clients lazily) ---
     if args.api:

@@ -5,7 +5,7 @@ author_url: https://github.com/googrlc/rsg-hermes
 description: EspoCRM coordination middleware — sync NowCerts, lookup accounts, run data quality audits, and more. Connects to the Hermes API server.
 required_open_webui_version: 0.4.0
 requirements: requests
-version: 0.1.0
+version: 0.2.0
 licence: MIT
 """
 
@@ -109,6 +109,18 @@ class Tools:
         Show the current sales pipeline summary with stage counts and values.
         """
         return await asyncio.to_thread(self._dispatch, "pipeline")
+
+    async def crm_changelog(self, hours: int = 24, __event_emitter__=None) -> str:
+        """
+        Show recent CRM changes — new and updated records across all entity types.
+        :param hours: Lookback window in hours (default: 24)
+        """
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": f"Fetching CRM changes (last {hours}h)...", "done": False}})
+        result = await asyncio.to_thread(self._dispatch, f"changelog {hours} hours")
+        if __event_emitter__:
+            await __event_emitter__({"type": "status", "data": {"description": "Done", "done": True}})
+        return result
 
     async def hermes_command(self, command: str, __event_emitter__=None) -> str:
         """
