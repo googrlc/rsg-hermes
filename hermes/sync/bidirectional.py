@@ -374,7 +374,7 @@ def _link_nowcerts_id(supa: SupabaseClient, espo_id: str, nowcerts_id: str) -> N
         supa.upsert(
             "sync_mappings",
             {
-                "nowcerts_entity_type": "insured",
+                "nowcerts_entity_type": "Insured",
                 "nowcerts_id": nowcerts_id,
                 "espocrm_entity_type": "Account",
                 "espocrm_id": espo_id,

@@ -15,6 +15,61 @@ from hermes.core.auditor import SchemaAuditor, crm_readiness, quick_kpis
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher
 
+COMMAND_CATALOG = """Hermes command catalog
+
+Approval tokens:
+- APPROVE CRM ONLY
+- APPROVE SUPABASE ONLY
+- APPROVE TASKS ONLY
+- APPROVE ALL
+- REVISE
+- CANCEL
+
+Property research:
+- Research [address] for property underwriting
+- Find county, parcel, owner, tax values, year built, square footage, and source links for [address]
+- Run title-like pre-check for [address]
+- Check public recorder clues for [address]
+- Estimate rebuild cost range for [address] using available property facts
+
+Business research:
+- Research this business for underwriting: [business name] [address] [website]
+- Enrich this lead: [business name] [address] [phone/email]
+- Find NAICS, SIC, GL class, WC class, business description, and risk flags for [business name]
+
+Document extraction:
+- Read this dec page and extract policy data
+- Summarize this policy document
+- Compare this quote to the current policy
+- Extract all vehicles and drivers from this document
+- Review this loss run and flag underwriting issues
+
+Transcript workflow:
+- Summarize this call transcript
+- Turn this call transcript into CRM notes and tasks
+- Extract client promises, RSG promises, deadlines, and follow-up items from this transcript
+
+Medicare:
+- Review this Medicare client intake
+- Prepare Medicare checklist for this client
+- Check RSG Medicare tables for carrier options for this client
+
+Life:
+- Review this life insurance intake
+- Prepare a preliminary life underwriting summary
+- Check carrier table-rating data for this life case
+
+Commissions:
+- Calculate expected commission for this policy
+- Check commission rule for [carrier] [LOB] [new/renewal]
+- Compare expected vs posted commission for this policy
+
+CRM draft commands:
+- Prepare an EspoCRM account update draft
+- Prepare an EspoCRM opportunity update draft
+- Show me exactly what you would write to EspoCRM
+"""
+
 
 def main() -> int:
     load_dotenv()
@@ -25,11 +80,17 @@ def main() -> int:
     )
     parser = argparse.ArgumentParser(description="Hermes — EspoCRM coordinator")
     parser.add_argument("command", nargs="*", help="One-shot command (omit for REPL)")
+    parser.add_argument("--commands", action="store_true", help="Print Open WebUI command catalog and exit")
     parser.add_argument("--ping", action="store_true", help="Test API key and exit")
     parser.add_argument("--doctor", action="store_true", help="Run non-mutating CRM readiness checks")
     parser.add_argument("--kpi", action="store_true", help="Print quick entity counts")
     parser.add_argument("--audit-fields", action="store_true", help="Build schema_map.json field audit")
     parser.add_argument("--audit-schema", action="store_true", help="Build schema_map.json schema audit")
+    parser.add_argument(
+        "--inventory-metadata",
+        action="store_true",
+        help="Build live Espo metadata inventory (writable/read-only/required fields)",
+    )
     parser.add_argument(
         "--revenue-sentinel",
         action="store_true",
@@ -205,6 +266,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.commands:
+        print(COMMAND_CATALOG)
+        return 0
+
     # --- NowCerts sync (requires NowCerts + Supabase + EspoCRM) ---
     if args.sync_nowcerts or args.sync_nowcerts_dry_run:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
@@ -374,6 +439,11 @@ def main() -> int:
         schema = SchemaAuditor(client).run_field_audit()
         print(f"Schema audit wrote {os.environ.get('HERMES_SCHEMA_MAP', 'schema_map.json')}")
         print(schema)
+        return 0
+    if args.inventory_metadata:
+        schema = SchemaAuditor(client).run_live_metadata_inventory()
+        print(f"Metadata inventory wrote {os.environ.get('HERMES_SCHEMA_MAP', 'schema_map.json')}")
+        print(f"Entity count: {schema.get('entity_count', 0)}")
         return 0
 
     if args.slack:
