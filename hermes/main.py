@@ -95,6 +95,23 @@ def main() -> int:
         action="store_true",
         help="Run Slack Socket Mode bot (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)",
     )
+    # --- NowCerts ↔ EspoCRM Sync commands ---
+    parser.add_argument(
+        "--sync-nowcerts",
+        action="store_true",
+        help="Run NowCerts → EspoCRM sync pipeline (Insured → Account)",
+    )
+    parser.add_argument(
+        "--sync-nowcerts-dry-run",
+        action="store_true",
+        help="Preview NowCerts sync without writing to EspoCRM",
+    )
+    parser.add_argument(
+        "--sync-nowcerts-since",
+        type=str,
+        default=None,
+        help="Only sync records changed since this ISO datetime (e.g. 2026-05-01T00:00:00)",
+    )
     # --- Hermes Operations Center commands ---
     parser.add_argument(
         "--ops-doctor",
@@ -117,6 +134,42 @@ def main() -> int:
         help="Record system health, finance, and renewal KPI snapshots",
     )
     args = parser.parse_args()
+
+    # --- NowCerts sync (requires NowCerts + Supabase + EspoCRM) ---
+    if args.sync_nowcerts or args.sync_nowcerts_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes.sync.pipeline import run_insured_to_account_sync
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            nc = NowCertsClient()
+        except NowCertsClientError as e:
+            print(f"NowCerts connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            espo = EspoClient()
+        except EspoClientError as e:
+            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
+            return 2
+
+        sync_result = run_insured_to_account_sync(
+            nc,
+            espo,
+            supa,
+            dry_run=args.sync_nowcerts_dry_run,
+            since=args.sync_nowcerts_since,
+        )
+        print(sync_result.message)
+        if sync_result.errors:
+            print("Errors:")
+            for err in sync_result.errors:
+                print(f"- {err}")
+        return 0 if sync_result.ok else 1
 
     # --- Supabase-only commands (no EspoCRM credentials required) ---
     if args.ops_doctor:
