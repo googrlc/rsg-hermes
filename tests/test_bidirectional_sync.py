@@ -264,15 +264,13 @@ class NowCertsWriteTests(unittest.TestCase):
 
 
 def _mock_supa():
-    """Create a mock SupabaseClient."""
+    """Create a mock SupabaseClient with wrapper methods."""
     supa = MagicMock()
-    supa.client.table.return_value.insert.return_value.execute.return_value = MagicMock(
-        data=[{"id": "run-123"}]
-    )
-    supa.client.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
-    supa.client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
-    supa.client.table.return_value.select.return_value.is_.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
-    supa.client.table.return_value.upsert.return_value.execute.return_value = MagicMock()
+    supa.insert.return_value = {"id": "run-123"}
+    supa.update.return_value = {}
+    supa.update_where.return_value = []
+    supa.select.return_value = []
+    supa.upsert.return_value = {}
     return supa
 
 
@@ -342,11 +340,10 @@ class HubToNowCertsTests(unittest.TestCase):
 
         nc = _mock_nc()
         supa = _mock_supa()
-        # Return unlinked accounts
-        supa.client.table.return_value.select.return_value.is_.return_value.eq.return_value.execute.return_value = MagicMock(
-            data=[
-                {"espocrm_id": "acc-1", "name": "New Corp", "raw_espo_payload": {"name": "New Corp", "primaryLastName": "Owner"}},
-            ]
+        # Return unlinked accounts from select (for _fetch_unlinked_accounts)
+        supa.select.side_effect = lambda table, **kw: (
+            [{"espocrm_id": "acc-1", "name": "New Corp", "raw_espo_payload": {"name": "New Corp", "primaryLastName": "Owner"}}]
+            if table == "crm_accounts" else []
         )
 
         result = run_hub_to_nowcerts(nc, supa, dry_run=True)

@@ -302,14 +302,17 @@ def _upsert_golden_account(supa: SupabaseClient, row: dict[str, Any]) -> None:
     row["last_espo_sync_at"] = datetime.now(timezone.utc).isoformat()
     row["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    existing = supa.client.table("crm_accounts").select("id").eq(
-        "espocrm_id", espo_id
-    ).execute()
-
-    if existing.data:
-        supa.client.table("crm_accounts").update(row).eq("espocrm_id", espo_id).execute()
+    existing = supa.select(
+        "crm_accounts", columns="id",
+        params={"espocrm_id": f"eq.{espo_id}"}, limit=1,
+    )
+    if existing:
+        supa.update_where(
+            "crm_accounts", row,
+            filters={"espocrm_id": f"eq.{espo_id}"},
+        )
     else:
-        supa.client.table("crm_accounts").insert(row).execute()
+        supa.insert("crm_accounts", row)
 
 
 def _upsert_golden_commission(supa: SupabaseClient, row: dict[str, Any]) -> None:
@@ -319,66 +322,76 @@ def _upsert_golden_commission(supa: SupabaseClient, row: dict[str, Any]) -> None
     row["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     if espo_id:
-        existing = supa.client.table("crm_commissions").select("id").eq(
-            "espocrm_id", espo_id
-        ).execute()
-        if existing.data:
-            supa.client.table("crm_commissions").update(row).eq("espocrm_id", espo_id).execute()
+        existing = supa.select(
+            "crm_commissions", columns="id",
+            params={"espocrm_id": f"eq.{espo_id}"}, limit=1,
+        )
+        if existing:
+            supa.update_where(
+                "crm_commissions", row,
+                filters={"espocrm_id": f"eq.{espo_id}"},
+            )
             return
 
-    supa.client.table("crm_commissions").insert(row).execute()
+    supa.insert("crm_commissions", row)
 
 
 def _fetch_unlinked_accounts(supa: SupabaseClient) -> list[dict[str, Any]]:
     """Fetch golden accounts that have no NowCerts link."""
-    resp = supa.client.table("crm_accounts").select("*").is_(
-        "nowcerts_id", "null"
-    ).eq("source_system", "espocrm").execute()
-    return resp.data or []
+    return supa.select(
+        "crm_accounts",
+        params={"nowcerts_id": "is.null", "source_system": "eq.espocrm"},
+        limit=200,
+    )
 
 
 def _fetch_unpushed_commissions(supa: SupabaseClient) -> list[dict[str, Any]]:
     """Fetch commissions from CRM that haven't been pushed to NowCerts."""
-    resp = supa.client.table("crm_commissions").select("*").is_(
-        "nowcerts_id", "null"
-    ).eq("source_system", "espocrm").execute()
-    return resp.data or []
+    return supa.select(
+        "crm_commissions",
+        params={"nowcerts_id": "is.null", "source_system": "eq.espocrm"},
+        limit=200,
+    )
 
 
 def _link_nowcerts_id(supa: SupabaseClient, espo_id: str, nowcerts_id: str) -> None:
     """Update a golden account with its NowCerts ID after successful push."""
-    supa.client.table("crm_accounts").update({
-        "nowcerts_id": nowcerts_id,
-        "last_nowcerts_sync_at": datetime.now(timezone.utc).isoformat(),
-    }).eq("espocrm_id", espo_id).execute()
+    supa.update_where(
+        "crm_accounts",
+        {"nowcerts_id": nowcerts_id, "last_nowcerts_sync_at": datetime.now(timezone.utc).isoformat()},
+        filters={"espocrm_id": f"eq.{espo_id}"},
+    )
 
-    # Also update sync_mappings for the forward direction
     try:
-        supa.client.table("sync_mappings").upsert({
-            "nowcerts_entity_type": "insured",
-            "nowcerts_id": nowcerts_id,
-            "espocrm_entity_type": "Account",
-            "espocrm_id": espo_id,
-            "match_method": "crm_originated",
-            "match_confidence": 1.0,
-            "active": True,
-        }, on_conflict="nowcerts_entity_type,nowcerts_id").execute()
-    except Exception:
+        supa.upsert(
+            "sync_mappings",
+            {
+                "nowcerts_entity_type": "insured",
+                "nowcerts_id": nowcerts_id,
+                "espocrm_entity_type": "Account",
+                "espocrm_id": espo_id,
+                "match_method": "crm_originated",
+                "match_confidence": 1.0,
+                "active": True,
+            },
+            on_conflict="nowcerts_entity_type,nowcerts_id",
+        )
+    except SupabaseClientError:
         log.warning("Could not update sync_mappings for %s → %s", espo_id, nowcerts_id)
 
 
 def _get_golden_account_by_id(supa: SupabaseClient, account_id: str) -> dict[str, Any] | None:
     if not account_id:
         return None
-    resp = supa.client.table("crm_accounts").select("*").eq("id", account_id).execute()
-    return resp.data[0] if resp.data else None
+    rows = supa.select("crm_accounts", params={"id": f"eq.{account_id}"}, limit=1)
+    return rows[0] if rows else None
 
 
 def _mark_commission_pushed(supa: SupabaseClient, commission_id: str) -> None:
-    supa.client.table("crm_commissions").update({
+    supa.update("crm_commissions", commission_id, {
         "nowcerts_id": "pushed",
         "last_synced_at": datetime.now(timezone.utc).isoformat(),
-    }).eq("id", commission_id).execute()
+    })
 
 
 def _resolve_golden_account_id(
@@ -391,28 +404,29 @@ def _resolve_golden_account_id(
     if not account_id:
         return None
 
-    resp = supa.client.table("crm_accounts").select("id").eq(
-        "espocrm_id", account_id
-    ).execute()
-    if resp.data:
-        return resp.data[0]["id"]
-    return None
+    rows = supa.select(
+        "crm_accounts", columns="id",
+        params={"espocrm_id": f"eq.{account_id}"}, limit=1,
+    )
+    return rows[0]["id"] if rows else None
 
 
 # ---------------------------------------------------------------------------
 # Sync run tracking (reuse existing sync_runs table)
 # ---------------------------------------------------------------------------
 
+_ACTION_MAP = {"mirror": "create", "push": "update"}
+
+
 def _start_run(supa: SupabaseClient, workflow: str, dry_run: bool) -> dict[str, Any]:
     try:
-        resp = supa.client.table("sync_runs").insert({
+        return supa.insert("sync_runs", {
             "workflow_name": workflow,
             "source_system": "espocrm" if "crm" in workflow else "supabase",
             "destination_system": "nowcerts" if "nowcerts" in workflow else "supabase",
             "status": "dry_run" if dry_run else "running",
-        }).execute()
-        return resp.data[0] if resp.data else {}
-    except Exception as exc:
+        })
+    except SupabaseClientError as exc:
         log.warning("Failed to start sync run: %s", exc)
         return {}
 
@@ -422,14 +436,14 @@ def _finish_run(supa: SupabaseClient, run_id: str, result: BidiSyncResult, dry_r
         return
     status = "dry_run" if dry_run else ("success" if result.ok else "failed")
     try:
-        supa.client.table("sync_runs").update({
+        supa.update("sync_runs", run_id, {
             "status": status,
             "records_processed": result.accounts_mirrored + result.commissions_mirrored,
             "records_created": result.accounts_pushed + result.commissions_pushed,
             "records_failed": result.records_failed,
             "finished_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", run_id).execute()
-    except Exception as exc:
+        })
+    except SupabaseClientError as exc:
         log.warning("Failed to finish sync run %s: %s", run_id, exc)
 
 
@@ -450,12 +464,12 @@ def _audit(
         row: dict[str, Any] = {
             "run_id": run_id,
             "object_type": object_type,
-            "object_id": object_id,
-            "action": action,
+            "source_object_id": object_id,
+            "action": _ACTION_MAP.get(action, action),
             "status": status,
         }
         if error:
-            row["error_message"] = error[:1000]
-        supa.client.table("sync_audit_log").insert(row).execute()
-    except Exception:
-        pass
+            row["message"] = error[:1000]
+        supa.insert("sync_audit_log", row)
+    except SupabaseClientError:
+        log.debug("Failed to write audit row for %s %s", object_type, object_id)
