@@ -85,12 +85,7 @@ class Tools:
         """
         return await asyncio.to_thread(self._dispatch, f"find account {query}")
 
-    async def lookup(self, query: str, __event_emitter__=None) -> str:
-        """
-        Look up any CRM record — contacts, accounts, policies, opportunities.
-        :param query: Natural language query (e.g. "what is the FEIN for Acme Corp")
-        """
-        return await asyncio.to_thread(self._dispatch, f"what {query}")
+        return await asyncio.to_thread(self._dispatch, f"{query}")
 
     async def data_quality(self, __event_emitter__=None) -> str:
         """
