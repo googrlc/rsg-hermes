@@ -186,3 +186,121 @@ class NowCertsClient:
 
         log.info("NowCerts: total policies fetched = %d", len(all_records))
         return all_records
+
+    # ── Write methods ─────────────────────────────────────────────────────
+
+    def _post(self, path: str, payload: dict[str, Any]) -> Any:
+        """POST with auto-retry on 401 (token expired)."""
+        url = f"{self.base_url}{path}"
+        for attempt in range(2):
+            headers = {**self._headers(), "Content-Type": "application/json"}
+            resp = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=self.timeout,
+            )
+            if resp.status_code == 401 and attempt == 0:
+                log.info("NowCerts: token expired, re-authenticating")
+                self._authenticate()
+                continue
+            if not resp.ok:
+                raise NowCertsClientError(
+                    f"NowCerts POST {path} failed {resp.status_code}: {resp.text[:500]}"
+                )
+            if resp.content:
+                return resp.json()
+            return {}
+        raise NowCertsClientError(f"NowCerts POST {path}: auth retry exhausted")
+
+    def _patch(self, path: str, payload: dict[str, Any]) -> Any:
+        """PATCH with auto-retry on 401 (token expired)."""
+        url = f"{self.base_url}{path}"
+        for attempt in range(2):
+            headers = {**self._headers(), "Content-Type": "application/json"}
+            resp = requests.patch(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=self.timeout,
+            )
+            if resp.status_code == 401 and attempt == 0:
+                log.info("NowCerts: token expired, re-authenticating")
+                self._authenticate()
+                continue
+            if not resp.ok:
+                raise NowCertsClientError(
+                    f"NowCerts PATCH {path} failed {resp.status_code}: {resp.text[:500]}"
+                )
+            if resp.content:
+                return resp.json()
+            return {}
+        raise NowCertsClientError(f"NowCerts PATCH {path}: auth retry exhausted")
+
+    def create_insured(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create or update an insured/prospect in NowCerts.
+
+        POST /api/Insured/Insert — upserts on DatabaseId, CommercialName,
+        or FirstName+LastName.
+
+        Args:
+            payload: NowCerts Insured fields (CommercialName, FirstName,
+                     LastName, FEIN, AddressLine1, etc.)
+
+        Returns:
+            API response dict.
+        """
+        log.info("NowCerts: creating/updating insured: %s", payload.get("CommercialName", "?"))
+        return self._post("/api/Insured/Insert", payload)
+
+    def create_insured_with_policies(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create or update an insured with policies in a single call.
+
+        POST /api/InsuredAndPolicies/Insert
+
+        Args:
+            payload: InsuredAndPolicies body with top-level insured fields
+                     plus optional 'Policies' and 'Quotes' arrays.
+
+        Returns:
+            API response dict.
+        """
+        log.info(
+            "NowCerts: creating insured+policies: %s (%d policies)",
+            payload.get("CommercialName", "?"),
+            len(payload.get("Policies", [])),
+        )
+        return self._post("/api/InsuredAndPolicies/Insert", payload)
+
+    def insert_policy(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create or update a policy in NowCerts.
+
+        POST /api/Policy/Insert
+
+        Args:
+            payload: NcPolicyOrQuoteMatch fields (Number, EffectiveDate,
+                     Premium, AgencyCommissionPercent, etc.)
+
+        Returns:
+            API response dict.
+        """
+        log.info(
+            "NowCerts: inserting policy: %s for insured %s",
+            payload.get("Number", "?"),
+            payload.get("InsuredName", payload.get("InsuredDatabaseId", "?")),
+        )
+        return self._post("/api/Policy/Insert", payload)
+
+    def update_policy(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Partially update a policy in NowCerts.
+
+        PATCH /api/Policy/PartialUpdate — requires DatabaseId.
+
+        Args:
+            payload: Fields to update (DatabaseId required).
+
+        Returns:
+            API response dict.
+        """
+        log.info("NowCerts: updating policy: %s", payload.get("DatabaseId", "?"))
+        return self._patch("/api/Policy/PartialUpdate", payload)
