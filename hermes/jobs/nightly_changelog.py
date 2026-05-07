@@ -318,7 +318,7 @@ def _build_slack_payload(
     if total_all == 0:
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": "_No CRM changes recorded in the last 24 hours._"},
+            "text": {"type": "mrkdwn", "text": f"_No CRM changes recorded in the last {lookback_hours} hours._"},
         })
     else:
         for entity_type, entity_changes in changes.items():
