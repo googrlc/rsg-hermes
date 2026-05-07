@@ -1,4 +1,8 @@
 -- SYNC CONTROL TABLES — NowCerts ↔ EspoCRM pipeline spine
+-- NOTE: If the remote DB already has `create_sync_control_foundation` with a different
+-- `inbound_sync_staging` shape, apply `20260507015000_sync_schema_alignment.sql` first,
+-- then use `20260507021000_*` / `20260507022000_*` for RLS + extra triggers instead of
+-- re-running this whole file verbatim.
 -- Purpose: staging, identity mapping, outbound queue, audit trail, error/conflict tracking
 -- =====================================================================================
 

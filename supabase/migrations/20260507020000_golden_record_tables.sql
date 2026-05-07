@@ -2,7 +2,7 @@
 -- Supabase is the hub between EspoCRM (CRM) and NowCerts (AMS).
 
 -- ── crm_accounts: unified client record ──────────────────────────────────────
-CREATE TABLE IF NOT EXISTS crm_accounts (
+CREATE TABLE IF NOT EXISTS public.crm_accounts (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     espocrm_id TEXT UNIQUE,
     nowcerts_id TEXT UNIQUE,
@@ -29,15 +29,15 @@ CREATE TABLE IF NOT EXISTS crm_accounts (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_crm_accounts_espocrm_id ON crm_accounts(espocrm_id);
-CREATE INDEX IF NOT EXISTS idx_crm_accounts_nowcerts_id ON crm_accounts(nowcerts_id);
-CREATE INDEX IF NOT EXISTS idx_crm_accounts_source ON crm_accounts(source_system);
-CREATE INDEX IF NOT EXISTS idx_crm_accounts_fein ON crm_accounts(fein);
+CREATE INDEX IF NOT EXISTS idx_crm_accounts_espocrm_id ON public.crm_accounts(espocrm_id);
+CREATE INDEX IF NOT EXISTS idx_crm_accounts_nowcerts_id ON public.crm_accounts(nowcerts_id);
+CREATE INDEX IF NOT EXISTS idx_crm_accounts_source ON public.crm_accounts(source_system);
+CREATE INDEX IF NOT EXISTS idx_crm_accounts_fein ON public.crm_accounts(fein);
 
 -- ── crm_commissions: commission tracking per policy ──────────────────────────
-CREATE TABLE IF NOT EXISTS crm_commissions (
+CREATE TABLE IF NOT EXISTS public.crm_commissions (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    account_id UUID REFERENCES crm_accounts(id),
+    account_id UUID REFERENCES public.crm_accounts(id),
     policy_number TEXT,
     carrier TEXT,
     line_of_business TEXT,
@@ -56,9 +56,9 @@ CREATE TABLE IF NOT EXISTS crm_commissions (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_crm_commissions_account ON crm_commissions(account_id);
-CREATE INDEX IF NOT EXISTS idx_crm_commissions_policy ON crm_commissions(policy_number);
-CREATE INDEX IF NOT EXISTS idx_crm_commissions_source ON crm_commissions(source_system);
+CREATE INDEX IF NOT EXISTS idx_crm_commissions_account ON public.crm_commissions(account_id);
+CREATE INDEX IF NOT EXISTS idx_crm_commissions_policy ON public.crm_commissions(policy_number);
+CREATE INDEX IF NOT EXISTS idx_crm_commissions_source ON public.crm_commissions(source_system);
 
 -- ── sync_log: bidirectional sync run log ─────────────────────────────────────
 -- Extends the existing sync_runs table pattern for reverse (CRM→AMS) direction.
@@ -68,10 +68,12 @@ CREATE INDEX IF NOT EXISTS idx_crm_commissions_source ON crm_commissions(source_
 --   'bidirectional'     — Full round-trip
 
 -- ── RLS (match existing pattern from sync_control_tables migration) ──────────
-ALTER TABLE crm_accounts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE crm_commissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.crm_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.crm_commissions ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "service_role_crm_accounts" ON crm_accounts
-    FOR ALL USING (auth.role() = 'service_role');
-CREATE POLICY "service_role_crm_commissions" ON crm_commissions
-    FOR ALL USING (auth.role() = 'service_role');
+DROP POLICY IF EXISTS "service_role_crm_accounts" ON public.crm_accounts;
+CREATE POLICY "service_role_crm_accounts" ON public.crm_accounts
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "service_role_crm_commissions" ON public.crm_commissions;
+CREATE POLICY "service_role_crm_commissions" ON public.crm_commissions
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
