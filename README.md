@@ -19,6 +19,7 @@ cp .env.example .env   # then set ESPO_URL and ESPO_API_KEY
 hermes --ping
 hermes --doctor       # auth + core CRM read + metadata readiness
 hermes --kpi
+hermes --commands      # print Open WebUI command catalog
 hermes --audit-schema  # writes schema_map.json
 hermes --slack        # needs SLACK_* tokens in .env
 hermes-api            # private HTTP bridge for Open WebUI/tools
@@ -30,6 +31,10 @@ hermes --commission-audit-dry-run
 hermes --eom-scorecard
 hermes --eom-scorecard-dry-run
 hermes --commission-reconcile-file ./statements/carrier.csv
+hermes --ops-doctor             # check Supabase + Hermes table health
+hermes --process-crm-queue      # dequeue pending CRM writes → EspoCRM
+hermes --process-crm-queue-dry-run
+hermes --snapshot-kpis          # record system/finance/renewal KPIs
 hermes 'What is Jane phone'
 hermes 'total premium for Acme'
 hermes 'renewal audit'
@@ -86,6 +91,22 @@ Example cron:
 Use `--revenue-sentinel-force` to bypass idempotency and post again on the same day.
 Use `--revenue-sentinel-dry-run` to preview output without posting.
 Use `--revenue-sentinel-health` to verify freshness and required config.
+
+## Hermes Operations Center
+
+Hermes now includes a Supabase-backed governance layer (the "Operating Constitution"). See [`docs/hermes-operating-constitution.md`](docs/hermes-operating-constitution.md) for the full blueprint.
+
+Key capabilities:
+- **`--ops-doctor`** — verifies Supabase connectivity and all 11 Hermes tables
+- **`--process-crm-queue`** — dequeues staged CRM writes and applies them to EspoCRM with receipt logging
+- **`--snapshot-kpis`** — records system health, finance, and renewal metrics to `dashboard_kpis`
+
+The schema lives in `supabase/migrations/` and seed data in `supabase/seeds/`. The operations modules (`hermes/operations/`) provide:
+- **Guardrails** — channel drift prevention, blocked-action logging
+- **Slack Router** — registry-aware posting (refuses unregistered channels)
+- **CRM Queue Worker** — queue → EspoCRM → receipt pipeline
+- **KPI Writer** — snapshot metrics for dashboards
+- **Renewal Tracker** — Project 85 lifecycle management via Supabase
 
 ## TLS Note
 

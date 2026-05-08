@@ -1,4 +1,4 @@
-"""Thin Supabase PostgREST wrapper for dual-writing CRM events."""
+"""Thin Supabase PostgREST wrapper for Hermes operations and CRM dual-writes."""
 
 from __future__ import annotations
 
@@ -25,11 +25,11 @@ class SupabaseClient:
         timeout: float = 30.0,
     ) -> None:
         self.url = (url or os.environ.get("SUPABASE_URL", "")).rstrip("/")
-        self.key = key or os.environ.get("SUPABASE_KEY", "")
+        self.key = key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "") or os.environ.get("SUPABASE_KEY", "")
         self.timeout = timeout
         if not self.url or not self.key:
             raise SupabaseClientError(
-                "SUPABASE_URL and SUPABASE_KEY must be set (env or constructor)."
+                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_KEY) must be set (env or constructor)."
             )
 
     def _headers(self, *, prefer: str = "return=representation") -> dict[str, str]:
@@ -91,6 +91,80 @@ class SupabaseClient:
             raise SupabaseClientError(f"{resp.status_code} RPC {name}: {resp.text[:500]}")
         body = resp.json() if resp.content else {}
         return body
+
+    def update(self, table: str, record_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """PATCH a single row by primary key."""
+        resp = requests.patch(
+            f"{self.url}/rest/v1/{table}",
+            headers=self._headers(),
+            json=payload,
+            params={"id": f"eq.{record_id}"},
+            timeout=self.timeout,
+        )
+        if not resp.ok:
+            log.error("Supabase update %s failed: %s %s", table, resp.status_code, resp.text[:500])
+            raise SupabaseClientError(f"{resp.status_code} UPDATE {table}: {resp.text[:500]}")
+        rows = resp.json()
+        return rows[0] if isinstance(rows, list) and rows else rows
+
+    def upsert(
+        self,
+        table: str,
+        payload: dict[str, Any],
+        *,
+        on_conflict: str = "id",
+    ) -> dict[str, Any]:
+        """INSERT … ON CONFLICT via PostgREST ``Prefer: resolution=merge-duplicates``."""
+        headers = self._headers(prefer="return=representation,resolution=merge-duplicates")
+        resp = requests.post(
+            f"{self.url}/rest/v1/{table}",
+            headers=headers,
+            json=payload,
+            params={"on_conflict": on_conflict},
+            timeout=self.timeout,
+        )
+        if not resp.ok:
+            log.error("Supabase upsert %s failed: %s %s", table, resp.status_code, resp.text[:500])
+            raise SupabaseClientError(f"{resp.status_code} UPSERT {table}: {resp.text[:500]}")
+        rows = resp.json()
+        return rows[0] if isinstance(rows, list) and rows else rows
+
+    def update_where(
+        self,
+        table: str,
+        payload: dict[str, Any],
+        *,
+        filters: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        """PATCH rows matching arbitrary PostgREST filter params.
+
+        Example: ``supa.update_where("crm_accounts", {"nowcerts_id": "nc-1"},
+                                     filters={"espocrm_id": "eq.espo-1"})``
+        """
+        resp = requests.patch(
+            f"{self.url}/rest/v1/{table}",
+            headers=self._headers(),
+            json=payload,
+            params=filters,
+            timeout=self.timeout,
+        )
+        if not resp.ok:
+            log.error("Supabase update_where %s failed: %s %s", table, resp.status_code, resp.text[:500])
+            raise SupabaseClientError(f"{resp.status_code} UPDATE {table}: {resp.text[:500]}")
+        rows = resp.json()
+        return rows if isinstance(rows, list) else [rows] if rows else []
+
+    def delete(self, table: str, record_id: str) -> None:
+        """DELETE a single row by primary key."""
+        resp = requests.delete(
+            f"{self.url}/rest/v1/{table}",
+            headers=self._headers(prefer=""),
+            params={"id": f"eq.{record_id}"},
+            timeout=self.timeout,
+        )
+        if not resp.ok:
+            log.error("Supabase delete %s failed: %s %s", table, resp.status_code, resp.text[:500])
+            raise SupabaseClientError(f"{resp.status_code} DELETE {table}: {resp.text[:500]}")
 
     def log_slack_intake(
         self,
