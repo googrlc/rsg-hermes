@@ -3,7 +3,8 @@
 Handles "parking lot" dictation like:
   "Just met Juan Silva at Peterbilt, 404-555-0199, needs 3-unit fleet quote, Commercial Auto"
 
-Pipeline: OpenAI extract -> EspoCRM upsert (Account + Contact + Opportunity) -> Supabase dual-write.
+Pipeline: OpenAI extraction -> draft payloads -> explicit confirmation request.
+No CRM/Supabase writes are executed from this handler.
 """
 
 from __future__ import annotations
@@ -78,19 +79,17 @@ def _extract_lead(text: str) -> dict[str, Any] | None:
         return None
 
 
-def _write_espo(
-    client: "EspoClient",
-    data: dict[str, Any],
-) -> dict[str, Any]:
-    """Upsert Account, Contact, and optionally create an Opportunity."""
-    result: dict[str, Any] = {}
+def _normalize_phone(raw_phone: str) -> str:
+    digits = "".join(c for c in raw_phone if c.isdigit())
+    if len(digits) == 10:
+        digits = "1" + digits
+    return f"+{digits}" if digits else raw_phone
 
-    account_id = None
+
+def _build_espo_drafts(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Prepare draft Espo payloads without writing."""
     biz = data.get("businessName")
-    if biz:
-        account = client.upsert_account({"name": biz})
-        account_id = account.get("id") if isinstance(account, dict) else None
-        result["account"] = account
+    account_payload = {"name": biz} if biz else {}
 
     contact_payload: dict[str, Any] = {}
     if data.get("firstName"):
@@ -98,109 +97,150 @@ def _write_espo(
     if data.get("lastName"):
         contact_payload["lastName"] = data["lastName"]
     if data.get("phone"):
-        digits = "".join(c for c in data["phone"] if c.isdigit())
-        if len(digits) == 10:
-            digits = "1" + digits
-        contact_payload["phoneNumber"] = f"+{digits}"
+        contact_payload["phoneNumber"] = _normalize_phone(data["phone"])
     if data.get("email"):
         contact_payload["emailAddress"] = data["email"]
-    if account_id:
-        contact_payload["accountId"] = account_id
-
     if contact_payload.get("firstName") or contact_payload.get("lastName"):
         name_parts = [contact_payload.get("firstName", ""), contact_payload.get("lastName", "")]
         contact_payload["name"] = " ".join(p for p in name_parts if p)
-        contact = client.upsert_contact(contact_payload)
-        result["contact"] = contact
 
     lob = data.get("lineOfBusiness") or ""
     desc = data.get("businessDescription") or ""
     opp_name = f"{biz or data.get('lastName', 'Lead')} - {lob}" if lob else (biz or "New Lead")
-    opp_payload: dict[str, Any] = {
+    opportunity_payload: dict[str, Any] = {
         "name": opp_name,
         "stage": "New",
         "description": f"[Hermes Intake] {desc}".strip(),
     }
-    if account_id:
-        opp_payload["accountId"] = account_id
-    try:
-        opp = client.create("Opportunity", opp_payload)
-        result["opportunity"] = opp
-    except Exception:
-        log.exception("Opportunity creation failed (non-fatal)")
-
-    return result
+    return {
+        "account": account_payload,
+        "contact": contact_payload,
+        "opportunity": opportunity_payload,
+    }
 
 
-def _write_supabase(
-    supa: "SupabaseClient",
+def _build_supabase_drafts(
     data: dict[str, Any],
     raw_text: str,
     *,
     channel_id: str | None = None,
     user_id: str | None = None,
     message_ts: str | None = None,
-) -> None:
-    """Dual-write to Supabase leads_staging and stg_slack_intake_notes."""
-    try:
-        supa.log_lead({
-            "source": "hermes_slack",
-            "status": "new",
-            "contact_first_name": data.get("firstName"),
-            "contact_last_name": data.get("lastName"),
-            "business_name": data.get("businessName"),
-            "phone": data.get("phone"),
-            "email": data.get("email"),
-            "address": data.get("address"),
-            "city": data.get("city"),
-            "state": data.get("state"),
-            "business_description": data.get("businessDescription"),
-            "referred_by": data.get("referredBy"),
-            "raw_input": raw_text,
-            "ai_score": data.get("aiScore"),
-            "ai_notes": f"LOB: {data.get('lineOfBusiness', 'unknown')}",
-        })
-    except Exception:
-        log.exception("Supabase leads_staging write failed (non-fatal)")
-
-    if channel_id:
-        try:
-            supa.log_slack_intake(
-                channel_id=channel_id,
-                user_id=user_id,
-                message_text=raw_text,
-                message_ts=message_ts,
-                parsed_command="intake",
-            )
-        except Exception:
-            log.exception("Supabase stg_slack_intake_notes write failed (non-fatal)")
+) -> dict[str, dict[str, Any]]:
+    """Prepare draft Supabase payloads without writing."""
+    lead_payload = {
+        "source": "hermes_slack",
+        "status": "new",
+        "contact_first_name": data.get("firstName"),
+        "contact_last_name": data.get("lastName"),
+        "business_name": data.get("businessName"),
+        "phone": data.get("phone"),
+        "email": data.get("email"),
+        "address": data.get("address"),
+        "city": data.get("city"),
+        "state": data.get("state"),
+        "business_description": data.get("businessDescription"),
+        "referred_by": data.get("referredBy"),
+        "raw_input": raw_text,
+        "ai_score": data.get("aiScore"),
+        "ai_notes": f"LOB: {data.get('lineOfBusiness', 'unknown')}",
+    }
+    slack_payload = {
+        "channel_id": channel_id,
+        "user_id": user_id,
+        "message_text": raw_text,
+        "message_ts": message_ts,
+        "parsed_command": "intake",
+        "source_record_id": message_ts,
+        "payload": {},
+    }
+    return {
+        "leads_staging": lead_payload,
+        "stg_slack_intake_notes": slack_payload if channel_id else {},
+    }
 
 
-def _format_confirmation(data: dict[str, Any], espo_result: dict[str, Any]) -> str:
-    """Build a Slack-friendly confirmation message."""
-    name = " ".join(
-        p for p in [data.get("firstName"), data.get("lastName")] if p
-    ) or "Unknown"
-    biz = data.get("businessName")
-    lob = data.get("lineOfBusiness") or "Unspecified"
-    phone = data.get("phone") or "N/A"
-    desc = data.get("businessDescription") or ""
-
+def _format_confirmation_request(
+    data: dict[str, Any],
+    espo_drafts: dict[str, dict[str, Any]],
+    supabase_drafts: dict[str, dict[str, Any]],
+) -> str:
+    """Build confirm-before-write response with explicit approval options."""
     lines = [
-        "Got it, Lamar. Logged in Momentum Desk:",
-        f"*{name}*" + (f" ({biz})" if biz else ""),
-        f"LOB: {lob}",
-        f"Phone: {phone}",
+        "I found the following updates and have not written anything yet.",
+        "Proposed CRM Updates:",
+        f"- Account draft: {json.dumps(espo_drafts.get('account', {}), default=str)}",
+        f"- Contact draft: {json.dumps(espo_drafts.get('contact', {}), default=str)}",
+        f"- Opportunity draft: {json.dumps(espo_drafts.get('opportunity', {}), default=str)}",
+        "Proposed Supabase Updates:",
+        f"- leads_staging: {json.dumps(supabase_drafts.get('leads_staging', {}), default=str)}",
     ]
-    if desc:
-        lines.append(f"Notes: {desc}")
-
-    opp = espo_result.get("opportunity")
-    if isinstance(opp, dict) and opp.get("id"):
-        lines.append(f"Opportunity ID: {opp['id']}")
-
-    lines.append("Want me to set a follow-up for tomorrow?")
+    slack_draft = supabase_drafts.get("stg_slack_intake_notes", {})
+    if slack_draft:
+        lines.append(f"- stg_slack_intake_notes: {json.dumps(slack_draft, default=str)}")
+    lines.extend(
+        [
+            "Proposed Tasks:",
+            "- None",
+            "Source Links:",
+            "- None (intake text only)",
+            f"Confidence: aiScore={data.get('aiScore', 'unknown')}",
+            "Reply with one of the following:",
+            "- APPROVE CRM ONLY",
+            "- APPROVE SUPABASE ONLY",
+            "- APPROVE TASKS ONLY",
+            "- APPROVE ALL",
+            "- REVISE",
+            "- CANCEL",
+            "Write Status:",
+            "Not written. Awaiting confirmation.",
+        ]
+    )
     return "\n".join(lines)
+
+
+def execute_approved_drafts(
+    client: "EspoClient",
+    supa: "SupabaseClient | None",
+    *,
+    espo_drafts: dict[str, dict[str, Any]],
+    supabase_drafts: dict[str, dict[str, Any]],
+    approve_crm: bool,
+    approve_supabase: bool,
+) -> dict[str, Any]:
+    """Execute approved draft payloads for intake."""
+    out: dict[str, Any] = {"crm": {}, "supabase": {}}
+    account_id: str | None = None
+
+    if approve_crm:
+        account_payload = espo_drafts.get("account") or {}
+        if account_payload:
+            account = client.upsert_account(account_payload)
+            out["crm"]["account"] = account
+            if isinstance(account, dict) and account.get("id"):
+                account_id = str(account["id"])
+
+        contact_payload = dict(espo_drafts.get("contact") or {})
+        if contact_payload:
+            if account_id and not contact_payload.get("accountId"):
+                contact_payload["accountId"] = account_id
+            out["crm"]["contact"] = client.upsert_contact(contact_payload)
+
+        opp_payload = dict(espo_drafts.get("opportunity") or {})
+        if opp_payload:
+            if account_id and not opp_payload.get("accountId"):
+                opp_payload["accountId"] = account_id
+            out["crm"]["opportunity"] = client.create("Opportunity", opp_payload)
+
+    if approve_supabase and supa:
+        lead_payload = supabase_drafts.get("leads_staging") or {}
+        if lead_payload:
+            out["supabase"]["leads_staging"] = supa.log_lead(lead_payload)
+        slack_payload = supabase_drafts.get("stg_slack_intake_notes") or {}
+        if slack_payload:
+            out["supabase"]["stg_slack_intake_notes"] = supa.insert("stg_slack_intake_notes", slack_payload)
+
+    return out
 
 
 def handle(
@@ -212,7 +252,9 @@ def handle(
     user_id: str | None = None,
     message_ts: str | None = None,
 ) -> DispatchResult:
-    """Parse casual lead text, write to EspoCRM + Supabase, return confirmation."""
+    """Parse lead text and return draft updates pending explicit approval."""
+    _ = client  # Direct writes intentionally disabled for confirm-before-write.
+    _ = supa
     data = _extract_lead(text)
     if not data:
         return DispatchResult(
@@ -221,15 +263,22 @@ def handle(
             '"Met Juan Silva at Peterbilt, 404-555-0199, needs fleet quote, Commercial Auto"',
         )
 
-    espo_result = _write_espo(client, data)
-
-    if supa:
-        _write_supabase(
-            supa, data, text,
-            channel_id=channel_id,
-            user_id=user_id,
-            message_ts=message_ts,
-        )
-
-    msg = _format_confirmation(data, espo_result)
-    return DispatchResult(True, msg, {"extracted": data, "espo": espo_result})
+    espo_drafts = _build_espo_drafts(data)
+    supabase_drafts = _build_supabase_drafts(
+        data,
+        text,
+        channel_id=channel_id,
+        user_id=user_id,
+        message_ts=message_ts,
+    )
+    msg = _format_confirmation_request(data, espo_drafts, supabase_drafts)
+    return DispatchResult(
+        True,
+        msg,
+        {
+            "extracted": data,
+            "espo_drafts": espo_drafts,
+            "supabase_drafts": supabase_drafts,
+            "write_status": "NOT_WRITTEN_AWAITING_CONFIRMATION",
+        },
+    )

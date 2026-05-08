@@ -71,7 +71,7 @@ def run(
     """Execute the nightly changelog pipeline."""
     local_now = _now_in_timezone(now)
     target_day = local_now.date()
-    hours = lookback_hours if lookback_hours is not None else int(os.environ.get("HERMES_CHANGELOG_LOOKBACK_HOURS", "24"))
+    hours = lookback_hours or int(os.environ.get("HERMES_CHANGELOG_LOOKBACK_HOURS", "24"))
     cutoff = local_now - timedelta(hours=hours)
 
     if not force and _already_sent_today(target_day):
@@ -318,7 +318,7 @@ def _build_slack_payload(
     if total_all == 0:
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"_No CRM changes recorded in the last {lookback_hours} hours._"},
+            "text": {"type": "mrkdwn", "text": "_No CRM changes recorded in the last 24 hours._"},
         })
     else:
         for entity_type, entity_changes in changes.items():

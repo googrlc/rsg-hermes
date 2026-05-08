@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 hermes = "hermes.main:main"
+hermes-api = "hermes.api:main"
 
 [build-system]
 requires = ["setuptools>=61"]
