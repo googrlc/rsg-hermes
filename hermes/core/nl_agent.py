@@ -62,6 +62,33 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "normalize_proper_nouns",
+            "description": (
+                "Detect and fix improper capitalization in names (accounts, contacts). "
+                "Handles edge cases like ALL CAPS, all lowercase, mixed case anomalies, spacing issues. "
+                "Use for requests like 'fix bad names', 'normalize proper nouns', 'clean up name formatting', "
+                "'find records with weird capitalization'. This stages changes for review before applying."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                    "preview_only": {
+                        "type": "boolean",
+                        "description": "If true, only show preview without staging. Default false.",
+                    },
+                    "entity_filter": {
+                        "type": "string",
+                        "enum": ["Account", "Contact", "all"],
+                        "description": "Filter to specific entity type. Default: all.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_field_value",
             "description": (
                 "Look up a specific field value for a CRM record. "
@@ -446,6 +473,22 @@ def _exec_merge(client: "EspoClient", args: dict[str, Any], *, confirmed: bool =
     return merge_handle(client, f"merge {entity.lower()} {source_id} into {target_id}")
 
 
+def _exec_normalize(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
+    from hermes.commands.proper_noun_normalize import handle_normalize_command
+    preview_only = args.get("preview_only", False)
+    entity_filter = args.get("entity_filter", "all")
+    
+    # Build command text based on parameters
+    if preview_only:
+        text = "preview normalize proper nouns"
+    elif entity_filter != "all":
+        text = f"normalize proper nouns {entity_filter.lower()}"
+    else:
+        text = "normalize proper nouns"
+    
+    return handle_normalize_command(client, text, supa=None)
+
+
 _EXECUTORS: dict[str, Any] = {
     "search_records": _exec_search,
     "get_field_value": _exec_get_field,
@@ -455,6 +498,7 @@ _EXECUTORS: dict[str, Any] = {
     "update_record": _exec_update,
     "intake_lead": _exec_intake,
     "merge_records": _exec_merge,
+    "normalize_proper_nouns": _exec_normalize,
 }
 
 _WRITE_TOOLS = {"create_record", "update_record", "intake_lead", "merge_records"}
