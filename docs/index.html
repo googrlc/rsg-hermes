@@ -7,16 +7,16 @@
     <link rel="canonical" href="https://googrlc.github.io/rsg-hermes/" />
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #0f1115;
-        --panel: #171a21;
-        --text: #e8edf6;
-        --muted: #a7b1c2;
-        --border: #2a2f3b;
-        --accent: #5b9cff;
-        --ok: #2ecc71;
-        --warn: #f5b041;
-        --err: #e74c3c;
+        color-scheme: light;
+        --bg: #f4f6f8;
+        --panel: #ffffff;
+        --text: #111827;
+        --muted: #6b7280;
+        --border: #d1d5db;
+        --accent: #2563eb;
+        --ok: #16a34a;
+        --warn: #f59e0b;
+        --err: #dc2626;
       }
       * { box-sizing: border-box; }
       body {
@@ -147,7 +147,8 @@
         </label>
       </section>
 
-      <section class="panel grid cols-2">
+      <section class="panel grid cols-2 hidden backend-config">
+        <!-- Hidden repo-specific backend config values; managed in repoConfig for maintenance. -->
         <label>
           Transport Mode
           <select id="transportMode">
@@ -375,18 +376,26 @@
       const HISTORY_KEY = "hermes_crm_history_v1";
       const COUNTER_KEY = "hermes_crm_submit_counter_v1";
 
+      const repoConfig = {
+        proxyFunctionUrl: "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
+        authHeaderName: "Authorization",
+        authHeaderValue: "",
+        duplicateCheckUrl: "",
+        slackWebhookUrl: "",
+      };
+
       const state = {
         destinationSystem: "EspoCRM",
         objectType: "contact",
         operation: "upsert",
         transportMode: "proxy",
-        proxyFunctionUrl: "",
+        proxyFunctionUrl: repoConfig.proxyFunctionUrl,
         supabaseAnonKey: "",
         webhookUrl: "",
-        authHeaderName: "Authorization",
-        authHeaderValue: "",
-        duplicateCheckUrl: "",
-        slackWebhookUrl: "",
+        authHeaderName: repoConfig.authHeaderName,
+        authHeaderValue: repoConfig.authHeaderValue,
+        duplicateCheckUrl: repoConfig.duplicateCheckUrl,
+        slackWebhookUrl: repoConfig.slackWebhookUrl,
         presetType: "",
         confirmSensitive: false,
         notes: "",
