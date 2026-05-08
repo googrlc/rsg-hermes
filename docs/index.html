@@ -118,6 +118,7 @@
           Fill fields, review payload, then click <strong>Submit to Hermes</strong>.
         </p>
         <p class="small">Submitted today: <span id="submitCounter">0</span></p>
+        <p class="small" id="envStatus" style="color: var(--ok);">✓ Configuration loaded from environment</p>
       </section>
 
       <section class="panel grid cols-3">
@@ -158,15 +159,15 @@
         </label>
         <label>
           Supabase Function URL
-          <input id="proxyFunctionUrl" placeholder="https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy" />
+          <input id="proxyFunctionUrl" placeholder="Auto-loaded from env or enter manually" />
         </label>
         <label>
           Supabase Publishable/Anon Key
-          <input id="supabaseAnonKey" placeholder="eyJhbGciOi..." />
+          <input id="supabaseAnonKey" placeholder="Auto-loaded from env or enter manually" />
         </label>
         <label>
           Webhook URL
-          <input id="webhookUrl" placeholder="https://.../hermes/webhook" />
+          <input id="webhookUrl" placeholder="Auto-loaded from env or enter manually" />
         </label>
         <label>
           Auth Header Name
@@ -376,8 +377,20 @@
       const HISTORY_KEY = "hermes_crm_history_v1";
       const COUNTER_KEY = "hermes_crm_submit_counter_v1";
 
+      // Environment variable injection for production deployment
+      // These are populated by the server/build process before serving the file
+      const envConfig = {
+        HERMES_SUPABASE_URL: typeof process !== 'undefined' ? process.env.HERMES_SUPABASE_URL : (window.HERMES_CONFIG?.supabaseUrl || ''),
+        HERMES_SUPABASE_KEY: typeof process !== 'undefined' ? process.env.HERMES_SUPABASE_KEY : (window.HERMES_CONFIG?.supabaseKey || ''),
+        HERMES_WEBHOOK_URL: typeof process !== 'undefined' ? process.env.HERMES_WEBHOOK_URL : (window.HERMES_CONFIG?.webhookUrl || ''),
+        HERMES_TRANSPORT_MODE: typeof process !== 'undefined' ? process.env.HERMES_TRANSPORT_MODE : (window.HERMES_CONFIG?.transportMode || 'proxy'),
+      };
+
       const repoConfig = {
-        proxyFunctionUrl: "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
+        proxyFunctionUrl: envConfig.HERMES_SUPABASE_URL || "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
+        supabaseAnonKey: envConfig.HERMES_SUPABASE_KEY || "",
+        webhookUrl: envConfig.HERMES_WEBHOOK_URL || "",
+        transportMode: envConfig.HERMES_TRANSPORT_MODE || "proxy",
         authHeaderName: "Authorization",
         authHeaderValue: "",
         duplicateCheckUrl: "",
@@ -489,9 +502,29 @@
             }
             state.confirmSensitive = Boolean(parsed.confirmSensitive);
           }
+          
+          // Override with environment config if available (production deployment)
+          if (envConfig.HERMES_SUPABASE_URL) state.proxyFunctionUrl = envConfig.HERMES_SUPABASE_URL;
+          if (envConfig.HERMES_SUPABASE_KEY) state.supabaseAnonKey = envConfig.HERMES_SUPABASE_KEY;
+          if (envConfig.HERMES_WEBHOOK_URL) state.webhookUrl = envConfig.HERMES_WEBHOOK_URL;
+          if (envConfig.HERMES_TRANSPORT_MODE) state.transportMode = envConfig.HERMES_TRANSPORT_MODE;
+          
           batchQueue = JSON.parse(localStorage.getItem(BATCH_KEY) || "[]");
           history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
           submitCounter = Number(localStorage.getItem(COUNTER_KEY) || "0");
+          
+          // Update UI to show env config status
+          const envStatusEl = document.getElementById("envStatus");
+          if (envStatusEl) {
+            const hasEnv = envConfig.HERMES_SUPABASE_URL || envConfig.HERMES_SUPABASE_KEY || envConfig.HERMES_WEBHOOK_URL;
+            if (hasEnv) {
+              envStatusEl.textContent = "✓ Configuration loaded from environment variables";
+              envStatusEl.style.color = "var(--ok)";
+            } else {
+              envStatusEl.textContent = "⚠ Manual configuration required - enter values below";
+              envStatusEl.style.color = "var(--warn)";
+            }
+          }
         } catch {
           batchQueue = [];
           history = [];
