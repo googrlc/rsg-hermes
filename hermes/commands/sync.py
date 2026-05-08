@@ -23,9 +23,6 @@ _STATUS_RE = re.compile(r"\b(status|last\s+run|history|runs)\b", re.I)
 _CONFLICTS_RE = re.compile(r"\bconflicts?\b", re.I)
 _ERRORS_RE = re.compile(r"\berrors?\b", re.I)
 _SINCE_RE = re.compile(r"\bsince\s+(\S+)", re.I)
-_BIDI_RE = re.compile(r"\b(bidirectional|bidi|full[\s-]?sync|all[\s-]?directions)\b", re.I)
-_CRM_TO_HUB_RE = re.compile(r"\b(crm[\s-]?to[\s-]?hub|mirror|espo[\s-]?to[\s-]?supa)\b", re.I)
-_HUB_TO_NC_RE = re.compile(r"\b(hub[\s-]?to[\s-]?nowcerts|push[\s-]?to[\s-]?nowcerts|push[\s-]?to[\s-]?ams)\b", re.I)
 
 
 def handle(
