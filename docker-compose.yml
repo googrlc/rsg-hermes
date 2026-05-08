@@ -16,10 +16,11 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: rsg-hermes-api
-    network_mode: "host"
     env_file:
       - .env
     volumes:
       - .:/app
     restart: unless-stopped
-    command: ["hermes-api", "--host", "127.0.0.1", "--port", "8787"]
+    ports:
+      - "8788:8787"
+    command: ["hermes-api", "--host", "0.0.0.0", "--port", "8787"]

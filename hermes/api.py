@@ -38,6 +38,7 @@ app = FastAPI(
     description="EspoCRM coordination middleware — sync, lookup, data quality, and more.",
     version="0.1.0",
 )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

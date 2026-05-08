@@ -1,0 +1,1267 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hermes CRM Form</title>
+    <link rel="canonical" href="https://googrlc.github.io/rsg-hermes/" />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f8;
+        --panel: #ffffff;
+        --text: #111827;
+        --muted: #6b7280;
+        --border: #d1d5db;
+        --accent: #2563eb;
+        --ok: #16a34a;
+        --warn: #f59e0b;
+        --err: #dc2626;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h1, h2 { margin: 0; }
+      .container {
+        max-width: 1100px;
+        margin: 0 auto;
+        display: grid;
+        gap: 16px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px;
+      }
+      .grid {
+        display: grid;
+        gap: 12px;
+      }
+      .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      @media (max-width: 860px) {
+        .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; }
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      input, select, textarea, button {
+        font: inherit;
+      }
+      input, select, textarea {
+        width: 100%;
+        padding: 9px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--panel) !important;
+        color: var(--text) !important;
+        appearance: none;
+      }
+      option {
+        background: var(--panel);
+        color: var(--text);
+      }
+      textarea { min-height: 120px; resize: vertical; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      button {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 9px 12px;
+        color: var(--text);
+        background: var(--panel);
+        cursor: pointer;
+      }
+      button.primary {
+        border-color: transparent;
+        background: var(--accent);
+        color: #fff;
+      }
+      button:disabled { opacity: 0.65; cursor: not-allowed; }
+      .status {
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        padding: 10px;
+        font-size: 13px;
+      }
+      .status.ok { border-color: rgba(46, 204, 113, 0.6); color: #c5f7d7; }
+      .status.warn { border-color: rgba(245, 176, 65, 0.6); color: #ffe5be; }
+      .status.err { border-color: rgba(231, 76, 60, 0.6); color: #ffd1cc; }
+      .small { color: var(--muted); font-size: 12px; }
+      .hidden { display: none; }
+      .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
+      .pill {
+        display: inline-block;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <section class="panel">
+        <h1>Hermes CRM Submit Form</h1>
+        <p class="small">
+          Fill fields, review payload, then click <strong>Submit to Hermes</strong>.
+        </p>
+        <p class="small">Submitted today: <span id="submitCounter">0</span></p>
+        <p class="small" id="envStatus" style="color: var(--ok);">✓ Configuration loaded from environment</p>
+      </section>
+
+      <section class="panel grid cols-3">
+        <label>
+          Destination
+          <select id="destinationSystem">
+            <option>EspoCRM</option>
+            <option>Supabase</option>
+          </select>
+        </label>
+        <label>
+          Object Type
+          <select id="objectType">
+            <option value="contact">contact</option>
+            <option value="task">task</option>
+            <option value="opportunity">opportunity</option>
+            <option value="lead">lead</option>
+          </select>
+        </label>
+        <label>
+          Operation
+          <select id="operation">
+            <option value="upsert">upsert</option>
+            <option value="create">create</option>
+            <option value="update">update</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="panel grid cols-2 hidden backend-config">
+        <!-- Hidden repo-specific backend config values; managed in repoConfig for maintenance. -->
+        <label>
+          Transport Mode
+          <select id="transportMode">
+            <option value="proxy">supabase_proxy (recommended)</option>
+            <option value="direct">direct_webhook</option>
+          </select>
+        </label>
+        <label>
+          Supabase Function URL
+          <input id="proxyFunctionUrl" placeholder="Auto-loaded from env or enter manually" />
+        </label>
+        <label>
+          Supabase Publishable/Anon Key
+          <input id="supabaseAnonKey" placeholder="Auto-loaded from env or enter manually" />
+        </label>
+        <label>
+          Webhook URL
+          <input id="webhookUrl" placeholder="Auto-loaded from env or enter manually" />
+        </label>
+        <label>
+          Auth Header Name
+          <input id="authHeaderName" value="Authorization" />
+        </label>
+        <label>
+          Auth Header Value (optional)
+          <input id="authHeaderValue" placeholder="Bearer eyJ..." />
+        </label>
+        <label>
+          Duplicate Check URL (optional)
+          <input id="duplicateCheckUrl" placeholder="https://.../crm/duplicate-check" />
+        </label>
+        <label>
+          Slack Log Webhook (optional)
+          <input id="slackWebhookUrl" placeholder="https://hooks.slack.com/services/..." />
+        </label>
+      </section>
+
+      <section class="panel grid cols-3">
+        <label>
+          Preset
+          <select id="presetType">
+            <option value="">Select preset...</option>
+            <option value="new-lead">New Lead</option>
+            <option value="renewal-task">Renewal Task</option>
+            <option value="quoted-opportunity">Quoted Opportunity</option>
+            <option value="carrier-contact">Carrier Contact</option>
+          </select>
+        </label>
+        <label style="align-content: end">
+          <button id="applyPresetBtn" type="button">Apply Preset</button>
+        </label>
+        <label style="align-content: end">
+          <span class="pill">Guardrail: confirm sensitive updates</span>
+          <input id="confirmSensitive" type="checkbox" />
+        </label>
+      </section>
+
+      <section id="contactForm" class="panel grid cols-2">
+        <h2 style="grid-column: 1 / -1">Contact</h2>
+        <label>Full Name *<input id="contactFullName" /></label>
+        <label>Company *<input id="contactCompany" /></label>
+        <label>Job Title<input id="contactTitle" /></label>
+        <label>Email<input id="contactEmail" type="email" /></label>
+        <label>Phone<input id="contactPhone" /></label>
+        <label>Owner User ID<input id="contactOwner" /></label>
+      </section>
+
+      <section id="taskForm" class="panel grid cols-2 hidden">
+        <h2 style="grid-column: 1 / -1">Task</h2>
+        <label>Subject *<input id="taskSubject" /></label>
+        <label>Due Date (YYYY-MM-DD) *<input id="taskDueDate" /></label>
+        <label>
+          Priority
+          <select id="taskPriority">
+            <option>low</option>
+            <option selected>normal</option>
+            <option>high</option>
+            <option>urgent</option>
+          </select>
+        </label>
+        <label>Status<input id="taskStatus" value="Not Started" /></label>
+        <label>Assigned To<input id="taskAssignedTo" /></label>
+        <label>Related To<input id="taskRelatedTo" /></label>
+      </section>
+
+      <section id="opportunityForm" class="panel grid cols-2 hidden">
+        <h2 style="grid-column: 1 / -1">Opportunity</h2>
+        <label>Opportunity Name *<input id="opportunityName" /></label>
+        <label>Account Name *<input id="opportunityAccount" /></label>
+        <label>
+          Stage
+          <select id="opportunityStage">
+            <option>Prospecting</option>
+            <option>Qualification</option>
+            <option>Quoted</option>
+            <option>Negotiation</option>
+            <option>Closed Won</option>
+            <option>Closed Lost</option>
+          </select>
+        </label>
+        <label>Amount<input id="opportunityAmount" type="number" /></label>
+        <label>Close Date (YYYY-MM-DD)<input id="opportunityCloseDate" /></label>
+        <label>Owner User ID<input id="opportunityOwner" /></label>
+      </section>
+
+      <section id="leadForm" class="panel grid cols-2 hidden">
+        <h2 style="grid-column: 1 / -1">Lead</h2>
+        <label>Full Name *<input id="leadFullName" /></label>
+        <label>Company *<input id="leadCompany" /></label>
+        <label>Email<input id="leadEmail" type="email" /></label>
+        <label>Phone<input id="leadPhone" /></label>
+        <label>
+          Lead Source
+          <select id="leadSource">
+            <option>Referral</option>
+            <option>Website</option>
+            <option>Inbound Call</option>
+            <option>Campaign</option>
+            <option>Partner</option>
+            <option>Other</option>
+          </select>
+        </label>
+        <label>
+          Lead Status
+          <select id="leadStatus">
+            <option>New</option>
+            <option>Working</option>
+            <option>Qualified</option>
+            <option>Disqualified</option>
+          </select>
+        </label>
+        <label>Owner User ID<input id="leadOwner" /></label>
+      </section>
+
+      <section class="panel grid">
+        <label>
+          Notes
+          <textarea id="notes"></textarea>
+        </label>
+      </section>
+
+      <section class="panel grid">
+        <div id="validationStatus" class="status warn">Fill required fields to submit.</div>
+        <div class="toolbar">
+          <button id="clearBtn" type="button">Clear</button>
+          <button id="exampleBtn" type="button">Load Example</button>
+          <button id="submitNextBtn" type="button" disabled>Submit + Create Another</button>
+          <button id="submitBtn" class="primary" type="button" disabled>Submit to Hermes</button>
+        </div>
+        <label>
+          Hermes Payload
+          <textarea id="payloadPreview" class="mono" readonly></textarea>
+        </label>
+        <label>
+          Response
+          <textarea id="responsePreview" class="mono" readonly></textarea>
+        </label>
+      </section>
+
+      <section class="panel grid">
+        <h2>Batch Queue</h2>
+        <div class="toolbar">
+          <button id="addToBatchBtn" type="button">Add Current to Batch</button>
+          <button id="submitBatchBtn" class="primary" type="button">Submit Batch</button>
+          <button id="clearBatchBtn" type="button">Clear Batch</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Type</th>
+                <th>Operation</th>
+                <th>Match</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="batchTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel grid">
+        <h2>CSV Import</h2>
+        <p class="small">
+          Imports rows as the currently selected object type. Header names should match field IDs
+          (example: <code>contactFullName,contactCompany,contactEmail</code>).
+        </p>
+        <div class="toolbar">
+          <input id="csvFileInput" type="file" accept=".csv,text/csv" />
+          <button id="importCsvBtn" type="button">Import CSV to Batch</button>
+        </div>
+      </section>
+
+      <section class="panel grid">
+        <h2>Submission History</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Type</th>
+                <th>Operation</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="historyTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel grid">
+        <h2>CRM Note</h2>
+        <div class="toolbar">
+          <button id="copyNoteBtn" type="button">Copy CRM Note</button>
+        </div>
+        <textarea id="crmNotePreview" class="mono" readonly></textarea>
+      </section>
+    </main>
+
+    <script>
+      const STORAGE_KEY = "hermes_crm_submit_form_v2";
+      const BATCH_KEY = "hermes_crm_batch_v1";
+      const HISTORY_KEY = "hermes_crm_history_v1";
+      const COUNTER_KEY = "hermes_crm_submit_counter_v1";
+
+      function isPlaceholderProxyUrl(value) {
+        return /PROJECT\.supabase\.co/i.test(String(value || ""));
+      }
+
+      function normalizeSupabaseUrl(value) {
+        const trimmed = String(value || "").trim();
+        if (!trimmed) return "";
+        return trimmed.replace(/\/+$/, "");
+      }
+
+      function resolveRepoConfig() {
+        const defaults = {
+          proxyFunctionUrl: "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
+          supabaseAnonKey: "",
+          webhookUrl: "",
+          authHeaderName: "Authorization",
+          authHeaderValue: "",
+          duplicateCheckUrl: "",
+          slackWebhookUrl: "",
+        };
+        const injected = (typeof window !== "undefined" && window.HERMES_FORM_CONFIG) ? window.HERMES_FORM_CONFIG : {};
+        const params = new URLSearchParams(window.location.search);
+        const pick = (key) => {
+          const qp = params.get(key);
+          if (qp !== null) return qp.trim();
+          const injectedValue = injected[key];
+          if (typeof injectedValue === "string") return injectedValue.trim();
+          return "";
+        };
+
+        const config = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+          const value = pick(key);
+          if (value) config[key] = value;
+        }
+
+        const supabaseUrl = normalizeSupabaseUrl(pick("supabaseUrl"));
+        if ((!config.proxyFunctionUrl || isPlaceholderProxyUrl(config.proxyFunctionUrl)) && supabaseUrl) {
+          config.proxyFunctionUrl = `${supabaseUrl}/functions/v1/hermes-crm-proxy`;
+        }
+        return config;
+      }
+
+      const repoConfig = resolveRepoConfig();
+
+      const state = {
+        destinationSystem: "EspoCRM",
+        objectType: "contact",
+        operation: "upsert",
+        transportMode: "proxy",
+        proxyFunctionUrl: repoConfig.proxyFunctionUrl,
+        supabaseAnonKey: repoConfig.supabaseAnonKey,
+        webhookUrl: repoConfig.webhookUrl,
+        authHeaderName: repoConfig.authHeaderName,
+        authHeaderValue: repoConfig.authHeaderValue,
+        duplicateCheckUrl: repoConfig.duplicateCheckUrl,
+        slackWebhookUrl: repoConfig.slackWebhookUrl,
+        presetType: "",
+        confirmSensitive: false,
+        notes: "",
+        contactFullName: "",
+        contactCompany: "",
+        contactTitle: "",
+        contactEmail: "",
+        contactPhone: "",
+        contactOwner: "",
+        taskSubject: "",
+        taskDueDate: "",
+        taskPriority: "normal",
+        taskStatus: "Not Started",
+        taskAssignedTo: "",
+        taskRelatedTo: "",
+        opportunityName: "",
+        opportunityAccount: "",
+        opportunityStage: "Prospecting",
+        opportunityAmount: "",
+        opportunityCloseDate: "",
+        opportunityOwner: "",
+        leadFullName: "",
+        leadCompany: "",
+        leadEmail: "",
+        leadPhone: "",
+        leadSource: "Referral",
+        leadStatus: "New",
+        leadOwner: "",
+      };
+
+      let batchQueue = [];
+      let history = [];
+      let submitCounter = 0;
+
+      const fieldIds = [
+        "destinationSystem", "objectType", "operation", "transportMode", "proxyFunctionUrl",
+        "supabaseAnonKey", "webhookUrl", "authHeaderName", "authHeaderValue", "duplicateCheckUrl",
+        "slackWebhookUrl", "presetType", "notes",
+        "contactFullName", "contactCompany", "contactTitle", "contactEmail", "contactPhone",
+        "contactOwner", "taskSubject", "taskDueDate", "taskPriority", "taskStatus",
+        "taskAssignedTo", "taskRelatedTo", "opportunityName", "opportunityAccount",
+        "opportunityStage", "opportunityAmount", "opportunityCloseDate", "opportunityOwner",
+        "leadFullName", "leadCompany", "leadEmail", "leadPhone", "leadSource", "leadStatus",
+        "leadOwner",
+      ];
+
+      const statusEl = document.getElementById("validationStatus");
+      const submitBtn = document.getElementById("submitBtn");
+      const submitNextBtn = document.getElementById("submitNextBtn");
+      const payloadPreview = document.getElementById("payloadPreview");
+      const responsePreview = document.getElementById("responsePreview");
+      const notePreview = document.getElementById("crmNotePreview");
+      const submitCounterEl = document.getElementById("submitCounter");
+      const batchTableBody = document.getElementById("batchTableBody");
+      const historyTableBody = document.getElementById("historyTableBody");
+
+      function safe(value) {
+        const trimmed = String(value || "").trim();
+        return trimmed === "" ? null : trimmed;
+      }
+
+      function validEmail(value) {
+        if (!safe(value)) return true;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
+      }
+
+      function validDate(value) {
+        if (!safe(value)) return true;
+        return /^\d{4}-\d{2}-\d{2}$/.test(String(value).trim());
+      }
+
+      function validPhone(value) {
+        if (!safe(value)) return true;
+        return /^[0-9+\-().\s]{7,20}$/.test(String(value).trim());
+      }
+
+      function splitName(fullName) {
+        const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
+        if (!parts.length) return { first: null, last: null };
+        if (parts.length === 1) return { first: parts[0], last: null };
+        return { first: parts[0], last: parts.slice(1).join(" ") };
+      }
+
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            for (const key of fieldIds) {
+              if (!Object.prototype.hasOwnProperty.call(parsed, key)) continue;
+              const saved = parsed[key];
+              const fallback = repoConfig[key];
+              if (
+                (saved === "" || saved === null || saved === undefined) &&
+                typeof fallback === "string" &&
+                fallback.trim()
+              ) {
+                state[key] = fallback;
+                continue;
+              }
+              if (
+                key === "proxyFunctionUrl" &&
+                isPlaceholderProxyUrl(saved) &&
+                typeof fallback === "string" &&
+                fallback.trim() &&
+                !isPlaceholderProxyUrl(fallback)
+              ) {
+                state[key] = fallback;
+                continue;
+              }
+              state[key] = saved;
+            }
+            state.confirmSensitive = Boolean(parsed.confirmSensitive);
+          }
+          
+          // Override with environment config if available (production deployment)
+          if (envConfig.HERMES_SUPABASE_URL) state.proxyFunctionUrl = envConfig.HERMES_SUPABASE_URL;
+          if (envConfig.HERMES_SUPABASE_KEY) state.supabaseAnonKey = envConfig.HERMES_SUPABASE_KEY;
+          if (envConfig.HERMES_WEBHOOK_URL) state.webhookUrl = envConfig.HERMES_WEBHOOK_URL;
+          if (envConfig.HERMES_TRANSPORT_MODE) state.transportMode = envConfig.HERMES_TRANSPORT_MODE;
+          
+          batchQueue = JSON.parse(localStorage.getItem(BATCH_KEY) || "[]");
+          history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+          submitCounter = Number(localStorage.getItem(COUNTER_KEY) || "0");
+          
+          // Update UI to show env config status
+          const envStatusEl = document.getElementById("envStatus");
+          if (envStatusEl) {
+            const hasEnv = envConfig.HERMES_SUPABASE_URL || envConfig.HERMES_SUPABASE_KEY || envConfig.HERMES_WEBHOOK_URL;
+            if (hasEnv) {
+              envStatusEl.textContent = "✓ Configuration loaded from environment variables";
+              envStatusEl.style.color = "var(--ok)";
+            } else {
+              envStatusEl.textContent = "⚠ Manual configuration required - enter values below";
+              envStatusEl.style.color = "var(--warn)";
+            }
+          }
+        } catch {
+          batchQueue = [];
+          history = [];
+          submitCounter = 0;
+        }
+      }
+
+      function saveState() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(BATCH_KEY, JSON.stringify(batchQueue));
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 50)));
+        localStorage.setItem(COUNTER_KEY, String(submitCounter));
+      }
+
+      function renderTypeForms() {
+        const type = state.objectType;
+        document.getElementById("contactForm").classList.toggle("hidden", type !== "contact");
+        document.getElementById("taskForm").classList.toggle("hidden", type !== "task");
+        document.getElementById("opportunityForm").classList.toggle("hidden", type !== "opportunity");
+        document.getElementById("leadForm").classList.toggle("hidden", type !== "lead");
+      }
+
+      function buildRecordFrom(source) {
+        if (source.objectType === "contact") {
+          const n = splitName(source.contactFullName);
+          return {
+            object_type: "contact",
+            operation: source.operation,
+            match: safe(source.contactEmail)
+              ? { primary: { email: safe(source.contactEmail) } }
+              : { secondary: { full_name: source.contactFullName.trim(), company_name: source.contactCompany.trim() } },
+            data: {
+              first_name: n.first,
+              last_name: n.last,
+              full_name: source.contactFullName.trim(),
+              company_name: source.contactCompany.trim(),
+              job_title: safe(source.contactTitle),
+              email: safe(source.contactEmail),
+              phone: safe(source.contactPhone),
+              owner_user_id: safe(source.contactOwner),
+              status: "Active",
+              notes: safe(source.notes),
+            },
+          };
+        }
+        if (source.objectType === "task") {
+          return {
+            object_type: "task",
+            operation: source.operation,
+            match: {
+              secondary: {
+                subject: source.taskSubject.trim(),
+                due_date: source.taskDueDate.trim(),
+                assigned_to: safe(source.taskAssignedTo),
+              },
+            },
+            data: {
+              subject: source.taskSubject.trim(),
+              due_date: source.taskDueDate.trim(),
+              priority: source.taskPriority,
+              status: source.taskStatus.trim() || "Not Started",
+              assigned_to: safe(source.taskAssignedTo),
+              related_to_name: safe(source.taskRelatedTo),
+              notes: safe(source.notes),
+            },
+          };
+        }
+        if (source.objectType === "opportunity") {
+          return {
+            object_type: "opportunity",
+            operation: source.operation,
+            match: {
+              secondary: {
+                opportunity_name: source.opportunityName.trim(),
+                account_name: source.opportunityAccount.trim(),
+              },
+            },
+            data: {
+              opportunity_name: source.opportunityName.trim(),
+              account_name: source.opportunityAccount.trim(),
+              stage: source.opportunityStage,
+              amount: safe(source.opportunityAmount),
+              close_date: safe(source.opportunityCloseDate),
+              owner_user_id: safe(source.opportunityOwner),
+              notes: safe(source.notes),
+            },
+          };
+        }
+        const n = splitName(source.leadFullName);
+        return {
+          object_type: "lead",
+          operation: source.operation,
+          match: safe(source.leadEmail)
+            ? { primary: { email: safe(source.leadEmail) } }
+            : { secondary: { full_name: source.leadFullName.trim(), company_name: source.leadCompany.trim() } },
+          data: {
+            first_name: n.first,
+            last_name: n.last,
+            full_name: source.leadFullName.trim(),
+            company_name: source.leadCompany.trim(),
+            email: safe(source.leadEmail),
+            phone: safe(source.leadPhone),
+            lead_source: source.leadSource,
+            lead_status: source.leadStatus,
+            owner_user_id: safe(source.leadOwner),
+            notes: safe(source.notes),
+          },
+        };
+      }
+
+      function buildPayload(record) {
+        return {
+          action: "crm.upsert_batch",
+          version: "hermes_crm_write_v1",
+          source: "manual_user_input",
+          destination_system: state.destinationSystem,
+          options: {
+            dry_run: false,
+            duplicate_check: true,
+            create_missing_relations: true,
+          },
+          records: [record],
+          audit: {
+            required: true,
+            change_reason: "Submitted from Hermes CRM form.",
+          },
+          human_review: {
+            required: true,
+            reason: "Verify duplicate confidence and required-field completeness.",
+          },
+        };
+      }
+
+      function validateSource(source) {
+        if (source.transportMode === "proxy") {
+          if (!source.proxyFunctionUrl.trim() || isPlaceholderProxyUrl(source.proxyFunctionUrl)) {
+            return { ok: false, msg: "Supabase proxy backend is not configured yet. Add ?supabaseUrl=... or ?proxyFunctionUrl=... to this page URL.", tone: "warn" };
+          }
+          if (!source.supabaseAnonKey.trim()) {
+            return { ok: false, msg: "Supabase anon key is required in proxy mode (set ?supabaseAnonKey=... once to auto-save).", tone: "warn" };
+          }
+        } else if (!source.webhookUrl.trim()) {
+          return { ok: false, msg: "Webhook URL is required in direct mode.", tone: "warn" };
+        }
+        if (source.objectType === "contact") {
+          if (!source.contactFullName.trim() || !source.contactCompany.trim()) {
+            return { ok: false, msg: "Contact requires Full Name and Company.", tone: "warn" };
+          }
+          if (!validEmail(source.contactEmail)) return { ok: false, msg: "Contact email is invalid.", tone: "warn" };
+          if (!validPhone(source.contactPhone)) return { ok: false, msg: "Contact phone is invalid.", tone: "warn" };
+        } else if (source.objectType === "task") {
+          if (!source.taskSubject.trim() || !source.taskDueDate.trim()) {
+            return { ok: false, msg: "Task requires Subject and Due Date.", tone: "warn" };
+          }
+          if (!validDate(source.taskDueDate)) return { ok: false, msg: "Task due date must be YYYY-MM-DD.", tone: "warn" };
+        } else if (source.objectType === "opportunity") {
+          if (!source.opportunityName.trim() || !source.opportunityAccount.trim()) {
+            return { ok: false, msg: "Opportunity requires Name and Account.", tone: "warn" };
+          }
+          if (!validDate(source.opportunityCloseDate)) return { ok: false, msg: "Opportunity close date must be YYYY-MM-DD.", tone: "warn" };
+        } else if (source.objectType === "lead") {
+          if (!source.leadFullName.trim() || !source.leadCompany.trim()) {
+            return { ok: false, msg: "Lead requires Full Name and Company.", tone: "warn" };
+          }
+          if (!validEmail(source.leadEmail)) return { ok: false, msg: "Lead email is invalid.", tone: "warn" };
+          if (!validPhone(source.leadPhone)) return { ok: false, msg: "Lead phone is invalid.", tone: "warn" };
+        }
+        return { ok: true, msg: "Ready to submit to Hermes.", tone: "ok" };
+      }
+
+      function isSensitiveRecord(record) {
+        if (record.operation === "update" || record.operation === "upsert") {
+          const owner = record.data && record.data.owner_user_id;
+          if (owner) return true;
+          if (record.object_type === "opportunity" && record.data && record.data.stage === "Closed Lost") {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      async function duplicateCheck(record) {
+        if (!state.duplicateCheckUrl.trim()) return { ok: true, duplicate: false };
+        try {
+          const res = await fetch(state.duplicateCheckUrl.trim(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ record }),
+          });
+          if (!res.ok) return { ok: true, duplicate: false };
+          const data = await res.json().catch(() => ({}));
+          return { ok: true, duplicate: Boolean(data.duplicate), detail: data };
+        } catch {
+          return { ok: true, duplicate: false };
+        }
+      }
+
+      function generateNote(record) {
+        const date = new Date().toISOString();
+        const type = record.object_type;
+        let subject = "Record";
+        if (type === "contact") subject = record.data.full_name || "Contact";
+        if (type === "task") subject = record.data.subject || "Task";
+        if (type === "opportunity") subject = record.data.opportunity_name || "Opportunity";
+        if (type === "lead") subject = record.data.full_name || "Lead";
+        return [
+          `Hermes CRM Submission`,
+          `Timestamp: ${date}`,
+          `Object: ${type}`,
+          `Operation: ${record.operation}`,
+          `Subject: ${subject}`,
+          `Destination: ${state.destinationSystem}`,
+          `Notes: ${safe(state.notes) || "None"}`,
+        ].join("\n");
+      }
+
+      function updateStatus({ ok, msg, tone }) {
+        statusEl.className = `status ${tone}`;
+        statusEl.textContent = msg;
+        submitBtn.disabled = !ok;
+        submitNextBtn.disabled = !ok;
+      }
+
+      function updateCounter() {
+        submitCounterEl.textContent = String(submitCounter);
+      }
+
+      function renderBatchTable() {
+        batchTableBody.innerHTML = "";
+        if (!batchQueue.length) {
+          batchTableBody.innerHTML = `<tr><td colspan="5" class="small">No queued records.</td></tr>`;
+          return;
+        }
+        batchQueue.forEach((entry, idx) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${idx + 1}</td>
+            <td>${entry.record.object_type}</td>
+            <td>${entry.record.operation}</td>
+            <td class="mono">${JSON.stringify(entry.record.match)}</td>
+            <td><button data-remove-batch="${idx}" type="button">Remove</button></td>
+          `;
+          batchTableBody.appendChild(row);
+        });
+      }
+
+      function renderHistory() {
+        historyTableBody.innerHTML = "";
+        if (!history.length) {
+          historyTableBody.innerHTML = `<tr><td colspan="5" class="small">No submissions yet.</td></tr>`;
+          return;
+        }
+        history.slice(0, 20).forEach((entry, idx) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${entry.time}</td>
+            <td>${entry.status}</td>
+            <td>${entry.objectType}</td>
+            <td>${entry.operation}</td>
+            <td><button data-retry-history="${idx}" type="button">Retry</button></td>
+          `;
+          historyTableBody.appendChild(row);
+        });
+      }
+
+      function syncPreview() {
+        renderTypeForms();
+        const validation = validateSource(state);
+        updateStatus(validation);
+        const record = buildRecordFrom(state);
+        payloadPreview.value = JSON.stringify(buildPayload(record), null, 2);
+        notePreview.value = generateNote(record);
+        updateCounter();
+        renderBatchTable();
+        renderHistory();
+        saveState();
+      }
+
+      function setExamples() {
+        state.objectType = "contact";
+        state.destinationSystem = "EspoCRM";
+        state.operation = "upsert";
+        state.contactFullName = "Shelly D'Amico";
+        state.contactCompany = "Pie Insurance";
+        state.contactTitle = "Agency Partner Manager";
+        state.contactEmail = "";
+        state.contactPhone = "";
+      }
+
+      function applyPreset() {
+        const preset = state.presetType;
+        if (preset === "new-lead") {
+          state.objectType = "lead";
+          state.operation = "create";
+          state.leadSource = "Referral";
+          state.leadStatus = "New";
+        } else if (preset === "renewal-task") {
+          state.objectType = "task";
+          state.operation = "create";
+          state.taskPriority = "high";
+          state.taskStatus = "Not Started";
+          state.taskSubject = "Renewal outreach and quote follow-up";
+        } else if (preset === "quoted-opportunity") {
+          state.objectType = "opportunity";
+          state.operation = "upsert";
+          state.opportunityStage = "Quoted";
+        } else if (preset === "carrier-contact") {
+          state.objectType = "contact";
+          state.operation = "upsert";
+          state.contactCompany = "Carrier";
+        }
+      }
+
+      function clearAll() {
+        for (const k of Object.keys(state)) {
+          if (k === "destinationSystem") state[k] = "EspoCRM";
+          else if (k === "objectType") state[k] = "contact";
+          else if (k === "operation") state[k] = "upsert";
+          else if (k === "transportMode") state[k] = "proxy";
+          else if (k === "proxyFunctionUrl") state[k] = repoConfig.proxyFunctionUrl;
+          else if (k === "supabaseAnonKey") state[k] = repoConfig.supabaseAnonKey;
+          else if (k === "webhookUrl") state[k] = repoConfig.webhookUrl;
+          else if (k === "authHeaderName") state[k] = "Authorization";
+          else if (k === "authHeaderValue") state[k] = repoConfig.authHeaderValue;
+          else if (k === "duplicateCheckUrl") state[k] = repoConfig.duplicateCheckUrl;
+          else if (k === "slackWebhookUrl") state[k] = repoConfig.slackWebhookUrl;
+          else if (k === "taskPriority") state[k] = "normal";
+          else if (k === "taskStatus") state[k] = "Not Started";
+          else if (k === "opportunityStage") state[k] = "Prospecting";
+          else if (k === "leadSource") state[k] = "Referral";
+          else if (k === "leadStatus") state[k] = "New";
+          else if (k === "confirmSensitive") state[k] = false;
+          else state[k] = "";
+        }
+      }
+
+      function clearActiveObjectFields() {
+        if (state.objectType === "contact") {
+          state.contactFullName = "";
+          state.contactCompany = "";
+          state.contactTitle = "";
+          state.contactEmail = "";
+          state.contactPhone = "";
+          state.contactOwner = "";
+          return;
+        }
+        if (state.objectType === "task") {
+          state.taskSubject = "";
+          state.taskDueDate = "";
+          state.taskPriority = "normal";
+          state.taskStatus = "Not Started";
+          state.taskAssignedTo = "";
+          state.taskRelatedTo = "";
+          return;
+        }
+        if (state.objectType === "opportunity") {
+          state.opportunityName = "";
+          state.opportunityAccount = "";
+          state.opportunityStage = "Prospecting";
+          state.opportunityAmount = "";
+          state.opportunityCloseDate = "";
+          state.opportunityOwner = "";
+          return;
+        }
+        state.leadFullName = "";
+        state.leadCompany = "";
+        state.leadEmail = "";
+        state.leadPhone = "";
+        state.leadSource = "Referral";
+        state.leadStatus = "New";
+        state.leadOwner = "";
+      }
+
+      function refreshInputs() {
+        for (const id of fieldIds) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.value = state[id] ?? "";
+        }
+        document.getElementById("confirmSensitive").checked = Boolean(state.confirmSensitive);
+      }
+
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      async function postToSlack(record, status, responseText) {
+        if (!state.slackWebhookUrl.trim()) return;
+        const payload = {
+          text: `Hermes CRM ${status}: ${record.object_type} ${record.operation} (${state.destinationSystem})`,
+          details: responseText ? String(responseText).slice(0, 1000) : "",
+        };
+        try {
+          await fetch(state.slackWebhookUrl.trim(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        } catch {
+          // non-blocking
+        }
+      }
+
+      async function sendPayloadWithRetry(payload) {
+        const headers = { "Content-Type": "application/json" };
+        let endpoint = state.webhookUrl.trim();
+        let body = payload;
+
+        if (state.transportMode === "proxy") {
+          endpoint = state.proxyFunctionUrl.trim();
+          headers.apikey = state.supabaseAnonKey.trim();
+          headers.Authorization = `Bearer ${state.supabaseAnonKey.trim()}`;
+          body = { payload };
+        } else {
+          const headerName = state.authHeaderName.trim();
+          const headerValue = state.authHeaderValue.trim();
+          if (headerName && headerValue) headers[headerName] = headerValue;
+        }
+
+        let attempts = 0;
+        let lastErrorText = "";
+        while (attempts < 3) {
+          attempts += 1;
+          try {
+            const res = await fetch(endpoint, {
+              method: "POST",
+              headers,
+              body: JSON.stringify(body),
+            });
+            const text = await res.text();
+            if (res.ok) return { ok: true, status: res.status, text };
+            lastErrorText = text || `HTTP ${res.status}`;
+            if (!(res.status === 429 || res.status >= 500)) {
+              return { ok: false, status: res.status, text: lastErrorText };
+            }
+          } catch (err) {
+            lastErrorText = String(err);
+          }
+          await sleep(500 * attempts);
+        }
+        return { ok: false, status: 0, text: lastErrorText || "Retry attempts exhausted." };
+      }
+
+      function pushHistory(record, outcome, responseText, payload) {
+        history.unshift({
+          time: new Date().toISOString(),
+          status: outcome,
+          objectType: record.object_type,
+          operation: record.operation,
+          response: responseText,
+          payload,
+        });
+        history = history.slice(0, 50);
+      }
+
+      async function submitRecord(record, clearAfterSubmit) {
+        if (isSensitiveRecord(record) && !state.confirmSensitive) {
+          updateStatus({
+            ok: false,
+            msg: "Sensitive update detected. Enable the guardrail checkbox to proceed.",
+            tone: "warn",
+          });
+          return;
+        }
+        const dupe = await duplicateCheck(record);
+        if (dupe.duplicate) {
+          updateStatus({
+            ok: false,
+            msg: "Possible duplicate found by pre-check. Review before submitting.",
+            tone: "warn",
+          });
+          responsePreview.value = JSON.stringify(dupe.detail || {}, null, 2);
+          return;
+        }
+
+        const payload = buildPayload(record);
+        submitBtn.disabled = true;
+        submitNextBtn.disabled = true;
+        updateStatus({ ok: false, msg: "Submitting to Hermes...", tone: "warn" });
+        const result = await sendPayloadWithRetry(payload);
+        responsePreview.value = result.text || "(empty response)";
+
+        if (!result.ok) {
+          pushHistory(record, "failed", result.text, payload);
+          updateStatus({
+            ok: false,
+            msg: `Hermes submit failed (${result.status || "network"}). See response panel.`,
+            tone: "err",
+          });
+          await postToSlack(record, "failed", result.text);
+          syncPreview();
+          return;
+        }
+
+        submitCounter += 1;
+        pushHistory(record, "success", result.text, payload);
+        await postToSlack(record, "success", result.text);
+
+        if (clearAfterSubmit) {
+          clearActiveObjectFields();
+          state.notes = "";
+          refreshInputs();
+        }
+
+        updateStatus({ ok: true, msg: "Submitted successfully to Hermes.", tone: "ok" });
+        syncPreview();
+      }
+
+      async function submitPayload(clearAfterSubmit) {
+        const validation = validateSource(state);
+        if (!validation.ok) {
+          updateStatus(validation);
+          return;
+        }
+        const record = buildRecordFrom(state);
+        await submitRecord(record, clearAfterSubmit);
+      }
+
+      async function submitBatch() {
+        if (!batchQueue.length) {
+          updateStatus({ ok: false, msg: "Batch is empty.", tone: "warn" });
+          return;
+        }
+        const total = batchQueue.length;
+        updateStatus({ ok: false, msg: `Submitting batch (${batchQueue.length})...`, tone: "warn" });
+        let success = 0;
+        for (const item of [...batchQueue]) {
+          const result = await sendPayloadWithRetry(buildPayload(item.record));
+          if (result.ok) {
+            success += 1;
+            submitCounter += 1;
+            pushHistory(item.record, "success", result.text, buildPayload(item.record));
+            await postToSlack(item.record, "success", result.text);
+          } else {
+            pushHistory(item.record, "failed", result.text, buildPayload(item.record));
+            await postToSlack(item.record, "failed", result.text);
+          }
+        }
+        batchQueue = [];
+        responsePreview.value = `Batch complete: ${success} succeeded, ${total - success} failed.`;
+        updateStatus({ ok: true, msg: `Batch finished. Success: ${success}/${total}`, tone: "ok" });
+        syncPreview();
+      }
+
+      function addCurrentToBatch() {
+        const validation = validateSource(state);
+        if (!validation.ok) {
+          updateStatus(validation);
+          return;
+        }
+        const record = buildRecordFrom(state);
+        batchQueue.push({ record, addedAt: new Date().toISOString() });
+        updateStatus({ ok: true, msg: "Added current record to batch queue.", tone: "ok" });
+        syncPreview();
+      }
+
+      function parseCSV(text) {
+        const lines = text.split(/\r?\n/).filter((line) => line.trim());
+        if (lines.length < 2) return [];
+        const headers = lines[0].split(",").map((h) => h.trim());
+        return lines.slice(1).map((line) => {
+          const cols = line.split(",");
+          const row = {};
+          headers.forEach((header, idx) => {
+            row[header] = (cols[idx] || "").trim();
+          });
+          return row;
+        });
+      }
+
+      async function importCsvToBatch() {
+        const fileInput = document.getElementById("csvFileInput");
+        if (!fileInput.files || !fileInput.files[0]) {
+          updateStatus({ ok: false, msg: "Choose a CSV file first.", tone: "warn" });
+          return;
+        }
+        const text = await fileInput.files[0].text();
+        const rows = parseCSV(text);
+        let imported = 0;
+        for (const row of rows) {
+          const source = { ...state, ...row, objectType: state.objectType, operation: state.operation };
+          const sourceValidation = validateSource(source);
+          if (!sourceValidation.ok) continue;
+          batchQueue.push({ record: buildRecordFrom(source), addedAt: new Date().toISOString() });
+          imported += 1;
+        }
+        updateStatus({ ok: true, msg: `Imported ${imported} rows to batch queue.`, tone: "ok" });
+        syncPreview();
+      }
+
+      function bind() {
+        for (const id of fieldIds) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.value = state[id] ?? "";
+          el.addEventListener("input", () => {
+            state[id] = el.value;
+            if (id === "presetType") applyPreset();
+            syncPreview();
+          });
+          el.addEventListener("change", () => {
+            state[id] = el.value;
+            if (id === "presetType") applyPreset();
+            syncPreview();
+          });
+        }
+
+        const confirmSensitiveEl = document.getElementById("confirmSensitive");
+        confirmSensitiveEl.checked = Boolean(state.confirmSensitive);
+        confirmSensitiveEl.addEventListener("change", () => {
+          state.confirmSensitive = Boolean(confirmSensitiveEl.checked);
+          syncPreview();
+        });
+
+        document.getElementById("applyPresetBtn").addEventListener("click", () => {
+          applyPreset();
+          refreshInputs();
+          syncPreview();
+        });
+
+        document.getElementById("exampleBtn").addEventListener("click", () => {
+          setExamples();
+          refreshInputs();
+          syncPreview();
+        });
+
+        document.getElementById("clearBtn").addEventListener("click", () => {
+          clearAll();
+          refreshInputs();
+          responsePreview.value = "";
+          syncPreview();
+        });
+
+        document.getElementById("copyNoteBtn").addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(notePreview.value);
+            updateStatus({ ok: true, msg: "CRM note copied to clipboard.", tone: "ok" });
+          } catch {
+            updateStatus({ ok: false, msg: "Clipboard unavailable; copy manually.", tone: "warn" });
+          }
+        });
+
+        document.getElementById("addToBatchBtn").addEventListener("click", addCurrentToBatch);
+        document.getElementById("submitBatchBtn").addEventListener("click", submitBatch);
+        document.getElementById("clearBatchBtn").addEventListener("click", () => {
+          batchQueue = [];
+          syncPreview();
+        });
+        document.getElementById("importCsvBtn").addEventListener("click", importCsvToBatch);
+
+        submitBtn.addEventListener("click", () => submitPayload(false));
+        submitNextBtn.addEventListener("click", () => submitPayload(true));
+
+        batchTableBody.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return;
+          const idx = target.getAttribute("data-remove-batch");
+          if (idx === null) return;
+          batchQueue.splice(Number(idx), 1);
+          syncPreview();
+        });
+
+        historyTableBody.addEventListener("click", async (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return;
+          const idx = target.getAttribute("data-retry-history");
+          if (idx === null) return;
+          const item = history[Number(idx)];
+          if (!item || !item.payload) return;
+          updateStatus({ ok: false, msg: "Retrying history item...", tone: "warn" });
+          const result = await sendPayloadWithRetry(item.payload);
+          responsePreview.value = result.text || "(empty response)";
+          if (result.ok) {
+            submitCounter += 1;
+            updateStatus({ ok: true, msg: "Retry succeeded.", tone: "ok" });
+          } else {
+            updateStatus({ ok: false, msg: "Retry failed.", tone: "err" });
+          }
+          syncPreview();
+        });
+      }
+
+      loadState();
+      bind();
+      refreshInputs();
+      syncPreview();
+    </script>
+  </body>
+</html>
