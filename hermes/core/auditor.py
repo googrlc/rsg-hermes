@@ -240,3 +240,39 @@ class SchemaAuditor:
         }
         self.output_path.write_text(json.dumps(schema_map, indent=2, sort_keys=True) + "\n")
         return schema_map
+
+    def run_live_metadata_inventory(self) -> dict[str, Any]:
+        """Export entity/field writability inventory from live Espo metadata."""
+        metadata = self._metadata()
+        entity_defs = self._entity_defs(metadata)
+        inventory: dict[str, Any] = {}
+        for entity_name, entity_def in entity_defs.items():
+            if not isinstance(entity_def, dict):
+                continue
+            fields = entity_def.get("fields")
+            if not isinstance(fields, dict):
+                continue
+            writable: list[str] = []
+            read_only: list[str] = []
+            required: list[str] = []
+            for field_name, field_def in fields.items():
+                if not isinstance(field_def, dict):
+                    continue
+                if field_def.get("required"):
+                    required.append(str(field_name))
+                if field_def.get("readOnly"):
+                    read_only.append(str(field_name))
+                else:
+                    writable.append(str(field_name))
+            inventory[str(entity_name)] = {
+                "writable_fields": sorted(writable),
+                "read_only_fields": sorted(read_only),
+                "required_fields": sorted(required),
+                "field_count": len(fields),
+            }
+        report = {
+            "entity_count": len(inventory),
+            "entities": inventory,
+        }
+        self.output_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        return report

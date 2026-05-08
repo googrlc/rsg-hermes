@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Any
 
+import aiohttp
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations.guardrails import log_guardrail_event
@@ -13,6 +15,7 @@ from hermes.operations.guardrails import log_guardrail_event
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5
+DEFAULT_CONCURRENCY = 5
 
 
 def enqueue_crm_write(
@@ -52,10 +55,18 @@ def process_queue(
     *,
     batch_size: int = 10,
     dry_run: bool = False,
+    concurrency: int = DEFAULT_CONCURRENCY,
 ) -> ProcessResult:
     """Dequeue PENDING items and apply them to EspoCRM.
 
     Returns a summary of processed, succeeded, and failed items.
+    
+    Args:
+        supa: Supabase client instance
+        espo: EspoCRM client instance
+        batch_size: Number of items to process per run
+        dry_run: If True, simulate processing without writing
+        concurrency: Number of concurrent async tasks (default: 5)
     """
     pending = supa.select(
         "crm_write_queue",
@@ -66,57 +77,112 @@ def process_queue(
         },
         limit=batch_size,
     )
+    
+    if not pending:
+        return ProcessResult(
+            total=0,
+            succeeded=0,
+            failed=0,
+            blocked=0,
+            errors=[],
+            dry_run=dry_run,
+        )
+    
+    # Run async processing
+    return asyncio.run(
+        _process_queue_async(
+            supa, espo, pending, 
+            dry_run=dry_run, 
+            concurrency=concurrency
+        )
+    )
+
+
+async def _process_queue_async(
+    supa: SupabaseClient,
+    espo: EspoClient,
+    pending: list[dict[str, Any]],
+    *,
+    dry_run: bool,
+    concurrency: int,
+) -> ProcessResult:
+    """Async implementation of queue processing with concurrent execution."""
+    semaphore = asyncio.Semaphore(concurrency)
     succeeded = 0
     failed = 0
     blocked = 0
     errors: list[str] = []
-
-    for item in pending:
-        queue_id = item["id"]
-        entity_type = item["entity_type"]
-        entity_id = item.get("entity_id")
-        payload = dict(item.get("payload") or {})
-        attempt_count = (item.get("attempt_count") or 0) + 1
-        role = item.get("created_by_role", "unknown")
-
-        if attempt_count > MAX_ATTEMPTS:
-            _update_status(supa, queue_id, "FAILED", attempt_count)
+    
+    async def _process_item(item: dict[str, Any]) -> tuple[bool, str | None]:
+        """Process a single queue item asynchronously."""
+        async with semaphore:
+            queue_id = item["id"]
+            entity_type = item["entity_type"]
+            entity_id = item.get("entity_id")
+            payload = dict(item.get("payload") or {})
+            attempt_count = (item.get("attempt_count") or 0) + 1
+            role = item.get("created_by_role", "unknown")
+            
+            # Check max attempts
+            if attempt_count > MAX_ATTEMPTS:
+                _update_status(supa, queue_id, "FAILED", attempt_count)
+                return False, f"{queue_id}: max attempts exceeded"
+            
+            # Dry run mode
+            if dry_run:
+                log.info("DRY RUN: would process queue_id=%s entity=%s", queue_id, entity_type)
+                return True, None
+            
+            # Mark as processing
+            _update_status(supa, queue_id, "PROCESSING", attempt_count)
+            
+            try:
+                # Execute CRM operation in thread pool (EspoClient is sync)
+                loop = asyncio.get_event_loop()
+                crm_response = await loop.run_in_executor(
+                    None,
+                    _apply_to_espo, espo, entity_type, entity_id, payload
+                )
+            except EspoClientError as exc:
+                log.warning("CRM write failed for queue_id=%s: %s", queue_id, exc)
+                _update_status(supa, queue_id, "FAILED", attempt_count)
+                return False, f"{queue_id}: {exc}"
+            
+            # Record receipt
+            transaction_id = _extract_transaction_id(crm_response, queue_id)
+            try:
+                supa.insert(
+                    "crm_receipts",
+                    {
+                        "queue_id": queue_id,
+                        "transaction_id": transaction_id,
+                        "raw_response": crm_response if isinstance(crm_response, dict) else {"raw": str(crm_response)},
+                    },
+                )
+            except SupabaseClientError:
+                log.exception("Failed to write CRM receipt for queue_id=%s", queue_id)
+            
+            _update_status(supa, queue_id, "SUCCESS", attempt_count)
+            return True, None
+    
+    # Process all items concurrently
+    tasks = [_process_item(item) for item in pending]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Aggregate results
+    for result in results:
+        if isinstance(result, Exception):
             failed += 1
-            errors.append(f"{queue_id}: max attempts exceeded")
-            continue
-
-        if dry_run:
-            log.info("DRY RUN: would process queue_id=%s entity=%s", queue_id, entity_type)
-            succeeded += 1
-            continue
-
-        _update_status(supa, queue_id, "PROCESSING", attempt_count)
-
-        try:
-            crm_response = _apply_to_espo(espo, entity_type, entity_id, payload)
-        except EspoClientError as exc:
-            log.warning("CRM write failed for queue_id=%s: %s", queue_id, exc)
-            _update_status(supa, queue_id, "FAILED", attempt_count)
-            failed += 1
-            errors.append(f"{queue_id}: {exc}")
-            continue
-
-        transaction_id = _extract_transaction_id(crm_response, queue_id)
-        try:
-            supa.insert(
-                "crm_receipts",
-                {
-                    "queue_id": queue_id,
-                    "transaction_id": transaction_id,
-                    "raw_response": crm_response if isinstance(crm_response, dict) else {"raw": str(crm_response)},
-                },
-            )
-        except SupabaseClientError:
-            log.exception("Failed to write CRM receipt for queue_id=%s", queue_id)
-
-        _update_status(supa, queue_id, "SUCCESS", attempt_count)
-        succeeded += 1
-
+            errors.append(f"Unexpected error: {result}")
+        elif isinstance(result, tuple):
+            success, error_msg = result
+            if success:
+                succeeded += 1
+            else:
+                failed += 1
+                if error_msg:
+                    errors.append(error_msg)
+    
     return ProcessResult(
         total=len(pending),
         succeeded=succeeded,

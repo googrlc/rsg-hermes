@@ -22,6 +22,14 @@ HERMES_TABLES = [
     "guardrail_logs",
     "reporting_schedules",
     "dashboard_kpis",
+    # Sync control tables (NowCerts ↔ EspoCRM pipeline)
+    "sync_runs",
+    "inbound_sync_staging",
+    "sync_mappings",
+    "outbound_sync_queue",
+    "sync_audit_log",
+    "sync_errors",
+    "sync_conflicts",
 ]
 
 
