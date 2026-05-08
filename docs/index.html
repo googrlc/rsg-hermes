@@ -62,6 +62,11 @@
         padding: 9px 10px;
         border-radius: 8px;
         border: 1px solid var(--border);
+        background: var(--panel) !important;
+        color: var(--text) !important;
+        appearance: none;
+      }
+      option {
         background: var(--panel);
         color: var(--text);
       }
@@ -77,7 +82,7 @@
         border-radius: 8px;
         padding: 9px 12px;
         color: var(--text);
-        background: #11141b;
+        background: var(--panel);
         cursor: pointer;
       }
       button.primary {
@@ -377,25 +382,50 @@
       const HISTORY_KEY = "hermes_crm_history_v1";
       const COUNTER_KEY = "hermes_crm_submit_counter_v1";
 
-      // Environment variable injection for production deployment
-      // These are populated by the server/build process before serving the file
-      const envConfig = {
-        HERMES_SUPABASE_URL: typeof process !== 'undefined' ? process.env.HERMES_SUPABASE_URL : (window.HERMES_CONFIG?.supabaseUrl || ''),
-        HERMES_SUPABASE_KEY: typeof process !== 'undefined' ? process.env.HERMES_SUPABASE_KEY : (window.HERMES_CONFIG?.supabaseKey || ''),
-        HERMES_WEBHOOK_URL: typeof process !== 'undefined' ? process.env.HERMES_WEBHOOK_URL : (window.HERMES_CONFIG?.webhookUrl || ''),
-        HERMES_TRANSPORT_MODE: typeof process !== 'undefined' ? process.env.HERMES_TRANSPORT_MODE : (window.HERMES_CONFIG?.transportMode || 'proxy'),
-      };
+      function isPlaceholderProxyUrl(value) {
+        return /PROJECT\.supabase\.co/i.test(String(value || ""));
+      }
 
-      const repoConfig = {
-        proxyFunctionUrl: envConfig.HERMES_SUPABASE_URL || "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
-        supabaseAnonKey: envConfig.HERMES_SUPABASE_KEY || "",
-        webhookUrl: envConfig.HERMES_WEBHOOK_URL || "",
-        transportMode: envConfig.HERMES_TRANSPORT_MODE || "proxy",
-        authHeaderName: "Authorization",
-        authHeaderValue: "",
-        duplicateCheckUrl: "",
-        slackWebhookUrl: "",
-      };
+      function normalizeSupabaseUrl(value) {
+        const trimmed = String(value || "").trim();
+        if (!trimmed) return "";
+        return trimmed.replace(/\/+$/, "");
+      }
+
+      function resolveRepoConfig() {
+        const defaults = {
+          proxyFunctionUrl: "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
+          supabaseAnonKey: "",
+          webhookUrl: "",
+          authHeaderName: "Authorization",
+          authHeaderValue: "",
+          duplicateCheckUrl: "",
+          slackWebhookUrl: "",
+        };
+        const injected = (typeof window !== "undefined" && window.HERMES_FORM_CONFIG) ? window.HERMES_FORM_CONFIG : {};
+        const params = new URLSearchParams(window.location.search);
+        const pick = (key) => {
+          const qp = params.get(key);
+          if (qp !== null) return qp.trim();
+          const injectedValue = injected[key];
+          if (typeof injectedValue === "string") return injectedValue.trim();
+          return "";
+        };
+
+        const config = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+          const value = pick(key);
+          if (value) config[key] = value;
+        }
+
+        const supabaseUrl = normalizeSupabaseUrl(pick("supabaseUrl"));
+        if ((!config.proxyFunctionUrl || isPlaceholderProxyUrl(config.proxyFunctionUrl)) && supabaseUrl) {
+          config.proxyFunctionUrl = `${supabaseUrl}/functions/v1/hermes-crm-proxy`;
+        }
+        return config;
+      }
+
+      const repoConfig = resolveRepoConfig();
 
       const state = {
         destinationSystem: "EspoCRM",
@@ -403,8 +433,8 @@
         operation: "upsert",
         transportMode: "proxy",
         proxyFunctionUrl: repoConfig.proxyFunctionUrl,
-        supabaseAnonKey: "",
-        webhookUrl: "",
+        supabaseAnonKey: repoConfig.supabaseAnonKey,
+        webhookUrl: repoConfig.webhookUrl,
         authHeaderName: repoConfig.authHeaderName,
         authHeaderValue: repoConfig.authHeaderValue,
         duplicateCheckUrl: repoConfig.duplicateCheckUrl,
@@ -498,7 +528,28 @@
           if (raw) {
             const parsed = JSON.parse(raw);
             for (const key of fieldIds) {
-              if (Object.prototype.hasOwnProperty.call(parsed, key)) state[key] = parsed[key];
+              if (!Object.prototype.hasOwnProperty.call(parsed, key)) continue;
+              const saved = parsed[key];
+              const fallback = repoConfig[key];
+              if (
+                (saved === "" || saved === null || saved === undefined) &&
+                typeof fallback === "string" &&
+                fallback.trim()
+              ) {
+                state[key] = fallback;
+                continue;
+              }
+              if (
+                key === "proxyFunctionUrl" &&
+                isPlaceholderProxyUrl(saved) &&
+                typeof fallback === "string" &&
+                fallback.trim() &&
+                !isPlaceholderProxyUrl(fallback)
+              ) {
+                state[key] = fallback;
+                continue;
+              }
+              state[key] = saved;
             }
             state.confirmSensitive = Boolean(parsed.confirmSensitive);
           }
@@ -660,11 +711,11 @@
 
       function validateSource(source) {
         if (source.transportMode === "proxy") {
-          if (!source.proxyFunctionUrl.trim()) {
-            return { ok: false, msg: "Supabase Function URL is required in proxy mode.", tone: "warn" };
+          if (!source.proxyFunctionUrl.trim() || isPlaceholderProxyUrl(source.proxyFunctionUrl)) {
+            return { ok: false, msg: "Supabase proxy backend is not configured yet. Add ?supabaseUrl=... or ?proxyFunctionUrl=... to this page URL.", tone: "warn" };
           }
           if (!source.supabaseAnonKey.trim()) {
-            return { ok: false, msg: "Supabase anon key is required in proxy mode.", tone: "warn" };
+            return { ok: false, msg: "Supabase anon key is required in proxy mode (set ?supabaseAnonKey=... once to auto-save).", tone: "warn" };
           }
         } else if (!source.webhookUrl.trim()) {
           return { ok: false, msg: "Webhook URL is required in direct mode.", tone: "warn" };
@@ -844,7 +895,13 @@
           else if (k === "objectType") state[k] = "contact";
           else if (k === "operation") state[k] = "upsert";
           else if (k === "transportMode") state[k] = "proxy";
+          else if (k === "proxyFunctionUrl") state[k] = repoConfig.proxyFunctionUrl;
+          else if (k === "supabaseAnonKey") state[k] = repoConfig.supabaseAnonKey;
+          else if (k === "webhookUrl") state[k] = repoConfig.webhookUrl;
           else if (k === "authHeaderName") state[k] = "Authorization";
+          else if (k === "authHeaderValue") state[k] = repoConfig.authHeaderValue;
+          else if (k === "duplicateCheckUrl") state[k] = repoConfig.duplicateCheckUrl;
+          else if (k === "slackWebhookUrl") state[k] = repoConfig.slackWebhookUrl;
           else if (k === "taskPriority") state[k] = "normal";
           else if (k === "taskStatus") state[k] = "Not Started";
           else if (k === "opportunityStage") state[k] = "Prospecting";
