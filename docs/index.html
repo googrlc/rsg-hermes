@@ -381,15 +381,50 @@
       const HISTORY_KEY = "hermes_crm_history_v1";
       const COUNTER_KEY = "hermes_crm_submit_counter_v1";
 
-      const repoConfig = {
-        proxyFunctionUrl: "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
-        supabaseAnonKey: "",
-        webhookUrl: "",
-        authHeaderName: "Authorization",
-        authHeaderValue: "",
-        duplicateCheckUrl: "",
-        slackWebhookUrl: "",
-      };
+      function isPlaceholderProxyUrl(value) {
+        return /PROJECT\.supabase\.co/i.test(String(value || ""));
+      }
+
+      function normalizeSupabaseUrl(value) {
+        const trimmed = String(value || "").trim();
+        if (!trimmed) return "";
+        return trimmed.replace(/\/+$/, "");
+      }
+
+      function resolveRepoConfig() {
+        const defaults = {
+          proxyFunctionUrl: "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
+          supabaseAnonKey: "",
+          webhookUrl: "",
+          authHeaderName: "Authorization",
+          authHeaderValue: "",
+          duplicateCheckUrl: "",
+          slackWebhookUrl: "",
+        };
+        const injected = (typeof window !== "undefined" && window.HERMES_FORM_CONFIG) ? window.HERMES_FORM_CONFIG : {};
+        const params = new URLSearchParams(window.location.search);
+        const pick = (key) => {
+          const qp = params.get(key);
+          if (qp !== null) return qp.trim();
+          const injectedValue = injected[key];
+          if (typeof injectedValue === "string") return injectedValue.trim();
+          return "";
+        };
+
+        const config = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+          const value = pick(key);
+          if (value) config[key] = value;
+        }
+
+        const supabaseUrl = normalizeSupabaseUrl(pick("supabaseUrl"));
+        if ((!config.proxyFunctionUrl || isPlaceholderProxyUrl(config.proxyFunctionUrl)) && supabaseUrl) {
+          config.proxyFunctionUrl = `${supabaseUrl}/functions/v1/hermes-crm-proxy`;
+        }
+        return config;
+      }
+
+      const repoConfig = resolveRepoConfig();
 
       const state = {
         destinationSystem: "EspoCRM",
@@ -492,7 +527,28 @@
           if (raw) {
             const parsed = JSON.parse(raw);
             for (const key of fieldIds) {
-              if (Object.prototype.hasOwnProperty.call(parsed, key)) state[key] = parsed[key];
+              if (!Object.prototype.hasOwnProperty.call(parsed, key)) continue;
+              const saved = parsed[key];
+              const fallback = repoConfig[key];
+              if (
+                (saved === "" || saved === null || saved === undefined) &&
+                typeof fallback === "string" &&
+                fallback.trim()
+              ) {
+                state[key] = fallback;
+                continue;
+              }
+              if (
+                key === "proxyFunctionUrl" &&
+                isPlaceholderProxyUrl(saved) &&
+                typeof fallback === "string" &&
+                fallback.trim() &&
+                !isPlaceholderProxyUrl(fallback)
+              ) {
+                state[key] = fallback;
+                continue;
+              }
+              state[key] = saved;
             }
             state.confirmSensitive = Boolean(parsed.confirmSensitive);
           }
@@ -634,11 +690,11 @@
 
       function validateSource(source) {
         if (source.transportMode === "proxy") {
-          if (!source.proxyFunctionUrl.trim()) {
-            return { ok: false, msg: "Supabase Function URL is required in proxy mode.", tone: "warn" };
+          if (!source.proxyFunctionUrl.trim() || isPlaceholderProxyUrl(source.proxyFunctionUrl)) {
+            return { ok: false, msg: "Supabase proxy backend is not configured yet. Add ?supabaseUrl=... or ?proxyFunctionUrl=... to this page URL.", tone: "warn" };
           }
           if (!source.supabaseAnonKey.trim()) {
-            return { ok: false, msg: "Supabase anon key is required in proxy mode.", tone: "warn" };
+            return { ok: false, msg: "Supabase anon key is required in proxy mode (set ?supabaseAnonKey=... once to auto-save).", tone: "warn" };
           }
         } else if (!source.webhookUrl.trim()) {
           return { ok: false, msg: "Webhook URL is required in direct mode.", tone: "warn" };
