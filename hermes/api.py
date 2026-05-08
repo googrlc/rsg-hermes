@@ -17,7 +17,7 @@ from pydantic import BaseModel
 log = logging.getLogger(__name__)
 
 _WRITE_HINT = re.compile(
-    r"^\s*(?:add|create|update|move\s+opportunit(?:y|ie)|intake|new\s+lead|log\s+lead|met|talked|spoke|just\s+met)\b"
+    r"^\s*(?:add|create|update|merge|move\s+opportunit(?:y|ie)|intake|new\s+lead|log\s+lead|met|talked|spoke|just\s+met)\b"
     r"|^\s*(?:research|enrich|investigate|look\s+up|web\s+research)\b.*\b(?:save|write|update|put|log|store)\b",
     re.I,
 )
@@ -100,7 +100,7 @@ async def dispatch(req: DispatchRequest):
     try:
         espo = _get_espo()
         dispatcher = _get_dispatcher()
-        result = dispatcher.dispatch(espo, req.command)
+        result = dispatcher.dispatch(espo, req.command, confirmed=req.confirm)
         return DispatchResponse(ok=result.ok, message=result.message, data=result.data, requires_confirmation=False)
     except Exception as exc:
         log.exception("Dispatch failed for command: %s", req.command)

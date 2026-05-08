@@ -90,6 +90,7 @@ def test_requires_confirmation_for_write_like_commands() -> None:
     assert requires_confirmation("add Lead firstName=Jane lastName=Doe")
     assert requires_confirmation('move opportunity opp-1 to "Quoted"')
     assert requires_confirmation("intake met Jane at chamber lunch")
+    assert requires_confirmation("merge contact abc into def")
 
 
 def test_read_commands_do_not_require_confirmation() -> None:

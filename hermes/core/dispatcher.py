@@ -1069,6 +1069,7 @@ class Dispatcher:
         line: str,
         *,
         _allow_intent: bool = True,
+        confirmed: bool = False,
     ) -> DispatchResult:
         text = line.strip()
         if not text:
@@ -1089,9 +1090,9 @@ class Dispatcher:
                         return intent_result
                 return result
         if self.use_openai and _allow_intent:
-            intent_result = self._dispatch_from_intent(client, text)
-            if intent_result is not None:
-                return intent_result
+            from hermes.core.nl_agent import ask as nl_ask
+
+            return nl_ask(client, text, confirmed=confirmed)
         return DispatchResult(
             True,
             _clarification_message(text),
