@@ -1,7 +1,5 @@
 """Map natural-language style commands to Hermes command handlers."""
 
-from __future__ import annotations
-
 import logging
 import re
 from collections.abc import Callable
@@ -247,8 +245,6 @@ class Dispatcher:
         return DispatchResult(False, "Pending draft type is not executable yet.")
 """Map natural-language style commands to Hermes command handlers."""
 
-from __future__ import annotations
-
 import logging
 import re
 from collections.abc import Callable
@@ -561,8 +557,6 @@ class Dispatcher:
         return DispatchResult(False, "Pending draft type is not executable yet.")
 """Map natural-language style commands to Hermes command handlers."""
 
-from __future__ import annotations
-
 import logging
 import re
 from collections.abc import Callable
@@ -874,8 +868,6 @@ class Dispatcher:
             return DispatchResult(True, "Approved CRM merge was executed successfully.", {"result": result})
         return DispatchResult(False, "Pending draft type is not executable yet.")
 """Map natural-language style commands to Hermes command handlers."""
-
-from __future__ import annotations
 
 import logging
 import re
