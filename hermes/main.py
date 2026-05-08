@@ -206,6 +206,28 @@ def main() -> int:
         default=None,
         help="Lookback window in hours (default: 24)",
     )
+    # --- Morning Policy Sync (7am cron) ---
+    parser.add_argument(
+        "--morning-sync",
+        action="store_true",
+        help="Run morning policy sync at 7am: NowCerts → Supabase → EspoCRM + Slack summary",
+    )
+    parser.add_argument(
+        "--morning-sync-dry-run",
+        action="store_true",
+        help="Preview morning sync without writing to any system or posting to Slack",
+    )
+    parser.add_argument(
+        "--morning-sync-force",
+        action="store_true",
+        help="Bypass daily idempotency guard for morning sync",
+    )
+    parser.add_argument(
+        "--morning-sync-hours",
+        type=int,
+        default=None,
+        help="Lookback window in hours for morning sync (default: 24)",
+    )
     # --- Bidirectional Sync ---
     parser.add_argument(
         "--sync-bidirectional",
@@ -413,6 +435,45 @@ def main() -> int:
             lookback_hours=args.changelog_hours,
         )
         print(result.message)
+        if result.warnings:
+            print("Warnings:")
+            for w in result.warnings:
+                print(f"- {w}")
+        return 0 if result.ok else 1
+
+    # --- Morning Policy Sync (7am cron: NowCerts → Supabase → EspoCRM + Slack) ---
+    if args.morning_sync or args.morning_sync_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes.jobs import morning_policy_sync
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            nc = NowCertsClient()
+        except NowCertsClientError as e:
+            print(f"NowCerts connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            espo = EspoClient()
+        except EspoClientError as e:
+            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
+            return 2
+
+        result = morning_policy_sync.run(
+            nc, espo, supa,
+            dry_run=args.morning_sync_dry_run,
+            force=getattr(args, "morning_sync_force", False),
+            lookback_hours=args.morning_sync_hours,
+        )
+        print(result.message)
+        if result.errors:
+            print("Errors:")
+            for err in result.errors:
+                print(f"- {err}")
         if result.warnings:
             print("Warnings:")
             for w in result.warnings:

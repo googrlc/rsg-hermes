@@ -2,8 +2,6 @@
 # Compiled and build artifacts
 *.pyc
 __pycache__/
-*.o
-*.obj
 
 # Dependencies
 .venv/
@@ -18,19 +16,26 @@ node_modules/
 # Environment
 .env
 .env.local
-*.env.*
+.env.*
 
 # Editors
 .vscode/
 .idea/
 
-# Coverage
-.coverage
+# Coverage reports
 coverage/
 htmlcov/
+.coverage
 
-# Distribution / packaging
-dist/
-build/
+# Python specific
+*.pyo
+*.pyd
+.Python
+*.so
 *.egg-info/
+.eggs/
+
+# Build directories
+build/
+dist/
 ```

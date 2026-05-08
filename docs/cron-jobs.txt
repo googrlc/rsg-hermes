@@ -1,0 +1,119 @@
+# Hermes Cron Jobs Configuration
+# 
+# This file contains cron job configurations for the Hermes sync workflows.
+# Install these cron jobs on your VPS or automation server.
+#
+# To install: crontab /workspace/docs/cron-jobs.txt
+# To verify: crontab -l
+#
+# IMPORTANT: Ensure environment variables are loaded properly.
+# You may need to source your .env file or set PATH appropriately.
+
+# Environment setup (adjust path to your .env file)
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+MAILTO=""
+
+# =============================================================================
+# MORNING POLICY SYNC - 7:00 AM Daily
+# =============================================================================
+# Syncs policy data from NowCerts → Supabase → EspoCRM
+# Posts summary to Slack with changes and errors
+# Logs audit trail in EspoCRM as Task
+#
+# Schedule: Every day at 7:00 AM (in server timezone, typically America/New_York)
+0 7 * * * cd /workspace && /usr/local/bin/hermes --morning-sync >> /var/log/hermes/morning_sync.log 2>&1
+
+# =============================================================================
+# NIGHTLY CRM CHANGELOG - 11:00 PM Daily  
+# =============================================================================
+# Summarizes daily CRM changes and posts to Slack
+# Creates audit Task in EspoCRM
+#
+# Schedule: Every day at 11:00 PM
+0 23 * * * cd /workspace && /usr/local/bin/hermes --changelog >> /var/log/hermes/nightly_changelog.log 2>&1
+
+# =============================================================================
+# BIDIRECTIONAL SYNC - Every 6 Hours
+# =============================================================================
+# Full bidirectional sync: NowCerts ↔ Supabase ↔ EspoCRM
+# Ensures all systems stay in sync throughout the day
+#
+# Schedule: Every 6 hours (at 0:00, 6:00, 12:00, 18:00)
+0 */6 * * * cd /workspace && /usr/local/bin/hermes --sync-bidirectional >> /var/log/hermes/bidi_sync.log 2>&1
+
+# =============================================================================
+# COMMISSION RECONCILIATION - Weekly (Monday 8:00 AM)
+# =============================================================================
+# Reconciles commissions between carrier statements and EspoCRM
+# Flags discrepancies for review
+#
+# Schedule: Every Monday at 8:00 AM
+0 8 * * 1 cd /workspace && /usr/local/bin/hermes --commission-audit >> /var/log/hermes/commission_audit.log 2>&1
+
+# =============================================================================
+# REVENUE SENTINEL - Daily (9:00 AM)
+# =============================================================================
+# Daily revenue guardrail briefing
+# Monitors KPIs, flags anomalies, posts to Slack
+#
+# Schedule: Every day at 9:00 AM
+0 9 * * * cd /workspace && /usr/local/bin/hermes --revenue-sentinel >> /var/log/hermes/revenue_sentinel.log 2>&1
+
+# =============================================================================
+# LOG ROTATION AND CLEANUP - Daily (Midnight)
+# =============================================================================
+# Clean up old log files (>30 days)
+0 0 * * * find /var/log/hermes -name "*.log" -mtime +30 -delete
+
+# =============================================================================
+# INSTALLATION INSTRUCTIONS
+# =============================================================================
+#
+# 1. Create log directory:
+#    sudo mkdir -p /var/log/hermes
+#    sudo chown $USER:$USER /var/log/hermes
+#
+# 2. Ensure hermes is installed and accessible:
+#    pip install -e /workspace
+#    which hermes
+#
+# 3. Set up environment variables in ~/.bashrc or /etc/environment:
+#    export NOWCERTS_API_URL="https://api.nowcerts.com"
+#    export NOWCERTS_USERNAME="your_username"
+#    export NOWCERTS_PASSWORD="your_password"
+#    export SUPABASE_URL="https://xxx.supabase.co"
+#    export SUPABASE_SERVICE_ROLE_KEY="your_key"
+#    export ESPO_URL="https://your-espocrm.com"
+#    export ESPO_API_KEY="your_api_key"
+#    export SLACK_BOT_TOKEN="xoxb-..."
+#    export HERMES_SENTINEL_SLACK_CHANNEL="D0B2PJYLGQG"
+#    export HERMES_SENTINEL_TIMEZONE="America/New_York"
+#
+# 4. Install cron jobs:
+#    crontab /workspace/docs/cron-jobs.txt
+#
+# 5. Verify installation:
+#    crontab -l
+#    sudo systemctl status cron
+#
+# 6. Test manually first:
+#    hermes --morning-sync-dry-run
+#    hermes --changelog-dry-run
+#
+# =============================================================================
+# MONITORING
+# =============================================================================
+#
+# Check logs:
+#   tail -f /var/log/hermes/morning_sync.log
+#   tail -f /var/log/hermes/nightly_changelog.log
+#
+# Check cron service:
+#   sudo systemctl status cron
+#   grep CRON /var/log/syslog | tail -20
+#
+# Manual test run:
+#   hermes --morning-sync-force  # Force re-run if needed
+#   hermes --changelog-force     # Force re-run if needed
+#
