@@ -10,6 +10,7 @@ from urllib.parse import urljoin
 
 import requests
 from requests import Session
+from requests.adapters import HTTPAdapter, Retry
 from urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
@@ -30,6 +31,8 @@ class EspoClient:
         max_retries: int | None = None,
         retry_sleep: float | None = None,
         max_list_size: int | None = None,
+        pool_connections: int = 10,
+        pool_maxsize: int = 20,
     ) -> None:
         raw = (base_url or os.environ.get("ESPO_URL", "")).rstrip("/")
         self.api_key = api_key or os.environ.get("ESPO_API_KEY", "")
@@ -42,7 +45,27 @@ class EspoClient:
             if verify is not None
             else os.environ.get("HERMES_VERIFY_TLS", "").strip().lower() in ("1", "true", "yes")
         )
-        self.session = session or requests.Session()
+        
+        # Connection pooling with retry strategy
+        if session is None:
+            self.session = Session()
+            retry_strategy = Retry(
+                total=max_retries if max_retries is not None else int(os.environ.get("HERMES_READ_RETRIES", "3")),
+                backoff_factor=retry_sleep if retry_sleep is not None else float(os.environ.get("HERMES_RETRY_SLEEP", "0.3")),
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["GET", "HEAD", "OPTIONS"],
+            )
+            adapter = HTTPAdapter(
+                pool_connections=pool_connections,
+                pool_maxsize=pool_maxsize,
+                max_retries=retry_strategy,
+                pool_block=False,
+            )
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
+        else:
+            self.session = session
+            
         self.max_retries = (
             max_retries
             if max_retries is not None
@@ -58,6 +81,11 @@ class EspoClient:
             if max_list_size is not None
             else int(os.environ.get("HERMES_MAX_LIST_SIZE", "200"))
         )
+        
+        # Simple in-memory metadata cache
+        self._metadata_cache: dict[str, Any] | None = None
+        self._metadata_cache_ttl: float = 300  # 5 minutes
+        self._metadata_cache_time: float = 0
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -190,13 +218,36 @@ class EspoClient:
         return self.get("App/user")
 
     def get_metadata(self, key: str | None = None) -> dict[str, Any] | list[Any] | Any:
-        """Fetch Espo metadata, optionally returning a top-level metadata key."""
+        """Fetch Espo metadata, optionally returning a top-level metadata key.
+        
+        Uses in-memory caching with TTL to avoid repeated API calls.
+        """
+        current_time = time.time()
+        use_cache = (
+            self._metadata_cache is not None 
+            and (current_time - self._metadata_cache_time) < self._metadata_cache_ttl
+        )
+        
         if not key:
-            return self.get("Metadata")
+            if use_cache:
+                return self._metadata_cache
+            metadata = self.get("Metadata")
+            if isinstance(metadata, dict):
+                self._metadata_cache = metadata
+                self._metadata_cache_time = current_time
+            return metadata
+        
+        if use_cache and isinstance(self._metadata_cache, dict) and key in self._metadata_cache:
+            return self._metadata_cache[key]
+            
         try:
             return self.get(f"Metadata/{key}")
         except EspoClientError:
+            # Refresh cache on miss for specific key
             metadata = self.get("Metadata")
+            if isinstance(metadata, dict):
+                self._metadata_cache = metadata
+                self._metadata_cache_time = current_time
             if isinstance(metadata, dict) and key in metadata:
                 return metadata[key]
             raise

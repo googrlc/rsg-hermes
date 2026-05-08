@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,9 @@ class SupabaseClient:
         url: str | None = None,
         key: str | None = None,
         timeout: float = 30.0,
+        pool_connections: int = 10,
+        pool_maxsize: int = 20,
+        max_retries: int = 3,
     ) -> None:
         self.url = (url or os.environ.get("SUPABASE_URL", "")).rstrip("/")
         self.key = key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "") or os.environ.get("SUPABASE_KEY", "")
@@ -31,6 +35,23 @@ class SupabaseClient:
             raise SupabaseClientError(
                 "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_KEY) must be set (env or constructor)."
             )
+
+        # Connection pooling with retry strategy
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=max_retries,
+            backoff_factor=0.1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "PUT", "DELETE", "PATCH"],
+        )
+        adapter = HTTPAdapter(
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+            max_retries=retry_strategy,
+            pool_block=False,
+        )
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
 
     def _headers(self, *, prefer: str = "return=representation") -> dict[str, str]:
         return {
@@ -42,7 +63,7 @@ class SupabaseClient:
 
     def insert(self, table: str, payload: dict[str, Any]) -> dict[str, Any]:
         """INSERT a single row; returns the created record."""
-        resp = requests.post(
+        resp = self.session.post(
             f"{self.url}/rest/v1/{table}",
             headers=self._headers(),
             json=payload,
@@ -66,7 +87,7 @@ class SupabaseClient:
         query: dict[str, str] = {"select": columns, "limit": str(limit)}
         if params:
             query.update(params)
-        resp = requests.get(
+        resp = self.session.get(
             f"{self.url}/rest/v1/{table}",
             headers=self._headers(prefer=""),
             params=query,
@@ -80,7 +101,7 @@ class SupabaseClient:
 
     def rpc(self, name: str, payload: dict[str, Any]) -> list[dict[str, Any]] | dict[str, Any]:
         """Call a Supabase PostgREST RPC."""
-        resp = requests.post(
+        resp = self.session.post(
             f"{self.url}/rest/v1/rpc/{name}",
             headers=self._headers(prefer=""),
             json=payload,
@@ -94,7 +115,7 @@ class SupabaseClient:
 
     def update(self, table: str, record_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """PATCH a single row by primary key."""
-        resp = requests.patch(
+        resp = self.session.patch(
             f"{self.url}/rest/v1/{table}",
             headers=self._headers(),
             json=payload,
@@ -116,7 +137,7 @@ class SupabaseClient:
     ) -> dict[str, Any]:
         """INSERT … ON CONFLICT via PostgREST ``Prefer: resolution=merge-duplicates``."""
         headers = self._headers(prefer="return=representation,resolution=merge-duplicates")
-        resp = requests.post(
+        resp = self.session.post(
             f"{self.url}/rest/v1/{table}",
             headers=headers,
             json=payload,
@@ -141,7 +162,7 @@ class SupabaseClient:
         Example: ``supa.update_where("crm_accounts", {"nowcerts_id": "nc-1"},
                                      filters={"espocrm_id": "eq.espo-1"})``
         """
-        resp = requests.patch(
+        resp = self.session.patch(
             f"{self.url}/rest/v1/{table}",
             headers=self._headers(),
             json=payload,
@@ -156,7 +177,7 @@ class SupabaseClient:
 
     def delete(self, table: str, record_id: str) -> None:
         """DELETE a single row by primary key."""
-        resp = requests.delete(
+        resp = self.session.delete(
             f"{self.url}/rest/v1/{table}",
             headers=self._headers(prefer=""),
             params={"id": f"eq.{record_id}"},
