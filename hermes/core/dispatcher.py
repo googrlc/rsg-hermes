@@ -201,8 +201,8 @@ class Dispatcher:
         client: "EspoClient",
         line: str,
         *,
-        confirmed: bool = False,
         _allow_intent: bool = True,
+        confirmed: bool = False,
     ) -> DispatchResult:
         text = line.strip()
         if not text:
