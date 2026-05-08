@@ -383,6 +383,8 @@
 
       const repoConfig = {
         proxyFunctionUrl: "https://PROJECT.supabase.co/functions/v1/hermes-crm-proxy",
+        supabaseAnonKey: "",
+        webhookUrl: "",
         authHeaderName: "Authorization",
         authHeaderValue: "",
         duplicateCheckUrl: "",
@@ -395,8 +397,8 @@
         operation: "upsert",
         transportMode: "proxy",
         proxyFunctionUrl: repoConfig.proxyFunctionUrl,
-        supabaseAnonKey: "",
-        webhookUrl: "",
+        supabaseAnonKey: repoConfig.supabaseAnonKey,
+        webhookUrl: repoConfig.webhookUrl,
         authHeaderName: repoConfig.authHeaderName,
         authHeaderValue: repoConfig.authHeaderValue,
         duplicateCheckUrl: repoConfig.duplicateCheckUrl,
@@ -816,7 +818,13 @@
           else if (k === "objectType") state[k] = "contact";
           else if (k === "operation") state[k] = "upsert";
           else if (k === "transportMode") state[k] = "proxy";
+          else if (k === "proxyFunctionUrl") state[k] = repoConfig.proxyFunctionUrl;
+          else if (k === "supabaseAnonKey") state[k] = repoConfig.supabaseAnonKey;
+          else if (k === "webhookUrl") state[k] = repoConfig.webhookUrl;
           else if (k === "authHeaderName") state[k] = "Authorization";
+          else if (k === "authHeaderValue") state[k] = repoConfig.authHeaderValue;
+          else if (k === "duplicateCheckUrl") state[k] = repoConfig.duplicateCheckUrl;
+          else if (k === "slackWebhookUrl") state[k] = repoConfig.slackWebhookUrl;
           else if (k === "taskPriority") state[k] = "normal";
           else if (k === "taskStatus") state[k] = "Not Started";
           else if (k === "opportunityStage") state[k] = "Prospecting";
