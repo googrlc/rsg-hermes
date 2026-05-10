@@ -6,7 +6,7 @@ import argparse
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, Literal
 
 import uvicorn
 from dotenv import load_dotenv
@@ -94,12 +94,23 @@ class CRMWriteDispatchRequest(BaseModel):
     priority: int = 1
 
 
-class AIEnrichmentDispatchRequest(BaseModel):
-    task_type: str
+OpenClawTaskType = Literal["appetite-analyzer", "retention-risk-scout", "crm-manager"]
+
+
+class OpenClawEnqueueRequest(BaseModel):
+    """Hermes → OpenClaw Manager contract (service-role inserts only from this API)."""
+
+    task_type: OpenClawTaskType
     payload: dict[str, Any]
-    requested_by: str = "dashboard"
+    requested_by: str = "hermes"
     priority: int = 5
     notify_slack: bool = False
+
+
+class AIEnrichmentDispatchRequest(OpenClawEnqueueRequest):
+    """Alias for dashboard dispatch payloads that target openclaw_task_queue."""
+
+    pass
 
 
 class DispatchRequest(BaseModel):
@@ -122,6 +133,35 @@ class AsyncAcceptedResponse(BaseModel):
     task_id: str
     queue_name: str
     status: str
+
+
+def _accept_openclaw_enqueue(body: OpenClawEnqueueRequest) -> JSONResponse:
+    """Queue one OpenClaw task; Hermes is a pure producer (insert + 202)."""
+    from hermes.integrations.openclaw_producer import enqueue_openclaw_task
+
+    try:
+        row = enqueue_openclaw_task(
+            _get_supa(),
+            task_type=body.task_type,
+            payload=body.payload,
+            requested_by=body.requested_by,
+            priority=body.priority,
+            notify_slack=body.notify_slack,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse(
+        status_code=202,
+        content=_model_dict(
+            AsyncAcceptedResponse(
+                ok=True,
+                message="Task queued for OpenClaw (openclaw_task_queue).",
+                task_id=str(row.get("id")),
+                queue_name="openclaw_task_queue",
+                status="PENDING",
+            )
+        ),
+    )
 
 
 @app.get("/health")
@@ -183,29 +223,7 @@ async def dashboard_dispatch(req: DispatchRequest):
         )
 
     if req.ai_enrichment is not None:
-        from hermes.operations.openclaw_task_worker import enqueue_openclaw_task
-
-        try:
-            row = enqueue_openclaw_task(
-                _get_supa(),
-                task_type=req.ai_enrichment.task_type,
-                payload=req.ai_enrichment.payload,
-                requested_by=req.ai_enrichment.requested_by,
-                priority=req.ai_enrichment.priority,
-                notify_slack=req.ai_enrichment.notify_slack,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return JSONResponse(
-            status_code=202,
-            content=_model_dict(AsyncAcceptedResponse(
-                ok=True,
-                message="AI enrichment task queued for OpenClaw worker.",
-                task_id=str(row.get("id")),
-                queue_name="openclaw_task_queue",
-                status="PENDING",
-            )),
-        )
+        return _accept_openclaw_enqueue(req.ai_enrichment)
 
     if req.command and req.command.strip():
         # Backward compatible command execution for clients that still send command-only payloads.
@@ -221,6 +239,12 @@ async def dashboard_dispatch(req: DispatchRequest):
             )),
         )
     raise HTTPException(status_code=400, detail="Provide either crm_write, ai_enrichment, or command.")
+
+
+@app.post("/api/hermes/openclaw/enqueue")
+async def openclaw_enqueue(req: OpenClawEnqueueRequest):
+    """Dedicated OpenClaw producer endpoint (same contract as ai_enrichment on /api/hermes/dispatch)."""
+    return _accept_openclaw_enqueue(req)
 
 
 @app.get("/api/hermes/sync-health")

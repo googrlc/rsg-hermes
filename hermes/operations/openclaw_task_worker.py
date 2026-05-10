@@ -7,6 +7,7 @@ import os
 import time
 from typing import Any
 
+from hermes.integrations.openclaw_producer import enqueue_openclaw_task as producer_enqueue_openclaw_task
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
@@ -20,26 +21,18 @@ def enqueue_openclaw_task(
     *,
     task_type: str,
     payload: dict[str, Any],
-    requested_by: str,
+    requested_by: str = "hermes",
     priority: int = 5,
     notify_slack: bool = False,
 ) -> dict[str, Any]:
-    """Insert a new async enrichment task for OpenClaw processing."""
-    if not task_type.strip():
-        raise ValueError("task_type is required")
-    if priority < 1:
-        raise ValueError("priority must be >= 1")
-    return supa.insert(
-        "openclaw_task_queue",
-        {
-            "task_type": task_type.strip(),
-            "payload": payload,
-            "status": "PENDING",
-            "priority": priority,
-            "attempt_count": 0,
-            "requested_by": requested_by,
-            "notify_slack": bool(notify_slack),
-        },
+    """Queue a task for OpenClaw (validated contract + retrying insert)."""
+    return producer_enqueue_openclaw_task(
+        supa,
+        task_type=task_type,
+        payload=payload,
+        requested_by=requested_by,
+        priority=priority,
+        notify_slack=notify_slack,
     )
 
 

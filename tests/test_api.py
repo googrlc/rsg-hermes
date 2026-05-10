@@ -75,7 +75,8 @@ class TestDispatch:
 
     def test_missing_command(self, client) -> None:
         resp = client.post("/dispatch", json={})
-        assert resp.status_code == 422
+        # DispatchRequest allows optional fields; empty body is rejected as empty command.
+        assert resp.status_code == 400
 
     @patch("hermes.api._get_dispatcher")
     @patch("hermes.api._get_espo")
@@ -122,8 +123,15 @@ class TestDashboardDispatch:
             "/api/hermes/dispatch",
             json={
                 "ai_enrichment": {
-                    "task_type": "risk_scoring",
-                    "payload": {"account_id": "acc-1"},
+                    "task_type": "crm-manager",
+                    "payload": {
+                        "client_id": "test-client-003",
+                        "renewal_id": "test-renewal-003",
+                        "naics_code": "236220",
+                        "sic_code": "1542",
+                        "industry": "Commercial Construction",
+                        "state": "GA",
+                    },
                     "requested_by": "dashboard",
                     "priority": 2,
                     "notify_slack": True,
@@ -157,6 +165,42 @@ class TestDashboardDispatch:
         assert data["openclaw_task_queue"]["processing"] == 1
         assert data["latest_sync_run"]["id"] == "run-1"
 
+    @patch("hermes.api._get_supa")
+    def test_openclaw_enqueue_route(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        mock_get_supa.return_value = supa
+        supa.insert.return_value = {"id": "oc-direct-1"}
+
+        resp = client.post(
+            "/api/hermes/openclaw/enqueue",
+            json={
+                "task_type": "appetite-analyzer",
+                "payload": {
+                    "naics_code": "236220",
+                    "sic_code": "1542",
+                    "industry": "Commercial Construction",
+                    "state": "GA",
+                },
+                "priority": 1,
+            },
+        )
+        assert resp.status_code == 202
+        assert resp.json()["task_id"] == "oc-direct-1"
+
+    @patch("hermes.api._get_supa")
+    def test_openclaw_enqueue_rejects_invalid_payload(self, mock_get_supa, client) -> None:
+        mock_get_supa.return_value = MagicMock()
+
+        resp = client.post(
+            "/api/hermes/openclaw/enqueue",
+            json={
+                "task_type": "crm-manager",
+                "payload": {},
+                "priority": 1,
+            },
+        )
+        assert resp.status_code == 400
+
 
 def test_requires_confirmation_for_write_like_commands() -> None:
     from hermes.api import requires_confirmation
@@ -182,3 +226,4 @@ def test_openapi_schema_advertises_command_endpoint() -> None:
     schema = openapi_schema()
     assert schema["openapi"].startswith("3.")
     assert "/command" in schema["paths"]
+    assert "/api/hermes/openclaw/enqueue" in schema["paths"]

@@ -8,6 +8,7 @@ __pycache__/
 # Dependencies
 .venv/
 .venv-ci/
+.venv-tmp-openclaw/
 venv/
 node_modules/
 
