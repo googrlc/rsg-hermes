@@ -24,3 +24,26 @@ services:
     ports:
       - "8788:8787"
     command: ["hermes-api", "--host", "0.0.0.0", "--port", "8787"]
+  hermes-crm-queue-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rsg-hermes-crm-queue-worker
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    command: ["hermes", "--run-crm-queue-worker", "--crm-queue-poll-seconds", "5"]
+  hermes-openclaw-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rsg-hermes-openclaw-worker
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    command: ["hermes", "--run-openclaw-worker", "--openclaw-poll-seconds", "5"]
