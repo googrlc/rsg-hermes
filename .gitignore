@@ -7,8 +7,12 @@ __pycache__/
 
 # Dependencies
 .venv/
+.venv-ci/
 venv/
 node_modules/
+
+# OS / tooling noise
+.DS_Store
 
 # Logs and temp files
 *.log
