@@ -9,12 +9,14 @@ Supabase is the golden record hub. Three flows:
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes.operations.renewal_tracker import upsert_renewal
 from hermes.sync.field_mapper import (
     map_account_to_golden,
     map_account_to_insured,
@@ -87,6 +89,12 @@ def run_crm_to_hub(
 
         for account in accounts:
             try:
+                espo_id = str(account.get("id") or "").strip()
+                if espo_id:
+                    _stage_inbound_espo(
+                        supa, result.run_id, "Account", espo_id, account, dry_run=dry_run,
+                    )
+
                 golden_row = map_account_to_golden(account)
                 espo_id = golden_row["espocrm_id"]
                 if not espo_id:
@@ -96,12 +104,35 @@ def run_crm_to_hub(
                     _upsert_golden_account(supa, golden_row)
 
                 result.accounts_mirrored += 1
-                _audit(supa, result.run_id, "Account", espo_id, "mirror", "success", dry_run=dry_run)
+                _audit(
+                    supa,
+                    result.run_id,
+                    workflow_name="crm_to_hub",
+                    source_system="espocrm",
+                    destination_system="supabase",
+                    object_type="Account",
+                    object_id=espo_id,
+                    action="mirror",
+                    status="success",
+                    dry_run=dry_run,
+                )
 
             except (SupabaseClientError, Exception) as exc:
                 result.records_failed += 1
                 result.errors.append(f"Account {account.get('id','?')}: {exc}")
-                _audit(supa, result.run_id, "Account", account.get("id", ""), "mirror", "failed", str(exc), dry_run=dry_run)
+                _audit(
+                    supa,
+                    result.run_id,
+                    workflow_name="crm_to_hub",
+                    source_system="espocrm",
+                    destination_system="supabase",
+                    object_type="Account",
+                    object_id=str(account.get("id", "")),
+                    action="mirror",
+                    status="failed",
+                    error=str(exc),
+                    dry_run=dry_run,
+                )
 
         # ── Mirror Policies (commission data) ─────────────────────────
         policies = _fetch_modified_policies(espo, cutoff)
@@ -109,6 +140,12 @@ def run_crm_to_hub(
 
         for policy in policies:
             try:
+                pol_id = str(policy.get("id") or "").strip()
+                if pol_id:
+                    _stage_inbound_espo(
+                        supa, result.run_id, "Policy", pol_id, policy, dry_run=dry_run,
+                    )
+
                 account_id = _resolve_golden_account_id(supa, policy, dry_run)
                 commission_row = map_policy_to_commission(policy, account_id)
                 if not commission_row.get("policy_number"):
@@ -116,6 +153,7 @@ def run_crm_to_hub(
 
                 if not dry_run:
                     _upsert_golden_commission(supa, commission_row)
+                    _maybe_upsert_renewal_watchlist(supa, policy, dry_run=dry_run)
 
                 result.commissions_mirrored += 1
             except (SupabaseClientError, Exception) as exc:
@@ -170,12 +208,35 @@ def run_hub_to_nowcerts(
                         _link_nowcerts_id(supa, account["espocrm_id"], str(nc_id))
 
                 result.accounts_pushed += 1
-                _audit(supa, result.run_id, "Insured", account.get("espocrm_id", ""), "push", "success", dry_run=dry_run)
+                _audit(
+                    supa,
+                    result.run_id,
+                    workflow_name="hub_to_nowcerts",
+                    source_system="supabase",
+                    destination_system="nowcerts",
+                    object_type="Insured",
+                    object_id=str(account.get("espocrm_id", "")),
+                    action="push",
+                    status="success",
+                    dry_run=dry_run,
+                )
 
             except (NowCertsClientError, Exception) as exc:
                 result.records_failed += 1
                 result.errors.append(f"Push account {account.get('espocrm_id','?')}: {exc}")
-                _audit(supa, result.run_id, "Insured", account.get("espocrm_id", ""), "push", "failed", str(exc), dry_run=dry_run)
+                _audit(
+                    supa,
+                    result.run_id,
+                    workflow_name="hub_to_nowcerts",
+                    source_system="supabase",
+                    destination_system="nowcerts",
+                    object_type="Insured",
+                    object_id=str(account.get("espocrm_id", "")),
+                    action="push",
+                    status="failed",
+                    error=str(exc),
+                    dry_run=dry_run,
+                )
 
         # ── Push commissions for linked accounts ─────────────────────
         unpushed_commissions = _fetch_unpushed_commissions(supa)
@@ -265,6 +326,72 @@ def run_bidirectional(
 
 
 # ---------------------------------------------------------------------------
+# Inbound staging + renewal watchlist (CRM → hub contract)
+# ---------------------------------------------------------------------------
+
+def _stage_inbound_espo(
+    supa: SupabaseClient,
+    run_id: str,
+    object_type: str,
+    object_id: str,
+    payload: dict[str, Any],
+    *,
+    dry_run: bool,
+) -> None:
+    """Snapshot raw Espo payloads into inbound_sync_staging for the run."""
+    if dry_run or not run_id or not object_id:
+        return
+    try:
+        supa.upsert(
+            "inbound_sync_staging",
+            {
+                "run_id": run_id,
+                "source_system": "espocrm",
+                "source_object_type": object_type,
+                "source_object_id": object_id,
+                "raw_payload": payload,
+                "processing_status": "mapped",
+                "payload_hash": payload_hash(payload),
+            },
+            on_conflict="run_id,source_system,source_object_type,source_object_id",
+        )
+    except SupabaseClientError:
+        log.debug("Staging skipped for %s %s", object_type, object_id)
+
+
+def _maybe_upsert_renewal_watchlist(
+    supa: SupabaseClient,
+    policy: dict[str, Any],
+    *,
+    dry_run: bool,
+) -> None:
+    """Drive project_85_renewals from Espo Policy rows when enough fields exist."""
+    if dry_run:
+        return
+    commission_row = map_policy_to_commission(policy, None)
+    policy_number = commission_row.get("policy_number")
+    expiration_date = commission_row.get("expiration_date")
+    if not policy_number or not expiration_date:
+        return
+    client_name = (
+        policy.get("accountName")
+        or policy.get("account_name")
+        or "Unknown client"
+    )
+    premium = commission_row.get("premium")
+    try:
+        upsert_renewal(
+            supa,
+            policy_number=str(policy_number),
+            client_name=str(client_name),
+            expiration_date=str(expiration_date),
+            premium_current=float(premium) if premium is not None else None,
+        )
+    except (SupabaseClientError, ValueError) as exc:
+        log.debug("project_85_renewals upsert skipped for %s: %s", policy_number, exc)
+
+
+# ---------------------------------------------------------------------------
 # EspoCRM query helpers
 # ---------------------------------------------------------------------------
 
@@ -344,12 +471,20 @@ def _upsert_golden_commission(supa: SupabaseClient, row: dict[str, Any]) -> None
     supa.insert("crm_commissions", row)
 
 
+def _hub_push_account_limit() -> int:
+    """Cap Hub→NowCerts account batch (default 200). Set HERMES_HUB_TO_NOWCERTS_ACCOUNT_LIMIT for tests."""
+    raw = os.environ.get("HERMES_HUB_TO_NOWCERTS_ACCOUNT_LIMIT", "").strip()
+    if raw.isdigit():
+        return max(1, min(int(raw), 500))
+    return 200
+
+
 def _fetch_unlinked_accounts(supa: SupabaseClient) -> list[dict[str, Any]]:
     """Fetch golden accounts that have no NowCerts link."""
     return supa.select(
         "crm_accounts",
         params={"nowcerts_id": "is.null", "source_system": "eq.espocrm"},
-        limit=200,
+        limit=_hub_push_account_limit(),
     )
 
 
@@ -459,21 +594,29 @@ def _finish_run(supa: SupabaseClient, run_id: str, result: BidiSyncResult, dry_r
 def _audit(
     supa: SupabaseClient,
     run_id: str,
+    *,
+    workflow_name: str,
+    source_system: str,
+    destination_system: str,
     object_type: str,
     object_id: str,
     action: str,
     status: str,
     error: str | None = None,
-    *,
     dry_run: bool = False,
 ) -> None:
     if dry_run or not run_id:
         return
+    oid = (object_id or "").strip() or "unknown"
     try:
         row: dict[str, Any] = {
+            "workflow_name": workflow_name,
             "run_id": run_id,
             "object_type": object_type,
-            "source_object_id": object_id,
+            "object_id": oid,
+            "source_system": source_system,
+            "destination_system": destination_system,
+            "source_object_id": oid,
             "action": _ACTION_MAP.get(action, action),
             "status": status,
         }

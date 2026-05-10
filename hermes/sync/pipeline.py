@@ -27,6 +27,9 @@ from hermes.sync.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
+# Matches sync_runs.workflow_name for this pipeline (live sync_audit_log requires workflow_name).
+WORKFLOW_INSURED_TO_ACCOUNT = "insured_to_account"
+
 
 @dataclass
 class SyncRunResult:
@@ -173,6 +176,7 @@ def run_insured_to_account_sync(
                     result.records_created += 1
                 _log_audit(
                     supa,
+                    workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
                     run_id=run_id,
                     object_type="Account",
                     source_id=source_id,
@@ -536,6 +540,7 @@ def _process_outbound_queue(
             # Audit failure
             _log_audit(
                 supa,
+                workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
                 run_id=run_id,
                 object_type=object_type,
                 source_id=payload.get("momentumClientId", ""),
@@ -594,6 +599,7 @@ def _process_outbound_queue(
                 pass
         _log_audit(
             supa,
+            workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
             run_id=run_id,
             object_type=item["object_type"],
             source_id=item["payload"].get("momentumClientId", ""),
@@ -655,21 +661,30 @@ def _update_queue_status(
 def _log_audit(
     supa: SupabaseClient,
     *,
+    workflow_name: str,
     run_id: str,
     object_type: str,
     source_id: str | None,
     dest_id: str | None,
     action: str,
     status: str,
+    source_system: str = "nowcerts",
+    destination_system: str = "espocrm",
     before_snapshot: dict[str, Any] | None = None,
     after_snapshot: dict[str, Any] | None = None,
     payload_hash: str | None = None,
     message: str | None = None,
 ) -> None:
+    """Write sync_audit_log; columns align with live Supabase (NOT NULL workflow_name, object_id, systems)."""
     try:
+        object_id = (dest_id or source_id or "").strip() or "unknown"
         row: dict[str, Any] = {
+            "workflow_name": workflow_name,
             "run_id": run_id,
             "object_type": object_type,
+            "object_id": object_id,
+            "source_system": source_system,
+            "destination_system": destination_system,
             "source_object_id": source_id,
             "dest_object_id": dest_id,
             "action": action,
@@ -699,23 +714,29 @@ def _log_error(
     error_message: str,
     error_code: str | None = None,
     error_detail: dict[str, Any] | None = None,
+    workflow_name: str = WORKFLOW_INSURED_TO_ACCOUNT,
+    source_system: str = "nowcerts",
+    destination_system: str = "espocrm",
 ) -> None:
+    """Write sync_errors; columns align with live Supabase (NOT NULL workflow_name, object_id, error_type)."""
     try:
+        object_id = (source_id or queue_id or "").strip() or "unknown"
+        payload: dict[str, Any] = dict(error_detail) if error_detail else {}
+        if staging_id:
+            payload["staging_id"] = staging_id
+        if queue_id:
+            payload["queue_id"] = queue_id
         row: dict[str, Any] = {
+            "workflow_name": workflow_name,
             "run_id": run_id,
             "object_type": object_type,
-            "source_object_id": source_id,
+            "object_id": object_id,
+            "source_system": source_system,
+            "destination_system": destination_system,
+            "error_type": (error_code or "sync_pipeline")[:100],
             "error_message": error_message[:2000],
-            "retryable": True,
+            "payload": payload or None,
         }
-        if staging_id:
-            row["staging_id"] = staging_id
-        if queue_id:
-            row["queue_id"] = queue_id
-        if error_code:
-            row["error_code"] = error_code
-        if error_detail:
-            row["error_detail"] = error_detail
         supa.insert("sync_errors", row)
     except SupabaseClientError:
         log.exception("Failed to write sync error")
