@@ -260,6 +260,28 @@ def main() -> int:
         help="Preview CRM queue processing without writing to EspoCRM",
     )
     parser.add_argument(
+        "--run-crm-queue-worker",
+        action="store_true",
+        help="Continuously poll crm_write_queue every N seconds (systemd worker mode)",
+    )
+    parser.add_argument(
+        "--crm-queue-poll-seconds",
+        type=float,
+        default=5.0,
+        help="Poll interval for --run-crm-queue-worker (default: 5s)",
+    )
+    parser.add_argument(
+        "--run-openclaw-worker",
+        action="store_true",
+        help="Continuously poll openclaw_task_queue every N seconds (systemd worker mode)",
+    )
+    parser.add_argument(
+        "--openclaw-poll-seconds",
+        type=float,
+        default=5.0,
+        help="Poll interval for --run-openclaw-worker (default: 5s)",
+    )
+    parser.add_argument(
         "--snapshot-kpis",
         action="store_true",
         help="Record system health, finance, and renewal KPI snapshots",
@@ -544,6 +566,39 @@ def main() -> int:
             for err in result.errors:
                 print(f"- {err}")
         return 0 if result.ok else 1
+
+    if args.run_crm_queue_worker:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.operations.crm_queue_worker import run_worker_loop
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        print(f"Starting CRM queue worker loop every {args.crm_queue_poll_seconds}s...")
+        run_worker_loop(
+            supa,
+            client,
+            poll_seconds=args.crm_queue_poll_seconds,
+        )
+        return 0
+
+    if args.run_openclaw_worker:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.operations.openclaw_task_worker import run_openclaw_worker_loop
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        print(f"Starting OpenClaw worker loop every {args.openclaw_poll_seconds}s...")
+        run_openclaw_worker_loop(
+            supa,
+            poll_seconds=args.openclaw_poll_seconds,
+        )
+        return 0
 
     if args.commission_reconcile_file:
         from hermes.jobs import commission_reconciliation

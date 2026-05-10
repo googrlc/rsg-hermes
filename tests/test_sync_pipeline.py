@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from hermes.sync.pipeline import (
     SyncRunResult,
+    _derive_queue_action_type,
     _resolve_mapping,
     _stage_record,
     run_insured_to_account_sync,
@@ -127,10 +128,14 @@ class DryRunPipelineTests(unittest.TestCase):
 
 
 class QueuedPipelineTests(unittest.TestCase):
-    def test_creates_new_account_via_queue(self) -> None:
+    @patch("hermes.sync.pipeline.process_queue")
+    @patch("hermes.sync.pipeline.enqueue_crm_write")
+    def test_creates_new_account_via_queue(self, enqueue_mock: MagicMock, process_mock: MagicMock) -> None:
         nc = _mock_nc(insureds=[_sample_insured()])
         espo = _mock_espo()
         supa = _mock_supa()
+        enqueue_mock.return_value = {"id": "crm-q-1"}
+        process_mock.return_value = MagicMock(failed=0, errors=[])
 
         # select calls: mapping lookup returns empty, queue lookup returns our item
         queue_item = {
@@ -150,7 +155,9 @@ class QueuedPipelineTests(unittest.TestCase):
         result = run_insured_to_account_sync(nc, espo, supa, dry_run=False)
         self.assertEqual(result.records_processed, 1)
         self.assertEqual(result.records_created, 1)
-        espo.create.assert_called_once()
+        espo.create.assert_not_called()
+        enqueue_mock.assert_called_once()
+        process_mock.assert_called_once()
 
     def test_skips_record_without_database_id(self) -> None:
         nc = _mock_nc(insureds=[{"commercialName": "No ID Corp"}])
@@ -161,13 +168,17 @@ class QueuedPipelineTests(unittest.TestCase):
         self.assertEqual(result.records_skipped, 1)
         self.assertEqual(result.records_created, 0)
 
-    def test_handles_espo_create_failure(self) -> None:
-        from hermes.core.client import EspoClientError
-
+    @patch("hermes.sync.pipeline.process_queue")
+    @patch("hermes.sync.pipeline.enqueue_crm_write")
+    def test_handles_espo_create_failure(self, enqueue_mock: MagicMock, process_mock: MagicMock) -> None:
         nc = _mock_nc(insureds=[_sample_insured()])
         espo = _mock_espo()
-        espo.create.side_effect = EspoClientError("422 rejected")
         supa = _mock_supa()
+        enqueue_mock.return_value = {"id": "crm-q-1"}
+        process_mock.return_value = MagicMock(
+            failed=1,
+            errors=["crm-q-1: 422 rejected"],
+        )
 
         queue_item = {
             "id": "q-1",
@@ -230,6 +241,48 @@ class ResolveMappingTests(unittest.TestCase):
             nc_record=_sample_insured(), run_id="run-1",
         )
         self.assertEqual(result["espocrm_id"], "espo-dedup-match")
+
+
+class QueueActionTypeDerivationTests(unittest.TestCase):
+    def test_create_renewal_maps_to_first_class_action(self) -> None:
+        action_type = _derive_queue_action_type(
+            object_type="Renewal",
+            action="create",
+            payload={"client_name": "Smith Auto"},
+        )
+        self.assertEqual(action_type, "create_renewal")
+
+    def test_update_status_maps_when_status_key_present(self) -> None:
+        action_type = _derive_queue_action_type(
+            object_type="Task",
+            action="update",
+            payload={"status": "Completed"},
+        )
+        self.assertEqual(action_type, "update_status")
+
+    def test_update_note_maps_when_note_key_present(self) -> None:
+        action_type = _derive_queue_action_type(
+            object_type="Account",
+            action="update",
+            payload={"notes": "Client requested callback"},
+        )
+        self.assertEqual(action_type, "create_note")
+
+    def test_request_docs_maps_when_doc_request_keys_present(self) -> None:
+        action_type = _derive_queue_action_type(
+            object_type="Renewal",
+            action="update",
+            payload={"requested_documents": ["loss_runs"], "urgency": "30_day_window"},
+        )
+        self.assertEqual(action_type, "request_docs")
+
+    def test_unknown_patterns_fall_back_to_legacy_write(self) -> None:
+        action_type = _derive_queue_action_type(
+            object_type="Account",
+            action="update",
+            payload={"phoneNumber": "4045551212"},
+        )
+        self.assertEqual(action_type, "legacy_write")
 
 
 if __name__ == "__main__":

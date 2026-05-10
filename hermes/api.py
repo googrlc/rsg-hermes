@@ -12,9 +12,16 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
+
+def _model_dict(model: BaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()  # type: ignore[no-any-return]
+
 
 _WRITE_HINT = re.compile(
     r"^\s*(?:add|create|update|merge|move\s+opportunit(?:y|ie)|intake|new\s+lead|log\s+lead|met|talked|spoke|just\s+met)\b"
@@ -48,6 +55,7 @@ app.add_middleware(
 
 _espo = None
 _dispatcher = None
+_supa = None
 
 
 def _get_espo():
@@ -69,9 +77,36 @@ def _get_dispatcher():
     return _dispatcher
 
 
+def _get_supa():
+    global _supa
+    if _supa is None:
+        from hermes.integrations.supabase_client import SupabaseClient
+
+        _supa = SupabaseClient()
+    return _supa
+
+
+class CRMWriteDispatchRequest(BaseModel):
+    entity_type: str
+    entity_id: str | None = None
+    payload: dict[str, Any]
+    created_by_role: str = "dashboard"
+    priority: int = 1
+
+
+class AIEnrichmentDispatchRequest(BaseModel):
+    task_type: str
+    payload: dict[str, Any]
+    requested_by: str = "dashboard"
+    priority: int = 5
+    notify_slack: bool = False
+
+
 class DispatchRequest(BaseModel):
-    command: str
+    command: str | None = None
     confirm: bool = False
+    crm_write: CRMWriteDispatchRequest | None = None
+    ai_enrichment: AIEnrichmentDispatchRequest | None = None
 
 
 class DispatchResponse(BaseModel):
@@ -81,6 +116,14 @@ class DispatchResponse(BaseModel):
     requires_confirmation: bool = False
 
 
+class AsyncAcceptedResponse(BaseModel):
+    ok: bool
+    message: str
+    task_id: str
+    queue_name: str
+    status: str
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "hermes"}
@@ -88,7 +131,7 @@ async def health():
 
 @app.post("/dispatch", response_model=DispatchResponse)
 async def dispatch(req: DispatchRequest):
-    if not req.command.strip():
+    if not req.command or not req.command.strip():
         raise HTTPException(status_code=400, detail="Empty command.")
     if requires_confirmation(req.command) and not req.confirm:
         return DispatchResponse(
@@ -105,6 +148,115 @@ async def dispatch(req: DispatchRequest):
     except Exception as exc:
         log.exception("Dispatch failed for command: %s", req.command)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/hermes/dispatch", response_model=AsyncAcceptedResponse)
+async def dashboard_dispatch(req: DispatchRequest):
+    """Dashboard async dispatch entrypoint.
+
+    - CRM mutations are queued into crm_write_queue and return HTTP 202.
+    - AI enrichment jobs are queued into openclaw_task_queue and return HTTP 202.
+    """
+    if req.crm_write is not None:
+        from hermes.operations.crm_queue_worker import enqueue_crm_write
+
+        try:
+            row = enqueue_crm_write(
+                _get_supa(),
+                entity_type=req.crm_write.entity_type,
+                entity_id=req.crm_write.entity_id,
+                payload=req.crm_write.payload,
+                created_by_role=req.crm_write.created_by_role,
+                priority=req.crm_write.priority,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return JSONResponse(
+            status_code=202,
+            content=_model_dict(AsyncAcceptedResponse(
+                ok=True,
+                message="CRM write queued for Hermes worker.",
+                task_id=str(row.get("id")),
+                queue_name="crm_write_queue",
+                status="PENDING",
+            )),
+        )
+
+    if req.ai_enrichment is not None:
+        from hermes.operations.openclaw_task_worker import enqueue_openclaw_task
+
+        try:
+            row = enqueue_openclaw_task(
+                _get_supa(),
+                task_type=req.ai_enrichment.task_type,
+                payload=req.ai_enrichment.payload,
+                requested_by=req.ai_enrichment.requested_by,
+                priority=req.ai_enrichment.priority,
+                notify_slack=req.ai_enrichment.notify_slack,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return JSONResponse(
+            status_code=202,
+            content=_model_dict(AsyncAcceptedResponse(
+                ok=True,
+                message="AI enrichment task queued for OpenClaw worker.",
+                task_id=str(row.get("id")),
+                queue_name="openclaw_task_queue",
+                status="PENDING",
+            )),
+        )
+
+    if req.command and req.command.strip():
+        # Backward compatible command execution for clients that still send command-only payloads.
+        result = await dispatch(req)
+        return JSONResponse(
+            status_code=202,
+            content=_model_dict(AsyncAcceptedResponse(
+                ok=result.ok,
+                message=result.message,
+                task_id="inline-command",
+                queue_name="command_dispatch",
+                status="ACCEPTED",
+            )),
+        )
+    raise HTTPException(status_code=400, detail="Provide either crm_write, ai_enrichment, or command.")
+
+
+@app.get("/api/hermes/sync-health")
+async def sync_health():
+    """Queue-centric health snapshot for dashboard SyncHealthCheck component."""
+    supa = _get_supa()
+    crm_pending = supa.select("crm_write_queue", columns="id", params={"status": "eq.PENDING"}, limit=1000)
+    crm_processing = supa.select("crm_write_queue", columns="id", params={"status": "eq.PROCESSING"}, limit=1000)
+    crm_failed = supa.select("crm_write_queue", columns="id", params={"status": "eq.FAILED"}, limit=1000)
+
+    openclaw_pending = supa.select("openclaw_task_queue", columns="id", params={"status": "eq.PENDING"}, limit=1000)
+    openclaw_processing = supa.select("openclaw_task_queue", columns="id", params={"status": "eq.PROCESSING"}, limit=1000)
+    openclaw_failed = supa.select("openclaw_task_queue", columns="id", params={"status": "eq.FAILED"}, limit=1000)
+
+    latest_run = supa.select("sync_runs", params={"order": "created_at.desc"}, limit=1)
+    latest = latest_run[0] if latest_run else {}
+
+    return {
+        "status": "ok",
+        "crm_write_queue": {
+            "pending": len(crm_pending),
+            "processing": len(crm_processing),
+            "failed": len(crm_failed),
+        },
+        "openclaw_task_queue": {
+            "pending": len(openclaw_pending),
+            "processing": len(openclaw_processing),
+            "failed": len(openclaw_failed),
+        },
+        "latest_sync_run": {
+            "id": latest.get("id"),
+            "status": latest.get("status"),
+            "workflow_name": latest.get("workflow_name"),
+            "finished_at": latest.get("finished_at"),
+        },
+    }
 
 
 @app.post("/command", response_model=DispatchResponse)

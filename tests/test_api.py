@@ -17,9 +17,11 @@ def _reset_singletons():
     import hermes.api as api_mod
     api_mod._espo = None
     api_mod._dispatcher = None
+    api_mod._supa = None
     yield
     api_mod._espo = None
     api_mod._dispatcher = None
+    api_mod._supa = None
 
 
 @pytest.fixture
@@ -81,6 +83,79 @@ class TestDispatch:
         mock_dispatcher.return_value.dispatch.side_effect = RuntimeError("boom")
         resp = client.post("/dispatch", json={"command": "ping"})
         assert resp.status_code == 500
+
+
+class TestDashboardDispatch:
+    @patch("hermes.api._get_supa")
+    def test_dashboard_dispatch_queues_crm_write(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        mock_get_supa.return_value = supa
+        supa.insert.return_value = {"id": "crm-q-1"}
+
+        resp = client.post(
+            "/api/hermes/dispatch",
+            json={
+                "crm_write": {
+                    "entity_type": "Task",
+                    "entity_id": "task-1",
+                    "created_by_role": "dashboard",
+                    "priority": 1,
+                    "payload": {
+                        "action_type": "update_status",
+                        "context": {"status": "Completed"},
+                    },
+                }
+            },
+        )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["queue_name"] == "crm_write_queue"
+        assert data["task_id"] == "crm-q-1"
+
+    @patch("hermes.api._get_supa")
+    def test_dashboard_dispatch_queues_openclaw_task(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        mock_get_supa.return_value = supa
+        supa.insert.return_value = {"id": "oc-q-1"}
+
+        resp = client.post(
+            "/api/hermes/dispatch",
+            json={
+                "ai_enrichment": {
+                    "task_type": "risk_scoring",
+                    "payload": {"account_id": "acc-1"},
+                    "requested_by": "dashboard",
+                    "priority": 2,
+                    "notify_slack": True,
+                }
+            },
+        )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["queue_name"] == "openclaw_task_queue"
+        assert data["task_id"] == "oc-q-1"
+
+    @patch("hermes.api._get_supa")
+    def test_sync_health_payload(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        mock_get_supa.return_value = supa
+        supa.select.side_effect = [
+            [{"id": "1"}],  # crm pending
+            [],  # crm processing
+            [{"id": "2"}, {"id": "3"}],  # crm failed
+            [],  # openclaw pending
+            [{"id": "4"}],  # openclaw processing
+            [],  # openclaw failed
+            [{"id": "run-1", "status": "success", "workflow_name": "insured_to_account", "finished_at": "2026-01-01T00:00:00Z"}],
+        ]
+
+        resp = client.get("/api/hermes/sync-health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["crm_write_queue"]["pending"] == 1
+        assert data["crm_write_queue"]["failed"] == 2
+        assert data["openclaw_task_queue"]["processing"] == 1
+        assert data["latest_sync_run"]["id"] == "run-1"
 
 
 def test_requires_confirmation_for_write_like_commands() -> None:

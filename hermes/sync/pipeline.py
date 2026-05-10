@@ -15,6 +15,7 @@ from typing import Any
 
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes.operations.crm_queue_worker import enqueue_crm_write, process_queue
 from hermes.sync.field_mapper import (
     INSURED_DEDUP_SOURCE,
     INSURED_DEDUP_TARGET,
@@ -453,7 +454,7 @@ def _process_outbound_queue(
     run_id: str,
     result: SyncRunResult,
 ) -> None:
-    """Dequeue outbound items for this run and apply to EspoCRM."""
+    """Dequeue outbound items and route all EspoCRM writes via crm_write_queue."""
     queued = supa.select(
         "outbound_sync_queue",
         params={
@@ -465,6 +466,10 @@ def _process_outbound_queue(
     )
     log.info("Processing %d outbound queue items for run %s", len(queued), run_id)
 
+    if not queued:
+        return
+
+    enqueued_items: list[dict[str, Any]] = []
     for item in queued:
         queue_id = item["id"]
         object_type = item["object_type"]
@@ -478,54 +483,42 @@ def _process_outbound_queue(
         _update_queue_status(supa, queue_id, "processing", attempt_count=attempt)
 
         try:
-            if action == "update" and object_id:
-                crm_response = espo.update(object_type, object_id, payload)
-                result.records_updated += 1
-            elif action == "create":
-                crm_response = espo.create(object_type, payload)
-                result.records_created += 1
-                # Update mapping with new EspoCRM ID
-                new_id = crm_response.get("id") if isinstance(crm_response, dict) else None
-                if new_id and mapping_id:
-                    try:
-                        supa.update("sync_mappings", mapping_id, {
-                            "espocrm_id": new_id,
-                            "last_synced_at": datetime.now(timezone.utc).isoformat(),
-                        })
-                    except SupabaseClientError:
-                        log.exception("Failed to update mapping %s with new Espo ID", mapping_id)
-            else:
+            if action not in {"update", "create"}:
                 result.records_skipped += 1
                 _update_queue_status(supa, queue_id, "completed", attempt_count=attempt)
                 continue
 
-            _update_queue_status(supa, queue_id, "completed", attempt_count=attempt)
-
-            # Update mapping last_synced_at
-            if mapping_id:
-                try:
-                    supa.update("sync_mappings", mapping_id, {"last_synced_at": datetime.now(timezone.utc).isoformat()})
-                except SupabaseClientError:
-                    pass
-
-            # Audit success
-            dest_id = object_id
-            if not dest_id and isinstance(crm_response, dict):
-                dest_id = crm_response.get("id")
-            _log_audit(
+            crm_queue_row = enqueue_crm_write(
                 supa,
-                run_id=run_id,
-                object_type=object_type,
-                source_id=payload.get("momentumClientId", ""),
-                dest_id=dest_id,
-                action=action,
-                status="success",
-                after_snapshot=crm_response if isinstance(crm_response, dict) else None,
-                payload_hash=payload_hash(payload),
+                entity_type=object_type,
+                entity_id=object_id,
+                payload={
+                    "action_type": _derive_queue_action_type(
+                        object_type=object_type,
+                        action=action,
+                        payload=payload,
+                    ),
+                    "intent": action,
+                    "context": payload,
+                },
+                created_by_role="sync_pipeline",
+                priority=1,
+            )
+            enqueued_items.append(
+                {
+                    "outbound_queue_id": queue_id,
+                    "crm_queue_id": crm_queue_row.get("id"),
+                    "object_type": object_type,
+                    "object_id": object_id,
+                    "action": action,
+                    "payload": payload,
+                    "mapping_id": mapping_id,
+                    "attempt": attempt,
+                }
             )
 
-        except EspoClientError as exc:
-            log.warning("Outbound %s failed for queue %s: %s", action, queue_id, exc)
+        except (EspoClientError, SupabaseClientError, ValueError) as exc:
+            log.warning("Outbound enqueue %s failed for queue %s: %s", action, queue_id, exc)
             result.records_failed += 1
             result.errors.append(f"{queue_id}: {exc}")
             _update_queue_status(supa, queue_id, "failed", last_error=str(exc), attempt_count=attempt)
@@ -552,6 +545,95 @@ def _process_outbound_queue(
                 message=str(exc)[:500],
                 payload_hash=payload_hash(payload),
             )
+
+    if not enqueued_items:
+        return
+
+    process_result = process_queue(
+        supa,
+        espo,
+        batch_size=len(enqueued_items),
+        dry_run=False,
+    )
+    if process_result.failed:
+        result.records_failed += process_result.failed
+        result.errors.extend(process_result.errors)
+        for item in enqueued_items:
+            _update_queue_status(
+                supa,
+                item["outbound_queue_id"],
+                "failed",
+                last_error="; ".join(process_result.errors[:3]) if process_result.errors else "crm_write_queue failure",
+                attempt_count=item["attempt"],
+            )
+            _log_error(
+                supa,
+                run_id=run_id,
+                queue_id=item["outbound_queue_id"],
+                object_type=item["object_type"],
+                source_id=item["payload"].get("momentumClientId", ""),
+                error_message="; ".join(process_result.errors[:3]) if process_result.errors else "crm_write_queue processing failed",
+            )
+        return
+
+    for item in enqueued_items:
+        if item["action"] == "create":
+            result.records_created += 1
+        else:
+            result.records_updated += 1
+        _update_queue_status(
+            supa,
+            item["outbound_queue_id"],
+            "completed",
+            attempt_count=item["attempt"],
+        )
+        if item["mapping_id"]:
+            try:
+                supa.update("sync_mappings", item["mapping_id"], {"last_synced_at": datetime.now(timezone.utc).isoformat()})
+            except SupabaseClientError:
+                pass
+        _log_audit(
+            supa,
+            run_id=run_id,
+            object_type=item["object_type"],
+            source_id=item["payload"].get("momentumClientId", ""),
+            dest_id=item["object_id"],
+            action=item["action"],
+            status="success",
+            payload_hash=payload_hash(item["payload"]),
+        )
+
+
+def _derive_queue_action_type(
+    *,
+    object_type: str,
+    action: str,
+    payload: dict[str, Any],
+) -> str:
+    """Infer first-class crm_write_queue action_type from sync object/action patterns."""
+    normalized_action = action.strip().lower()
+    normalized_entity = object_type.strip().lower()
+    payload_keys = {str(key).strip().lower() for key in payload.keys()}
+
+    if normalized_action == "create" and normalized_entity == "renewal":
+        return "create_renewal"
+
+    if normalized_action == "update":
+        if payload_keys & {"status", "state", "stage", "renewalstatus", "taskstatus"}:
+            return "update_status"
+        if payload_keys & {"note", "notes", "comment", "comments", "internalnotes", "description"}:
+            return "create_note"
+        if payload_keys & {
+            "requested_documents",
+            "request_documents",
+            "documents_requested",
+            "document_request",
+            "doc_request",
+            "requested_by",
+            "urgency",
+        }:
+            return "request_docs"
+    return "legacy_write"
 
 
 def _update_queue_status(
