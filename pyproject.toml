@@ -18,6 +18,7 @@ dependencies = [
 hermes = "hermes.main:main"
 hermes-api = "hermes.api:main"
 hermes-mcp = "hermes.mcp_server:main"
+nowcerts-mcp = "hermes.nowcerts_mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=61"]

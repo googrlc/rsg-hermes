@@ -304,3 +304,73 @@ class NowCertsClient:
         """
         log.info("NowCerts: updating policy: %s", payload.get("DatabaseId", "?"))
         return self._patch("/api/Policy/PartialUpdate", payload)
+
+    def search_insureds(self, query: str, *, top: int = 20) -> list[dict[str, Any]]:
+        """Search insureds by commercial name or last name (OData contains filter).
+
+        Args:
+            query: Text to search for.
+            top: Max results to return.
+
+        Returns:
+            List of matching insured dicts.
+        """
+        f = (
+            f"contains(tolower(CommercialName), '{query.lower()}')"
+            f" or contains(tolower(LastName), '{query.lower()}')"
+            f" or contains(tolower(FirstName), '{query.lower()}')"
+        )
+        body = self._get("/api/InsuredDetailList", params={"$filter": f, "$top": str(top)})
+        if isinstance(body, list):
+            return body
+        return body.get("value", body.get("items", []))
+
+    def get_insured(self, database_id: str) -> dict[str, Any]:
+        """Fetch a single insured by DatabaseId.
+
+        Args:
+            database_id: NowCerts insured DatabaseId.
+        """
+        body = self._get(
+            "/api/InsuredDetailList",
+            params={"$filter": f"DatabaseId eq '{database_id}'", "$top": "1"},
+        )
+        records = body if isinstance(body, list) else body.get("value", body.get("items", []))
+        if not records:
+            raise NowCertsClientError(f"Insured not found: {database_id}")
+        return records[0]
+
+    def get_policies_for_insured(self, insured_id: str, *, top: int = 50) -> list[dict[str, Any]]:
+        """Fetch policies belonging to a specific insured.
+
+        Args:
+            insured_id: NowCerts insured DatabaseId.
+            top: Max records to return.
+        """
+        body = self._get(
+            "/api/PolicyDetailList",
+            params={
+                "$filter": f"InsuredDatabaseId eq '{insured_id}'",
+                "$top": str(top),
+                "$orderby": "EffectiveDate desc",
+            },
+        )
+        if isinstance(body, list):
+            return body
+        return body.get("value", body.get("items", []))
+
+    def search_policies(self, query: str, *, top: int = 20) -> list[dict[str, Any]]:
+        """Search policies by policy number or insured name.
+
+        Args:
+            query: Text to search for.
+            top: Max results to return.
+        """
+        f = (
+            f"contains(tolower(Number), '{query.lower()}')"
+            f" or contains(tolower(InsuredName), '{query.lower()}')"
+        )
+        body = self._get("/api/PolicyDetailList", params={"$filter": f, "$top": str(top)})
+        if isinstance(body, list):
+            return body
+        return body.get("value", body.get("items", []))
