@@ -1,0 +1,10 @@
+[build]
+  command   = "jekyll build"
+  publish   = "_site"
+  # Only rebuild when site-relevant files actually change.
+  # git diff --quiet exits 0 (no diff) → Netlify skips; exits 1 (diff) → Netlify builds.
+  ignore    = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- docs/ _config.yml Gemfile Gemfile.lock"
+
+[build.environment]
+  JEKYLL_ENV = "production"
+  RUBY_VERSION = "3.2"
