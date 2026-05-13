@@ -287,7 +287,7 @@ def _write_account_research(client: "EspoClient", research: dict[str, Any], quer
         raise RuntimeError("Could not find or create Account for research result.")
 
     payload: dict[str, Any] = {}
-    website_field = _first_existing(fields, "intel_website", "website", "websiteUrl")
+    website_field = _first_existing(fields, "intelWebsite", "website")
     if website_field and research.get("website_url"):
         payload[website_field] = research["website_url"]
     linkedin_field = _first_existing(fields, "intel_linkedin_url", "linkedin_url")
