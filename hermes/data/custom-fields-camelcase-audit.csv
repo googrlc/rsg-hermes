@@ -141,7 +141,6 @@ Policy,effectiveDate,date,false,false
 Quote,effectiveDate,date,false,false
 Opportunity,emailSequenceStarted,bool,false,false
 Policy,emailSequenceStarted,bool,false,false
-Account,employeeCount,int,false,false
 Commission,estimatedCommission,currency,true,false
 Opportunity,estimatedCommission,currency,false,false
 Account,estimatedPremium,currency,false,false
@@ -354,7 +353,6 @@ Account,nextXDate,date,false,false
 Account,nextXDateLob,text,false,false
 Account,npsDate,date,false,false
 Account,npsScore,int,false,false
-Account,numberOfEmployees,int,false,false
 ActivityLog,oldPremium,currency,false,false
 Opportunity,onboardingSent,bool,false,false
 Opportunity,opportunityDrivers,linkMultiple,false,false
@@ -425,13 +423,10 @@ Renewal,premiumChange,float,true,false
 Account,premiumChangeAmount,currency,false,false
 Account,premiumChangePct,float,false,false
 ActivityLog,premiumDelta,currency,true,false
-Account,primaryDob,date,false,false
-Account,primaryEmail,email,false,false
 Account,primaryFirstName,varchar,false,false
 Account,primaryGender,enum,false,false
 Account,primaryLastName,varchar,false,false
 Account,primaryOccupation,text,false,false
-Account,primaryPhone,phone,false,false
 Opportunity,propAddress,address,false,false
 Opportunity,propAssessmentDate,datetime,false,false
 Opportunity,propAssessmentNotes,text,false,false
@@ -539,7 +534,6 @@ Opportunity,wcAnnualPayroll,currency,false,false
 Opportunity,wcClassCode,varchar,false,false
 Opportunity,wcEmployeeCount,int,false,false
 Opportunity,wcExperienceMod,float,false,false
-Account,websiteUrl,url,false,false
 Commission,writtenPremium,currency,false,false
 Opportunity,writtenPremium,currency,false,false
 Account,xDate,date,false,false
