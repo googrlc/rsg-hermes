@@ -11,11 +11,13 @@ dependencies = [
   "openai>=1.30.0",
   "fastapi>=0.100.0",
   "uvicorn>=0.23.0",
+  "mcp>=1.0.0",
 ]
 
 [project.scripts]
 hermes = "hermes.main:main"
 hermes-api = "hermes.api:main"
+hermes-mcp = "hermes.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=61"]
