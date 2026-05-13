@@ -1,0 +1,66 @@
+# ============================================================
+#  RSG Unified SSH Config — May 2026
+#
+#  Copy to ~/.ssh/config on any Mac or workstation.
+#  Requires 1Password desktop app with SSH agent enabled:
+#  Settings → Developer → Use the SSH agent
+# ============================================================
+
+# --- Global: route all SSH through 1Password agent ---
+Host *
+  IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+  AddKeysToAgent yes
+  IdentitiesOnly yes
+
+# --- GitHub ---
+Host github.com
+  HostName github.com
+  User git
+
+# ============================================================
+#  HOSTINGER VPS (KVM 4 / Ubuntu 24.04 / Boston 2)
+#  Tailscale: 100.111.105.90
+#  Public:    srv1624160.hstgr.cloud  (177.7.38.146)
+#
+#  All services run here via Cloudflare Tunnel (rsg-tunnel):
+#    command.risk-solutionsgroup.com
+#    n8n.risk-solutionsgroup.com
+#    budibase.risk-solutionsgroup.com
+#    openclaw.risk-solutionsgroup.com
+#    ai.risk-solutionsgroup.com        (OpenWebUI)
+#    hermes.risk-solutionsgroup.com
+#    home.risk-solutionsgroup.com      (Homebase)
+#    carriers.risk-solutionsgroup.com
+# ============================================================
+
+Host rsg-vps
+  HostName 100.111.105.90
+  User root
+
+Host rsg-vps-direct
+  HostName srv1624160.hstgr.cloud
+  User root
+
+# ============================================================
+#  ELESTIO — EspoCRM (rrespocrm-rsg-u69864)
+#  Tailscale: 100.117.239.109
+#  Public:    134.199.192.41
+#  App port:  8686 (internal), 443 via nginx (public)
+# ============================================================
+
+Host espocrm-ts
+  HostName 100.117.239.109
+  User root
+
+Host espocrm-direct
+  HostName 134.199.192.41
+  User root
+
+# ============================================================
+#  UBUNTU ASH-1 (offline as of Apr 26 — keep for reference)
+#  Tailscale: 100.107.127.124
+# ============================================================
+
+Host ubuntu-ash
+  HostName 100.107.127.124
+  User root
