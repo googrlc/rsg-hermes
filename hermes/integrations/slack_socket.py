@@ -262,5 +262,23 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             replace_original=False,
         )
 
+    @app.action("archive_task_message")
+    def on_archive_task(ack: Any, body: dict[str, Any]) -> None:
+        """Delete the task notification message from Slack when Archive is clicked."""
+        ack()
+        container = body.get("container") or {}
+        channel = container.get("channel_id")
+        ts = container.get("message_ts")
+        user_id = ((body.get("user") or {}).get("id") if isinstance(body, dict) else None) or "unknown"
+        if not channel or not ts:
+            log.warning("archive_task_message: missing channel or ts user=%s", user_id)
+            return
+        try:
+            app.client.chat_delete(channel=channel, ts=ts)
+            log.info("archive_task_message: deleted message channel=%s ts=%s user=%s", channel, ts, user_id)
+        except SlackApiError as e:
+            error = e.response.get("error") if getattr(e, "response", None) else "unknown"
+            log.exception("archive_task_message: chat_delete failed channel=%s ts=%s error=%s", channel, ts, error)
+
     handler = SocketModeHandler(app, app_token)
     handler.start()

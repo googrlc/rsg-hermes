@@ -1,0 +1,71 @@
+{
+  "name": "RSG Task assignee → Slack channel",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "rsg-task-assigned-slack", "options": {}},
+      "id": "cb6eb449-c233-4165-a40e-687fee8477f3",
+      "name": "Webhook Espo Task1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "c4f8a1b2-3d5e-6f70-89ab-cdef01234567",
+      "position": [448, 0]
+    },
+    {
+      "parameters": {"jsCode": "const CRM_BASE_URL = 'https://rrespocrm-rsg-u69864.vm.elestio.app';\n\nreturn $input.all().map((item) => ({\n  json: {\n    ...item.json,\n    crmBaseUrlFromCred: CRM_BASE_URL,\n  },\n  pairedItem: item.pairedItem,\n}));"},
+      "id": "abd605ae-c8e1-467b-b5e0-009244b9992c",
+      "name": "Load Espo CRM base URL1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [672, 0]
+    },
+    {
+      "parameters": {"assignments": {"assignments": [{"id": "a_taskId","name": "taskId","type": "string","value": "={{$json.body?.taskId || $json.body?.id || $json.taskId || $json.id || ''}}"},{"id": "a_taskName","name": "taskName","type": "string","value": "={{$json.body?.name || $json.name || ''}}"},{"id": "a_dateEnd","name": "dateEnd","type": "string","value": "={{$json.body?.dateEnd || $json.dateEnd || ''}}"},{"id": "a_assignedUserName","name": "assignedUserName","type": "string","value": "={{$json.body?.assignedUserName || $json.assignedUserName || ''}}"},{"id": "a_accountName","name": "accountName","type": "string","value": "={{$json.body?.accountName || $json.accountName || $json.body?.linkedAccountName || ''}}"},{"id": "a_crmBaseUrl","name": "crmBaseUrl","type": "string","value": "={{$json.body?.crmBaseUrl || $json.query?.crmBaseUrl || $json.crmBaseUrl || $json.crmBaseUrlFromCred || ''}}"},{"id": "a_taskUrl","name": "taskUrl","type": "string","value": "={{ ($json.body?.crmBaseUrl || $json.query?.crmBaseUrl || $json.crmBaseUrl || $json.crmBaseUrlFromCred || '').replace(/\\/+$/, '') + ($json.body?.taskId || $json.body?.id || $json.taskId || $json.id ? '/#Task/view/' + ($json.body?.taskId || $json.body?.id || $json.taskId || $json.id) : '') }}"}]},"options": {}},
+      "id": "bf4e6f9d-08ea-4f0f-9c90-3e7f44d72182",
+      "name": "Normalize Task Fields1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [896, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const SLACK_DM_MAP = {\n  'Lamar Coates':    'D09MBKK5YCU',\n  'Gretchen Coates': 'D09NPN3MHB3',\n  'Terrance':        'D0AUS4NPG3T',\n};\nconst FALLBACK_CHANNEL = 'C09LSKBF6KZ';\n\nconst task = $input.first().json;\nconst assignedName = task.assignedUserName || '';\nconst slackChannelId = SLACK_DM_MAP[assignedName] || FALLBACK_CHANNEL;\nconst mention = `*${assignedName || 'Unassigned'}*`;\n\nconst blocks = [\n  {\n    type: 'header',\n    text: { type: 'plain_text', text: '🔴 NEW TASK ASSIGNED', emoji: true }\n  },\n  {\n    type: 'section',\n    fields: [\n      { type: 'mrkdwn', text: `*Task:*\\n${task.taskName || '(no name)'}` },\n      { type: 'mrkdwn', text: `*👤 Assigned To:*\\n${mention}` },\n      { type: 'mrkdwn', text: `*📅 Due:*\\n${task.dateEnd || '—'}` },\n      { type: 'mrkdwn', text: `*🏢 Account:*\\n${task.accountName || '—'}` }\n    ]\n  },\n  task.taskUrl ? {\n    type: 'section',\n    text: { type: 'mrkdwn', text: `🔗 <${task.taskUrl}|Open in CRM>` }\n  } : null,\n  {\n    type: 'actions',\n    elements: [\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: '📥 Archive', emoji: true },\n        style: 'danger',\n        action_id: 'archive_task_message',\n        value: task.taskId || 'unknown',\n        confirm: {\n          title: { type: 'plain_text', text: 'Archive this task?' },\n          text: { type: 'mrkdwn', text: 'This will remove the message from Slack.' },\n          confirm: { type: 'plain_text', text: 'Archive' },\n          deny: { type: 'plain_text', text: 'Cancel' }\n        }\n      }\n    ]\n  }\n].filter(Boolean);\n\nreturn [{ json: { ...task, mention, slackChannelId, blocks } }];"
+      },
+      "id": "c769ad19-7af5-4287-a1f8-bf96a3f049c8",
+      "name": "Resolve Slack Mention",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1136, 0]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {"__rl": true, "value": "={{$json.slackChannelId}}", "mode": "id"},
+        "text": "🔴 New Task Assigned: {{$json.taskName}}",
+        "otherOptions": {
+          "blocks": "={{JSON.stringify($json.blocks)}}"
+        }
+      },
+      "id": "12a144e0-af27-4eaa-9ed0-1e9200bac479",
+      "name": "Slack postMessage1",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [1360, 0],
+      "webhookId": "f981d4e5-5516-47dd-996d-1fa1b78f7c6a",
+      "credentials": {"slackOAuth2Api": {"id": "l2JEOqqTIZmKIQ8d", "name": "task_master"}}
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Espo Task1": {"main": [[{"node": "Load Espo CRM base URL1","type": "main","index": 0}]]},
+    "Load Espo CRM base URL1": {"main": [[{"node": "Normalize Task Fields1","type": "main","index": 0}]]},
+    "Normalize Task Fields1": {"main": [[{"node": "Resolve Slack Mention","type": "main","index": 0}]]},
+    "Resolve Slack Mention": {"main": [[{"node": "Slack postMessage1","type": "main","index": 0}]]}
+  },
+  "active": true,
+  "settings": {"executionOrder": "v1","binaryMode": "separate"},
+  "versionId": "fdd3df21-3608-40b6-bf0b-735a36c6808b",
+  "meta": {"description": "POST from EspoCRM → Slack DM with Archive button (handled by Hermes Socket Mode)","templateCredsSetupCompleted": true,"instanceId": "811ac167cf6053a5fc8e99f5454ab9c95dac0aeb561399e6dde135848a253d19"},
+  "id": "148cb6ca-0186-4982-ae79-1b3e2bfe1ae5",
+  "tags": []
+}
