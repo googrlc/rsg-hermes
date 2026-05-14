@@ -1,0 +1,307 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns='http://www.w3.org/2005/Atom' xmlns:apps='http://schemas.google.com/apps/2006'>
+  <title>Mail Filters</title>
+
+  <!-- ============================================================ -->
+  <!-- 1. COI REQUESTS → Label: RSG-Task + Mark Important + Star    -->
+  <!--    Auto-forward to serviceteam@risk-solutionsgroup.com       -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='to' value='lamar@risksolutionsgroup.net OR lamar@risk-solutionsgroup.com'/>
+    <apps:property name='subject' value='COI'/>
+    <apps:property name='label' value='RSG-Task'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+    <apps:property name='forwardTo' value='serviceteam@risk-solutionsgroup.com'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='certificate of insurance'/>
+    <apps:property name='label' value='RSG-Task'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+    <apps:property name='forwardTo' value='serviceteam@risk-solutionsgroup.com'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='Missing Certificate of Insurance'/>
+    <apps:property name='label' value='RSG-Task'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <!-- ============================================================ -->
+  <!-- 2. POLICY CANCELLATIONS → Label: Carrier — Review Later      -->
+  <!--    + Star + Mark Important                                   -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='support@solepro.com'/>
+    <apps:property name='subject' value='Cancellation'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='Billing.Updates@usassure.com'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='directbill.orchidinsurance@mg.natprograms.com'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='Policy Cancellation'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='Cancellation Notice'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='Pending Cancellation'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <!-- ============================================================ -->
+  <!-- 3. POLICY AUDITS (ZoomAudits) → Label: Carrier—Review Later  -->
+  <!--    Skip inbox to reduce duplicate noise                      -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='shieldsupport@zoomaudits.com'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <!-- ============================================================ -->
+  <!-- 4. CARRIER / UNDERWRITER COMMUNICATIONS                      -->
+  <!--    → Label: Carrier — Review Later + keep in inbox          -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='mmans@bassuw.com OR carnold@bassuw.com'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='GLIC.Agency.Commissions@gerberlife.com'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='jeff@solepro.com'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='accounting@useascend.com OR no-reply@useascend.com'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='noreply@propeller.insure'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='learning@usassure.com'/>
+    <apps:property name='label' value='Carrier — Review Later'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <!-- ============================================================ -->
+  <!-- 5. PAYMENT FAILURES → Label: Payment Issues + Star           -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='Payment Failed'/>
+    <apps:property name='label' value='Payment Issues'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='payment was declined'/>
+    <apps:property name='label' value='Payment Issues'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='past due'/>
+    <apps:property name='label' value='Payment Issues'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='Payment Reminder'/>
+    <apps:property name='from' value='billing@hetzner.com'/>
+    <apps:property name='label' value='Payment Issues'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='subject' value='subscription renewal failed OR subscription renewal in Domain Purchase failed OR We still can&apos;t process your payment OR Invalid payment info OR Service Suspension Imminent'/>
+    <apps:property name='label' value='Payment Issues'/>
+    <apps:property name='shouldStar' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <!-- ============================================================ -->
+  <!-- 6. TECH ALERTS → Label: Tech Alerts + Skip inbox            -->
+  <!--    GitHub CI, deployments, Cloudflare, n8n, Supabase        -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='notifications@github.com OR noreply@github.com OR support@github.com'/>
+    <apps:property name='subject' value='Run failed OR workflow run OR codespaces OR Repository transfer OR public key'/>
+    <apps:property name='label' value='Tech Alerts'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='hello@notify.railway.app'/>
+    <apps:property name='label' value='Tech Alerts'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='noreply@notify.cloudflare.com'/>
+    <apps:property name='label' value='Tech Alerts'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='security@info.n8n.io'/>
+    <apps:property name='label' value='Tech Alerts'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='noreply@supabase.com'/>
+    <apps:property name='label' value='Tech Alerts'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='no-reply@asana.com'/>
+    <apps:property name='label' value='Tech Alerts'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='calendar-notification@google.com'/>
+    <apps:property name='label' value='Tech Alerts'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <!-- ============================================================ -->
+  <!-- 7. LINKEDIN NOTIFICATIONS → Label: Newsletters + Skip inbox  -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='notifications-noreply@linkedin.com OR invitations@linkedin.com OR messages-noreply@linkedin.com OR updates-noreply@linkedin.com OR editors-noreply@linkedin.com'/>
+    <apps:property name='label' value='Newsletters'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <!-- ============================================================ -->
+  <!-- 8. SUBSTACK / AI NEWSLETTERS → Label: Newsletters + Skip    -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='substack.com'/>
+    <apps:property name='label' value='Newsletters'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='hi@mail.theresanaiforthat.com OR info@youreverydayai.com OR larry.johnson@cobbcountycourier.com OR scott@send.referralsdoneright.org OR noreply@riskeducation.org'/>
+    <apps:property name='label' value='Newsletters'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <!-- ============================================================ -->
+  <!-- 9. SOCIAL / MARKETING NOISE → Skip inbox + Archive          -->
+  <!-- ============================================================ -->
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='close_friend_updates@facebookmail.com OR english-quora-digest@quora.com OR reddit-events@reddit.com'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='no-reply@spotify.com OR shop@oil.take5.com OR chrono24@comms.chrono24.com OR hello@mailing.quickenloans.com OR marie.turko@dispatch.me OR marketing@github.com OR mitsloan@getsmarter.com'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+  <entry>
+    <category term='filter'/>
+    <apps:property name='from' value='wix-team@notifications.wix.com OR wix-team@team.wix.com OR chelsea.c@ifttt.com OR simon@send.simonsezit.com OR krystianw@dfacourseacademy.com'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldNeverSpam' value='true'/>
+  </entry>
+
+</feed>

@@ -1,0 +1,333 @@
+{
+  "meta": {
+    "description": "RSG Gmail Automations — 4 n8n workflows covering COI routing, cancellation alerts, payment issue escalation, and newsletter cleanup",
+    "created": "2026-05-14"
+  },
+  "workflows": [
+    {
+      "name": "RSG — COI Request Router",
+      "description": "Detects incoming COI / Certificate of Insurance requests, labels them RSG-Task, and auto-forwards to the service team",
+      "nodes": [
+        {
+          "name": "Gmail Trigger",
+          "type": "n8n-nodes-base.gmailTrigger",
+          "parameters": {
+            "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+            "filters": {
+              "q": "(subject:COI OR subject:\"certificate of insurance\" OR subject:\"Missing Certificate\") in:inbox"
+            }
+          }
+        },
+        {
+          "name": "Has RSG-Task Label?",
+          "type": "n8n-nodes-base.if",
+          "parameters": {
+            "conditions": {
+              "string": [
+                {
+                  "value1": "={{ $json.labelIds.join(',') }}",
+                  "operation": "contains",
+                  "value2": "Label_343179237202613202"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add RSG-Task Label",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "addLabels",
+            "messageId": "={{ $json.id }}",
+            "labelIds": ["Label_343179237202613202", "STARRED", "IMPORTANT"]
+          }
+        },
+        {
+          "name": "Forward to Service Team",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "send",
+            "toList": "serviceteam@risk-solutionsgroup.com",
+            "subject": "=FWD [COI REQUEST]: {{ $json.subject }}",
+            "message": "=Auto-forwarded COI request.\n\nOriginal sender: {{ $json.from }}\nOriginal subject: {{ $json.subject }}\nReceived: {{ $json.date }}\n\n---\n{{ $json.snippet }}\n\n---\nThread ID: {{ $json.threadId }}\nPlease process and reply to the original sender.",
+            "options": {
+              "replyToSenderOnly": false
+            }
+          }
+        },
+        {
+          "name": "Mark RSG-Processed",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "addLabels",
+            "messageId": "={{ $json.id }}",
+            "labelIds": ["Label_1829554879318378524"]
+          }
+        }
+      ],
+      "connections": {
+        "Gmail Trigger": { "main": [[{ "node": "Has RSG-Task Label?", "type": "main", "index": 0 }]] },
+        "Has RSG-Task Label?": {
+          "main": [
+            [],
+            [{ "node": "Add RSG-Task Label", "type": "main", "index": 0 }]
+          ]
+        },
+        "Add RSG-Task Label": { "main": [[{ "node": "Forward to Service Team", "type": "main", "index": 0 }]] },
+        "Forward to Service Team": { "main": [[{ "node": "Mark RSG-Processed", "type": "main", "index": 0 }]] }
+      }
+    },
+
+    {
+      "name": "RSG — Policy Cancellation Alert",
+      "description": "Monitors for cancellation / non-payment notices from carriers and SolePro. Labels them, stars them, and sends a Slack/SMS alert.",
+      "nodes": [
+        {
+          "name": "Gmail Trigger",
+          "type": "n8n-nodes-base.gmailTrigger",
+          "parameters": {
+            "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+            "filters": {
+              "q": "(subject:\"Cancellation Notice\" OR subject:\"Policy Cancellation\" OR subject:\"Pending Cancellation\" OR subject:\"Cancellation for Non-Payment\") in:inbox newer_than:1d"
+            }
+          }
+        },
+        {
+          "name": "Extract Policy Info",
+          "type": "n8n-nodes-base.set",
+          "parameters": {
+            "values": {
+              "string": [
+                { "name": "sender", "value": "={{ $json.from }}" },
+                { "name": "subject", "value": "={{ $json.subject }}" },
+                { "name": "snippet", "value": "={{ $json.snippet }}" },
+                { "name": "receivedAt", "value": "={{ $json.date }}" },
+                { "name": "alertMessage", "value": "=🚨 POLICY CANCELLATION ALERT\n\nFrom: {{ $json.from }}\nSubject: {{ $json.subject }}\nReceived: {{ $json.date }}\n\nSnippet: {{ $json.snippet }}\n\nAction required — log in to SolePro or carrier portal immediately." }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Label Carrier Review Later",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "addLabels",
+            "messageId": "={{ $json.id }}",
+            "labelIds": ["Label_5774923228564714022", "STARRED", "IMPORTANT"]
+          }
+        },
+        {
+          "name": "Send Slack Alert",
+          "type": "n8n-nodes-base.slack",
+          "parameters": {
+            "channel": "#rsg-alerts",
+            "text": "={{ $node['Extract Policy Info'].json.alertMessage }}",
+            "otherOptions": {}
+          }
+        }
+      ],
+      "connections": {
+        "Gmail Trigger": { "main": [[{ "node": "Extract Policy Info", "type": "main", "index": 0 }]] },
+        "Extract Policy Info": { "main": [[{ "node": "Label Carrier Review Later", "type": "main", "index": 0 }]] },
+        "Label Carrier Review Later": { "main": [[{ "node": "Send Slack Alert", "type": "main", "index": 0 }]] }
+      }
+    },
+
+    {
+      "name": "RSG — Payment Issues Escalator",
+      "description": "Catches SaaS/vendor payment failures and billing reminders. Labels them Payment Issues, stars them, and sends a daily digest summary.",
+      "nodes": [
+        {
+          "name": "Gmail Trigger",
+          "type": "n8n-nodes-base.gmailTrigger",
+          "parameters": {
+            "pollTimes": { "item": [{ "mode": "everyHour" }] },
+            "filters": {
+              "q": "(subject:\"Payment Failed\" OR subject:\"payment was declined\" OR subject:\"past due\" OR subject:\"Payment Reminder\" OR subject:\"subscription renewal failed\" OR subject:\"Unable to charge\" OR subject:\"Auto Recharge Payment Failed\" OR subject:\"Service Suspension\") in:inbox newer_than:1d"
+            }
+          }
+        },
+        {
+          "name": "Add Payment Issues Label",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "addLabels",
+            "messageId": "={{ $json.id }}",
+            "labelIds": ["Label_PAYMENT_ISSUES_ID", "STARRED"]
+          },
+          "notes": "Replace Label_PAYMENT_ISSUES_ID with the actual label ID after creating the 'Payment Issues' label in Gmail"
+        },
+        {
+          "name": "Aggregate Payment Issues",
+          "type": "n8n-nodes-base.aggregate",
+          "parameters": {
+            "aggregate": "aggregateAllItemData",
+            "destinationFieldName": "paymentIssues",
+            "include": "specifiedFields",
+            "fieldsToInclude": { "fieldToInclude": [{ "fieldName": "subject" }, { "fieldName": "from" }, { "fieldName": "date" }] }
+          }
+        },
+        {
+          "name": "Send Daily Digest",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "send",
+            "toList": "lamar@risksolutionsgroup.net",
+            "subject": "=⚠️ Payment Issues Digest — {{ $now.format('MMM D, YYYY') }}",
+            "message": "=The following payment issues were detected today and need your attention:\n\n{{ $json.paymentIssues.map(p => `• ${p.subject}\\n  From: ${p.from}\\n  Date: ${p.date}`).join('\\n\\n') }}\n\n---\nAll items have been labeled 'Payment Issues' in Gmail.\nNote: Most failures appear related to Mastercard •••• 2043 — consider updating your default payment method.",
+            "options": {}
+          }
+        }
+      ],
+      "connections": {
+        "Gmail Trigger": { "main": [[{ "node": "Add Payment Issues Label", "type": "main", "index": 0 }]] },
+        "Add Payment Issues Label": { "main": [[{ "node": "Aggregate Payment Issues", "type": "main", "index": 0 }]] },
+        "Aggregate Payment Issues": { "main": [[{ "node": "Send Daily Digest", "type": "main", "index": 0 }]] }
+      }
+    },
+
+    {
+      "name": "RSG — Newsletter & Noise Cleaner",
+      "description": "Runs every 6 hours. Finds newsletter/social/marketing emails in inbox and moves them to the Newsletters label, skipping the inbox.",
+      "nodes": [
+        {
+          "name": "Schedule Trigger",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "parameters": {
+            "rule": { "interval": [{ "field": "hours", "hoursInterval": 6 }] }
+          }
+        },
+        {
+          "name": "Find Newsletter Emails",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "getAll",
+            "filters": {
+              "q": "(from:substack.com OR from:linkedin.com OR from:facebookmail.com OR from:quora.com OR from:reddit-events@reddit.com OR from:no-reply@spotify.com OR from:chrono24@comms.chrono24.com OR from:hi@mail.theresanaiforthat.com OR from:info@youreverydayai.com OR from:larry.johnson@cobbcountycourier.com OR from:scott@send.referralsdoneright.org OR from:noreply@riskeducation.org OR from:mitsloan@getsmarter.com OR from:marketing@github.com OR from:marketing@optimyl.com OR from:learning@usassure.com) in:inbox"
+            },
+            "limit": 50
+          }
+        },
+        {
+          "name": "Split Into Items",
+          "type": "n8n-nodes-base.splitInBatches",
+          "parameters": { "batchSize": 10, "options": {} }
+        },
+        {
+          "name": "Archive + Label Newsletters",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "addLabels",
+            "messageId": "={{ $json.id }}",
+            "labelIds": ["Label_536149612286232523"]
+          }
+        },
+        {
+          "name": "Remove From Inbox",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "removeLabels",
+            "messageId": "={{ $json.id }}",
+            "labelIds": ["INBOX"]
+          }
+        }
+      ],
+      "connections": {
+        "Schedule Trigger": { "main": [[{ "node": "Find Newsletter Emails", "type": "main", "index": 0 }]] },
+        "Find Newsletter Emails": { "main": [[{ "node": "Split Into Items", "type": "main", "index": 0 }]] },
+        "Split Into Items": { "main": [[{ "node": "Archive + Label Newsletters", "type": "main", "index": 0 }]] },
+        "Archive + Label Newsletters": { "main": [[{ "node": "Remove From Inbox", "type": "main", "index": 0 }]] }
+      }
+    },
+
+    {
+      "name": "RSG — Tech Alerts Archiver",
+      "description": "Runs every 2 hours. Archives GitHub CI failures, codespace warnings, Railway crashes, Cloudflare, n8n, and Supabase system emails into Tech Alerts label.",
+      "nodes": [
+        {
+          "name": "Schedule Trigger",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "parameters": {
+            "rule": { "interval": [{ "field": "hours", "hoursInterval": 2 }] }
+          }
+        },
+        {
+          "name": "Find Tech Alert Emails",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "getAll",
+            "filters": {
+              "q": "(from:notifications@github.com OR from:noreply@github.com OR from:support@github.com OR from:hello@notify.railway.app OR from:noreply@notify.cloudflare.com OR from:security@info.n8n.io OR from:noreply@supabase.com OR from:no-reply@asana.com OR from:calendar-notification@google.com) in:inbox"
+            },
+            "limit": 50
+          }
+        },
+        {
+          "name": "Split Into Items",
+          "type": "n8n-nodes-base.splitInBatches",
+          "parameters": { "batchSize": 10, "options": {} }
+        },
+        {
+          "name": "Apply Tech Alerts Label",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "addLabels",
+            "messageId": "={{ $json.id }}",
+            "labelIds": ["Label_TECH_ALERTS_ID"]
+          },
+          "notes": "Replace Label_TECH_ALERTS_ID with the actual label ID after creating the 'Tech Alerts' label in Gmail"
+        },
+        {
+          "name": "Remove From Inbox",
+          "type": "n8n-nodes-base.gmail",
+          "parameters": {
+            "operation": "removeLabels",
+            "messageId": "={{ $json.id }}",
+            "labelIds": ["INBOX"]
+          }
+        }
+      ],
+      "connections": {
+        "Schedule Trigger": { "main": [[{ "node": "Find Tech Alert Emails", "type": "main", "index": 0 }]] },
+        "Find Tech Alert Emails": { "main": [[{ "node": "Split Into Items", "type": "main", "index": 0 }]] },
+        "Split Into Items": { "main": [[{ "node": "Apply Tech Alerts Label", "type": "main", "index": 0 }]] },
+        "Apply Tech Alerts Label": { "main": [[{ "node": "Remove From Inbox", "type": "main", "index": 0 }]] }
+      }
+    }
+  ],
+
+  "setup_instructions": {
+    "step_1_labels": {
+      "description": "Create these two labels in Gmail first (Settings → Labels → Create new label)",
+      "labels": [
+        { "name": "Payment Issues", "suggested_color": "red" },
+        { "name": "Tech Alerts", "suggested_color": "dark blue" }
+      ]
+    },
+    "step_2_gmail_filters": {
+      "description": "Import the Gmail filter file to handle all future incoming emails automatically",
+      "instructions": [
+        "1. Go to Gmail Settings → Filters and Blocked Addresses",
+        "2. Scroll to bottom → 'Import filters'",
+        "3. Upload docs/gmail-filters.xml from this repo",
+        "4. Check 'Apply to matching conversations' to also process existing emails",
+        "5. Click 'Create filters'"
+      ]
+    },
+    "step_3_n8n_workflows": {
+      "description": "Import workflows into your n8n Cloud instance",
+      "instructions": [
+        "1. Open your n8n instance",
+        "2. Create New Workflow → Import from JSON for each workflow object in the 'workflows' array",
+        "3. Connect your Gmail credential to each Gmail node",
+        "4. Connect your Slack credential to the Cancellation Alert workflow",
+        "5. Update Label_PAYMENT_ISSUES_ID and Label_TECH_ALERTS_ID with actual IDs from Gmail API",
+        "6. Activate all 5 workflows"
+      ]
+    },
+    "step_4_update_label_ids": {
+      "description": "After creating the Payment Issues and Tech Alerts labels, get their IDs and update the n8n workflows",
+      "how_to_get_label_ids": "Run: curl -H 'Authorization: Bearer <gmail_token>' 'https://gmail.googleapis.com/gmail/v1/users/me/labels' | jq '.labels[] | select(.name==\"Payment Issues\") | .id'"
+    }
+  }
+}
