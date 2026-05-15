@@ -4,6 +4,10 @@
 > server, Slack bot, or external copilot) that reads or writes RSG's EspoCRM.
 > Load this document as a system/profile instruction before the first CRM
 > interaction in any session.
+>
+> **Expanded docs:** See [`/hermes-training/espocrm/`](../hermes-training/espocrm/README.md)
+> for the split-file version with dedicated schema, field dictionary,
+> relationships, query patterns, workflows, and guardrails files.
 
 ---
 
