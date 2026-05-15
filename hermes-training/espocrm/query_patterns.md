@@ -9,15 +9,15 @@
 
 | User says | CRM query path |
 |-----------|---------------|
-| "Find open deals for Acme" | Search Account (name ~ "Acme") → get linked Opportunities → filter `stage` not in {Closed Won, Closed Lost} |
+| "Find open deals for Acme" | Search Account (name ≈ "Acme") → get linked Opportunities → filter `stage` not in {Closed Won, Closed Lost} |
 | "Who owns this client?" | Search Account → return `assignedUserName` |
-| "What's Acme's FEIN?" | Search Account (name ~ "Acme") → return `fein` field |
-| "Show me John's policies" | Search Contact (name ~ "John") → follow `policies` link → return list |
-| "Total premium for Atlas" | Search Account (name ~ "Atlas") → sum `amount` on linked Opportunities where stage = Closed Won, or sum `premium` on linked Policies |
+| "What's Acme's FEIN?" | Search Account (name ≈ "Acme") → return `fein` field |
+| "Show me John's policies" | Search Contact (name ≈ "John") → follow `policies` link → return list |
+| "Total premium for Atlas" | Search Account (name ≈ "Atlas") → sum `amount` on linked Opportunities where stage = Closed Won, or sum `premium` on linked Policies |
 | "Expiring policies this month" | Search Renewals where `expiration_date` within 30 days → include Account name and carrier |
-| "What's the DOT number for ABC Trucking?" | Search Account/Opportunity (name ~ "ABC Trucking") → return `caDotNumber` |
+| "What's the DOT number for ABC Trucking?" | Search Account/Opportunity (name ≈ "ABC Trucking") → return `caDotNumber` |
 | "Show all Medicare contacts" | Search Contacts where linked Account has `account_type` = "Medicare" |
-| "Who is our contact at Acme?" | Search Account (name ~ "Acme") → follow `contacts` link → return list |
+| "Who is our contact at Acme?" | Search Account (name ≈ "Acme") → follow `contacts` link → return list |
 | "Find accounts with no recent activity" | Search Accounts → filter where `lastContactDate` > 30 days ago |
 
 ---

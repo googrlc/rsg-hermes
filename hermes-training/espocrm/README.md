@@ -20,8 +20,9 @@
 
 ## How to Use
 
-**As a system prompt:** Concatenate the files in order (schema → relationships
-→ workflows → guardrails) and inject as the system message for an LLM session.
+**As a system prompt:** Concatenate the files in order (schema →
+field_dictionary → relationships → query_patterns → workflows → guardrails)
+and inject as the system message for an LLM session.
 
 **As MCP context:** Point the MCP server's `--profile` or context-injection
 config at this directory. Each file is self-contained and can be loaded
