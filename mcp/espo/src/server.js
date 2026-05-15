@@ -47,11 +47,9 @@ function ensureAuthorized(req, res, next) {
 
 async function espoRequest(path, { params = {}, method = "GET", body: reqBody } = {}) {
   const url = new URL(`${ESPO_URL}/${path.replace(/^\/+/, "")}`);
-  if (method === "GET") {
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== null && value !== "") {
-        url.searchParams.set(key, Array.isArray(value) || typeof value === "object" ? jsonParam(value) : String(value));
-      }
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, Array.isArray(value) || typeof value === "object" ? jsonParam(value) : String(value));
     }
   }
   const fetchOptions = {
@@ -368,6 +366,7 @@ function createServer() {
         }
       });
       const records = listFromEspo(body);
+      const total = body.total ?? records.length;
       const stages = {};
       for (const r of records) {
         const s = r.stage || "Unknown";
@@ -375,7 +374,8 @@ function createServer() {
         stages[s].count++;
         stages[s].totalAmount += Number(r.amount) || 0;
       }
-      return result({ openOpportunities: records.length, byStage: stages });
+      const truncated = total > records.length;
+      return result({ openOpportunities: total, fetchedRecords: records.length, truncated, byStage: stages });
     }
   );
 
