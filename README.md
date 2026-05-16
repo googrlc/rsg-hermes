@@ -49,7 +49,7 @@ docker compose up -d --build
 docker compose logs -f hermes
 ```
 
-The container defaults to `hermes --slack`, reads `.env`, and uses host networking so it can reach Tailscale/IP-only services from the VPS host.
+The container defaults to `hermes --slack` and reads `.env`. On Elestio, services are reachable via the internal Docker network; adjust `network_mode` in `docker-compose.yml` if host networking is not required.
 
 Use `docker exec rsg-hermes hermes --doctor` after credential or permission changes. `--ping` only proves the API key can authenticate; `--doctor` proves Hermes can read Account, Contact, Opportunity, and metadata without writing anything.
 
@@ -110,6 +110,6 @@ The schema lives in `supabase/migrations/` and seed data in `supabase/seeds/`. T
 
 ## TLS Note
 
-Hermes defaults `HERMES_VERIFY_TLS=false` to preserve the current Tailscale/IP HTTPS behavior. Set it to `true` only when EspoCRM is reachable with a matching certificate chain.
+Hermes defaults `HERMES_VERIFY_TLS=false` for environments where EspoCRM is accessed over a private IP or self-signed certificate. On Elestio, EspoCRM is typically served with a valid certificate via the built-in reverse proxy — set `HERMES_VERIFY_TLS=true` once the domain and certificate are confirmed.
 
 See `docs/espocrm.md` for how this relates to the RSG EspoCRM repo.
