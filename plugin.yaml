@@ -1,0 +1,36 @@
+name: rsg-hermes
+version: 0.1.0
+description: "Chief CRM Officer — EspoCRM add/update, pipeline management, data sync, reporting, merges, renewals, and business research via natural language"
+author: googrlc
+
+provides_tools:
+  - crm_lookup
+  - crm_write
+  - crm_pipeline_report
+  - crm_kpi_dashboard
+  - crm_premium_by_lob
+  - crm_stale_leads
+  - crm_account_list
+  - crm_changelog
+  - crm_renewal_audit
+  - crm_revenue_view
+  - crm_merge_records
+  - crm_data_quality
+  - crm_sync_run
+  - crm_sync_status
+  - crm_sync_conflicts
+  - crm_sync_errors
+  - crm_intake
+  - crm_business_research
+
+requires_env:
+  - name: ESPO_URL
+    description: EspoCRM instance base URL (e.g. https://crm.youragency.com)
+  - name: ESPO_API_KEY
+    description: EspoCRM API key for authentication
+    secret: true
+  - name: SUPABASE_URL
+    description: Supabase project URL (for sync, commissions, changelog)
+  - name: SUPABASE_KEY
+    description: Supabase service role key
+    secret: true
