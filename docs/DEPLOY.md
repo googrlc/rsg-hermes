@@ -60,7 +60,7 @@ ENV HERMES_WEBHOOK_URL=https://crm.example.com/api/v1/webhook
 ENV HERMES_TRANSPORT_MODE=proxy
 ```
 
-#### Method 4: GitHub Pages / Static Hosting
+#### Method 4: Static Hosting
 
 Create a small JavaScript file that loads before the main script:
 
