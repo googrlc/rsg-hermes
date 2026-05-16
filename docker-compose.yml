@@ -4,13 +4,14 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: rsg-hermes
-    network_mode: "host"
     env_file:
       - .env
     volumes:
       - .:/app
     restart: unless-stopped
     command: ["hermes", "--slack"]
+    networks:
+      - hermes-shared
   hermes-api:
     build:
       context: .
@@ -46,13 +47,14 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: rsg-hermes-crm-queue-worker
-    network_mode: "host"
     env_file:
       - .env
     volumes:
       - .:/app
     restart: unless-stopped
     command: ["hermes", "--run-crm-queue-worker", "--crm-queue-poll-seconds", "5"]
+    networks:
+      - hermes-shared
   hermes-openclaw-worker:
     build:
       context: .
