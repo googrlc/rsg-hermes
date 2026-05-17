@@ -40,6 +40,7 @@ AUDIT_RULES: dict[str, list[dict[str, Any]]] = {
     ],
     "Policy": [
         {"field": "policy_number", "label": "Policy Number", "severity": "high"},
+        {"field": "accountId", "label": "Linked Account", "severity": "high"},
         {"field": "carrier", "label": "Carrier", "severity": "high"},
         {"field": "effective_date", "label": "Effective Date", "severity": "high"},
         {"field": "premium_amount", "label": "Premium", "severity": "medium"},
@@ -69,24 +70,46 @@ def _scan_missing_records(
     *,
     max_scan: int = 200,
 ) -> list[dict[str, Any]]:
-    """Fetch records and count missing values locally.
+    """Fetch all records in safe pages and count missing values locally.
 
     We intentionally avoid field-specific `select` clauses because some Espo setups
     reject them for custom fields even when the fields are readable.
     """
-    body = client.get(
-        entity,
-        params={
-            "maxSize": max_scan,
-        },
-    )
-    rows = body.get("list", []) if isinstance(body, dict) else []
     missing: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if _is_missing(row.get(field_name)):
-            missing.append(row)
+    page_size = min(max_scan, 200)
+    offset = 0
+    total: int | None = None
+
+    while True:
+        body = client.get(
+            entity,
+            params={
+                "maxSize": page_size,
+                "offset": offset,
+            },
+        )
+        rows = body.get("list", []) if isinstance(body, dict) else []
+        if not isinstance(rows, list) or rows == []:
+            break
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if _is_missing(row.get(field_name)):
+                missing.append(row)
+
+        if isinstance(body, dict) and total is None and body.get("total") is not None:
+            try:
+                total = int(body["total"])
+            except (TypeError, ValueError):
+                total = None
+
+        offset += len(rows)
+        if total is not None and offset >= total:
+            break
+        if len(rows) < page_size:
+            break
+
     return missing
 
 

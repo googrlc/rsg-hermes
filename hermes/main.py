@@ -68,6 +68,12 @@ CRM draft commands:
 - Prepare an EspoCRM account update draft
 - Prepare an EspoCRM opportunity update draft
 - Show me exactly what you would write to EspoCRM
+
+Policy data repair:
+- Repair policy accounts dry run
+- Repair policy accounts apply
+- hermes --repair-policy-accounts-dry-run
+- hermes --repair-policy-accounts
 """
 
 
@@ -286,6 +292,16 @@ def main() -> int:
         action="store_true",
         help="Record system health, finance, and renewal KPI snapshots",
     )
+    parser.add_argument(
+        "--repair-policy-accounts",
+        action="store_true",
+        help="Link Policies to Accounts by insuredMomentumId -> Account.momentum_client_id",
+    )
+    parser.add_argument(
+        "--repair-policy-accounts-dry-run",
+        action="store_true",
+        help="Preview Policy account-link repairs without writing to EspoCRM",
+    )
     args = parser.parse_args()
 
     if args.commands:
@@ -491,6 +507,16 @@ def main() -> int:
         for r in quick_kpis(client):
             print(f"{r.label}: {r.value}" + (f" — {r.detail}" if r.detail else ""))
         return 0
+
+    if args.repair_policy_accounts or args.repair_policy_accounts_dry_run:
+        from hermes.commands.policy_repair import run_policy_account_repair
+
+        result = run_policy_account_repair(
+            client,
+            dry_run=args.repair_policy_accounts_dry_run or not args.repair_policy_accounts,
+        )
+        print(result.format_message())
+        return 0 if result.ok else 1
 
     if args.revenue_sentinel or args.revenue_sentinel_dry_run:
         from hermes.jobs import revenue_sentinel

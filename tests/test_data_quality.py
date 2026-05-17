@@ -25,6 +25,7 @@ class DataQualityTests(unittest.TestCase):
         self.assertIn("policy_number", policy_fields)
         self.assertIn("effective_date", policy_fields)
         self.assertIn("premium_amount", policy_fields)
+        self.assertIn("accountId", policy_fields)
 
     def test_data_quality_scan_uses_espo_safe_page_size(self) -> None:
         result = handle(SizeGuardClient(), "data quality")
@@ -33,6 +34,46 @@ class DataQualityTests(unittest.TestCase):
         self.assertIn("Overall score", result.message)
         self.assertNotIn("error scanning", result.message)
         self.assertEqual(result.data["scan_errors"], 0)
+
+    def test_data_quality_policy_scan_paginates_beyond_first_page(self) -> None:
+        class Client:
+            def get(self, entity: str, **kwargs):
+                params = kwargs.get("params") or {}
+                max_size = int(params.get("maxSize", 0))
+                offset = int(params.get("offset", 0))
+
+                if max_size > 200:
+                    raise EspoClientError(f"403 GET {entity}: maxSize too large")
+
+                if entity != "Policy":
+                    return {"list": [], "total": 0}
+
+                total = 201
+                if max_size == 1 and "offset" not in params:
+                    return {"list": [], "total": total}
+
+                rows = [
+                    {
+                        "id": f"p{i}",
+                        "name": f"Policy {i}",
+                        "policy_number": None,
+                        "accountId": None,
+                        "carrier": "Progressive",
+                        "effective_date": "2026-01-01",
+                        "premium_amount": "1000",
+                    }
+                    for i in range(offset, min(offset + max_size, total))
+                ]
+                return {"list": rows, "total": total}
+
+        result = handle(Client(), "data quality")
+        policy_rules = {
+            rule["field"]: rule["violation_count"]
+            for rule in result.data["entities"]["Policy"]["rules"]
+        }
+
+        self.assertEqual(policy_rules["policy_number"], 201)
+        self.assertEqual(policy_rules["accountId"], 201)
 
     def test_stale_leads_uses_simple_list_read_and_filters_locally(self) -> None:
         class Client:
