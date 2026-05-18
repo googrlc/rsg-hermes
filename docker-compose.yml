@@ -26,21 +26,6 @@ services:
     command: ["hermes-api", "--host", "0.0.0.0", "--port", "8787"]
     networks:
       - hermes-shared
-  espo-mcp:
-    build:
-      context: ./mcp/espo
-      dockerfile: Dockerfile
-    container_name: rsg-espo-mcp
-    env_file:
-      - .env
-    environment:
-      ESPO_MCP_PORT: "3000"
-      ESPO_MCP_MAX_LIST_SIZE: "200"
-    restart: unless-stopped
-    expose:
-      - "3000"
-    networks:
-      - hermes-shared
   hermes-crm-queue-worker:
     build:
       context: .
@@ -53,19 +38,29 @@ services:
       - .:/app
     restart: unless-stopped
     command: ["hermes", "--run-crm-queue-worker", "--crm-queue-poll-seconds", "5"]
-  hermes-openclaw-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: rsg-hermes-openclaw-worker
-    env_file:
-      - .env
-    volumes:
-      - .:/app
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: rsg-n8n
     restart: unless-stopped
-    command: ["hermes", "--run-openclaw-worker", "--openclaw-poll-seconds", "5"]
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - WEBHOOK_URL=https://hermes-j21v6-u69864.vm.elestio.app:5678
+      - GENERIC_TIMEZONE=America/New_York
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_COMMUNITY_PACKAGES_ENABLED=true
+    volumes:
+      - n8n_data:/home/node/.n8n
     networks:
       - hermes-shared
+
+volumes:
+  n8n_data:
 
 networks:
   hermes-shared:
