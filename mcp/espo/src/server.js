@@ -45,19 +45,25 @@ function ensureAuthorized(req, res, next) {
   res.status(401).json({ error: "Unauthorized" });
 }
 
-async function espoRequest(path, { params = {} } = {}) {
+async function espoRequest(path, { params = {}, method = "GET", body: reqBody } = {}) {
   const url = new URL(`${ESPO_URL}/${path.replace(/^\/+/, "")}`);
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== "") {
       url.searchParams.set(key, Array.isArray(value) || typeof value === "object" ? jsonParam(value) : String(value));
     }
   }
-  const response = await fetch(url, {
+  const fetchOptions = {
+    method,
     headers: {
       Accept: "application/json",
       "X-Api-Key": ESPO_API_KEY
     }
-  });
+  };
+  if (reqBody !== undefined) {
+    fetchOptions.headers["Content-Type"] = "application/json";
+    fetchOptions.body = JSON.stringify(reqBody);
+  }
+  const response = await fetch(url, fetchOptions);
   const text = await response.text();
   let body = {};
   try {
@@ -66,7 +72,7 @@ async function espoRequest(path, { params = {} } = {}) {
     body = { raw: text.slice(0, 500) };
   }
   if (!response.ok) {
-    throw new Error(`${response.status} GET ${path}: ${JSON.stringify(body).slice(0, 700)}`);
+    throw new Error(`${response.status} ${method} ${path}: ${JSON.stringify(body).slice(0, 700)}`);
   }
   return body;
 }
@@ -192,13 +198,225 @@ function createServer() {
     }
   );
 
+  // --- Opportunity / pipeline tools ---
+
+  server.registerTool(
+    "get_opportunities",
+    {
+      title: "Get Opportunities",
+      description: "List EspoCRM opportunities (pipeline). Optionally filter by stage or text. Read-only.",
+      inputSchema: {
+        query: z.string().optional().default(""),
+        stage: z.string().optional().describe("Pipeline stage filter, e.g. 'Quoting', 'Closed Won'"),
+        limit: z.number().int().min(1).max(50).default(20)
+      }
+    },
+    async ({ query, stage, limit }) => {
+      const where = [];
+      if (stage) {
+        where.push({ type: "equals", attribute: "stage", value: stage });
+      }
+      if (query) {
+        where.push({ type: "contains", attribute: "name", value: query });
+      }
+      const body = await espoRequest("Opportunity", {
+        params: {
+          maxSize: clampLimit(limit),
+          orderBy: "closeDate",
+          order: "asc",
+          select: "id,name,stage,amount,probability,closeDate,accountName,assignedUserName",
+          where
+        }
+      });
+      return result({ entity: "Opportunity", count: listFromEspo(body).length, records: listFromEspo(body) });
+    }
+  );
+
+  // --- Lead tools ---
+
+  server.registerTool(
+    "search_leads",
+    {
+      title: "Search Leads",
+      description: "Search EspoCRM leads by name, email, or company. Read-only.",
+      inputSchema: {
+        query: z.string().min(2),
+        limit: z.number().int().min(1).max(50).default(10)
+      }
+    },
+    async ({ query, limit }) => {
+      const body = await espoRequest("Lead", {
+        params: {
+          maxSize: clampLimit(limit),
+          select: "id,name,emailAddress,phoneNumber,accountName,status,assignedUserName,source",
+          where: [
+            {
+              type: "or",
+              value: [
+                { type: "contains", attribute: "name", value: query },
+                { type: "contains", attribute: "emailAddress", value: query },
+                { type: "contains", attribute: "accountName", value: query }
+              ]
+            }
+          ]
+        }
+      });
+      return result({ entity: "Lead", count: listFromEspo(body).length, records: listFromEspo(body) });
+    }
+  );
+
+  // --- Account summary ---
+
+  server.registerTool(
+    "get_account_summary",
+    {
+      title: "Get Account Summary",
+      description: "Retrieve an account with its related contacts, opportunities, and recent activity. Read-only.",
+      inputSchema: {
+        accountId: z.string().min(1).describe("EspoCRM Account ID")
+      }
+    },
+    async ({ accountId }) => {
+      const [account, contacts, opportunities, activities] = await Promise.all([
+        espoRequest(`Account/${encodeURIComponent(accountId)}`),
+        espoRequest(`Account/${encodeURIComponent(accountId)}/contacts`, {
+          params: { maxSize: 10, select: "id,name,emailAddress,phoneNumber" }
+        }),
+        espoRequest(`Account/${encodeURIComponent(accountId)}/opportunities`, {
+          params: { maxSize: 10, select: "id,name,stage,amount,closeDate", orderBy: "closeDate", order: "desc" }
+        }),
+        espoRequest(`Account/${encodeURIComponent(accountId)}/activities`, {
+          params: { maxSize: 5 }
+        }).catch(() => ({ list: [] }))
+      ]);
+      return result({
+        account,
+        contacts: listFromEspo(contacts),
+        opportunities: listFromEspo(opportunities),
+        recentActivity: listFromEspo(activities)
+      });
+    }
+  );
+
+  // --- Note / Stream tools ---
+
+  server.registerTool(
+    "create_note",
+    {
+      title: "Create Note",
+      description: "Add a note (stream post) to an EspoCRM record. Write operation.",
+      inputSchema: {
+        parentType: z.enum(["Account", "Contact", "Lead", "Opportunity", "Task"]),
+        parentId: z.string().min(1).describe("ID of the parent record"),
+        post: z.string().min(1).describe("Note body text")
+      }
+    },
+    async ({ parentType, parentId, post }) => {
+      const note = await espoRequest("Note", {
+        method: "POST",
+        body: {
+          type: "Post",
+          parentType,
+          parentId,
+          post
+        }
+      });
+      return result({ created: true, noteId: note.id, parentType, parentId });
+    }
+  );
+
+  // --- Stream / activity ---
+
+  server.registerTool(
+    "get_stream",
+    {
+      title: "Get Record Stream",
+      description: "Fetch the activity stream (notes, updates) for an EspoCRM record. Read-only.",
+      inputSchema: {
+        entity: z.enum(["Account", "Contact", "Lead", "Opportunity", "Task"]),
+        id: z.string().min(1),
+        limit: z.number().int().min(1).max(50).default(10)
+      }
+    },
+    async ({ entity, id, limit }) => {
+      const body = await espoRequest(`${entity}/${encodeURIComponent(id)}/stream`, {
+        params: { maxSize: clampLimit(limit) }
+      });
+      return result({ entity, id, count: listFromEspo(body).length, stream: listFromEspo(body) });
+    }
+  );
+
+  // --- Pipeline summary ---
+
+  server.registerTool(
+    "pipeline_summary",
+    {
+      title: "Pipeline Summary",
+      description: "Aggregate open opportunities by stage with counts and total amounts. Read-only.",
+      inputSchema: {}
+    },
+    async () => {
+      const body = await espoRequest("Opportunity", {
+        params: {
+          maxSize: MAX_LIST_SIZE,
+          select: "id,stage,amount",
+          where: [
+            { type: "notIn", attribute: "stage", value: ["Closed Won", "Closed Lost"] }
+          ]
+        }
+      });
+      const records = listFromEspo(body);
+      const total = body.total ?? records.length;
+      const stages = {};
+      for (const r of records) {
+        const s = r.stage || "Unknown";
+        if (!stages[s]) stages[s] = { count: 0, totalAmount: 0 };
+        stages[s].count++;
+        stages[s].totalAmount += Number(r.amount) || 0;
+      }
+      const truncated = total > records.length;
+      return result({ openOpportunities: total, fetchedRecords: records.length, truncated, byStage: stages });
+    }
+  );
+
+  // --- Recent CRM changes ---
+
+  server.registerTool(
+    "recent_changes",
+    {
+      title: "Recent CRM Changes",
+      description: "List records modified in the last N hours across a given entity type. Read-only.",
+      inputSchema: {
+        entity: z.enum(["Account", "Contact", "Lead", "Opportunity", "Task"]).default("Account"),
+        hours: z.number().int().min(1).max(720).default(24),
+        limit: z.number().int().min(1).max(50).default(20)
+      }
+    },
+    async ({ entity, hours, limit }) => {
+      const since = new Date(Date.now() - hours * 3600_000).toISOString();
+      const body = await espoRequest(entity, {
+        params: {
+          maxSize: clampLimit(limit),
+          orderBy: "modifiedAt",
+          order: "desc",
+          where: [
+            { type: "after", attribute: "modifiedAt", value: since }
+          ]
+        }
+      });
+      return result({ entity, since, count: listFromEspo(body).length, records: listFromEspo(body) });
+    }
+  );
+
   return server;
 }
 
 const transports = new Map();
 
+const TOOL_COUNT = 11;
+
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "rsg-espo-mcp", tools: 4 });
+  res.json({ status: "ok", service: "rsg-espo-mcp", tools: TOOL_COUNT });
 });
 
 app.all("/mcp", ensureAuthorized, async (req, res) => {
