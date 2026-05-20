@@ -223,6 +223,17 @@ async def health():
     return {"status": "ok", "service": "hermes"}
 
 
+@app.get("/hermes/ping", response_model=DispatchResponse)
+async def hermes_ping():
+    """Compatibility ping endpoint for WebUI connectors that call /hermes/ping."""
+    return DispatchResponse(
+        ok=True,
+        message="Pong! How can I assist you with the CRM today?",
+        data=None,
+        requires_confirmation=False,
+    )
+
+
 @app.post("/dispatch", response_model=DispatchResponse)
 async def dispatch(req: DispatchRequest):
     if not req.command or not req.command.strip():
