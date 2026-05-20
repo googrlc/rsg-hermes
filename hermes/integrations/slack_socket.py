@@ -262,5 +262,61 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             replace_original=False,
         )
 
+    @app.action(re.compile(r"^agency_intake_"))
+    def on_agency_intake_action(ack: Any, body: dict[str, Any], action: dict[str, Any], respond: Any) -> None:
+        """Slack button callback for agency intake approvals.
+
+        action_id format: agency_intake_<token_slug>
+        value:           the draft_id
+
+        token_slug → token:
+          approve_all       → APPROVE ALL
+          approve_crm       → APPROVE CRM ONLY
+          approve_supabase  → APPROVE SUPABASE ONLY
+          approve_tasks     → APPROVE TASKS ONLY
+          revise            → REVISE
+          cancel            → CANCEL
+        """
+        ack()
+        action_id = str(action.get("action_id") or "")
+        draft_id = str(action.get("value") or "")
+        user_id = ((body.get("user") or {}).get("id") if isinstance(body, dict) else None) or "unknown"
+
+        token_map = {
+            "agency_intake_approve_all": "APPROVE ALL",
+            "agency_intake_approve_crm": "APPROVE CRM ONLY",
+            "agency_intake_approve_supabase": "APPROVE SUPABASE ONLY",
+            "agency_intake_approve_tasks": "APPROVE TASKS ONLY",
+            "agency_intake_revise": "REVISE",
+            "agency_intake_cancel": "CANCEL",
+        }
+        token = token_map.get(action_id)
+        if not token or not draft_id:
+            respond(
+                text=f"Unknown agency intake action: {action_id} (draft={draft_id!r})",
+                response_type="ephemeral",
+                replace_original=False,
+            )
+            return
+
+        try:
+            from hermes.integrations.supabase_client import SupabaseClient
+            from hermes.operations.agency_intake_approval import ApprovalError, approve_draft
+
+            result = approve_draft(
+                SupabaseClient(),
+                draft_id=draft_id,
+                token=token,
+                approver=user_id,
+            )
+            text = result.summary
+        except ApprovalError as e:
+            text = f"Approval blocked: {e}"
+        except Exception as e:
+            log.exception("agency_intake action failed user=%s action=%s", user_id, action_id)
+            text = f"Agency intake action failed: {e}"
+
+        respond(text=text, response_type="ephemeral", replace_original=False)
+
     handler = SocketModeHandler(app, app_token)
     handler.start()

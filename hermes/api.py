@@ -135,6 +135,39 @@ class AsyncAcceptedResponse(BaseModel):
     status: str
 
 
+class AgencyIntakeRequest(BaseModel):
+    raw_text: str
+    submitted_by: str | None = None
+    source_type: str = "manual"
+    source_ref: str | None = None
+
+
+class AgencyIntakeResponse(BaseModel):
+    ok: bool
+    draft_id: str
+    approval_prompt: str
+    validation_warnings: list[str] = []
+    payload_preview: dict | None = None
+    requires_confirmation: bool = True
+
+
+class AgencyIntakeApprovalRequest(BaseModel):
+    draft_id: str
+    token: str
+    approver: str | None = None
+
+
+class AgencyIntakeApprovalResponse(BaseModel):
+    ok: bool
+    draft_id: str
+    token: str
+    status: str
+    summary: str
+    enqueued_queue_ids: list[str] = []
+    retrieval_row_ids: dict[str, list[str]] = {}
+    error: str | None = None
+
+
 def _accept_openclaw_enqueue(body: OpenClawEnqueueRequest) -> JSONResponse:
     """Queue one OpenClaw task; Hermes is a pure producer (insert + 202)."""
     from hermes.integrations.openclaw_producer import enqueue_openclaw_task
@@ -281,6 +314,71 @@ async def sync_health():
             "finished_at": latest.get("finished_at"),
         },
     }
+
+
+@app.post("/agency-intake", response_model=AgencyIntakeResponse)
+async def agency_intake(req: AgencyIntakeRequest):
+    """Stage an agency intake draft. Returns draft_id + approval prompt.
+
+    Nothing is written to CRM yet — caller must POST /agency-intake/approve
+    with an approval token (APPROVE ALL, APPROVE CRM ONLY, etc.).
+    """
+    from hermes.commands.agency_intake import AgencyIntakeError, stage_draft
+
+    if not req.raw_text or not req.raw_text.strip():
+        raise HTTPException(status_code=400, detail="raw_text is required")
+    try:
+        draft = stage_draft(
+            _get_supa(),
+            raw_text=req.raw_text,
+            submitted_by=req.submitted_by,
+            source_type=req.source_type,
+            source_ref=req.source_ref,
+        )
+    except AgencyIntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("agency_intake staging failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return AgencyIntakeResponse(
+        ok=True,
+        draft_id=draft.draft_id,
+        approval_prompt=draft.approval_prompt,
+        validation_warnings=draft.validation_warnings,
+        payload_preview=draft.payload,
+    )
+
+
+@app.post("/agency-intake/approve", response_model=AgencyIntakeApprovalResponse)
+async def agency_intake_approve(req: AgencyIntakeApprovalRequest):
+    """Apply an approval token to a staged agency intake draft.
+
+    Same shared logic that the Slack interactive button calls.
+    """
+    from hermes.operations.agency_intake_approval import ApprovalError, approve_draft
+
+    try:
+        result = approve_draft(
+            _get_supa(),
+            draft_id=req.draft_id,
+            token=req.token,
+            approver=req.approver,
+        )
+    except ApprovalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("agency_intake_approve failed for draft=%s", req.draft_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+    return AgencyIntakeApprovalResponse(
+        ok=result.ok,
+        draft_id=result.draft_id,
+        token=result.token,
+        status=result.status,
+        summary=result.summary,
+        enqueued_queue_ids=result.enqueued_queue_ids,
+        retrieval_row_ids=result.retrieval_row_ids,
+        error=result.error,
+    )
 
 
 @app.post("/command", response_model=DispatchResponse)
