@@ -76,13 +76,17 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
         user_id: str | None,
         text: str,
         thread_ts: str | None,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> None:
+        post_kwargs: dict[str, Any] = {"text": text}
+        if blocks:
+            post_kwargs["blocks"] = blocks
         if channel_id:
             try:
                 app.client.chat_postMessage(
                     channel=channel_id,
-                    text=text,
                     thread_ts=thread_ts,
+                    **post_kwargs,
                 )
                 return
             except SlackApiError as e:
@@ -95,7 +99,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
                         if dm_channel:
                             app.client.chat_postMessage(
                                 channel=dm_channel,
-                                text=text,
+                                **post_kwargs,
                             )
                             return
                     except SlackApiError as dm_error:
@@ -116,7 +120,10 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
                         )
                         log.exception("Slack fallback channel failed channel=%s error=%s", fallback_channel, fallback_code)
         try:
-            say(text, thread_ts=thread_ts)
+            if blocks:
+                say(text=text, blocks=blocks, thread_ts=thread_ts)
+            else:
+                say(text, thread_ts=thread_ts)
         except SlackApiError as e:
             error = e.response.get("error") if getattr(e, "response", None) else "unknown"
             log.exception("Slack say failed channel=%s user=%s error=%s", channel_id, user_id, error)
@@ -154,13 +161,23 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             log.exception("Hermes command failed")
             result = DispatchResult(False, f"Hermes command failed: {e}")
         prefix = "" if result.ok else ":warning: "
-        for chunk in _chunk(prefix + result.message):
+        blocks = None
+        if isinstance(result.data, dict):
+            candidate = result.data.get("slack_blocks")
+            if isinstance(candidate, list) and candidate:
+                blocks = candidate
+        chunks = _chunk(prefix + result.message)
+        for idx, chunk in enumerate(chunks):
+            # Only attach interactive blocks to the final chunk so buttons
+            # are not duplicated on long responses.
+            attach_blocks = blocks if idx == len(chunks) - 1 else None
             _send_reply(
                 say=say,
                 channel_id=channel_id,
                 user_id=user_id,
                 text=chunk,
                 thread_ts=thread_ts,
+                blocks=attach_blocks,
             )
 
     @app.event("app_mention")

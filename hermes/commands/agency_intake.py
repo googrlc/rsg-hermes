@@ -16,11 +16,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from hermes.core.dispatcher import DispatchResult
+
 if TYPE_CHECKING:
+    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
@@ -274,6 +278,133 @@ def _format_approval_prompt(payload: dict[str, Any], draft_id: str) -> str:
         "Reply with one of:\n"
         "  APPROVE ALL · APPROVE CRM ONLY · APPROVE SUPABASE ONLY · "
         "APPROVE TASKS ONLY · REVISE · CANCEL"
+    )
+
+
+def build_approval_blocks(draft_id: str, approval_prompt: str) -> list[dict[str, Any]]:
+    """Render the 6 approval buttons as a Slack Block Kit payload.
+
+    Slack callers attach this to the dispatched message; the
+    `^agency_intake_` action handler in `slack_socket.py` routes
+    button clicks to `approve_draft`.
+    """
+    return [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": approval_prompt},
+        },
+        {
+            "type": "actions",
+            "block_id": f"agency_intake_actions_{draft_id}",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": "agency_intake_approve_all",
+                    "value": draft_id,
+                    "style": "primary",
+                    "text": {"type": "plain_text", "text": "Approve All"},
+                },
+                {
+                    "type": "button",
+                    "action_id": "agency_intake_approve_crm",
+                    "value": draft_id,
+                    "text": {"type": "plain_text", "text": "CRM Only"},
+                },
+                {
+                    "type": "button",
+                    "action_id": "agency_intake_approve_supabase",
+                    "value": draft_id,
+                    "text": {"type": "plain_text", "text": "Supabase Only"},
+                },
+                {
+                    "type": "button",
+                    "action_id": "agency_intake_approve_tasks",
+                    "value": draft_id,
+                    "text": {"type": "plain_text", "text": "Tasks Only"},
+                },
+                {
+                    "type": "button",
+                    "action_id": "agency_intake_revise",
+                    "value": draft_id,
+                    "text": {"type": "plain_text", "text": "Revise"},
+                },
+                {
+                    "type": "button",
+                    "action_id": "agency_intake_cancel",
+                    "value": draft_id,
+                    "style": "danger",
+                    "text": {"type": "plain_text", "text": "Cancel"},
+                },
+            ],
+        },
+    ]
+
+
+_INTAKE_VERB_RE = re.compile(
+    r"^\s*(stage|draft|agency)\s*(an?\s+)?(intake|account|summary)\b[:\s\-]*",
+    re.I,
+)
+_NEW_PROSPECT_RE = re.compile(
+    r"^\s*new\s+(commercial|personal|life|benefits|medicare)\s+(account|prospect|client)\b[:\s\-]*",
+    re.I,
+)
+
+
+def handle(
+    client: "EspoClient",
+    text: str,
+    *,
+    supa: "SupabaseClient | None" = None,
+    channel_id: str | None = None,
+    user_id: str | None = None,
+    message_ts: str | None = None,
+) -> DispatchResult:
+    """Dispatcher entry point for agency intake.
+
+    Strips the leading verb ("stage intake:", "new commercial prospect:"),
+    sends the remaining text through the LLM extractor, and returns a
+    DispatchResult whose `data["slack_blocks"]` carries the 6 approval
+    buttons.
+    """
+    _ = client  # CRM lookups happen during approval, not staging.
+    if supa is None:
+        return DispatchResult(
+            False,
+            "Agency intake requires Supabase configured "
+            "(SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).",
+        )
+
+    body = _INTAKE_VERB_RE.sub("", text, count=1)
+    body = _NEW_PROSPECT_RE.sub("", body, count=1).strip()
+    if not body:
+        return DispatchResult(
+            False,
+            "Paste an underwriting summary, transcript, or fact-finder "
+            "after the intake verb. Example:\n"
+            "  stage intake: 3D Pumps LLC — bypass pumping contractor, "
+            "GA, $335K revenue, …",
+        )
+
+    try:
+        draft = stage_draft(
+            supa,
+            raw_text=body,
+            submitted_by=user_id,
+            source_type="slack_dm" if channel_id else "manual",
+            source_ref=message_ts,
+        )
+    except AgencyIntakeError as exc:
+        return DispatchResult(False, f"Intake extraction failed: {exc}")
+
+    return DispatchResult(
+        True,
+        draft.approval_prompt,
+        {
+            "draft_id": draft.draft_id,
+            "validation_warnings": draft.validation_warnings,
+            "payload": draft.payload,
+            "slack_blocks": build_approval_blocks(draft.draft_id, draft.approval_prompt),
+        },
     )
 
 

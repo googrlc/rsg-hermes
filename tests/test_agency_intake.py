@@ -332,5 +332,86 @@ class ApprovalTokenContractTests(unittest.TestCase):
         )
 
 
+class BuildApprovalBlocksTests(unittest.TestCase):
+    def test_returns_section_plus_six_action_buttons(self) -> None:
+        from hermes.commands.agency_intake import build_approval_blocks
+
+        blocks = build_approval_blocks("draft-abc", "Intake draft ready — 3D Pumps LLC")
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(blocks[0]["type"], "section")
+        self.assertIn("3D Pumps LLC", blocks[0]["text"]["text"])
+        actions = blocks[1]
+        self.assertEqual(actions["type"], "actions")
+        self.assertEqual(len(actions["elements"]), 6)
+        action_ids = {e["action_id"] for e in actions["elements"]}
+        self.assertEqual(action_ids, {
+            "agency_intake_approve_all",
+            "agency_intake_approve_crm",
+            "agency_intake_approve_supabase",
+            "agency_intake_approve_tasks",
+            "agency_intake_revise",
+            "agency_intake_cancel",
+        })
+        # Every button carries the draft id so the action handler can route it
+        # to approve_draft without state.
+        for elem in actions["elements"]:
+            self.assertEqual(elem["value"], "draft-abc")
+        # Approve All is primary; Cancel is danger.
+        styles = {e["action_id"]: e.get("style") for e in actions["elements"]}
+        self.assertEqual(styles["agency_intake_approve_all"], "primary")
+        self.assertEqual(styles["agency_intake_cancel"], "danger")
+
+
+class DispatcherHandleTests(unittest.TestCase):
+    def test_handle_strips_verb_and_stages(self) -> None:
+        from hermes.commands.agency_intake import handle
+
+        supa = MagicMock()
+        supa.insert.return_value = {"id": "draft-xyz"}
+
+        with patch(
+            "hermes.commands.agency_intake._extract_payload",
+            return_value=PUMPS_PAYLOAD,
+        ):
+            result = handle(
+                client=MagicMock(),
+                text="stage intake: 3D Pumps LLC — bypass pumping…",
+                supa=supa,
+                channel_id="C123",
+                user_id="U999",
+                message_ts="1700000000.0",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data["draft_id"], "draft-xyz")
+        self.assertIn("slack_blocks", result.data)
+        self.assertEqual(len(result.data["slack_blocks"]), 2)
+        self.assertEqual(result.data["slack_blocks"][1]["type"], "actions")
+
+    def test_handle_requires_body_after_verb(self) -> None:
+        from hermes.commands.agency_intake import handle
+
+        supa = MagicMock()
+        result = handle(
+            client=MagicMock(),
+            text="stage intake:",
+            supa=supa,
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("Paste", result.message)
+        supa.insert.assert_not_called()
+
+    def test_handle_requires_supa(self) -> None:
+        from hermes.commands.agency_intake import handle
+
+        result = handle(
+            client=MagicMock(),
+            text="stage intake: anything",
+            supa=None,
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("Supabase", result.message)
+
+
 if __name__ == "__main__":
     unittest.main()
