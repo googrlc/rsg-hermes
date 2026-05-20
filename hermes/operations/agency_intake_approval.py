@@ -24,6 +24,7 @@ Partial-scope tokens behave like a subset:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -128,6 +129,16 @@ def _map_account_to_espo(account: dict[str, Any]) -> dict[str, Any]:
     return mapped
 
 
+def _normalize_phone_e164(raw: str) -> str:
+    """Strip a US phone to E.164 (+1XXXXXXXXXX). Returns raw if non-US."""
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    return raw
+
+
 def _map_contact_to_espo(contact: dict[str, Any]) -> dict[str, Any]:
     """Translate intake Contact fields to EspoCRM Contact field names."""
     mapped: dict[str, Any] = {}
@@ -143,6 +154,8 @@ def _map_contact_to_espo(contact: dict[str, Any]) -> dict[str, Any]:
         val = contact.get(src)
         if val is not None:
             mapped[dst] = val
+    if mapped.get("phoneNumber"):
+        mapped["phoneNumber"] = _normalize_phone_e164(mapped["phoneNumber"])
     return mapped
 
 
