@@ -5,7 +5,7 @@ author_url: https://github.com/googrlc/rsg-hermes
 description: EspoCRM coordination middleware — sync NowCerts, lookup accounts, run data quality audits, and more. Connects to the Hermes API server.
 required_open_webui_version: 0.4.0
 requirements: requests
-version: 0.3.0
+version: 0.3.2
 licence: MIT
 """
 
@@ -23,7 +23,7 @@ class Tools:
 
     class Valves(BaseModel):
         hermes_api_url: str = Field(
-            default="http://localhost:8484",
+            default="http://172.16.0.1:8788",
             description="Base URL for the Hermes API server",
         )
         timeout: int = Field(

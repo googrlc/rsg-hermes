@@ -81,9 +81,11 @@ def _extract_lead(text: str) -> dict[str, Any] | None:
 
 def _normalize_phone(raw_phone: str) -> str:
     digits = "".join(c for c in raw_phone if c.isdigit())
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
     if len(digits) == 10:
-        digits = "1" + digits
-    return f"+{digits}" if digits else raw_phone
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    return raw_phone
 
 
 def _build_espo_drafts(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
