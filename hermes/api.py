@@ -168,6 +168,27 @@ class AgencyIntakeApprovalResponse(BaseModel):
     error: str | None = None
 
 
+class AgencyFactRequest(BaseModel):
+    question: str | None = None
+    entity: str | None = None
+    fact_label: str | None = None
+    include_restricted: bool = True
+
+
+class AgencyFactResponse(BaseModel):
+    ok: bool
+    found: bool
+    entity: str
+    fact_label: str
+    fact_value: str | None = None
+    source: str
+    confidence: str = "high"
+    sensitivity: str = "standard"
+    answer_text: str
+    candidates: list[dict[str, Any]] = []
+    notes: str | None = None
+
+
 def _accept_openclaw_enqueue(body: OpenClawEnqueueRequest) -> JSONResponse:
     """Queue one OpenClaw task; Hermes is a pure producer (insert + 202)."""
     from hermes.integrations.openclaw_producer import enqueue_openclaw_task
@@ -378,6 +399,62 @@ async def agency_intake_approve(req: AgencyIntakeApprovalRequest):
         enqueued_queue_ids=result.enqueued_queue_ids,
         retrieval_row_ids=result.retrieval_row_ids,
         error=result.error,
+    )
+
+
+@app.post("/agency-fact", response_model=AgencyFactResponse)
+async def agency_fact(req: AgencyFactRequest):
+    """Answer a structured fact-retrieval question with citation + confidence.
+
+    Two call shapes:
+      1. Natural-language: {"question": "What is JB Noble's EIN?"}
+      2. Structured:       {"entity": "JB Noble", "fact_label": "EIN"}
+    """
+    from hermes.commands import fact_retriever
+
+    entity = (req.entity or "").strip()
+    fact_label = (req.fact_label or "").strip()
+    if not entity or not fact_label:
+        if not req.question or not req.question.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either {entity, fact_label} or question.",
+            )
+        parsed = fact_retriever.parse_question(req.question)
+        if not parsed:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Couldn't parse fact label from question. Use shapes like "
+                    "\"What is <entity>'s EIN?\" or pass entity+fact_label directly."
+                ),
+            )
+        entity, fact_label = parsed
+
+    try:
+        answer = fact_retriever.retrieve(
+            _get_espo(),
+            _get_supa(),
+            entity_name=entity,
+            fact_label=fact_label,
+            include_restricted=req.include_restricted,
+        )
+    except Exception as exc:
+        log.exception("agency_fact failed entity=%s label=%s", entity, fact_label)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return AgencyFactResponse(
+        ok=True,
+        found=answer.found,
+        entity=answer.entity,
+        fact_label=answer.fact_label,
+        fact_value=answer.fact_value,
+        source=answer.source,
+        confidence=answer.confidence,
+        sensitivity=answer.sensitivity,
+        answer_text=answer.render(),
+        candidates=answer.candidates,
+        notes=answer.notes,
     )
 
 
