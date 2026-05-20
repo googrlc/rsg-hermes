@@ -35,6 +35,13 @@ class TestHealth:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
+    def test_hermes_ping_compatibility_route(self, client) -> None:
+        resp = client.get("/hermes/ping")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "Pong" in data["message"]
+
 
 class TestDispatch:
     @patch("hermes.api._get_dispatcher")
