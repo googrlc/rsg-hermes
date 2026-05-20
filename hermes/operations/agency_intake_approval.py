@@ -95,6 +95,81 @@ def _update_draft_status(
     supa.update("agency_intake_drafts", draft_id, payload)
 
 
+def _map_account_to_espo(account: dict[str, Any]) -> dict[str, Any]:
+    """Translate intake Account fields to EspoCRM Account field names."""
+    mapped: dict[str, Any] = {}
+    field_map = {
+        "account_name": "name",
+        "legal_name": "legalName",
+        "dba": "dba",
+        "fein": "fein",
+        "entity_type": "businessEntity",
+        "industry": "industry",
+        "address": "billingAddressStreet",
+        "city": "billingAddressCity",
+        "state": "billingAddressState",
+        "zip": "billingAddressPostalCode",
+        "phone": "phoneNumber",
+        "email": "emailAddress",
+        "website": "website",
+        "operations_summary": "description",
+        "annual_revenue": "annualRevenue",
+        "estimated_payroll": "estimatedPayroll",
+        "employee_count": "employeeCount",
+        "account_type": "accountType",
+        "account_status": "accountStatus",
+    }
+    for src, dst in field_map.items():
+        val = account.get(src)
+        if val is not None:
+            mapped[dst] = val
+    if account.get("tags"):
+        mapped["tags"] = account["tags"]
+    return mapped
+
+
+def _map_contact_to_espo(contact: dict[str, Any]) -> dict[str, Any]:
+    """Translate intake Contact fields to EspoCRM Contact field names."""
+    mapped: dict[str, Any] = {}
+    field_map = {
+        "first_name": "firstName",
+        "last_name": "lastName",
+        "phone": "phoneNumber",
+        "email": "emailAddress",
+        "role": "title",
+        "relationship_to_account": "description",
+    }
+    for src, dst in field_map.items():
+        val = contact.get(src)
+        if val is not None:
+            mapped[dst] = val
+    return mapped
+
+
+def _map_opportunity_to_espo(opp: dict[str, Any]) -> dict[str, Any]:
+    """Translate intake Opportunity fields to EspoCRM Opportunity field names."""
+    mapped: dict[str, Any] = {}
+    field_map = {
+        "opportunity_name": "name",
+        "line_of_business": "lineOfBusiness",
+        "stage": "stage",
+        "quote_number": "quoteNumber",
+        "carrier": "carrier",
+        "premium": "amount",
+        "proposed_effective_date": "proposedEffectiveDate",
+        "opportunity_type": "opportunityType",
+        "producer": "producer",
+        "package_name": "packageName",
+    }
+    for src, dst in field_map.items():
+        val = opp.get(src)
+        if val is not None:
+            mapped[dst] = val
+    if opp.get("tags"):
+        mapped["tags"] = opp["tags"]
+    return mapped
+
+
 def _enqueue_crm_writes(
     supa: "SupabaseClient",
     payload: dict[str, Any],
@@ -114,10 +189,11 @@ def _enqueue_crm_writes(
     note = payload.get("note") or {}
 
     if account.get("account_name"):
+        espo_account = _map_account_to_espo(account)
         row = enqueue_crm_write(
             supa,
             entity_type="Account",
-            payload=account,
+            payload=espo_account,
             created_by_role=created_by_role,
             priority=1,
         )
@@ -127,10 +203,11 @@ def _enqueue_crm_writes(
     for idx, contact in enumerate(contacts, start=1):
         if not contact:
             continue
+        espo_contact = _map_contact_to_espo(contact)
         row = enqueue_crm_write(
             supa,
             entity_type="Contact",
-            payload=contact,
+            payload=espo_contact,
             created_by_role=created_by_role,
             priority=2,
         )
@@ -143,10 +220,11 @@ def _enqueue_crm_writes(
         if not opp.get("opportunity_name") or not opp.get("line_of_business"):
             log.warning("Skipping opportunity without name/LOB: %s", opp)
             continue
+        espo_opp = _map_opportunity_to_espo(opp)
         row = enqueue_crm_write(
             supa,
             entity_type="Opportunity",
-            payload=opp,
+            payload=espo_opp,
             created_by_role=created_by_role,
             priority=3,
         )
@@ -163,7 +241,7 @@ def _enqueue_crm_writes(
     if note.get("body") and note.get("title"):
         note_payload = {
             "name": note.get("title"),
-            "description": note.get("body"),
+            "content": note.get("body"),
             "noteType": note.get("note_type"),
             "tags": note.get("tags") or [],
             "parentType": "Account",
