@@ -247,6 +247,27 @@ async def _process_queue_async(
     )
 
 
+def _resolve_parent_id(
+    espo: EspoClient,
+    properties: dict[str, Any],
+    entity_type: str,
+) -> None:
+    """Resolve parentName/parentType to accountId for entities that require it."""
+    if entity_type not in ("ClientNote",):
+        return
+    if properties.get("accountId"):
+        return
+    parent_type = properties.pop("parentType", None)
+    parent_name = properties.pop("parentName", None)
+    if parent_type == "Account" and parent_name:
+        match = espo.find_one_by_field("Account", "name", parent_name, select="id")
+        if match and match.get("id"):
+            properties["accountId"] = match["id"]
+            log.info("Resolved accountId for %s: %s -> %s", entity_type, parent_name, match["id"])
+        else:
+            log.warning("Could not resolve Account '%s' for %s", parent_name, entity_type)
+
+
 def _apply_to_espo(
     espo: EspoClient,
     entity_type: str,
@@ -272,6 +293,8 @@ def _apply_to_espo(
         properties = work.pop("properties", work)
         if isinstance(properties, dict) and not properties:
             properties = work
+
+    _resolve_parent_id(espo, properties, entity_type)
 
     if entity_id and intent in ("update", "annotate", ""):
         return espo.update(entity_type, entity_id, properties)

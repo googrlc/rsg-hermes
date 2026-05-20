@@ -165,6 +165,9 @@ def _map_opportunity_to_espo(opp: dict[str, Any]) -> dict[str, Any]:
         val = opp.get(src)
         if val is not None:
             mapped[dst] = val
+    # EspoCRM requires closeDate — use proposed_effective_date
+    if opp.get("proposed_effective_date"):
+        mapped["closeDate"] = opp["proposed_effective_date"]
     if opp.get("tags"):
         mapped["tags"] = opp["tags"]
     return mapped
