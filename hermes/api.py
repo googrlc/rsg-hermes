@@ -564,6 +564,8 @@ async def slack_crm_entry_webhook(request: Request, background_tasks: Background
     if verifier is None:
         log.error("SLACK_EVENTS_SIGNING_SECRET not configured; refusing webhook")
         raise HTTPException(status_code=503, detail="Slack webhook not configured")
+    if not signature or not timestamp or not timestamp.isdigit():
+        raise HTTPException(status_code=401, detail="Missing Slack signature headers")
     if not verifier.is_valid(body=raw_body, timestamp=timestamp, signature=signature):
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
 
