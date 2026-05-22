@@ -40,3 +40,9 @@ build/
 *.egg-info/
 ```
 .hermes/
+
+# Hermes runtime state (sqlite dedupe etc.)
+state/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
