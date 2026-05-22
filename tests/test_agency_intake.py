@@ -413,5 +413,68 @@ class DispatcherHandleTests(unittest.TestCase):
         self.assertIn("Supabase", result.message)
 
 
+class NormalizationTests(unittest.TestCase):
+    """Tests for the Espo-payload normalizers added after the 3D Pumps deploy
+    discovered validation failures on phoneNumber and lineOfBusiness fields."""
+
+    def test_phone_normalized_to_paren_dash_format(self) -> None:
+        """EspoCRM rejects +1XXXXXXXXXX (see b5abb0b). Must produce (NXX) NXX-XXXX."""
+        from hermes.operations.agency_intake_approval import _normalize_phone_us
+
+        self.assertEqual(_normalize_phone_us("7707808848"), "(770) 780-8848")
+        self.assertEqual(_normalize_phone_us("(770) 780-8848"), "(770) 780-8848")
+        self.assertEqual(_normalize_phone_us("17707808848"), "(770) 780-8848")
+        self.assertEqual(_normalize_phone_us("+17707808848"), "(770) 780-8848")
+        # Non-US / unparseable — passes through unchanged.
+        self.assertEqual(_normalize_phone_us("+447911123456"), "+447911123456")
+        self.assertEqual(_normalize_phone_us(""), "")
+
+    def test_account_mapper_normalizes_phone(self) -> None:
+        from hermes.operations.agency_intake_approval import _map_account_to_espo
+
+        mapped = _map_account_to_espo({"account_name": "3D Pumps LLC", "phone": "(770) 780-8848"})
+        self.assertEqual(mapped["phoneNumber"], "(770) 780-8848")
+
+        mapped_raw = _map_account_to_espo({"account_name": "Acme", "phone": "7707808848"})
+        self.assertEqual(mapped_raw["phoneNumber"], "(770) 780-8848")
+
+    def test_contact_mapper_still_normalizes_phone(self) -> None:
+        from hermes.operations.agency_intake_approval import _map_contact_to_espo
+
+        mapped = _map_contact_to_espo({"first_name": "Jarod", "phone": "+17707808848"})
+        self.assertEqual(mapped["phoneNumber"], "(770) 780-8848")
+
+    def test_lineOfBusiness_aliases_canonicalize(self) -> None:
+        from hermes.operations.agency_intake_approval import _normalize_lob
+
+        # Mappings that fix the 3D Pumps failures.
+        self.assertEqual(_normalize_lob("General Liability"), "GL/BOP")
+        self.assertEqual(_normalize_lob("Workers Compensation"), "Workers Comp")
+        self.assertEqual(_normalize_lob("Workers' Compensation"), "Workers Comp")
+        self.assertEqual(_normalize_lob("Commercial Package Liability"), "GL/BOP")
+        self.assertEqual(_normalize_lob("CPL"), "GL/BOP")
+        # Already-canonical values stay put.
+        self.assertEqual(_normalize_lob("Commercial Auto"), "Commercial Auto")
+        self.assertEqual(_normalize_lob("Umbrella"), "Umbrella")
+        self.assertEqual(_normalize_lob("Inland Marine"), "Inland Marine")
+        # Case + whitespace tolerant.
+        self.assertEqual(_normalize_lob("  general liability  "), "GL/BOP")
+        # Unknown — passes through; runtime logs a warning.
+        self.assertEqual(_normalize_lob("Cyber"), "Cyber")
+        # Falsy — passes through.
+        self.assertIsNone(_normalize_lob(None))
+        self.assertEqual(_normalize_lob(""), "")
+
+    def test_opportunity_mapper_normalizes_lineOfBusiness(self) -> None:
+        from hermes.operations.agency_intake_approval import _map_opportunity_to_espo
+
+        mapped = _map_opportunity_to_espo({
+            "opportunity_name": "3D Pumps LLC - GL - 06/01/2026",
+            "line_of_business": "General Liability",
+            "stage": "Discovery",
+        })
+        self.assertEqual(mapped["lineOfBusiness"], "GL/BOP")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any
@@ -19,6 +20,21 @@ log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 DEFAULT_CONCURRENCY = 5
 DEFAULT_POLL_SECONDS = 5.0
+
+# EspoClientError messages start with the HTTP status. 4xx (other than 408/429)
+# means the payload itself is invalid — retrying with the same payload will
+# fail the same way. Surface these as permanent failures so the worker stops
+# burning EspoCRM API calls on bad data.
+_PERMANENT_HTTP_STATUS_PATTERN = re.compile(r"^(400|401|403|404|409|410|422) ")
+
+
+def _is_non_retryable_espo_error(message: str) -> bool:
+    """True when an EspoClientError describes a client-side / validation error."""
+    if not message:
+        return False
+    if _PERMANENT_HTTP_STATUS_PATTERN.match(message):
+        return True
+    return "validationFailure" in message
 ALLOWED_ACTION_TYPES = {
     "request_docs",
     "update_status",
@@ -180,27 +196,38 @@ async def _process_queue_async(
                     _apply_to_espo, espo, entity_type, entity_id, payload
                 )
             except EspoClientError as exc:
-                log.warning("CRM write failed for queue_id=%s: %s", queue_id, exc)
-                _update_status(supa, queue_id, "FAILED", attempt_count)
+                msg = str(exc)
+                # 4xx (validation) errors won't get better on retry — bump attempt_count
+                # to MAX_ATTEMPTS so the row drops out of the dequeue filter immediately.
+                if _is_non_retryable_espo_error(msg):
+                    final_attempt = MAX_ATTEMPTS
+                    log.warning(
+                        "CRM write permanently invalid for queue_id=%s (not retrying): %s",
+                        queue_id, msg,
+                    )
+                else:
+                    final_attempt = attempt_count
+                    log.warning("CRM write failed for queue_id=%s: %s", queue_id, msg)
+                _update_status(supa, queue_id, "FAILED", final_attempt)
                 _log_failed_queue_guardrail(
                     supa,
                     queue_id=queue_id,
                     entity_type=entity_type,
                     entity_id=entity_id,
                     role=role,
-                    attempt_count=attempt_count,
-                    reason=str(exc),
+                    attempt_count=final_attempt,
+                    reason=msg,
                 )
-                if attempt_count >= MAX_ATTEMPTS:
+                if final_attempt >= MAX_ATTEMPTS:
                     _alert_slack_on_terminal_failure(
                         queue_id=queue_id,
                         entity_type=entity_type,
                         entity_id=entity_id,
                         role=role,
-                        attempt_count=attempt_count,
-                        error_message=str(exc),
+                        attempt_count=final_attempt,
+                        error_message=msg,
                     )
-                return False, f"{queue_id}: {exc}"
+                return False, f"{queue_id}: {msg}"
             
             # Record receipt
             transaction_id = _extract_transaction_id(crm_response, queue_id)

@@ -125,5 +125,75 @@ class ProcessQueueRetryTests(unittest.TestCase):
         alert_mock.assert_called_once()
 
 
+class NonRetryableErrorTests(unittest.TestCase):
+    """Tests for the 4xx validation-failure short-circuit.
+
+    EspoCRM validation failures (400 with messageTranslation) won't succeed
+    on retry. The worker bumps attempt_count straight to MAX_ATTEMPTS so the
+    row drops out of the dequeue filter on the first failure.
+    """
+
+    def test_non_retryable_error_detector(self) -> None:
+        from hermes.operations.crm_queue_worker import _is_non_retryable_espo_error
+
+        # Exact shape EspoCRM returned for the 3D Pumps Opportunity failure.
+        msg = (
+            "400 POST Opportunity: EspoCRM request failed. "
+            "Body: {'messageTranslation': {'label': 'validationFailure', "
+            "'scope': None, 'data': {'field': 'lineOfBusiness', 'type': 'valid'}}}"
+        )
+        self.assertTrue(_is_non_retryable_espo_error(msg))
+
+        self.assertTrue(_is_non_retryable_espo_error("404 GET Account: not found"))
+        self.assertTrue(_is_non_retryable_espo_error("422 POST Contact: unprocessable"))
+
+        self.assertFalse(_is_non_retryable_espo_error("429 upstream throttle"))
+        self.assertFalse(_is_non_retryable_espo_error("500 internal server error"))
+        self.assertFalse(_is_non_retryable_espo_error("503 upstream unavailable"))
+        self.assertFalse(_is_non_retryable_espo_error("Connection reset by peer"))
+        self.assertFalse(_is_non_retryable_espo_error(""))
+
+    @patch("hermes.operations.crm_queue_worker.log_guardrail_event")
+    @patch("hermes.operations.crm_queue_worker._alert_slack_on_terminal_failure")
+    def test_400_validation_failure_short_circuits_to_max_attempts(
+        self, alert_mock: MagicMock, guardrail_mock: MagicMock
+    ) -> None:
+        """A 400 validation error on attempt 1 should mark the row as if it had
+        exhausted all retries — no more dequeue, terminal-failure alert fires."""
+        supa = MagicMock()
+        supa.select.return_value = [
+            {
+                "id": "q-validation",
+                "entity_type": "Opportunity",
+                "entity_id": None,
+                "payload": {"name": "X", "lineOfBusiness": "Unknown LOB"},
+                "attempt_count": 0,
+                "created_by_role": "agency-intake:U_TEST",
+            }
+        ]
+        espo = MagicMock()
+        espo.create.side_effect = EspoClientError(
+            "400 POST Opportunity: EspoCRM request failed. "
+            "Body: {'messageTranslation': {'label': 'validationFailure'}}"
+        )
+
+        result = process_queue(supa, espo, batch_size=1, dry_run=False)
+
+        self.assertEqual(result.failed, 1)
+        # Status update should record attempt_count = MAX_ATTEMPTS so the row
+        # is excluded from future dequeues. Inspect the FAILED update call.
+        update_calls = [
+            call for call in supa.update.call_args_list
+            if call.args and call.args[0] == "crm_write_queue" and call.args[1] == "q-validation"
+        ]
+        terminal_update = next(
+            (c for c in update_calls if c.args[2].get("status") == "FAILED"),
+            None,
+        )
+        self.assertIsNotNone(terminal_update, "expected a FAILED status update")
+        self.assertEqual(terminal_update.args[2]["attempt_count"], MAX_ATTEMPTS)
+        alert_mock.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
