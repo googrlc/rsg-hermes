@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import logging
 import os
 import re
+from datetime import datetime
 from typing import Any, Literal
 
 import uvicorn
@@ -14,7 +16,7 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 log = logging.getLogger(__name__)
 
@@ -134,6 +136,65 @@ class AsyncAcceptedResponse(BaseModel):
     task_id: str
     queue_name: str
     status: str
+
+
+IntakeSource = Literal["cowork", "voice_tool", "manual_curl", "n8n"]
+IntakeAgent = Literal["lamar", "gretchen"]
+IntakeKind = Literal["full_intake", "task", "note", "update", "other"]
+
+
+class IntakeDocument(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: str | None = None
+    extracted_data: dict[str, Any] | None = None
+    raw_text: str | None = None
+    source_file: str | None = None
+
+
+class IntakeCoachingSnapshot(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    covered_topics: list[str] = Field(default_factory=list)
+    remaining_gaps: list[str] = Field(default_factory=list)
+    flags_detected: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class IntakeSubmissionRequest(BaseModel):
+    # Required
+    idempotency_key: str = Field(..., min_length=1, max_length=512)
+    source: IntakeSource
+    agent: IntakeAgent
+    captured_at: datetime
+
+    # Optional with default
+    intake_kind: IntakeKind = "full_intake"
+
+    # Optional structured envelope fields
+    client_identifier: str | None = None
+    lob_code: str | None = None
+
+    # Payload content — at least one of transcript/documents is required
+    transcript: str | None = None
+    documents: list[IntakeDocument] = Field(default_factory=list)
+    coaching_snapshot: IntakeCoachingSnapshot | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _require_transcript_or_documents(self) -> "IntakeSubmissionRequest":
+        has_transcript = bool(self.transcript and self.transcript.strip())
+        has_documents = bool(self.documents)
+        if not (has_transcript or has_documents):
+            raise ValueError("at least one of `transcript` or `documents` is required")
+        return self
+
+
+class IntakeSubmissionResponse(BaseModel):
+    submission_id: str
+    status: str
+    status_url: str
+    created_at: str
+    idempotent_replay: bool = False
 
 
 class AgencyIntakeRequest(BaseModel):
@@ -468,6 +529,80 @@ async def agency_fact(req: AgencyFactRequest):
         candidates=answer.candidates,
         notes=answer.notes,
     )
+
+
+def _require_intake_api_key(request: Request) -> None:
+    """Validate ``X-RSG-API-Key`` header against ``RSG_INTAKE_API_KEY`` env."""
+    expected = os.environ.get("RSG_INTAKE_API_KEY", "").strip()
+    if not expected:
+        # Misconfiguration: never silently accept; refuse with 503.
+        log.error("RSG_INTAKE_API_KEY is unset — refusing /api/intake")
+        raise HTTPException(status_code=503, detail="intake endpoint not configured")
+    provided = request.headers.get("x-rsg-api-key", "")
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="invalid or missing X-RSG-API-Key")
+
+
+def _intake_status_url(request: Request, submission_id: str) -> str:
+    base = os.environ.get("HERMES_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if not base:
+        base = str(request.base_url).rstrip("/")
+    return f"{base}/api/intake/{submission_id}/status"
+
+
+@app.post("/api/intake")
+async def intake_submit(req: IntakeSubmissionRequest, request: Request):
+    """Accept an intake submission and insert one row in ``intake_submissions``.
+
+    On a fresh insert: returns 202 with ``submission_id``, ``status_url``, etc.
+    On idempotent replay (same ``idempotency_key``): returns 200 with the
+    existing row's state. The Phase 3 worker picks up ``status='received'``
+    rows asynchronously; this endpoint never blocks on downstream processing.
+    """
+    from hermes.integrations.intake_submissions import (
+        IntakeError,
+        insert_submission,
+    )
+    from hermes.integrations.supabase_client import SupabaseClientError
+
+    _require_intake_api_key(request)
+
+    payload = {
+        "transcript": req.transcript,
+        "documents": [_model_dict(d) for d in req.documents],
+        "coaching_snapshot": _model_dict(req.coaching_snapshot) if req.coaching_snapshot else None,
+        "notes": req.notes,
+    }
+
+    try:
+        row, is_new = insert_submission(
+            _get_supa(),
+            idempotency_key=req.idempotency_key,
+            source=req.source,
+            agent=req.agent,
+            intake_kind=req.intake_kind,
+            client_identifier=req.client_identifier,
+            lob_code=req.lob_code,
+            captured_at=req.captured_at,
+            payload=payload,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except SupabaseClientError as exc:
+        log.exception("intake_submissions insert failed key=%s", req.idempotency_key)
+        raise HTTPException(status_code=502, detail=f"supabase write failed: {exc}")
+
+    submission_id = str(row.get("id"))
+    body = _model_dict(
+        IntakeSubmissionResponse(
+            submission_id=submission_id,
+            status=str(row.get("status", "received")),
+            status_url=_intake_status_url(request, submission_id),
+            created_at=str(row.get("created_at", "")),
+            idempotent_replay=not is_new,
+        )
+    )
+    return JSONResponse(status_code=202 if is_new else 200, content=body)
 
 
 @app.post("/command", response_model=DispatchResponse)
