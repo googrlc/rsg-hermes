@@ -124,19 +124,84 @@ def _map_account_to_espo(account: dict[str, Any]) -> dict[str, Any]:
         val = account.get(src)
         if val is not None:
             mapped[dst] = val
+    if mapped.get("phoneNumber"):
+        mapped["phoneNumber"] = _normalize_phone_us(mapped["phoneNumber"])
     if account.get("tags"):
         mapped["tags"] = account["tags"]
     return mapped
 
 
-def _normalize_phone_e164(raw: str) -> str:
-    """Strip a US phone to E.164 (+1XXXXXXXXXX). Returns raw if non-US."""
-    digits = re.sub(r"\D", "", raw)
-    if len(digits) == 10:
-        return f"+1{digits}"
+def _normalize_phone_us(raw: str) -> str:
+    """Normalize a US phone to `(NXX) NXX-XXXX` — the only format EspoCRM accepts.
+
+    See commit b5abb0b: "EspoCRM rejects +1XXXXXXXXXX format". Returns the raw
+    string unchanged if it's not a 10/11-digit US number.
+    """
+    digits = re.sub(r"\D", "", raw or "")
     if len(digits) == 11 and digits.startswith("1"):
-        return f"+{digits}"
+        digits = digits[1:]
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
     return raw
+
+
+# EspoCRM Opportunity.lineOfBusiness allowed values. The agency-intake LLM
+# extractor produces human strings like "General Liability"; EspoCRM rejects
+# anything not in its option-list. This is the canonical mapping. Unknown
+# values pass through with a warning so misses are visible in logs.
+_LOB_ALIASES: dict[str, str] = {
+    # GL / BOP / CPL all collapse to "GL/BOP" — EspoCRM's umbrella term.
+    "general liability": "GL/BOP",
+    "gl": "GL/BOP",
+    "gl/bop": "GL/BOP",
+    "bop": "GL/BOP",
+    "business owners policy": "GL/BOP",
+    "commercial general liability": "GL/BOP",
+    "cgl": "GL/BOP",
+    "commercial package liability": "GL/BOP",
+    "cpl": "GL/BOP",
+    "package": "GL/BOP",
+    # Workers Comp
+    "workers compensation": "Workers Comp",
+    "workers' compensation": "Workers Comp",
+    "workers comp": "Workers Comp",
+    "wc": "Workers Comp",
+    "wc/employers liability": "Workers Comp",
+    # Commercial Auto
+    "commercial auto": "Commercial Auto",
+    "auto": "Commercial Auto",
+    "ca": "Commercial Auto",
+    # Inland Marine
+    "inland marine": "Inland Marine",
+    "im": "Inland Marine",
+    # Umbrella
+    "umbrella": "Umbrella",
+    "commercial umbrella": "Umbrella",
+    "excess liability": "Umbrella",
+    # Property
+    "property": "Property",
+    "commercial property": "Property",
+    # Personal Lines + life/medicare
+    "personal lines": "Personal Lines",
+    "medicare": "Medicare",
+    "life": "Life",
+    "life insurance": "Life",
+}
+
+
+def _normalize_lob(raw: str | None) -> str | None:
+    """Map an extractor LOB string to EspoCRM's option-list value. Logs misses."""
+    if not raw:
+        return raw
+    key = raw.strip().lower()
+    mapped = _LOB_ALIASES.get(key)
+    if mapped is None:
+        log.warning(
+            "lineOfBusiness alias not mapped — sending raw value, EspoCRM may reject: %r",
+            raw,
+        )
+        return raw
+    return mapped
 
 
 def _map_contact_to_espo(contact: dict[str, Any]) -> dict[str, Any]:
@@ -155,7 +220,7 @@ def _map_contact_to_espo(contact: dict[str, Any]) -> dict[str, Any]:
         if val is not None:
             mapped[dst] = val
     if mapped.get("phoneNumber"):
-        mapped["phoneNumber"] = _normalize_phone_e164(mapped["phoneNumber"])
+        mapped["phoneNumber"] = _normalize_phone_us(mapped["phoneNumber"])
     return mapped
 
 
@@ -178,6 +243,8 @@ def _map_opportunity_to_espo(opp: dict[str, Any]) -> dict[str, Any]:
         val = opp.get(src)
         if val is not None:
             mapped[dst] = val
+    if mapped.get("lineOfBusiness"):
+        mapped["lineOfBusiness"] = _normalize_lob(mapped["lineOfBusiness"])
     # EspoCRM requires closeDate — use proposed_effective_date
     if opp.get("proposed_effective_date"):
         mapped["closeDate"] = opp["proposed_effective_date"]
