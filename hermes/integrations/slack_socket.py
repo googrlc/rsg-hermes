@@ -13,14 +13,13 @@ from slack_sdk.errors import SlackApiError
 
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher, DispatchResult
+from hermes.integrations.slack_dedupe import CRM_ENTRY_CHANNEL, claim_event
 from hermes.jobs import commission_reconciliation
 from hermes.jobs import revenue_sentinel
 from hermes.jobs import revenue_integrity
 
 _SLACK_MSG_LIMIT = 3500
 log = logging.getLogger(__name__)
-
-CRM_ENTRY_CHANNEL = "C0B57E18RK5"
 
 
 def _strip_leading_mention(text: str) -> str:
@@ -251,6 +250,10 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             return
         text = event.get("text") or ""
         if "Hermes:" not in text or "MODULE:" not in text:
+            return
+        event_ts = event.get("ts") or ""
+        if not claim_event(f"crm_entry_ts:{event_ts}"):
+            log.info("crm_entry duplicate ts=%s — already handled by other transport", event_ts)
             return
         log.info(
             "crm_entry message received: channel=%s user=%s",
