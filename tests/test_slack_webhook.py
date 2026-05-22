@@ -200,6 +200,34 @@ class TestHappyPath:
         assert kwargs["channel"] == "C0B57E18RK5"
         assert "Account created." in kwargs["text"]
 
+    @patch("hermes.api._get_slack_web_client")
+    @patch("hermes.api._get_dispatcher")
+    @patch("hermes.api._get_espo")
+    def test_passes_slack_blocks_to_chat_postMessage(self, mock_espo, mock_disp, mock_web, client) -> None:
+        """When dispatcher returns data["slack_blocks"] (agency intake approval buttons),
+        the webhook must attach them so users get clickable buttons in Slack."""
+        web = MagicMock()
+        mock_web.return_value = web
+        approval_blocks = [
+            {"type": "actions", "elements": [
+                {"type": "button", "action_id": "agency_intake_approve_all", "text": {"type": "plain_text", "text": "APPROVE ALL"}},
+                {"type": "button", "action_id": "agency_intake_cancel", "text": {"type": "plain_text", "text": "CANCEL"}},
+            ]},
+        ]
+        mock_disp.return_value.dispatch.return_value = DispatchResult(
+            True,
+            "Intake draft ready — NOTHING WRITTEN YET.",
+            {"draft_id": "abc-123", "slack_blocks": approval_blocks},
+        )
+
+        resp = _post(client, _event_callback())
+        assert resp.status_code == 200
+
+        web.chat_postMessage.assert_called_once()
+        kwargs = web.chat_postMessage.call_args.kwargs
+        assert kwargs.get("blocks") == approval_blocks
+        assert "Intake draft ready" in kwargs["text"]
+
 
 class TestDedupe:
     @patch("hermes.api._get_slack_web_client")
