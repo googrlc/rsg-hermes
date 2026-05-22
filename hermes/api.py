@@ -509,13 +509,24 @@ def _get_slack_web_client():
 
 
 def _process_crm_entry_text(text: str, *, channel_id: str, user_id: str | None, message_ts: str | None, thread_ts: str | None) -> None:
-    """Run dispatcher and post the ack back to #crm-entry."""
+    """Run dispatcher and post the ack back to #crm-entry.
+
+    Mirrors the Socket Mode handler's behavior: when the dispatcher returns
+    `result.data["slack_blocks"]`, those interactive blocks (e.g. the agency
+    intake approve buttons) are attached to the LAST message chunk so users
+    can click rather than retype the approval token.
+    """
+    blocks: list[dict[str, Any]] | None = None
     try:
         espo = _get_espo()
         dispatcher = _get_dispatcher()
         dispatcher.set_slack_context(channel_id=channel_id, user_id=user_id, message_ts=message_ts)
         result = dispatcher.dispatch(espo, _strip_leading_slack_mention(text))
         ack = ("" if result.ok else ":warning: ") + (result.message or "")
+        if isinstance(result.data, dict):
+            candidate = result.data.get("slack_blocks")
+            if isinstance(candidate, list) and candidate:
+                blocks = candidate
     except Exception as exc:
         log.exception("Slack webhook dispatch failed channel=%s ts=%s", channel_id, message_ts)
         ack = f":warning: Hermes command failed: {exc}"
@@ -523,9 +534,14 @@ def _process_crm_entry_text(text: str, *, channel_id: str, user_id: str | None, 
     if web is None:
         log.error("SLACK_BOT_TOKEN unset; cannot post ack to %s", channel_id)
         return
-    for chunk in _chunk_slack(ack):
+    chunks = _chunk_slack(ack)
+    for idx, chunk in enumerate(chunks):
+        # Only attach blocks to the final chunk so buttons aren't duplicated.
+        post_kwargs: dict[str, Any] = {"channel": channel_id, "text": chunk, "thread_ts": thread_ts}
+        if blocks and idx == len(chunks) - 1:
+            post_kwargs["blocks"] = blocks
         try:
-            web.chat_postMessage(channel=channel_id, text=chunk, thread_ts=thread_ts)
+            web.chat_postMessage(**post_kwargs)
         except Exception:
             log.exception("Slack webhook ack post failed channel=%s ts=%s", channel_id, message_ts)
             return
