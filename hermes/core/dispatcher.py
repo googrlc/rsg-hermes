@@ -1000,6 +1000,15 @@ class Dispatcher:
                 "agency_intake",
             ),
             (re.compile(r"^\s*new\s+(commercial|personal|life|benefits|medicare)\s+(account|prospect|client)\b", re.I), "agency_intake"),
+            # Structured Hermes intake block produced by intake skills
+            # ("Hermes:\n…\nMODULE: …"). Routes to the same multi-entity
+            # extractor even when posted without a leading "stage intake:" verb,
+            # so producer-submitted full-summary posts in #crm-entry land in
+            # the right pipeline (Account + Contacts + per-LOB Opportunities).
+            (
+                re.compile(r"\bHermes\s*:\s*\n.*?\bMODULE\s*:", re.I | re.S),
+                "agency_intake",
+            ),
             # Fact retrieval — narrow: question word + recognized fact label,
             # OR short-form "<label> for <entity>". Must precede the broad
             # `lookup.handle` route below.

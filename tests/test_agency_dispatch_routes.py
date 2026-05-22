@@ -94,6 +94,34 @@ class IntakeRouteTests(unittest.TestCase):
             d.dispatch(MagicMock(), "new commercial prospect: 3D Pumps")
             ai_handle.assert_called_once()
 
+    def test_structured_hermes_block_routes_to_agency_intake(self) -> None:
+        """Producer-submitted "Hermes:\n…\nMODULE:" blocks bypass the verb prefix."""
+        d = _make_dispatcher()
+        post = (
+            "3D Pumps LLC – Full Summary | 2026-05-21 | Producer: Lamar Coates\n"
+            "8 records below — Contact, Account, GL, WC, Commercial Auto, "
+            "Inland Marine, CPL, Umbrella.\n\n"
+            "Hermes:\n\n"
+            "PRE-CHECK:\n- Searched CRM?:\n\n"
+            "MODULE: contact\n"
+            "ACTION: create\n"
+            "RECORD NAME: Jarod Denero Mattison\n"
+        )
+        with patch("hermes.commands.agency_intake.handle") as ai_handle:
+            from hermes.core.dispatcher import DispatchResult
+            ai_handle.return_value = DispatchResult(True, "draft staged", {})
+            result = d.dispatch(MagicMock(), post)
+            ai_handle.assert_called_once()
+            self.assertTrue(result.ok)
+
+    def test_module_without_hermes_marker_does_not_route(self) -> None:
+        """A bare `MODULE:` line without the Hermes: header should NOT match —
+        avoids hijacking unrelated text that happens to contain the word."""
+        d = _make_dispatcher()  # use_openai is False by default in the helper
+        with patch("hermes.commands.agency_intake.handle") as ai_handle:
+            d.dispatch(MagicMock(), "Some MODULE: contact discussion here")
+            ai_handle.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
