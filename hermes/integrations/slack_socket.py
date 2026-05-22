@@ -84,13 +84,17 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
         user_id: str | None,
         text: str,
         thread_ts: str | None,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> None:
+        post_kwargs: dict[str, Any] = {"text": text}
+        if blocks:
+            post_kwargs["blocks"] = blocks
         if channel_id:
             try:
                 app.client.chat_postMessage(
                     channel=channel_id,
-                    text=text,
                     thread_ts=thread_ts,
+                    **post_kwargs,
                 )
                 return
             except SlackApiError as e:
@@ -103,7 +107,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
                         if dm_channel:
                             app.client.chat_postMessage(
                                 channel=dm_channel,
-                                text=text,
+                                **post_kwargs,
                             )
                             return
                     except SlackApiError as dm_error:
@@ -124,7 +128,10 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
                         )
                         log.exception("Slack fallback channel failed channel=%s error=%s", fallback_channel, fallback_code)
         try:
-            say(text, thread_ts=thread_ts)
+            if blocks:
+                say(text=text, blocks=blocks, thread_ts=thread_ts)
+            else:
+                say(text, thread_ts=thread_ts)
         except SlackApiError as e:
             error = e.response.get("error") if getattr(e, "response", None) else "unknown"
             log.exception("Slack say failed channel=%s user=%s error=%s", channel_id, user_id, error)
@@ -162,13 +169,23 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             log.exception("Hermes command failed")
             result = DispatchResult(False, f"Hermes command failed: {e}")
         prefix = "" if result.ok else ":warning: "
-        for chunk in _chunk(prefix + result.message):
+        blocks = None
+        if isinstance(result.data, dict):
+            candidate = result.data.get("slack_blocks")
+            if isinstance(candidate, list) and candidate:
+                blocks = candidate
+        chunks = _chunk(prefix + result.message)
+        for idx, chunk in enumerate(chunks):
+            # Only attach interactive blocks to the final chunk so buttons
+            # are not duplicated on long responses.
+            attach_blocks = blocks if idx == len(chunks) - 1 else None
             _send_reply(
                 say=say,
                 channel_id=channel_id,
                 user_id=user_id,
                 text=chunk,
                 thread_ts=thread_ts,
+                blocks=attach_blocks,
             )
 
     @app.event("app_mention")
@@ -296,6 +313,62 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             response_type="ephemeral",
             replace_original=False,
         )
+
+    @app.action(re.compile(r"^agency_intake_"))
+    def on_agency_intake_action(ack: Any, body: dict[str, Any], action: dict[str, Any], respond: Any) -> None:
+        """Slack button callback for agency intake approvals.
+
+        action_id format: agency_intake_<token_slug>
+        value:           the draft_id
+
+        token_slug → token:
+          approve_all       → APPROVE ALL
+          approve_crm       → APPROVE CRM ONLY
+          approve_supabase  → APPROVE SUPABASE ONLY
+          approve_tasks     → APPROVE TASKS ONLY
+          revise            → REVISE
+          cancel            → CANCEL
+        """
+        ack()
+        action_id = str(action.get("action_id") or "")
+        draft_id = str(action.get("value") or "")
+        user_id = ((body.get("user") or {}).get("id") if isinstance(body, dict) else None) or "unknown"
+
+        token_map = {
+            "agency_intake_approve_all": "APPROVE ALL",
+            "agency_intake_approve_crm": "APPROVE CRM ONLY",
+            "agency_intake_approve_supabase": "APPROVE SUPABASE ONLY",
+            "agency_intake_approve_tasks": "APPROVE TASKS ONLY",
+            "agency_intake_revise": "REVISE",
+            "agency_intake_cancel": "CANCEL",
+        }
+        token = token_map.get(action_id)
+        if not token or not draft_id:
+            respond(
+                text=f"Unknown agency intake action: {action_id} (draft={draft_id!r})",
+                response_type="ephemeral",
+                replace_original=False,
+            )
+            return
+
+        try:
+            from hermes.integrations.supabase_client import SupabaseClient
+            from hermes.operations.agency_intake_approval import ApprovalError, approve_draft
+
+            result = approve_draft(
+                SupabaseClient(),
+                draft_id=draft_id,
+                token=token,
+                approver=user_id,
+            )
+            text = result.summary
+        except ApprovalError as e:
+            text = f"Approval blocked: {e}"
+        except Exception as e:
+            log.exception("agency_intake action failed user=%s action=%s", user_id, action_id)
+            text = f"Agency intake action failed: {e}"
+
+        respond(text=text, response_type="ephemeral", replace_original=False)
 
     handler = SocketModeHandler(app, app_token)
     handler.start()

@@ -135,6 +135,60 @@ class AsyncAcceptedResponse(BaseModel):
     status: str
 
 
+class AgencyIntakeRequest(BaseModel):
+    raw_text: str
+    submitted_by: str | None = None
+    source_type: str = "manual"
+    source_ref: str | None = None
+
+
+class AgencyIntakeResponse(BaseModel):
+    ok: bool
+    draft_id: str
+    approval_prompt: str
+    validation_warnings: list[str] = []
+    payload_preview: dict | None = None
+    requires_confirmation: bool = True
+
+
+class AgencyIntakeApprovalRequest(BaseModel):
+    draft_id: str
+    token: str
+    approver: str | None = None
+
+
+class AgencyIntakeApprovalResponse(BaseModel):
+    ok: bool
+    draft_id: str
+    token: str
+    status: str
+    summary: str
+    enqueued_queue_ids: list[str] = []
+    retrieval_row_ids: dict[str, list[str]] = {}
+    error: str | None = None
+
+
+class AgencyFactRequest(BaseModel):
+    question: str | None = None
+    entity: str | None = None
+    fact_label: str | None = None
+    include_restricted: bool = True
+
+
+class AgencyFactResponse(BaseModel):
+    ok: bool
+    found: bool
+    entity: str
+    fact_label: str
+    fact_value: str | None = None
+    source: str
+    confidence: str = "high"
+    sensitivity: str = "standard"
+    answer_text: str
+    candidates: list[dict[str, Any]] = []
+    notes: str | None = None
+
+
 def _accept_openclaw_enqueue(body: OpenClawEnqueueRequest) -> JSONResponse:
     """Queue one OpenClaw task; Hermes is a pure producer (insert + 202)."""
     from hermes.integrations.openclaw_producer import enqueue_openclaw_task
@@ -292,6 +346,127 @@ async def sync_health():
             "finished_at": latest.get("finished_at"),
         },
     }
+
+
+@app.post("/agency-intake", response_model=AgencyIntakeResponse)
+async def agency_intake(req: AgencyIntakeRequest):
+    """Stage an agency intake draft. Returns draft_id + approval prompt.
+
+    Nothing is written to CRM yet — caller must POST /agency-intake/approve
+    with an approval token (APPROVE ALL, APPROVE CRM ONLY, etc.).
+    """
+    from hermes.commands.agency_intake import AgencyIntakeError, stage_draft
+
+    if not req.raw_text or not req.raw_text.strip():
+        raise HTTPException(status_code=400, detail="raw_text is required")
+    try:
+        draft = stage_draft(
+            _get_supa(),
+            raw_text=req.raw_text,
+            submitted_by=req.submitted_by,
+            source_type=req.source_type,
+            source_ref=req.source_ref,
+        )
+    except AgencyIntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("agency_intake staging failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return AgencyIntakeResponse(
+        ok=True,
+        draft_id=draft.draft_id,
+        approval_prompt=draft.approval_prompt,
+        validation_warnings=draft.validation_warnings,
+        payload_preview=draft.payload,
+    )
+
+
+@app.post("/agency-intake/approve", response_model=AgencyIntakeApprovalResponse)
+async def agency_intake_approve(req: AgencyIntakeApprovalRequest):
+    """Apply an approval token to a staged agency intake draft.
+
+    Same shared logic that the Slack interactive button calls.
+    """
+    from hermes.operations.agency_intake_approval import ApprovalError, approve_draft
+
+    try:
+        result = approve_draft(
+            _get_supa(),
+            draft_id=req.draft_id,
+            token=req.token,
+            approver=req.approver,
+        )
+    except ApprovalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("agency_intake_approve failed for draft=%s", req.draft_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+    return AgencyIntakeApprovalResponse(
+        ok=result.ok,
+        draft_id=result.draft_id,
+        token=result.token,
+        status=result.status,
+        summary=result.summary,
+        enqueued_queue_ids=result.enqueued_queue_ids,
+        retrieval_row_ids=result.retrieval_row_ids,
+        error=result.error,
+    )
+
+
+@app.post("/agency-fact", response_model=AgencyFactResponse)
+async def agency_fact(req: AgencyFactRequest):
+    """Answer a structured fact-retrieval question with citation + confidence.
+
+    Two call shapes:
+      1. Natural-language: {"question": "What is JB Noble's EIN?"}
+      2. Structured:       {"entity": "JB Noble", "fact_label": "EIN"}
+    """
+    from hermes.commands import fact_retriever
+
+    entity = (req.entity or "").strip()
+    fact_label = (req.fact_label or "").strip()
+    if not entity or not fact_label:
+        if not req.question or not req.question.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either {entity, fact_label} or question.",
+            )
+        parsed = fact_retriever.parse_question(req.question)
+        if not parsed:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Couldn't parse fact label from question. Use shapes like "
+                    "\"What is <entity>'s EIN?\" or pass entity+fact_label directly."
+                ),
+            )
+        entity, fact_label = parsed
+
+    try:
+        answer = fact_retriever.retrieve(
+            _get_espo(),
+            _get_supa(),
+            entity_name=entity,
+            fact_label=fact_label,
+            include_restricted=req.include_restricted,
+        )
+    except Exception as exc:
+        log.exception("agency_fact failed entity=%s label=%s", entity, fact_label)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return AgencyFactResponse(
+        ok=True,
+        found=answer.found,
+        entity=answer.entity,
+        fact_label=answer.fact_label,
+        fact_value=answer.fact_value,
+        source=answer.source,
+        confidence=answer.confidence,
+        sensitivity=answer.sensitivity,
+        answer_text=answer.render(),
+        candidates=answer.candidates,
+        notes=answer.notes,
+    )
 
 
 @app.post("/command", response_model=DispatchResponse)
