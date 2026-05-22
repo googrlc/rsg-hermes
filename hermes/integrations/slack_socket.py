@@ -20,6 +20,8 @@ from hermes.jobs import revenue_integrity
 _SLACK_MSG_LIMIT = 3500
 log = logging.getLogger(__name__)
 
+CRM_ENTRY_CHANNEL = "C0B57E18RK5"
+
 
 def _strip_leading_mention(text: str) -> str:
     return re.sub(r"^<@[^>]+>\s*", "", (text or "").strip()).strip()
@@ -55,6 +57,12 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
     if not bot_token or not app_token:
         raise RuntimeError(
             "Set SLACK_BOT_TOKEN (Bot User OAuth) and SLACK_APP_TOKEN (App-level) for Socket Mode."
+        )
+    hermes_bot_user_id = os.environ.get("HERMES_BOT_USER_ID", "")
+    if not hermes_bot_user_id:
+        raise RuntimeError(
+            "Set HERMES_BOT_USER_ID (Hermes' own Slack user id, e.g. U0123ABCD) so the "
+            "#crm-entry message listener can skip its own posts and avoid infinite loops."
         )
 
     if espo is None:
@@ -212,6 +220,33 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
                 user_id=event.get("user"),
                 message_ts=event.get("ts"),
             )
+
+    @app.event("message")
+    def on_crm_entry_message(event: dict[str, Any], say: Any) -> None:
+        # 🚨 CRITICAL: prevent infinite loop on Hermes' own ack posts in #crm-entry.
+        if event.get("bot_id"):
+            return
+        if event.get("user") == hermes_bot_user_id:
+            return
+        if event.get("subtype") in ("bot_message", "message_changed", "message_deleted"):
+            return
+        if event.get("channel") != CRM_ENTRY_CHANNEL:
+            return
+        text = event.get("text") or ""
+        if "Hermes:" not in text or "MODULE:" not in text:
+            return
+        log.info(
+            "crm_entry message received: channel=%s user=%s",
+            event.get("channel"),
+            event.get("user"),
+        )
+        thread_ts = event.get("thread_ts") or event.get("ts")
+        _handle_text(
+            text, say, thread_ts,
+            channel_id=event.get("channel"),
+            user_id=event.get("user"),
+            message_ts=event.get("ts"),
+        )
 
     @app.action(re.compile(r"^sentinel_"))
     def on_sentinel_action(ack: Any, body: dict[str, Any], action: dict[str, Any], respond: Any) -> None:
