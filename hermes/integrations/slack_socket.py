@@ -202,11 +202,39 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
     @app.event("message")
     def on_message(event: dict[str, Any], say: Any) -> None:
         log.info("message event: channel=%s type=%s is_dm=%s is_cmd=%s", event.get("channel"), event.get("channel_type"), _is_direct_im(event), _is_command_channel(event, command_channel))
-        if not _is_direct_im(event) and not _is_command_channel(event, command_channel):
+        # Common bot/self/edit filters first — apply to every routing path.
+        if event.get("bot_id") or event.get("subtype") == "bot_message":
+            return
+        if event.get("user") == hermes_bot_user_id:
             return
         if event.get("subtype") in ("message_changed", "message_deleted", "channel_join", "channel_leave"):
             return
-        if event.get("bot_id") or event.get("subtype") == "bot_message":
+
+        # Route 1: #crm-entry channel — parse Hermes:/MODULE: block, dispatch, ack in-thread.
+        if event.get("channel") == CRM_ENTRY_CHANNEL:
+            text = event.get("text") or ""
+            if "Hermes:" not in text or "MODULE:" not in text:
+                return
+            event_ts = event.get("ts") or ""
+            if not claim_event(f"crm_entry_ts:{event_ts}"):
+                log.info("crm_entry duplicate ts=%s — already handled by other transport", event_ts)
+                return
+            log.info(
+                "crm_entry message received: channel=%s user=%s",
+                event.get("channel"),
+                event.get("user"),
+            )
+            thread_ts = event.get("thread_ts") or event.get("ts")
+            _handle_text(
+                text, say, thread_ts,
+                channel_id=event.get("channel"),
+                user_id=event.get("user"),
+                message_ts=event.get("ts"),
+            )
+            return
+
+        # Route 2: DMs and the @-mention command channel.
+        if not _is_direct_im(event) and not _is_command_channel(event, command_channel):
             return
         text = event.get("text") or ""
         thread_ts = event.get("thread_ts") or event.get("ts")
@@ -236,37 +264,6 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
                 user_id=event.get("user"),
                 message_ts=event.get("ts"),
             )
-
-    @app.event("message")
-    def on_crm_entry_message(event: dict[str, Any], say: Any) -> None:
-        # 🚨 CRITICAL: prevent infinite loop on Hermes' own ack posts in #crm-entry.
-        if event.get("bot_id"):
-            return
-        if event.get("user") == hermes_bot_user_id:
-            return
-        if event.get("subtype") in ("bot_message", "message_changed", "message_deleted"):
-            return
-        if event.get("channel") != CRM_ENTRY_CHANNEL:
-            return
-        text = event.get("text") or ""
-        if "Hermes:" not in text or "MODULE:" not in text:
-            return
-        event_ts = event.get("ts") or ""
-        if not claim_event(f"crm_entry_ts:{event_ts}"):
-            log.info("crm_entry duplicate ts=%s — already handled by other transport", event_ts)
-            return
-        log.info(
-            "crm_entry message received: channel=%s user=%s",
-            event.get("channel"),
-            event.get("user"),
-        )
-        thread_ts = event.get("thread_ts") or event.get("ts")
-        _handle_text(
-            text, say, thread_ts,
-            channel_id=event.get("channel"),
-            user_id=event.get("user"),
-            message_ts=event.get("ts"),
-        )
 
     @app.action(re.compile(r"^sentinel_"))
     def on_sentinel_action(ack: Any, body: dict[str, Any], action: dict[str, Any], respond: Any) -> None:
