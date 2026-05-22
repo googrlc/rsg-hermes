@@ -103,6 +103,30 @@ class TestSignatureVerification:
         resp = _post(client, _event_callback())
         assert resp.status_code == 503
 
+    def test_missing_headers_returns_401(self, client) -> None:
+        """No X-Slack-Request-Timestamp / X-Slack-Signature → 401, not 500."""
+        body = json.dumps(_event_callback()).encode("utf-8")
+        resp = client.post(
+            "/api/hermes/slack/crm-entry",
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert "Missing Slack signature headers" in resp.json()["detail"]
+
+    def test_non_numeric_timestamp_returns_401(self, client) -> None:
+        body = json.dumps(_event_callback()).encode("utf-8")
+        resp = client.post(
+            "/api/hermes/slack/crm-entry",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "x-slack-request-timestamp": "not-a-number",
+                "x-slack-signature": "v0=deadbeef",
+            },
+        )
+        assert resp.status_code == 401
+
 
 class TestUrlVerification:
     def test_returns_challenge(self, client) -> None:
