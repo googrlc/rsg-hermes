@@ -97,20 +97,90 @@ def _safe_transition_to_failed(
 # ---------------------------------------------------------------------------
 
 
-def _post_draft_stub(submission_id: str, payload: dict[str, Any]) -> None:
-    """Step-4 hook: replaced by a real Slack post with interactive buttons."""
-    log.info("[stub] would post draft for submission %s to Slack", submission_id)
-
-
-# Step 3: real synthesizer + renderer from commands/agency_intake.py.
-from hermes.commands.agency_intake import (  # noqa: E402  (import-after-use to keep the hook section contiguous)
+from hermes.commands.agency_intake import (  # noqa: E402
+    build_approval_blocks,
     render_hermes_blocks,
     synthesize_from_payload,
 )
 
+
+def _format_submission_approval_prompt(
+    submission_id: str, draft_summary: dict[str, Any]
+) -> str:
+    """One-liner Slack-friendly summary keyed on submission_id (not draft_id).
+
+    Lamar reviews this in #crm-entry / the draft channel before clicking
+    APPROVE ALL. The submission_id is embedded so the audit trail
+    matches the intake_submissions row even if the buttons are clipped.
+    """
+    account = draft_summary.get("account") or {}
+    contacts = draft_summary.get("contacts") or []
+    opps = draft_summary.get("opportunities") or []
+    facts = draft_summary.get("facts") or []
+    note = draft_summary.get("note") or {}
+
+    contact_names = ", ".join(
+        c.get("full_name", "") or f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+        for c in contacts
+    ) or "(none)"
+    lob_lines = [
+        f"  - {o.get('line_of_business', '?')}  ({o.get('stage', '?')})"
+        + (f"  quote {o.get('quote_number')}" if o.get("quote_number") else "")
+        for o in opps
+    ]
+    restricted = sum(1 for f in facts if isinstance(f, dict) and f.get("sensitivity") == "restricted")
+
+    return (
+        f"*Intake draft ready — NOTHING WRITTEN YET.*  "
+        f"(submission_id: `{submission_id}`)\n\n"
+        f"*Account:*       {account.get('account_name', '?')}  "
+        f"({account.get('entity_type', '?')}, {account.get('industry', '?')})\n"
+        f"*Contacts:*      {contact_names}\n"
+        f"*Opportunities:* {len(opps)}\n"
+        + ("\n".join(lob_lines) + "\n" if lob_lines else "")
+        + f"*Note:*          {note.get('title', '(none)')}  ({note.get('note_type', '?')})\n"
+        f"*Facts staged:*  {len(facts)} ({restricted} restricted)\n\n"
+        "Click a button below — or reply with the token verbatim."
+    )
+
+
+def post_draft_to_slack(submission_id: str, draft_summary: dict[str, Any]) -> None:
+    """Real Step-4 implementation of ``post_draft``.
+
+    Posts the synthesized intake draft to the draft channel with the same
+    interactive Block Kit buttons used by the agency-intake Slack flow —
+    the existing ``^agency_intake_`` action handler in slack_socket.py
+    will route button clicks to the (Step-5-rewritten) approve_draft.
+
+    The button value is ``submission_id`` (NOT draft_id) and the
+    ``block_id`` carries it too so the handler can recover it from either
+    field.
+
+    Slack failures are caught + logged so the worker doesn't fail the
+    transition. The row will still settle at awaiting_approval; an
+    operator can manually post or click the approval token reply.
+    """
+    prompt_text = _format_submission_approval_prompt(submission_id, draft_summary)
+    blocks = build_approval_blocks(submission_id, prompt_text)
+    try:
+        notifier = SlackNotifier(channel=_intake_draft_channel())
+        notifier.post_message(text=prompt_text, blocks=blocks)
+        log.info("Posted intake draft to Slack for submission %s", submission_id)
+    except SlackNotifierError as exc:
+        log.exception("Slack draft post failed for submission %s", submission_id)
+        # Surface to the alert channel so it doesn't get lost.
+        _post_alert(
+            f":warning: Intake draft synthesized but Slack post failed\n"
+            f"- submission_id: {submission_id}\n"
+            f"- error: {exc}\n"
+            f"Row will settle at awaiting_approval; approve via reply token "
+            f"or POST /agency-intake/approve."
+        )
+
+
 synthesize_payload = synthesize_from_payload
 render_blocks = render_hermes_blocks
-post_draft = _post_draft_stub  # Step 4 fills this
+post_draft = post_draft_to_slack
 
 
 # ---------------------------------------------------------------------------

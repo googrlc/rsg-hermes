@@ -381,6 +381,124 @@ class TestWorkerWithRealSynthesizer:
         assert synth_update["draft_summary"]["account"]["account_name"] == "Acme"
 
 
+# ---------------------------------------------------------------------------
+# Step 4: Slack draft post (post_draft_to_slack)
+# ---------------------------------------------------------------------------
+
+
+class TestPostDraftToSlack:
+    @patch("hermes.operations.intake_worker.SlackNotifier")
+    def test_post_format_includes_summary_and_blocks(self, MockNotifier) -> None:
+        from hermes.operations.intake_worker import post_draft_to_slack
+
+        notifier = MockNotifier.return_value
+        notifier.post_message.return_value = {"ok": True}
+
+        draft_summary = {
+            "account": {"account_name": "3D Pumps LLC", "entity_type": "LLC", "industry": "Construction"},
+            "contacts": [{"full_name": "Jarod Mattison"}],
+            "opportunities": [
+                {"line_of_business": "General Liability", "stage": "Discovery"},
+                {"line_of_business": "Commercial Package", "stage": "Discovery"},
+            ],
+            "facts": [{"sensitivity": "restricted"}, {}],
+            "note": {"title": "Quote summary", "note_type": "Quote Summary"},
+        }
+        post_draft_to_slack("sub-abc-123", draft_summary)
+
+        notifier.post_message.assert_called_once()
+        kwargs = notifier.post_message.call_args.kwargs
+        text = kwargs["text"]
+        blocks = kwargs["blocks"]
+
+        # Text body conveys the key fields.
+        assert "Intake draft ready" in text
+        assert "submission_id" in text
+        assert "sub-abc-123" in text
+        assert "3D Pumps LLC" in text
+        assert "Jarod Mattison" in text
+        assert "General Liability" in text
+        assert "Commercial Package" in text
+        assert "(1 restricted)" in text
+
+        # Blocks are the 6 approval buttons.
+        actions_block = next(b for b in blocks if b.get("type") == "actions")
+        button_ids = [el["action_id"] for el in actions_block["elements"]]
+        assert button_ids == [
+            "agency_intake_approve_all",
+            "agency_intake_approve_crm",
+            "agency_intake_approve_supabase",
+            "agency_intake_approve_tasks",
+            "agency_intake_revise",
+            "agency_intake_cancel",
+        ]
+
+    @patch("hermes.operations.intake_worker.SlackNotifier")
+    def test_metadata_carries_submission_id_not_draft_id(self, MockNotifier) -> None:
+        from hermes.operations.intake_worker import post_draft_to_slack
+
+        notifier = MockNotifier.return_value
+        notifier.post_message.return_value = {"ok": True}
+
+        post_draft_to_slack("submission-uuid-zzz", {"account": {"account_name": "Acme"}})
+
+        blocks = notifier.post_message.call_args.kwargs["blocks"]
+        actions_block = next(b for b in blocks if b.get("type") == "actions")
+
+        # block_id encodes submission_id
+        assert actions_block["block_id"] == "agency_intake_actions_submission-uuid-zzz"
+
+        # Every button's `value` is the submission_id (the Slack listener
+        # reads action.value to recover it).
+        for element in actions_block["elements"]:
+            assert element["value"] == "submission-uuid-zzz"
+
+    @patch("hermes.operations.intake_worker._post_alert")
+    @patch("hermes.operations.intake_worker.SlackNotifier")
+    def test_slack_failure_routes_to_alert_channel(
+        self, MockNotifier, mock_alert,
+    ) -> None:
+        """If the draft post fails, the helper must NOT crash the worker —
+        it should log and post a warning to the alert channel so the
+        operator knows the row is stuck at awaiting_approval."""
+        from hermes.integrations.slack_notifier import SlackNotifierError
+        from hermes.operations.intake_worker import post_draft_to_slack
+
+        notifier = MockNotifier.return_value
+        notifier.post_message.side_effect = SlackNotifierError("rate limited")
+
+        # Should not raise.
+        post_draft_to_slack("sub-1", {"account": {"account_name": "X"}})
+
+        # An alert post happened with the submission_id surfaced.
+        mock_alert.assert_called_once()
+        alert_text = mock_alert.call_args.args[0]
+        assert "Slack post failed" in alert_text
+        assert "sub-1" in alert_text
+        assert "rate limited" in alert_text
+
+    @patch("hermes.operations.intake_worker.SlackNotifier")
+    def test_uses_draft_channel_env(self, MockNotifier, monkeypatch) -> None:
+        from hermes.operations.intake_worker import post_draft_to_slack
+
+        monkeypatch.setenv("HERMES_INTAKE_DRAFT_CHANNEL", "CCUSTOMDRAFT")
+        MockNotifier.return_value.post_message.return_value = {"ok": True}
+
+        post_draft_to_slack("sub-1", {"account": {"account_name": "X"}})
+
+        MockNotifier.assert_called_with(channel="CCUSTOMDRAFT")
+
+
+class TestPostDraftWiredIntoWorker:
+    """Confirms the module-level indirection actually points at the real
+    post_draft_to_slack after import (Step 4 wiring)."""
+
+    def test_post_draft_is_real_function_not_stub(self) -> None:
+        from hermes.operations.intake_worker import post_draft, post_draft_to_slack
+
+        assert post_draft is post_draft_to_slack
+
+
 class TestChannelResolution:
     def test_alert_channel_default(self, monkeypatch) -> None:
         monkeypatch.delenv("HERMES_INTAKE_ALERT_CHANNEL", raising=False)
