@@ -132,35 +132,77 @@ def _map_account_to_espo(account: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_phone_us(raw: str) -> str:
-    """Normalize a US phone to `(NXX) NXX-XXXX` — the only format EspoCRM accepts.
+    """Normalize a US phone to E.164 (`+1XXXXXXXXXX`).
 
-    See commit b5abb0b: "EspoCRM rejects +1XXXXXXXXXX format". Returns the raw
-    string unchanged if it's not a 10/11-digit US number.
+    Live-tested 2026-05-22 against ``POST /api/v1/Contact`` on the rsg-espocrm
+    install: of (770) 780-8848, 7707808848, 770-780-8848, 770.780.8848,
+    +17707808848 — only the E.164 form returned HTTP 200. Everything else
+    returned ``validationFailure {field: phoneNumber, type: valid}``.
+
+    Returns the raw string unchanged if it's not a 10/11-digit US number,
+    so non-US or unparsable input flows through for human inspection.
     """
     digits = re.sub(r"\D", "", raw or "")
     if len(digits) == 11 and digits.startswith("1"):
         digits = digits[1:]
     if len(digits) == 10:
-        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+        return f"+1{digits}"
     return raw
 
 
-# EspoCRM Opportunity.lineOfBusiness allowed values. The agency-intake LLM
-# extractor produces human strings like "General Liability"; EspoCRM rejects
-# anything not in its option-list. This is the canonical mapping. Unknown
-# values pass through with a warning so misses are visible in logs.
+# EspoCRM Opportunity.lineOfBusiness allowed values — keep this list in sync
+# with the live ``entityDefs.Opportunity.fields.lineOfBusiness.options`` array.
+# The field is required, audited, and locked after first save, so a wrong value
+# burns a record. Verified 2026-05-22 via Metadata API.
+ESPO_LINE_OF_BUSINESS_OPTIONS: tuple[str, ...] = (
+    "Commercial Auto",
+    "Transportation / Trucking",
+    "General Liability",
+    "Workers Comp",
+    "Commercial Property",
+    "BOP",
+    "Professional Liability",
+    "Umbrella",
+    "Builders Risk",
+    "Inland Marine",
+    "Personal Auto",
+    "Homeowners",
+    "Renters",
+    "Condo",
+    "Dwelling Fire",
+    "Motorcycle",
+    "Boat",
+    "RV",
+    "Life",
+    "Health",
+    "Medicare",
+    "Group Benefits",
+    "Garagekeepers",
+    "Commercial Package",
+    "Other",
+)
+
+
+# Maps lowercase-stripped LLM-extractor strings to a value in
+# ``ESPO_LINE_OF_BUSINESS_OPTIONS``. Unknown values pass through ``_normalize_lob``
+# with a logged warning so misses are visible.
 _LOB_ALIASES: dict[str, str] = {
-    # GL / BOP / CPL all collapse to "GL/BOP" — EspoCRM's umbrella term.
-    "general liability": "GL/BOP",
-    "gl": "GL/BOP",
-    "gl/bop": "GL/BOP",
-    "bop": "GL/BOP",
-    "business owners policy": "GL/BOP",
-    "commercial general liability": "GL/BOP",
-    "cgl": "GL/BOP",
-    "commercial package liability": "GL/BOP",
-    "cpl": "GL/BOP",
-    "package": "GL/BOP",
+    # General Liability family — each variant is a distinct enum entry now.
+    "general liability": "General Liability",
+    "gl": "General Liability",
+    "commercial general liability": "General Liability",
+    "cgl": "General Liability",
+    # BOP family
+    "bop": "BOP",
+    "business owners policy": "BOP",
+    # Commercial Package family
+    "commercial package": "Commercial Package",
+    "commercial package liability": "Commercial Package",
+    "cpl": "Commercial Package",
+    "package": "Commercial Package",
+    # Commercial Property family
+    "commercial property": "Commercial Property",
+    "property": "Commercial Property",
     # Workers Comp
     "workers compensation": "Workers Comp",
     "workers' compensation": "Workers Comp",
@@ -171,6 +213,10 @@ _LOB_ALIASES: dict[str, str] = {
     "commercial auto": "Commercial Auto",
     "auto": "Commercial Auto",
     "ca": "Commercial Auto",
+    # Transportation / Trucking
+    "transportation": "Transportation / Trucking",
+    "trucking": "Transportation / Trucking",
+    "transportation / trucking": "Transportation / Trucking",
     # Inland Marine
     "inland marine": "Inland Marine",
     "im": "Inland Marine",
@@ -178,14 +224,33 @@ _LOB_ALIASES: dict[str, str] = {
     "umbrella": "Umbrella",
     "commercial umbrella": "Umbrella",
     "excess liability": "Umbrella",
-    # Property
-    "property": "Property",
-    "commercial property": "Property",
-    # Personal Lines + life/medicare
-    "personal lines": "Personal Lines",
-    "medicare": "Medicare",
+    # Builders Risk
+    "builders risk": "Builders Risk",
+    # Professional Liability
+    "professional liability": "Professional Liability",
+    "errors and omissions": "Professional Liability",
+    "e&o": "Professional Liability",
+    # Garagekeepers
+    "garagekeepers": "Garagekeepers",
+    # Personal lines — each enum entry stands alone; no "Personal Lines" umbrella.
+    "personal auto": "Personal Auto",
+    "homeowners": "Homeowners",
+    "renters": "Renters",
+    "condo": "Condo",
+    "dwelling fire": "Dwelling Fire",
+    "motorcycle": "Motorcycle",
+    "boat": "Boat",
+    "rv": "RV",
+    # Life / Health / Medicare / Group
     "life": "Life",
     "life insurance": "Life",
+    "health": "Health",
+    "medicare": "Medicare",
+    "group benefits": "Group Benefits",
+    "group health": "Group Benefits",
+    "benefits": "Group Benefits",
+    # Catch-all
+    "other": "Other",
 }
 
 
