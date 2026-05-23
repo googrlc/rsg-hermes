@@ -118,24 +118,6 @@ class TestProcessOneReceived:
         assert update["error_log"][-1]["stage"] == "synthesize"
         assert update["error_log"][-1]["exception_type"] == "RuntimeError"
 
-    def test_stub_synthesizer_routes_to_failed(self, supa_with_received_row) -> None:
-        """The default Step-2 stub raises NotImplementedError. The worker
-        should catch that, mark the row failed, and NOT crash the loop."""
-        supa = supa_with_received_row
-        supa.select.side_effect = [
-            [{"id": "sub-1", "status_history": []}],
-            [{"id": "sub-1", "status": "synthesizing", "status_history": [], "error_log": []}],
-        ]
-        supa.update.return_value = {"id": "sub-1"}
-
-        # Don't override — use the module's default stub.
-        with patch.object(intake_worker, "_post_alert"):
-            assert process_one_received(supa) is True
-
-        update = supa.update.call_args.args[2]
-        assert update["status"] == "failed"
-        assert "NotImplementedError" in update["error_log"][-1]["exception_type"]
-
     def test_slack_post_failure_does_not_break_pipeline_when_post_swallows(
         self, supa_with_received_row,
     ) -> None:
@@ -190,6 +172,213 @@ class TestTick:
 # ---------------------------------------------------------------------------
 # Channel resolution
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Step 3: synthesizer port (agency_intake.synthesize_from_payload + render_hermes_blocks)
+# ---------------------------------------------------------------------------
+
+
+class TestPayloadToRawText:
+    def test_flattens_transcript_notes_documents_coaching(self) -> None:
+        from hermes.commands.agency_intake import _payload_dict_to_raw_text
+
+        raw = _payload_dict_to_raw_text({
+            "transcript": "Sandra called.",
+            "notes": "Follow up on umbrella.",
+            "documents": [
+                {"type": "drivers_license", "extracted_data": {"name": "Sandra", "state": "GA"}},
+            ],
+            "coaching_snapshot": {
+                "covered_topics": ["vehicles", "drivers"],
+                "remaining_gaps": ["claims"],
+                "flags_detected": [{"flag": "no garaging address", "severity": "med", "context": "..."}],
+            },
+        })
+        assert "=== TRANSCRIPT ===" in raw
+        assert "Sandra called." in raw
+        assert "=== NOTES ===" in raw
+        assert "=== DOCUMENTS ===" in raw
+        assert "drivers_license" in raw
+        assert "name: Sandra" in raw
+        assert "=== COACHING SNAPSHOT ===" in raw
+        assert "Covered topics: vehicles, drivers" in raw
+        assert "[med] no garaging address" in raw
+
+    def test_skips_empty_sections(self) -> None:
+        from hermes.commands.agency_intake import _payload_dict_to_raw_text
+
+        raw = _payload_dict_to_raw_text({"transcript": "hi", "documents": [], "notes": ""})
+        assert "TRANSCRIPT" in raw
+        assert "DOCUMENTS" not in raw
+        assert "NOTES" not in raw
+
+    def test_documents_only_payload_still_produces_text(self) -> None:
+        from hermes.commands.agency_intake import _payload_dict_to_raw_text
+
+        raw = _payload_dict_to_raw_text({
+            "documents": [{"type": "dec_page", "raw_text": "POLICY: ABC-123"}],
+        })
+        assert "POLICY: ABC-123" in raw
+
+    def test_empty_payload_returns_empty_string(self) -> None:
+        from hermes.commands.agency_intake import _payload_dict_to_raw_text
+
+        assert _payload_dict_to_raw_text({}) == ""
+        assert _payload_dict_to_raw_text({"notes": ""}) == ""
+
+
+class TestSynthesizeFromPayload:
+    @patch("hermes.commands.agency_intake._extract_payload")
+    def test_happy_path_returns_extracted_plus_warnings(self, mock_extract) -> None:
+        from hermes.commands.agency_intake import synthesize_from_payload
+
+        mock_extract.return_value = {
+            "action": "crm_intake_upsert",
+            "approval_required": True,
+            "account": {"account_name": "Acme"},
+            "contacts": [],
+            "opportunities": [
+                {"opportunity_name": "Acme - GL - 06/01", "line_of_business": "General Liability", "stage": "Discovery"},
+            ],
+            "facts": [],
+            "duplicate_search": {},
+        }
+        result, warnings = synthesize_from_payload({"transcript": "Acme is a contractor."})
+        assert result["account"]["account_name"] == "Acme"
+        assert isinstance(warnings, list)
+        mock_extract.assert_called_once()
+        # The flattened text must have been handed to the LLM.
+        assert "=== TRANSCRIPT ===" in mock_extract.call_args.args[0]
+
+    def test_empty_payload_raises(self) -> None:
+        from hermes.commands.agency_intake import AgencyIntakeError, synthesize_from_payload
+
+        with pytest.raises(AgencyIntakeError, match="nothing to synthesize"):
+            synthesize_from_payload({})
+
+    @patch("hermes.commands.agency_intake._extract_payload")
+    def test_extractor_error_propagates(self, mock_extract) -> None:
+        from hermes.commands.agency_intake import AgencyIntakeError, synthesize_from_payload
+
+        mock_extract.side_effect = AgencyIntakeError("openai timeout")
+        with pytest.raises(AgencyIntakeError, match="openai timeout"):
+            synthesize_from_payload({"transcript": "..."})
+
+
+class TestRenderHermesBlocks:
+    def test_renders_full_3D_pumps_style_payload(self) -> None:
+        from hermes.commands.agency_intake import render_hermes_blocks
+
+        payload = {
+            "account": {
+                "account_name": "3D Pumps LLC",
+                "legal_name": "3D Pumps LLC",
+                "entity_type": "LLC",
+                "industry": "Water Infrastructure / Specialty Contracting",
+                "phone": "(770) 780-8848",
+                "email": "jarod.mattison@gmail.com",
+                "city": "Atlanta",
+                "state": "GA",
+                "tags": ["Critical CPL binding gap"],
+            },
+            "contacts": [
+                {"full_name": "Jarod Denero Mattison", "role": "Sole Member / Principal",
+                 "phone": "(770) 780-8848", "primary_contact": True},
+            ],
+            "opportunities": [
+                {"opportunity_name": "3D Pumps LLC - GL - 05/21/2026",
+                 "line_of_business": "General Liability", "stage": "Discovery",
+                 "opportunity_type": "New Business"},
+                {"opportunity_name": "3D Pumps LLC - CPL - 05/21/2026",
+                 "line_of_business": "Commercial Package", "stage": "Discovery"},
+            ],
+            "note": {"title": "3D Pumps Summary", "body": "Facts:\n- bypass pumping\n", "note_type": "Quote Summary"},
+            "facts": [{"sensitivity": "restricted"}, {"sensitivity": "standard"}],
+        }
+        rendered = render_hermes_blocks(payload)
+        assert rendered.startswith("Hermes:")
+        assert "MODULE: account" in rendered
+        assert "NAME: 3D Pumps LLC" in rendered
+        assert "PHONE: (770) 780-8848" in rendered
+        assert "MODULE: contact" in rendered
+        assert "NAME: Jarod Denero Mattison" in rendered
+        assert "PRIMARY CONTACT: yes" in rendered
+        # Both opportunities present.
+        assert rendered.count("MODULE: opportunity") == 2
+        assert "LINE OF BUSINESS: General Liability" in rendered
+        assert "LINE OF BUSINESS: Commercial Package" in rendered
+        assert "MODULE: note" in rendered
+        assert "TITLE: 3D Pumps Summary" in rendered
+        assert "BODY:" in rendered
+        # Indented body lines
+        assert "    Facts:" in rendered or "Facts:" in rendered
+        # Facts summary
+        assert "MODULE: facts (2 total, 1 restricted)" in rendered
+
+    def test_skips_empty_modules(self) -> None:
+        from hermes.commands.agency_intake import render_hermes_blocks
+
+        rendered = render_hermes_blocks({
+            "account": {"account_name": "Acme"},
+            "contacts": [{}],  # invalid contact (no name) → skipped
+            "opportunities": [],
+            "note": {},
+        })
+        assert "MODULE: account" in rendered
+        assert "MODULE: contact" not in rendered
+        assert "MODULE: opportunity" not in rendered
+        assert "MODULE: note" not in rendered
+
+    def test_empty_payload_returns_header_only(self) -> None:
+        from hermes.commands.agency_intake import render_hermes_blocks
+
+        rendered = render_hermes_blocks({})
+        assert rendered.strip() == "Hermes:"
+
+
+class TestWorkerWithRealSynthesizer:
+    """End-to-end of the Step 3 wiring: worker -> synthesize_from_payload ->
+    render_hermes_blocks -> transitions, with the LLM call itself mocked."""
+
+    @patch("hermes.commands.agency_intake._extract_payload")
+    def test_valid_payload_reaches_awaiting_approval(self, mock_extract) -> None:
+        mock_extract.return_value = {
+            "action": "crm_intake_upsert",
+            "approval_required": True,
+            "account": {"account_name": "Acme"},
+            "contacts": [{"full_name": "Jane Doe"}],
+            "opportunities": [{"opportunity_name": "Acme - GL", "line_of_business": "General Liability", "stage": "Discovery"}],
+            "facts": [],
+            "duplicate_search": {},
+            "note": {"title": "t", "body": "b"},
+        }
+
+        supa = MagicMock()
+        supa.select.side_effect = [
+            [{"id": "sub-1", "status_history": []}],  # claim_next_received select
+            [{"id": "sub-1", "status": "synthesizing", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesized", "status_history": []}],
+            [{"id": "sub-1", "status": "drafting", "status_history": []}],
+        ]
+        supa.update.return_value = {"id": "sub-1"}
+        supa.update_where.return_value = [{
+            "id": "sub-1", "payload": {"transcript": "Acme is a contractor."},
+            "status_history": []
+        }]
+
+        # Use the real synthesize_from_payload + render_hermes_blocks
+        # (already wired into the worker by Step 3). Slack post stubbed.
+        intake_worker.post_draft = MagicMock(return_value=None)
+
+        assert process_one_received(supa) is True
+
+        statuses = [c.args[2]["status"] for c in supa.update.call_args_list]
+        assert statuses == ["synthesized", "drafting", "awaiting_approval"]
+        synth_update = supa.update.call_args_list[0].args[2]
+        assert "Hermes:" in synth_update["hermes_blocks"]
+        assert "MODULE: account" in synth_update["hermes_blocks"]
+        assert synth_update["draft_summary"]["account"]["account_name"] == "Acme"
 
 
 class TestChannelResolution:

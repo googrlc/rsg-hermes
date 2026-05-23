@@ -200,6 +200,213 @@ def _extract_payload(raw_text: str) -> dict[str, Any]:
         raise AgencyIntakeError(f"LLM did not return valid JSON: {raw[:300]}") from exc
 
 
+def _payload_dict_to_raw_text(payload: dict[str, Any]) -> str:
+    """Flatten an /api/intake payload (transcript / documents / notes /
+    coaching_snapshot) into the single text blob the existing LLM
+    synthesizer consumes.
+
+    The structure mirrors the JSON contract on POST /api/intake:
+      {transcript, documents[], notes, coaching_snapshot, ...}
+
+    Sections are delimited so the LLM sees a deterministic ordering even if
+    the caller omits some fields. Empty sections are skipped (the LLM
+    treats their absence as 'none provided').
+    """
+    parts: list[str] = []
+
+    transcript = (payload.get("transcript") or "").strip()
+    if transcript:
+        parts.append(f"=== TRANSCRIPT ===\n{transcript}")
+
+    notes = (payload.get("notes") or "").strip()
+    if notes:
+        parts.append(f"=== NOTES ===\n{notes}")
+
+    documents = payload.get("documents") or []
+    if documents:
+        doc_lines = ["=== DOCUMENTS ==="]
+        for idx, doc in enumerate(documents, start=1):
+            if not isinstance(doc, dict):
+                continue
+            doc_type = doc.get("type") or "unknown"
+            doc_lines.append(f"--- Document {idx}: {doc_type} ---")
+            extracted = doc.get("extracted_data")
+            if isinstance(extracted, dict) and extracted:
+                doc_lines.append("Extracted fields:")
+                for k, v in extracted.items():
+                    doc_lines.append(f"  {k}: {v}")
+            raw_text = (doc.get("raw_text") or "").strip()
+            if raw_text:
+                doc_lines.append(f"OCR / raw text:\n{raw_text}")
+            source_file = doc.get("source_file")
+            if source_file:
+                doc_lines.append(f"Source file: {source_file}")
+        parts.append("\n".join(doc_lines))
+
+    coaching = payload.get("coaching_snapshot")
+    if isinstance(coaching, dict) and coaching:
+        coach_lines = ["=== COACHING SNAPSHOT ==="]
+        covered = coaching.get("covered_topics") or []
+        gaps = coaching.get("remaining_gaps") or []
+        flags = coaching.get("flags_detected") or []
+        if covered:
+            coach_lines.append("Covered topics: " + ", ".join(str(t) for t in covered))
+        if gaps:
+            coach_lines.append("Remaining gaps: " + ", ".join(str(g) for g in gaps))
+        if flags:
+            coach_lines.append("Flags detected:")
+            for f in flags:
+                if isinstance(f, dict):
+                    sev = f.get("severity") or "?"
+                    coach_lines.append(
+                        f"  [{sev}] {f.get('flag', '?')}: {f.get('context', '')}"
+                    )
+                else:
+                    coach_lines.append(f"  {f}")
+        parts.append("\n".join(coach_lines))
+
+    return "\n\n".join(parts).strip()
+
+
+def synthesize_from_payload(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Phase-3 entry point for the intake worker.
+
+    Takes an ``intake_submissions.payload`` dict (the JSON we accepted at
+    POST /api/intake) and returns the synthesized CRM-intake JSON +
+    validation warnings.
+
+    Internally:
+      1. Flatten the structured payload into a single text blob.
+      2. Hand to the same ``_extract_payload`` the agency-intake Slack flow
+         uses, so the LLM contract is identical between transports.
+      3. Run ``validate_payload`` and return warnings alongside.
+
+    Raises ``AgencyIntakeError`` if the LLM call fails, the payload is
+    empty, or the response isn't valid JSON.
+    """
+    raw_text = _payload_dict_to_raw_text(payload)
+    if not raw_text:
+        raise AgencyIntakeError(
+            "payload has no transcript, documents, notes, or coaching_snapshot — "
+            "nothing to synthesize"
+        )
+    extracted = _extract_payload(raw_text)
+    warnings = validate_payload(extracted)
+    return extracted, warnings
+
+
+def render_hermes_blocks(payload: dict[str, Any]) -> str:
+    """Render a synthesized intake payload as Hermes-style text blocks.
+
+    Goes into ``intake_submissions.hermes_blocks`` for human review in
+    Slack. The format mirrors the manual ``Hermes:`` block syntax operators
+    type in #crm-entry today — one MODULE per CRM entity — so reviewers
+    see a familiar shape.
+
+    Pure function — does no I/O, no LLM calls. Empty/missing fields are
+    skipped rather than rendered as 'None'.
+    """
+    lines: list[str] = ["Hermes:"]
+    account = payload.get("account") or {}
+    contacts = payload.get("contacts") or []
+    opps = payload.get("opportunities") or []
+    note = payload.get("note") or {}
+    facts = payload.get("facts") or []
+
+    def _kv(label: str, value: Any) -> None:
+        if value in (None, "", [], {}):
+            return
+        if isinstance(value, (list, tuple)):
+            value = ", ".join(str(v) for v in value if v not in (None, ""))
+            if not value:
+                return
+        lines.append(f"  {label}: {value}")
+
+    if account.get("account_name"):
+        lines.append("")
+        lines.append("MODULE: account")
+        lines.append("ACTION: upsert")
+        _kv("NAME", account.get("account_name"))
+        _kv("LEGAL NAME", account.get("legal_name"))
+        _kv("DBA", account.get("dba"))
+        _kv("FEIN", account.get("fein"))
+        _kv("ENTITY TYPE", account.get("entity_type"))
+        _kv("INDUSTRY", account.get("industry"))
+        _kv("PHONE", account.get("phone"))
+        _kv("EMAIL", account.get("email"))
+        _kv("WEBSITE", account.get("website"))
+        _kv("ADDRESS", account.get("address"))
+        _kv("CITY", account.get("city"))
+        _kv("STATE", account.get("state"))
+        _kv("ZIP", account.get("zip"))
+        _kv("ACCOUNT TYPE", account.get("account_type"))
+        _kv("ACCOUNT STATUS", account.get("account_status"))
+        _kv("ANNUAL REVENUE", account.get("annual_revenue"))
+        _kv("EMPLOYEE COUNT", account.get("employee_count"))
+        _kv("OPERATIONS", account.get("operations_summary"))
+        _kv("TAGS", account.get("tags"))
+
+    for contact in contacts:
+        if not isinstance(contact, dict):
+            continue
+        name = contact.get("full_name") or (
+            f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+        )
+        if not name:
+            continue
+        lines.append("")
+        lines.append("MODULE: contact")
+        lines.append("ACTION: create")
+        _kv("NAME", name)
+        _kv("ROLE", contact.get("role"))
+        _kv("RELATIONSHIP TO ACCOUNT", contact.get("relationship_to_account"))
+        _kv("PHONE", contact.get("phone"))
+        _kv("EMAIL", contact.get("email"))
+        if contact.get("primary_contact"):
+            lines.append("  PRIMARY CONTACT: yes")
+
+    for opp in opps:
+        if not isinstance(opp, dict) or not opp.get("opportunity_name"):
+            continue
+        lines.append("")
+        lines.append("MODULE: opportunity")
+        lines.append("ACTION: create")
+        _kv("NAME", opp.get("opportunity_name"))
+        _kv("LINE OF BUSINESS", opp.get("line_of_business"))
+        _kv("STAGE", opp.get("stage"))
+        _kv("OPPORTUNITY TYPE", opp.get("opportunity_type"))
+        _kv("CARRIER", opp.get("carrier"))
+        _kv("PREMIUM", opp.get("premium"))
+        _kv("QUOTE NUMBER", opp.get("quote_number"))
+        _kv("PROPOSED EFFECTIVE DATE", opp.get("proposed_effective_date"))
+        _kv("PRODUCER", opp.get("producer"))
+        _kv("TAGS", opp.get("tags"))
+
+    if note.get("title") and note.get("body"):
+        lines.append("")
+        lines.append("MODULE: note")
+        lines.append("ACTION: create")
+        _kv("TITLE", note.get("title"))
+        _kv("NOTE TYPE", note.get("note_type"))
+        _kv("TAGS", note.get("tags"))
+        body = str(note.get("body") or "").strip()
+        if body:
+            lines.append("  BODY:")
+            for body_line in body.splitlines():
+                lines.append(f"    {body_line}")
+
+    if facts:
+        restricted = sum(
+            1 for f in facts if isinstance(f, dict) and f.get("sensitivity") == "restricted"
+        )
+        lines.append("")
+        lines.append(f"MODULE: facts ({len(facts)} total, {restricted} restricted)")
+
+    return "\n".join(lines).strip()
+
+
 def validate_payload(payload: dict[str, Any]) -> list[str]:
     """Light-touch validation. Returns a list of warning strings (empty = clean)."""
     warnings: list[str] = []

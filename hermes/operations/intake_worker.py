@@ -91,21 +91,10 @@ def _safe_transition_to_failed(
 
 
 # ---------------------------------------------------------------------------
-# Step 3 will replace these stubs.
+# Pluggable hooks (filled across Steps 3-4).
+# Steps 3+4 swap real implementations in via module-level assignment so the
+# worker's claim/transition flow stays stable.
 # ---------------------------------------------------------------------------
-
-
-def _synthesize_stub(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """Step-3 hook: replaced by agency_intake.synthesize_from_payload."""
-    raise NotImplementedError(
-        "Phase 3 Step 3 will wire synthesize_from_payload here. "
-        "The Step 2 worker scaffold can't synthesize on its own."
-    )
-
-
-def _render_blocks_stub(payload: dict[str, Any]) -> str:
-    """Step-3 hook: replaced by agency_intake.render_hermes_blocks."""
-    raise NotImplementedError("Phase 3 Step 3 will fill render_hermes_blocks.")
 
 
 def _post_draft_stub(submission_id: str, payload: dict[str, Any]) -> None:
@@ -113,10 +102,15 @@ def _post_draft_stub(submission_id: str, payload: dict[str, Any]) -> None:
     log.info("[stub] would post draft for submission %s to Slack", submission_id)
 
 
-# Module-level indirection so Step 3/4 can monkey-patch (and tests can mock).
-synthesize_payload = _synthesize_stub
-render_blocks = _render_blocks_stub
-post_draft = _post_draft_stub
+# Step 3: real synthesizer + renderer from commands/agency_intake.py.
+from hermes.commands.agency_intake import (  # noqa: E402  (import-after-use to keep the hook section contiguous)
+    render_hermes_blocks,
+    synthesize_from_payload,
+)
+
+synthesize_payload = synthesize_from_payload
+render_blocks = render_hermes_blocks
+post_draft = _post_draft_stub  # Step 4 fills this
 
 
 # ---------------------------------------------------------------------------
