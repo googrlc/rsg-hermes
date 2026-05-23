@@ -319,7 +319,10 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
         """Slack button callback for agency intake approvals.
 
         action_id format: agency_intake_<token_slug>
-        value:           the draft_id
+        value:           since Phase 3, this is a submission_id (UUID of
+                         intake_submissions.id). The ``draft_id`` kwarg on
+                         approve_draft() is now interpreted as a
+                         submission_id (back-compat parameter name).
 
         token_slug → token:
           approve_all       → APPROVE ALL
@@ -331,7 +334,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
         """
         ack()
         action_id = str(action.get("action_id") or "")
-        draft_id = str(action.get("value") or "")
+        draft_id = str(action.get("value") or "")  # actually submission_id now
         user_id = ((body.get("user") or {}).get("id") if isinstance(body, dict) else None) or "unknown"
 
         token_map = {

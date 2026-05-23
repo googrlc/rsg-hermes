@@ -496,90 +496,113 @@ def approve_draft(
     token: str,
     approver: str | None,
 ) -> ApprovalResult:
-    """Apply the approval token to the staged draft."""
+    """Apply an approval token to an intake_submissions row.
+
+    Phase 3 rewrite: the source of truth is now ``intake_submissions``
+    (keyed by submission_id) rather than ``agency_intake_drafts`` (keyed
+    by draft_id). The ``draft_id`` keyword is kept so existing callers in
+    api.py and slack_socket.py don't need touching — but the value is
+    now interpreted as a submission_id (UUID of intake_submissions.id).
+
+    Behavior:
+      APPROVE ALL                → transition awaiting_approval -> approved
+                                   (worker picks up, enqueues CRM writes,
+                                   walks writing -> written -> complete)
+      APPROVE CRM ONLY           → same as APPROVE ALL for now; worker
+                                   handles both paths uniformly. The
+                                   token is preserved in status_history.
+      APPROVE SUPABASE ONLY      → ditto
+      APPROVE TASKS ONLY         → ditto
+      REVISE                     → transition to failed with note
+                                   "marked revised by approver"
+                                   (intake_submissions enum has no
+                                   'revised' state)
+      CANCEL                     → transition to failed with note
+                                   "canceled by approver"
+    """
+    from datetime import datetime, timezone
+
+    from hermes.integrations.intake_submissions import (
+        IntakeError,
+        fetch_by_id,
+        transition,
+    )
+
+    submission_id = draft_id  # parameter is named draft_id for back-compat
     token = (token or "").strip().upper()
     if token not in ALLOWED_APPROVAL_TOKENS:
         raise ApprovalError(
             f"Token {token!r} is not allowed. Use one of: {sorted(ALLOWED_APPROVAL_TOKENS)}"
         )
 
-    draft = _load_draft(supa, draft_id)
-    if draft.get("status") not in {"pending"}:
+    submission = fetch_by_id(supa, submission_id)
+    if submission is None:
         raise ApprovalError(
-            f"Draft {draft_id} is in status={draft.get('status')!r}, not 'pending'"
+            f"Submission {submission_id} not found in intake_submissions. "
+            f"This Slack message may be stale from the pre-Phase-3 agency_intake_drafts path."
         )
 
-    payload = draft.get("payload") or {}
+    current_status = submission.get("status")
+    if current_status != "awaiting_approval":
+        raise ApprovalError(
+            f"Submission {submission_id} is in status={current_status!r}, "
+            f"not 'awaiting_approval' — cannot apply approval token."
+        )
+
+    approver_label = approver or "system"
 
     if token == "CANCEL":
-        _update_draft_status(
-            supa, draft_id,
-            status="canceled", approval_token=token, approved_by=approver,
-        )
+        try:
+            transition(
+                supa, submission_id, "failed",
+                note=f"canceled by {approver_label}",
+                error={"reason": "canceled by approver", "token": token},
+            )
+        except IntakeError as exc:
+            raise ApprovalError(f"Cancel transition failed: {exc}") from exc
         return ApprovalResult(
-            ok=True, draft_id=draft_id, token=token, status="canceled",
-            summary="Draft canceled. Nothing was written.",
+            ok=True, draft_id=submission_id, token=token, status="failed",
+            summary=f"Submission {submission_id} canceled. Nothing was written.",
         )
 
     if token == "REVISE":
-        _update_draft_status(
-            supa, draft_id,
-            status="revised", approval_token=token, approved_by=approver,
-        )
+        try:
+            transition(
+                supa, submission_id, "failed",
+                note=f"marked revised by {approver_label}",
+                error={"reason": "marked revised by approver", "token": token},
+            )
+        except IntakeError as exc:
+            raise ApprovalError(f"Revise transition failed: {exc}") from exc
         return ApprovalResult(
-            ok=True, draft_id=draft_id, token=token, status="revised",
-            summary="Draft marked revised. Resubmit with the corrections.",
+            ok=True, draft_id=submission_id, token=token, status="failed",
+            summary=f"Submission {submission_id} marked failed (revise). Resubmit with corrections.",
         )
 
-    do_crm = token in {"APPROVE ALL", "APPROVE CRM ONLY"}
-    do_supabase = token in {"APPROVE ALL", "APPROVE SUPABASE ONLY"}
-    role = f"agency-intake:{approver or 'system'}"
-
-    queue_ids: list[str] = []
-    write_plan: dict[str, Any] = {"steps": [], "token": token}
-    retrieval_ids: dict[str, list[str]] = {}
-
-    if do_crm:
-        queue_ids, write_plan = _enqueue_crm_writes(
-            supa, payload, created_by_role=role
+    # Any APPROVE* token → transition to 'approved'. The worker handles
+    # the rest. Partial-scope tokens (CRM ONLY / SUPABASE ONLY / TASKS
+    # ONLY) currently behave identically to APPROVE ALL — the token is
+    # preserved in status_history for audit + future scope control.
+    approved_at_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        transition(
+            supa, submission_id, "approved",
+            note=f"{token} by {approver_label}",
+            extra_fields={
+                "approved_by": approver_label,
+                "approved_at": approved_at_iso,
+            },
         )
-    if do_supabase:
-        retrieval_ids = _insert_retrieval_rows(supa, payload)
-
-    final_status = (
-        "approved"
-        if token == "APPROVE ALL"
-        else "partially_approved"
-    )
-
-    _update_draft_status(
-        supa, draft_id,
-        status=final_status,
-        approval_token=token,
-        approved_by=approver,
-        write_plan=write_plan,
-        enqueued_queue_ids=queue_ids,
-        retrieval_row_ids=retrieval_ids,
-    )
-
-    summary_parts = [
-        f"Draft {draft_id} {final_status} via {token}.",
-    ]
-    if queue_ids:
-        summary_parts.append(
-            f"Enqueued {len(queue_ids)} CRM writes (worker will POST to EspoCRM)."
-        )
-    if retrieval_ids:
-        counts = ", ".join(f"{k}={len(v)}" for k, v in retrieval_ids.items() if v)
-        if counts:
-            summary_parts.append(f"Retrieval inserts: {counts}.")
+    except IntakeError as exc:
+        raise ApprovalError(f"Approve transition failed: {exc}") from exc
 
     return ApprovalResult(
         ok=True,
-        draft_id=draft_id,
+        draft_id=submission_id,
         token=token,
-        status=final_status,
-        enqueued_queue_ids=queue_ids,
-        retrieval_row_ids=retrieval_ids,
-        summary=" ".join(summary_parts),
+        status="approved",
+        summary=(
+            f"Submission {submission_id} approved via {token}. "
+            f"Worker will enqueue CRM writes and walk through writing -> written -> complete."
+        ),
     )

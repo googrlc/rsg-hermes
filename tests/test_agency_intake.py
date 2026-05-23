@@ -222,94 +222,28 @@ class StageDraftTests(unittest.TestCase):
 
 
 class ApproveDraftTests(unittest.TestCase):
-    def _supa_with_draft(self) -> MagicMock:
-        supa = MagicMock()
-        supa.select.return_value = [
-            {"id": "draft-abc", "status": "pending", "payload": PUMPS_PAYLOAD}
-        ]
-        # enqueue_crm_write calls supa.insert("crm_write_queue", …)
-        # retrieval_client calls supa.insert("client_entities" | "client_facts" | …)
-        supa.insert.side_effect = (
-            lambda table, payload: {"id": f"{table}-row-{abs(hash(repr(payload))) % 10000}"}
-        )
-        supa.update.return_value = {"id": "draft-abc"}
-        return supa
+    """Phase 3: approve_draft now reads intake_submissions by submission_id.
+    The pre-Phase-3 agency_intake_drafts behavior is gone — full coverage of
+    the new behavior lives in tests/test_intake_worker.py::TestApproveDraftRewrite.
 
-    def test_approve_all_enqueues_per_lob_writes_and_retrieval_rows(self) -> None:
-        supa = self._supa_with_draft()
-        result = approve_draft(
-            supa, draft_id="draft-abc", token="APPROVE ALL", approver="U123"
-        )
-        self.assertTrue(result.ok)
-        self.assertEqual(result.status, "approved")
-        # Expect 1 Account + 1 Contact + 6 Opportunities + 1 ClientNote = 9 queue rows.
-        self.assertEqual(len(result.enqueued_queue_ids), 9, result.enqueued_queue_ids)
-        # Retrieval rows: 1 Account entity + 1 Contact entity, 3 facts, 1 note.
-        self.assertGreaterEqual(len(result.retrieval_row_ids.get("client_entities", [])), 2)
-        self.assertEqual(len(result.retrieval_row_ids.get("client_facts", [])), 3)
-        self.assertEqual(len(result.retrieval_row_ids.get("client_notes", [])), 1)
-        supa.update.assert_called()
-
-    def test_approve_crm_only_skips_retrieval_inserts(self) -> None:
-        supa = self._supa_with_draft()
-        result = approve_draft(
-            supa, draft_id="draft-abc", token="APPROVE CRM ONLY", approver="U123"
-        )
-        self.assertEqual(result.status, "partially_approved")
-        self.assertEqual(len(result.enqueued_queue_ids), 9)
-        self.assertEqual(result.retrieval_row_ids, {})
-
-    def test_approve_supabase_only_skips_crm_queue(self) -> None:
-        supa = self._supa_with_draft()
-        result = approve_draft(
-            supa, draft_id="draft-abc", token="APPROVE SUPABASE ONLY", approver="U123"
-        )
-        self.assertEqual(result.status, "partially_approved")
-        self.assertEqual(result.enqueued_queue_ids, [])
-        self.assertGreater(
-            sum(len(v) for v in result.retrieval_row_ids.values()), 0
-        )
-
-    def test_cancel_writes_nothing(self) -> None:
-        supa = self._supa_with_draft()
-        result = approve_draft(
-            supa, draft_id="draft-abc", token="CANCEL", approver="U123"
-        )
-        self.assertEqual(result.status, "canceled")
-        self.assertEqual(result.enqueued_queue_ids, [])
-        self.assertEqual(result.retrieval_row_ids, {})
-
-    def test_revise_writes_nothing(self) -> None:
-        supa = self._supa_with_draft()
-        result = approve_draft(
-            supa, draft_id="draft-abc", token="REVISE", approver="U123"
-        )
-        self.assertEqual(result.status, "revised")
-        self.assertEqual(result.enqueued_queue_ids, [])
+    Kept here: the small handful of pre-Phase-3 contract assertions that
+    survive the rewrite (token validation, missing-submission error).
+    """
 
     def test_rejects_unknown_token(self) -> None:
-        supa = self._supa_with_draft()
+        supa = MagicMock()
+        supa.select.return_value = []  # never reached — token validated first
         with self.assertRaises(ApprovalError):
             approve_draft(
-                supa, draft_id="draft-abc", token="SHIP IT", approver="U123"
+                supa, draft_id="any-id", token="SHIP IT", approver="U123"
             )
 
-    def test_rejects_missing_draft(self) -> None:
+    def test_rejects_missing_submission(self) -> None:
         supa = MagicMock()
         supa.select.return_value = []
         with self.assertRaises(ApprovalError):
             approve_draft(
                 supa, draft_id="missing", token="APPROVE ALL", approver="U123"
-            )
-
-    def test_rejects_already_finalized_draft(self) -> None:
-        supa = MagicMock()
-        supa.select.return_value = [
-            {"id": "draft-abc", "status": "approved", "payload": PUMPS_PAYLOAD}
-        ]
-        with self.assertRaises(ApprovalError):
-            approve_draft(
-                supa, draft_id="draft-abc", token="APPROVE ALL", approver="U123"
             )
 
 
