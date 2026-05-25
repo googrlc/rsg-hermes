@@ -1,6 +1,6 @@
 # Sync flow contract: AMS / Momentum → Supabase → EspoCRM (and reverse)
 
-This document is the **source-to-table contract** between n8n, Hermes, Supabase, and EspoCRM. Implementations live in **rsg-hermes** (`hermes/sync/pipeline.py`, `hermes/sync/bidirectional.py`); orchestration on Hostinger uses **n8n** plus **Hermes** workers.
+This document is the **source-to-table contract** between n8n, Hermes, Supabase, and EspoCRM. Implementations live in **rsg-hermes** (`hermes/sync/pipeline.py`, `hermes/sync/bidirectional.py`); orchestration uses **n8n** plus **Hermes** workers.
 
 ## Design principle
 

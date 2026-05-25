@@ -23,7 +23,7 @@ class Tools:
 
     class Valves(BaseModel):
         hermes_api_url: str = Field(
-            default="http://172.16.0.1:8788",
+            default="http://hermes-api:8787",
             description="Base URL for the Hermes API server",
         )
         timeout: int = Field(

@@ -47,7 +47,8 @@ services:
     environment:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
-      - WEBHOOK_URL=https://hermes-j21v6-u69864.vm.elestio.app:5678
+      - N8N_PATH=/n8n/
+      - WEBHOOK_URL=https://hermes-j21v6-u69864.vm.elestio.app/n8n/
       - GENERIC_TIMEZONE=America/New_York
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_BASIC_AUTH_ACTIVE=true
@@ -59,8 +60,24 @@ services:
     networks:
       - hermes-shared
 
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: rsg-open-webui
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    environment:
+      - OPENAI_API_BASE_URL=https://openrouter.ai/api/v1
+      - OPENAI_API_KEY=${OPENROUTER_API_KEY}
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+    volumes:
+      - open-webui_data:/app/backend/data
+    networks:
+      - hermes-shared
+
 volumes:
   n8n_data:
+  open-webui_data:
 
 networks:
   hermes-shared:

@@ -1,0 +1,16 @@
+# Hermes CRM assistant — Python 3.11 (Tailscale host access via docker-compose host network)
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+COPY pyproject.toml README.md ./
+COPY hermes ./hermes
+
+RUN pip install --no-cache-dir pip setuptools wheel \
+    && pip install --no-cache-dir .
+
+# Default: Socket Mode bot (override with docker compose command)
+CMD ["hermes", "--slack"]
