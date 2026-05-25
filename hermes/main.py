@@ -288,6 +288,17 @@ def main() -> int:
         help="Poll interval for --run-openclaw-worker (default: 5s)",
     )
     parser.add_argument(
+        "--run-intake-worker",
+        action="store_true",
+        help="Continuously poll intake_submissions every N seconds (Phase 3 rsg-intake worker)",
+    )
+    parser.add_argument(
+        "--intake-poll-seconds",
+        type=float,
+        default=5.0,
+        help="Poll interval for --run-intake-worker (default: 5s)",
+    )
+    parser.add_argument(
         "--snapshot-kpis",
         action="store_true",
         help="Record system health, finance, and renewal KPI snapshots",
@@ -608,6 +619,19 @@ def main() -> int:
             client,
             poll_seconds=args.crm_queue_poll_seconds,
         )
+        return 0
+
+    if args.run_intake_worker:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.operations.intake_worker import run_intake_worker_loop
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        print(f"Starting intake worker loop every {args.intake_poll_seconds}s...")
+        run_intake_worker_loop(supa, poll_seconds=args.intake_poll_seconds)
         return 0
 
     if args.run_openclaw_worker:

@@ -991,6 +991,46 @@ class Dispatcher:
             (re.compile(r"^\s*(create|update)\s+", re.I), data_entry.handle),
             (re.compile(r"^\s*add\s+", re.I), data_entry.handle),
             (re.compile(r"^\s*move\s+opportunit(?:y|ie)\s+", re.I), data_entry.handle),
+            # Agency intake — explicit verbs that mean "stage a draft from this summary".
+            (
+                re.compile(
+                    r"^\s*(stage|draft|agency)\s*(an?\s+)?(intake|account|summary)\b",
+                    re.I,
+                ),
+                "agency_intake",
+            ),
+            (re.compile(r"^\s*new\s+(commercial|personal|life|benefits|medicare)\s+(account|prospect|client)\b", re.I), "agency_intake"),
+            # Structured Hermes intake block produced by intake skills
+            # ("Hermes:\n…\nMODULE: …"). Routes to the same multi-entity
+            # extractor even when posted without a leading "stage intake:" verb,
+            # so producer-submitted full-summary posts in #crm-entry land in
+            # the right pipeline (Account + Contacts + per-LOB Opportunities).
+            (
+                re.compile(r"\bHermes\s*:\s*\n.*?\bMODULE\s*:", re.I | re.S),
+                "agency_intake",
+            ),
+            # Fact retrieval — narrow: question word + recognized fact label,
+            # OR short-form "<label> for <entity>". Must precede the broad
+            # `lookup.handle` route below.
+            (
+                re.compile(
+                    # Form A: "what/who/find/tell me … <label>"
+                    r"^\s*(what|who|find|lookup|tell\s+me)\b.*?\b("
+                    r"ein|fein|federal\s+(employer|tax)\s+id|"
+                    r"dob|date\s+of\s+birth|birthdate|birthday|"
+                    r"phone(\s+number)?|email(\s+address)?|address|"
+                    r"annual\s+revenue|gross\s+revenue|payroll|"
+                    r"employee\s+count|headcount|naics|"
+                    r"renewal\s+date|expir(es|ation)|x-?date|effective\s+date|"
+                    r"principal|sole\s+member|spouse|decision\s+maker|"
+                    r"quote\s+(number|#)|policy\s+(number|#)|carrier|premium"
+                    r")\b"
+                    # Form B: short "<label> for <entity>"
+                    r"|^\s*(phone|email|ein|fein|address|payroll|naics|carrier)\s+for\s+\S",
+                    re.I,
+                ),
+                "agency_fact",
+            ),
             (re.compile(r"\b(total\s+premium|sum\s+premium|premium\s+for)\b", re.I), lookup.handle),
             (re.compile(r"^\s*(what|who|find|lookup|search)\b", re.I), lookup.handle),
             (
@@ -1065,6 +1105,12 @@ class Dispatcher:
         if handler == "data_quality":
             from hermes.commands.data_quality import handle as dq_handle
             return dq_handle(client, text, supa=self.supa)
+        if handler == "agency_intake":
+            from hermes.commands.agency_intake import handle as ai_handle
+            return ai_handle(client, text, supa=self.supa, **self._slack_ctx)
+        if handler == "agency_fact":
+            from hermes.commands.fact_retriever import handle as fact_handle
+            return fact_handle(client, text, supa=self.supa)
         if (
             callable(handler)
             and getattr(handler, "__module__", "") == "hermes.commands.data_entry"
