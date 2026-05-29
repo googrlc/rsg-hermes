@@ -37,7 +37,7 @@ class MapAccountToInsuredTests(unittest.TestCase):
             "emailAddress": "john@acme.com",
             "phoneNumber": "4045551234",
             "accountType": "Commercial Lines",
-            "typeOfBusiness": "LLC",
+            "businessEntity": "LLC",
         }
         result = map_account_to_insured(espo)
         self.assertEqual(result["CommercialName"], "Acme Corp")
@@ -72,9 +72,11 @@ class MapAccountToInsuredTests(unittest.TestCase):
         espo = {
             "name": "Date Test",
             "dateOfBirth": "1985-07-14T00:00:00-05:00",
+            "spouseDob": "1987-03-21",
         }
         result = map_account_to_insured(espo)
         self.assertEqual(result["DateOfBirth"], "1985-07-14")
+        self.assertEqual(result["CoInsured_DateOfBirth"], "1987-03-21")
 
     def test_enum_map_group_benefits(self):
         espo = {"name": "Benefits Co", "accountType": "Group Benefits"}
@@ -105,8 +107,8 @@ class MapAccountToGoldenTests(unittest.TestCase):
             "emailAddress": "jane@golden.com",
             "phoneNumber": "9125551234",
             "website": "golden.com",
-            "typeOfBusiness": "Corp",
-            "yearBusinessStarted": 2010,
+            "businessEntity": "Corp",
+            "cYearBusinessEst": 2010,
             "momentum_client_id": "nc-uuid-456",
         }
         row = map_account_to_golden(espo)
@@ -131,7 +133,7 @@ class MapPolicyToCommissionTests(unittest.TestCase):
         policy = {
             "id": "pol-123",
             "policyNumber": "WC-2026-001",
-            "carrierName": "Hartford",
+            "carrier": "Hartford",
             "lineOfBusiness": "Workers Comp",
             "premium": 12500.00,
             "commissionRate": 15.0,

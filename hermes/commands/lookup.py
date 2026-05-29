@@ -35,7 +35,7 @@ COMMON_ALIASES: dict[str, str] = {
     "industry": "industry",
     "description": "description",
     "policy number": "policyNumber",
-    "carrier": "carrierName",
+    "carrier": "carrier",
     "premium": "amount",
     "commission rate": "commissionRate",
     "effective date": "effectiveDate",
@@ -220,14 +220,14 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
     policy_match = re.search(r"\bpolicy\s+(.+?)\s*\??$", text, re.I)
     if policy_match:
         term = policy_match.group(1).strip()
-        hits = _search_entity(client, "Policy", term, extra_fields="policyNumber,carrierName,effectiveDate,premium")
+        hits = _search_entity(client, "Policy", term, extra_fields="policyNumber,carrier,effectiveDate,premium")
         if not hits:
             return DispatchResult(True, f'No policy matching "{term}".', {"policies": []})
         lines = []
         for p in hits:
             name = p.get("name", "?")
             pnum = p.get("policyNumber") or "\u2014"
-            carrier = p.get("carrierName") or "\u2014"
+            carrier = p.get("carrier") or "\u2014"
             eff = p.get("effectiveDate") or "\u2014"
             prem = p.get("premium") or "\u2014"
             lines.append(f"*{name}* | #{pnum} | {carrier} | Eff: {eff} | ${prem}")

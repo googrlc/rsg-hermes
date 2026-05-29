@@ -230,14 +230,14 @@ def _policy_index(client: EspoClient) -> tuple[dict[str, dict[str, Any]], list[s
             continue
         expected = _as_money(_pick(row, "commissionAmount", "commission_amount"))
         if expected <= 0:
-            premium = _as_money(_pick(row, "premium", "premiumAmount", "amount"))
+            premium = _as_money(_pick(row, "premiumAmount", "premium_amount", "amount"))
             rate = _as_percent(_pick(row, "commissionRate", "commission_rate"))
             expected = (premium * rate) / Decimal("100")
         canonical = candidates[0]
         payload = {
             "policy_id": str(row.get("id") or ""),
             "policy_number": canonical,
-            "carrier": str(_pick(row, "carrierName", "carrier") or ""),
+            "carrier": str(_pick(row, "carrier") or ""),
             "expected_commission": expected,
         }
         for candidate in candidates:

@@ -29,20 +29,23 @@ INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "firstName", "dst": "primaryFirstName", "transform": "direct"},
     {"src": "lastName", "dst": "primaryLastName", "transform": "direct"},
     {"src": "dateOfBirth", "dst": "dateOfBirth", "transform": "date_only"},
+    {"src": "coInsured_FirstName", "dst": "spouseFirstName", "transform": "direct"},
+    {"src": "coInsured_LastName", "dst": "spouseLastName", "transform": "direct"},
+    {"src": "coInsured_DateOfBirth", "dst": "spouseDob", "transform": "date_only"},
     {"src": "insuredType", "dst": "account_type", "transform": "enum_map", "map": INSURED_TYPE_MAP},
-    {"src": "typeOfBusiness", "dst": "typeOfBusiness", "transform": "direct"},
-    {"src": "yearBusinessStarted", "dst": "yearBusinessStarted", "transform": "direct"},
-    {"src": "yearsInBusiness", "dst": "yearsInBusiness", "transform": "direct"},
-    {"src": "naics", "dst": "naics", "transform": "direct"},
+    {"src": "typeOfBusiness", "dst": "businessEntity", "transform": "direct"},
+    {"src": "yearBusinessStarted", "dst": "cYearBusinessEst", "transform": "direct"},
+    {"src": "yearsInBusiness", "dst": "years_in_business", "transform": "direct"},
+    {"src": "naics", "dst": "intel_naics", "transform": "direct"},
     {"src": "sicCode", "dst": "sicCode", "transform": "direct"},
     {"src": "fein", "dst": "fein", "transform": "direct"},
     {"src": "changeDate", "dst": "momentum_last_synced", "transform": "direct"},
-    {"src": "createDate", "dst": "createDate", "transform": "date_only"},
-    {"src": "referralSourceCompanyName", "dst": "referralSourceCompanyName", "transform": "direct"},
+    {"src": "createDate", "dst": "client_since", "transform": "date_only"},
+    {"src": "referralSourceCompanyName", "dst": "referral_name", "transform": "direct"},
     {"src": "leadSources", "dst": "referral_source", "transform": "first_element"},
-    {"src": "personNotes", "dst": "personNotes", "transform": "append"},
-    {"src": "agentOfRecordDate", "dst": "agentOfRecordDate", "transform": "date_only"},
-    # Address fields (standard EspoCRM fields — no rename needed)
+    {"src": "personNotes", "dst": "communication_notes", "transform": "append"},
+    {"src": "agentOfRecordDate", "dst": "agent_of_record_date", "transform": "date_only"},
+    # Address fields (supplemental — not in rsg-data-schema mapping but useful)
     {"src": "addressLine1", "dst": "billingAddressStreet", "transform": "direct"},
     {"src": "city", "dst": "billingAddressCity", "transform": "direct"},
     {"src": "state", "dst": "billingAddressState", "transform": "direct"},
@@ -126,7 +129,7 @@ def map_insured_to_account(
     Args:
         nc_record: Raw NowCerts insured dict.
         existing_espo: Current EspoCRM Account data (for append transforms).
-        is_first_sync: If True, includes createDate field.
+        is_first_sync: If True, includes client_since field.
 
     Returns:
         Dict ready for EspoCRM Account create/update.
@@ -188,9 +191,9 @@ def map_insured_to_account(
                 else:
                     result[dst_key] = new_val
 
-    # Only include createDate on first sync
+    # Only include client_since on first sync
     if not is_first_sync:
-        result.pop("createDate", None)
+        result.pop("client_since", None)
 
     # account_type is required on create — ensure it's set
     if "account_type" not in result:
@@ -212,8 +215,8 @@ def detect_conflicts(
     """
     skip = ignore_fields or {
         "momentum_last_synced",
-        "personNotes",
-        "createDate",
+        "communication_notes",
+        "client_since",
     }
     conflicts: list[dict[str, str]] = []
 
@@ -261,10 +264,13 @@ ACCOUNT_TO_INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "emailAddress", "dst": "EMail", "transform": "direct"},
     {"src": "phoneNumber", "dst": "Phone", "transform": "direct"},
     {"src": "account_type", "dst": "Type", "transform": "enum_map", "map": ACCOUNT_TYPE_REVERSE_MAP},
-    {"src": "typeOfBusiness", "dst": "TypeOfBusiness", "transform": "direct"},
-    {"src": "yearBusinessStarted", "dst": "YearBusinessStarted", "transform": "direct"},
+    {"src": "businessEntity", "dst": "TypeOfBusiness", "transform": "direct"},
+    {"src": "cYearBusinessEst", "dst": "YearBusinessStarted", "transform": "direct"},
     {"src": "website", "dst": "Website", "transform": "direct"},
+    {"src": "spouseFirstName", "dst": "CoInsured_FirstName", "transform": "direct"},
+    {"src": "spouseLastName", "dst": "CoInsured_LastName", "transform": "direct"},
     {"src": "dateOfBirth", "dst": "DateOfBirth", "transform": "date_only"},
+    {"src": "spouseDob", "dst": "CoInsured_DateOfBirth", "transform": "date_only"},
 ]
 
 
@@ -334,8 +340,8 @@ def map_account_to_golden(espo_record: dict[str, Any]) -> dict[str, Any]:
         "email": espo_record.get("emailAddress"),
         "phone": espo_record.get("phoneNumber"),
         "website": espo_record.get("website"),
-        "business_entity": espo_record.get("typeOfBusiness"),
-        "year_business_started": espo_record.get("yearBusinessStarted"),
+        "business_entity": espo_record.get("businessEntity"),
+        "year_business_started": espo_record.get("cYearBusinessEst"),
         "nowcerts_id": espo_record.get("momentum_client_id"),
         "source_system": "espocrm",
         "raw_espo_payload": espo_record,
@@ -359,16 +365,18 @@ def map_policy_to_commission(
     return {
         "account_id": account_id,
         "policy_number": policy_record.get("policyNumber") or policy_record.get("name"),
-        "carrier": policy_record.get("carrierName") or policy_record.get("carrier"),
+        "carrier": policy_record.get("carrier") or policy_record.get("carrierName"),
         "line_of_business": _first_non_none(
-            policy_record, "lineOfBusiness", "lineOfBusinessName",
+            policy_record, "lineOfBusiness", "line_of_business", "lineOfBusinessName",
         ),
-        "premium": _first_non_none(policy_record, "premium", "amount"),
+        "premium": _first_non_none(policy_record, "premium", "premium_amount", "amount"),
         "commission_rate": _first_non_none(policy_record, "commissionRate", "agencyCommissionPercent"),
         "commission_amount": _first_non_none(policy_record, "commissionAmount", "agencyCommissionValue"),
         "agency_fee": policy_record.get("agencyFee"),
         "effective_date": _strip_date(policy_record.get("effectiveDate")),
-        "expiration_date": _strip_date(policy_record.get("expirationDate")),
+        "expiration_date": _strip_date(
+            _first_non_none(policy_record, "expirationDate", "expiration_date"),
+        ),
         "policy_status": policy_record.get("status"),
         "source_system": "espocrm",
         "espocrm_id": policy_record.get("id"),

@@ -205,7 +205,7 @@ def _query_commission_blind_spots(client: EspoClient) -> tuple[list[dict[str, An
                 "policy_id": str(row.get("id") or ""),
                 "name": str(_pick(row, "accountName", "name") or "Unknown account"),
                 "lob": str(_pick(row, "lineOfBusiness", "line_of_business") or "Unknown"),
-                "premium": _as_money(_pick(row, "premium", "premiumAmount", "amount")),
+                "premium": _as_money(_pick(row, "premiumAmount", "premium_amount", "amount")),
             }
         )
     blind_spots.sort(key=lambda r: -r["premium"])
@@ -247,7 +247,7 @@ def _build_eom_summary(
     renewals_premium = Decimal("0")
     lob_totals: dict[str, Decimal] = {}
     for row in month_rows:
-        premium = _as_money(_pick(row, "premium", "premiumAmount", "amount"))
+        premium = _as_money(_pick(row, "premiumAmount", "premium_amount", "amount"))
         commission_rate = _as_decimal(_pick(row, "commissionRate", "commission_rate"))
         commission_amount = _as_money(_pick(row, "commissionAmount", "commission_amount"))
         revenue = commission_amount

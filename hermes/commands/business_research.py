@@ -205,7 +205,7 @@ def _first_existing(fields: dict[str, Any], *names: str) -> str | None:
 
 
 def _find_or_create_account(client: "EspoClient", business_name: str, *, create_if_missing: bool) -> dict[str, Any] | None:
-    hits = client.search("Account", business_name, max_size=1, select="id,name,website,linkedinUrl")
+    hits = client.search("Account", business_name, max_size=1, select="id,name,website,intel_website,intel_linkedin_url")
     if hits:
         return hits[0]
     if not create_if_missing:
@@ -287,21 +287,21 @@ def _write_account_research(client: "EspoClient", research: dict[str, Any], quer
         raise RuntimeError("Could not find or create Account for research result.")
 
     payload: dict[str, Any] = {}
-    website_field = _first_existing(fields, "website", "websiteUrl")
+    website_field = _first_existing(fields, "intel_website", "website", "websiteUrl")
     if website_field and research.get("website_url"):
         payload[website_field] = research["website_url"]
-    linkedin_field = _first_existing(fields, "linkedinUrl", "linkedin_url")
+    linkedin_field = _first_existing(fields, "intel_linkedin_url", "linkedin_url")
     if linkedin_field and research.get("linkedin_company_url"):
         payload[linkedin_field] = research["linkedin_company_url"]
-    notes_field = _first_existing(fields, "websiteNotes", "linkedinNotes", "description")
+    notes_field = _first_existing(fields, "intel_website_notes", "intel_linkedin_notes", "description")
     if notes_field:
         services = ", ".join(research.get("claimed_services") or [])
         summary = research.get("short_summary") or ""
         payload[notes_field] = f"{summary}\n\nClaimed services: {services}".strip()
-    if "naics" in fields and research.get("naics"):
-        payload["naics"] = research["naics"]
-    if "sic" in fields and research.get("sic"):
-        payload["sic"] = research["sic"]
+    if "intel_naics" in fields and research.get("naics"):
+        payload["intel_naics"] = research["naics"]
+    if "intel_sic" in fields and research.get("sic"):
+        payload["intel_sic"] = research["sic"]
 
     updated = client.update("Account", str(account["id"]), payload) if payload else account
     note_payload = {

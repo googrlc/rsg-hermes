@@ -20,7 +20,7 @@ class FakeClient:
                     "insuredMomentumId": "insured-1",
                     "accountId": None,
                     "accountName": "Danielle Coates",
-                    "policyNumber": None,
+                    "policy_number": None,
                 },
                 {
                     "id": "p2",
@@ -28,7 +28,7 @@ class FakeClient:
                     "insuredMomentumId": "insured-2",
                     "accountId": "a2",
                     "accountName": "Already Linked",
-                    "policyNumber": "P-2",
+                    "policy_number": "P-2",
                 },
                 {
                     "id": "p3",
@@ -36,7 +36,7 @@ class FakeClient:
                     "insuredMomentumId": "insured-3",
                     "accountId": None,
                     "accountName": "No Match",
-                    "policyNumber": "P-3",
+                    "policy_number": "P-3",
                 },
                 {
                     "id": "p4",
@@ -44,7 +44,7 @@ class FakeClient:
                     "insuredMomentumId": "insured-dup",
                     "accountId": None,
                     "accountName": "Duplicate Match",
-                    "policyNumber": "P-4",
+                    "policy_number": "P-4",
                 },
             ]
             return {"list": rows[offset: offset + int(params.get("maxSize", 200))], "total": len(rows)}

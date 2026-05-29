@@ -39,11 +39,11 @@ AUDIT_RULES: dict[str, list[dict[str, Any]]] = {
         {"field": "accountId", "label": "Linked Account", "severity": "high"},
     ],
     "Policy": [
-        {"field": "policyNumber", "label": "Policy Number", "severity": "high"},
+        {"field": "policy_number", "label": "Policy Number", "severity": "high"},
         {"field": "accountId", "label": "Linked Account", "severity": "high"},
-        {"field": "carrierName", "label": "Carrier", "severity": "high"},
-        {"field": "effectiveDate", "label": "Effective Date", "severity": "high"},
-        {"field": "premium", "label": "Premium", "severity": "medium"},
+        {"field": "carrier", "label": "Carrier", "severity": "high"},
+        {"field": "effective_date", "label": "Effective Date", "severity": "high"},
+        {"field": "premium_amount", "label": "Premium", "severity": "medium"},
     ],
     "Lead": [
         {"field": "firstName", "label": "First Name", "severity": "medium"},
