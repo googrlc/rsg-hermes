@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 import requests
 
 log = logging.getLogger(__name__)
+
+_TZ_OFFSET_RE = re.compile(r"[+\-]\d{2}:\d{2}$")
 
 
 class NowCertsClientError(Exception):
@@ -124,7 +127,7 @@ class NowCertsClient:
                 "$top": str(page_size),
             }
             if since:
-                ts = since if since.endswith("Z") else f"{since}Z"
+                ts = since if (since.endswith("Z") or _TZ_OFFSET_RE.search(since)) else f"{since}Z"
                 params["$filter"] = f"changeDate ge {ts}"
 
             body = self._get("/api/InsuredDetailList", params=params)
@@ -166,7 +169,7 @@ class NowCertsClient:
                 "$top": str(page_size),
             }
             if since:
-                ts = since if since.endswith("Z") else f"{since}Z"
+                ts = since if (since.endswith("Z") or _TZ_OFFSET_RE.search(since)) else f"{since}Z"
                 params["$filter"] = f"changeDate ge {ts}"
 
             body = self._get("/api/PolicyDetailList", params=params)

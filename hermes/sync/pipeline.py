@@ -341,7 +341,7 @@ def _resolve_mapping(
             )
 
     # 4. Search by email
-    email = nc_record.get("email")
+    email = nc_record.get("eMail") or nc_record.get("email")
     if email:
         espo_match = _find_espo_account(espo, "emailAddress", str(email))
         if espo_match:
