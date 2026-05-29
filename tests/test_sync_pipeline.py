@@ -40,7 +40,7 @@ def _mock_nc(insureds: list | None = None) -> MagicMock:
 
 def _sample_insured(**overrides) -> dict:
     base = {
-        "database_id": "NC-001",
+        "id": "NC-001",
         "commercialName": "Acme Corp",
         "firstName": "John",
         "lastName": "Doe",
@@ -159,7 +159,7 @@ class QueuedPipelineTests(unittest.TestCase):
         enqueue_mock.assert_called_once()
         process_mock.assert_called_once()
 
-    def test_skips_record_without_database_id(self) -> None:
+    def test_skips_record_without_id(self) -> None:
         nc = _mock_nc(insureds=[{"commercialName": "No ID Corp"}])
         espo = _mock_espo()
         supa = _mock_supa()
@@ -222,7 +222,7 @@ class ResolveMappingTests(unittest.TestCase):
 
         result = _resolve_mapping(
             supa, espo, source_id="NC-999",
-            nc_record=_sample_insured(database_id="NC-999"), run_id="run-1",
+            nc_record=_sample_insured(id="NC-999"), run_id="run-1",
         )
         self.assertIsNotNone(result)
         self.assertIsNone(result.get("espocrm_id"))

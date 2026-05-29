@@ -14,7 +14,7 @@ from hermes.sync.field_mapper import (
 class MapInsuredToAccountTests(unittest.TestCase):
     def _commercial_insured(self, **overrides) -> dict:
         base = {
-            "database_id": "NC-001",
+            "id": "NC-001",
             "commercialName": "Acme Corp",
             "firstName": "John",
             "lastName": "Doe",
@@ -23,19 +23,19 @@ class MapInsuredToAccountTests(unittest.TestCase):
             "fein": "12-3456789",
             "changeDate": "2026-05-01T10:00:00-05:00",
             "createDate": "2025-01-15T00:00:00",
-            "email": "john@acme.com",
+            "eMail": "john@acme.com",
             "cellPhone": "5551234567",
             "addressLine1": "123 Main St",
             "city": "Atlanta",
             "state": "GA",
-            "zip": "30301",
+            "zipCode": "30301",
         }
         base.update(overrides)
         return base
 
     def _personal_insured(self) -> dict:
         return {
-            "database_id": "NC-002",
+            "id": "NC-002",
             "firstName": "Jane",
             "lastName": "Smith",
             "insuredType": "Personal",
@@ -103,7 +103,7 @@ class MapInsuredToAccountTests(unittest.TestCase):
         self.assertEqual(result["communicationNotes"], "Same note")
 
     def test_default_account_type_when_missing(self) -> None:
-        insured = {"database_id": "NC-X", "commercialName": "Test", "changeDate": "2026-01-01"}
+        insured = {"id": "NC-X", "commercialName": "Test", "changeDate": "2026-01-01"}
         result = map_insured_to_account(insured)
         self.assertEqual(result["accountType"], "Commercial Lines")
 

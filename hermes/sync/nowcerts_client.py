@@ -124,7 +124,8 @@ class NowCertsClient:
                 "$top": str(page_size),
             }
             if since:
-                params["$filter"] = f"changeDate ge datetime'{since}'"
+                ts = since if since.endswith("Z") else f"{since}Z"
+                params["$filter"] = f"changeDate ge {ts}"
 
             body = self._get("/api/InsuredDetailList", params=params)
 
@@ -165,7 +166,8 @@ class NowCertsClient:
                 "$top": str(page_size),
             }
             if since:
-                params["$filter"] = f"changeDate ge datetime'{since}'"
+                ts = since if since.endswith("Z") else f"{since}Z"
+                params["$filter"] = f"changeDate ge {ts}"
 
             body = self._get("/api/PolicyDetailList", params=params)
             records = body if isinstance(body, list) else body.get("value", body.get("items", []))
