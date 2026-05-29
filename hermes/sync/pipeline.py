@@ -545,7 +545,7 @@ def _process_outbound_queue(
                 run_id=run_id,
                 queue_id=queue_id,
                 object_type=object_type,
-                source_id=payload.get("momentumClientId", ""),
+                source_id=payload.get("momentum_client_id", ""),
                 error_message=str(exc),
             )
 
@@ -555,7 +555,7 @@ def _process_outbound_queue(
                 workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
                 run_id=run_id,
                 object_type=object_type,
-                source_id=payload.get("momentumClientId", ""),
+                source_id=payload.get("momentum_client_id", ""),
                 dest_id=object_id,
                 action="error",
                 status="failed",
@@ -588,7 +588,7 @@ def _process_outbound_queue(
                 run_id=run_id,
                 queue_id=item["outbound_queue_id"],
                 object_type=item["object_type"],
-                source_id=item["payload"].get("momentumClientId", ""),
+                source_id=item["payload"].get("momentum_client_id", ""),
                 error_message="; ".join(process_result.errors[:3]) if process_result.errors else "crm_write_queue processing failed",
             )
         return
@@ -614,7 +614,7 @@ def _process_outbound_queue(
             workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
             run_id=run_id,
             object_type=item["object_type"],
-            source_id=item["payload"].get("momentumClientId", ""),
+            source_id=item["payload"].get("momentum_client_id", ""),
             dest_id=item["object_id"],
             action=item["action"],
             status="success",

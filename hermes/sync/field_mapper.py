@@ -23,7 +23,7 @@ INSURED_TYPE_MAP: dict[str, str] = {
 }
 
 INSURED_FIELD_MAP: list[dict[str, Any]] = [
-    {"src": "id", "dst": "momentumClientId", "transform": "direct"},
+    {"src": "id", "dst": "momentum_client_id", "transform": "direct"},
     {"src": "commercialName", "dst": "name", "transform": "conditional_name"},
     {"src": "firstName", "dst": "primaryFirstName", "transform": "direct"},
     {"src": "lastName", "dst": "primaryLastName", "transform": "direct"},
@@ -38,7 +38,7 @@ INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "naics", "dst": "intelNaics", "transform": "direct"},
     {"src": "sicCode", "dst": "sicCode", "transform": "direct"},
     {"src": "fein", "dst": "fein", "transform": "direct"},
-    {"src": "changeDate", "dst": "momentumLastSynced", "transform": "direct"},
+    {"src": "changeDate", "dst": "momentum_last_synced", "transform": "direct"},
     {"src": "createDate", "dst": "clientSince", "transform": "date_only"},
     {"src": "referralSourceCompanyName", "dst": "referralName", "transform": "direct"},
     {"src": "leadSources", "dst": "referralSource", "transform": "first_element"},
@@ -55,7 +55,7 @@ INSURED_FIELD_MAP: list[dict[str, Any]] = [
 
 # Dedup key for Insured → Account
 INSURED_DEDUP_SOURCE = "id"
-INSURED_DEDUP_TARGET = "momentumClientId"
+INSURED_DEDUP_TARGET = "momentum_client_id"
 
 
 def _strip_date(val: Any) -> str | None:
@@ -185,7 +185,7 @@ def detect_conflicts(
     and neither value is empty/null.
     """
     skip = ignore_fields or {
-        "momentumLastSynced",
+        "momentum_last_synced",
         "communicationNotes",
         "clientSince",
     }
@@ -313,7 +313,7 @@ def map_account_to_golden(espo_record: dict[str, Any]) -> dict[str, Any]:
         "website": espo_record.get("website"),
         "business_entity": espo_record.get("businessEntity"),
         "year_business_started": espo_record.get("cYearBusinessEst"),
-        "nowcerts_id": espo_record.get("momentumClientId"),
+        "nowcerts_id": espo_record.get("momentum_client_id"),
         "source_system": "espocrm",
         "raw_espo_payload": espo_record,
     }

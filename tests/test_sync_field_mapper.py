@@ -59,7 +59,7 @@ class MapInsuredToAccountTests(unittest.TestCase):
 
     def test_dedup_key_mapped(self) -> None:
         result = map_insured_to_account(self._commercial_insured())
-        self.assertEqual(result["momentumClientId"], "NC-001")
+        self.assertEqual(result["momentum_client_id"], "NC-001")
 
     def test_date_only_strips_time(self) -> None:
         result = map_insured_to_account(
@@ -129,8 +129,8 @@ class DetectConflictsTests(unittest.TestCase):
         self.assertEqual(conflicts[0]["field_name"], "name")
 
     def test_ignores_configured_fields(self) -> None:
-        source = {"momentumLastSynced": "2026-05-01", "name": "X"}
-        existing = {"momentumLastSynced": "2026-04-01", "name": "X"}
+        source = {"momentum_last_synced": "2026-05-01", "name": "X"}
+        existing = {"momentum_last_synced": "2026-04-01", "name": "X"}
         conflicts = detect_conflicts(source, existing)
         self.assertEqual(len(conflicts), 0)
 

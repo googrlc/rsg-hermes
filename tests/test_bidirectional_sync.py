@@ -109,7 +109,7 @@ class MapAccountToGoldenTests(unittest.TestCase):
             "website": "golden.com",
             "businessEntity": "Corp",
             "cYearBusinessEst": 2010,
-            "momentumClientId": "nc-uuid-456",
+            "momentum_client_id": "nc-uuid-456",
         }
         row = map_account_to_golden(espo)
         self.assertEqual(row["espocrm_id"], "espo-123")
