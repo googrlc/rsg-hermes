@@ -23,7 +23,7 @@ INSURED_TYPE_MAP: dict[str, str] = {
 }
 
 INSURED_FIELD_MAP: list[dict[str, Any]] = [
-    {"src": "database_id", "dst": "momentumClientId", "transform": "direct"},
+    {"src": "id", "dst": "momentumClientId", "transform": "direct"},
     {"src": "commercialName", "dst": "name", "transform": "conditional_name"},
     {"src": "firstName", "dst": "primaryFirstName", "transform": "direct"},
     {"src": "lastName", "dst": "primaryLastName", "transform": "direct"},
@@ -48,13 +48,13 @@ INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "addressLine1", "dst": "billingAddressStreet", "transform": "direct"},
     {"src": "city", "dst": "billingAddressCity", "transform": "direct"},
     {"src": "state", "dst": "billingAddressState", "transform": "direct"},
-    {"src": "zip", "dst": "billingAddressPostalCode", "transform": "direct"},
-    {"src": "email", "dst": "emailAddress", "transform": "direct"},
+    {"src": "zipCode", "dst": "billingAddressPostalCode", "transform": "direct"},
+    {"src": "eMail", "dst": "emailAddress", "transform": "direct"},
     {"src": "cellPhone", "dst": "phoneNumber", "transform": "direct"},
 ]
 
 # Dedup key for Insured → Account
-INSURED_DEDUP_SOURCE = "database_id"
+INSURED_DEDUP_SOURCE = "id"
 INSURED_DEDUP_TARGET = "momentumClientId"
 
 
@@ -429,7 +429,7 @@ def map_insured_to_contact(
     result["name"] = f"{first} {last}".strip()
 
     if role == "primary":
-        email = (nc_record.get("email") or "").strip()
+        email = (nc_record.get("eMail") or nc_record.get("email") or "").strip()
         phone = (nc_record.get("cellPhone") or "").strip()
         if email:
             result["emailAddress"] = email
@@ -439,7 +439,7 @@ def map_insured_to_contact(
         address = (nc_record.get("addressLine1") or "").strip()
         city = (nc_record.get("city") or "").strip()
         state = (nc_record.get("state") or "").strip()
-        zip_code = (nc_record.get("zip") or "").strip()
+        zip_code = (nc_record.get("zipCode") or nc_record.get("zip") or "").strip()
         if address:
             result["addressStreet"] = address
         if city:
@@ -512,12 +512,19 @@ def map_policy_to_opportunity(
         or nc_policy.get("Number")
         or ""
     )
-    lob_raw = (
-        nc_policy.get("lineOfBusinessName")
-        or nc_policy.get("lineOfBusiness")
-        or nc_policy.get("LineOfBusinessName")
-        or ""
-    )
+    # NowCerts returns LOB as an array in lineOfBusinesses; fall back to scalar fields.
+    lob_raw = ""
+    lob_list = nc_policy.get("lineOfBusinesses")
+    if isinstance(lob_list, list) and lob_list:
+        lob_raw = lob_list[0].get("lineOfBusinessName", "") if isinstance(lob_list[0], dict) else ""
+    if not lob_raw:
+        lob_raw = (
+            nc_policy.get("lineOfBusinessName")
+            or nc_policy.get("lineOfBusiness")
+            or nc_policy.get("LineOfBusinessName")
+            or nc_policy.get("description")
+            or ""
+        )
 
     if not policy_number and not lob_raw:
         return None
@@ -552,7 +559,9 @@ def map_policy_to_opportunity(
     if exp_date:
         result["expirationDate"] = exp_date
 
-    premium = nc_policy.get("premium") if nc_policy.get("premium") is not None else nc_policy.get("Premium")
+    premium = nc_policy.get("totalPremium")
+    if premium is None:
+        premium = nc_policy.get("premium") if nc_policy.get("premium") is not None else nc_policy.get("Premium")
     if premium is not None:
         try:
             result["amount"] = float(premium)

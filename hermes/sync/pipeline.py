@@ -102,9 +102,9 @@ def run_insured_to_account_sync(
 
         # ── B (cont). Stage raw payloads ─────────────────────────────────
         for record in raw_insureds:
-            source_id = str(record.get("database_id") or record.get("databaseId") or "")
+            source_id = str(record.get("id") or record.get("database_id") or record.get("databaseId") or "")
             if not source_id:
-                log.warning("Insured record missing database_id, skipping")
+                log.warning("Insured record missing id/database_id, skipping")
                 result.records_skipped += 1
                 continue
 
@@ -112,7 +112,7 @@ def run_insured_to_account_sync(
 
         # ── C. Normalize + match ─────────────────────────────────────────
         for record in raw_insureds:
-            source_id = str(record.get("database_id") or record.get("databaseId") or "")
+            source_id = str(record.get("id") or record.get("database_id") or record.get("databaseId") or "")
             if not source_id:
                 continue
 
@@ -341,7 +341,7 @@ def _resolve_mapping(
             )
 
     # 4. Search by email
-    email = nc_record.get("email")
+    email = nc_record.get("eMail") or nc_record.get("email")
     if email:
         espo_match = _find_espo_account(espo, "emailAddress", str(email))
         if espo_match:
@@ -637,7 +637,7 @@ def _sync_contacts_for_insureds(
       - Upserts a primary Contact (and co-insured Contact if present)
     """
     for record in raw_insureds:
-        source_id = str(record.get("database_id") or record.get("databaseId") or "")
+        source_id = str(record.get("id") or record.get("database_id") or record.get("databaseId") or "")
         if not source_id:
             continue
 
