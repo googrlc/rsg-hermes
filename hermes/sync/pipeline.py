@@ -403,6 +403,8 @@ def _upsert_mapping(
     confidence: float,
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
+        "object_type": "Account",
+        "source_system": "nowcerts",
         "nowcerts_entity_type": "Insured",
         "nowcerts_id": source_id,
         "espocrm_entity_type": "Account",
