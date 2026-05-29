@@ -6,6 +6,7 @@ import datetime
 import hashlib
 import json
 import logging
+import re
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "state", "dst": "billingAddressState", "transform": "direct"},
     {"src": "zipCode", "dst": "billingAddressPostalCode", "transform": "direct"},
     {"src": "eMail", "dst": "emailAddress", "transform": "direct"},
-    {"src": "cellPhone", "dst": "phoneNumber", "transform": "direct"},
+    {"src": "cellPhone", "dst": "phoneNumber", "transform": "phone_e164"},
 ]
 
 # Dedup key for Insured → Account
@@ -66,6 +67,29 @@ def _strip_date(val: Any) -> str | None:
     if "T" in s:
         return s.split("T")[0]
     return s[:10] if len(s) >= 10 else s
+
+
+def _to_e164_us(raw: Any) -> str | None:
+    """Normalize a US phone to E.164 (`+1XXXXXXXXXX`).
+
+    EspoCRM's phoneNumber validator rejects every non-E.164 form: NowCerts
+    sends `678-230-5750` style raw strings, which produce
+    `validationFailure {field: phoneNumber, type: valid}` on PUT/POST and
+    fail the entire Account/Contact update. Returns None for empty input
+    and the unchanged string for non-US / unparsable values so they flow
+    through for human review rather than silently corrupting the record.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    digits = re.sub(r"\D", "", s)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        return f"+1{digits}"
+    return s
 
 
 def _first_element(val: Any) -> Any:
@@ -137,6 +161,11 @@ def map_insured_to_account(
 
         elif transform == "first_element":
             val = _first_element(raw_val)
+            if val:
+                result[dst_key] = val
+
+        elif transform == "phone_e164":
+            val = _to_e164_us(raw_val)
             if val:
                 result[dst_key] = val
 
@@ -430,7 +459,7 @@ def map_insured_to_contact(
 
     if role == "primary":
         email = (nc_record.get("eMail") or nc_record.get("email") or "").strip()
-        phone = (nc_record.get("cellPhone") or "").strip()
+        phone = _to_e164_us(nc_record.get("cellPhone"))
         if email:
             result["emailAddress"] = email
         if phone:

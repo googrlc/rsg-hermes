@@ -113,6 +113,32 @@ class MapInsuredToAccountTests(unittest.TestCase):
         result = map_insured_to_account(insured)
         self.assertEqual(result["account_type"], "Personal Lines")
 
+    def test_phone_normalized_to_e164(self) -> None:
+        # NowCerts often returns "678-230-5750" style; Espo phoneNumber
+        # validator only accepts E.164. This sync used to fail Account
+        # writes with validationFailure on phoneNumber for those records.
+        for raw, expected in [
+            ("678-230-5750", "+16782305750"),
+            ("(770) 780-8848", "+17707808848"),
+            ("7707808848", "+17707808848"),
+            ("17707808848", "+17707808848"),
+            ("+17707808848", "+17707808848"),
+        ]:
+            insured = self._commercial_insured(cellPhone=raw)
+            result = map_insured_to_account(insured)
+            self.assertEqual(
+                result["phoneNumber"],
+                expected,
+                msg=f"raw {raw!r} did not normalize",
+            )
+
+    def test_phone_non_us_passes_through(self) -> None:
+        # Non-US / unparsable values flow through unchanged for human review
+        # rather than corrupting the record.
+        insured = self._commercial_insured(cellPhone="+44 20 7946 0958")
+        result = map_insured_to_account(insured)
+        self.assertEqual(result["phoneNumber"], "+44 20 7946 0958")
+
 
 class DetectConflictsTests(unittest.TestCase):
     def test_no_conflict_when_values_match(self) -> None:
