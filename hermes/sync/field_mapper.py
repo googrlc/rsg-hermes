@@ -585,6 +585,11 @@ def map_policy_to_opportunity(
     result["closeDate"] = eff_date or datetime.date.today().isoformat()
     if eff_date:
         result["proposedEffectiveDate"] = eff_date
+        # bindDate is layout/workflow-required on Opportunity create — POST
+        # 400s with `validationFailure {field: bindDate, type: required}`
+        # without it. For new policies bind date == effective date; NowCerts
+        # carries no separate field, so mirror.
+        result["bindDate"] = eff_date
     if exp_date:
         result["expirationDate"] = exp_date
 
