@@ -75,7 +75,68 @@ class EspoClientReliabilityTests(unittest.TestCase):
 
         client.get("Account", params={"maxSize": 500})
 
-        self.assertEqual(session.calls[0]["params"]["maxSize"], "200")
+        self.assertIn(("maxSize", "200"), session.calls[0]["params"])
+
+    def test_get_where_clause_is_bracket_encoded_not_json(self) -> None:
+        # EspoCRM ignores JSON-encoded `where` and silently returns the unfiltered
+        # first record — leaf values must be sent as where[0][type]=... pairs.
+        session = FakeSession([FakeResponse(200, {"list": [], "total": 0})])
+        client = EspoClient(
+            base_url="https://crm.example",
+            api_key="key",
+            timeout=1,
+            session=session,
+            retry_sleep=0,
+        )
+
+        client.get(
+            "Account",
+            params={
+                "maxSize": 1,
+                "select": "id,name",
+                "where": [
+                    {"type": "equals", "attribute": "name", "value": "Acme"},
+                ],
+            },
+        )
+
+        sent = session.calls[0]["params"]
+        self.assertIn(("where[0][type]", "equals"), sent)
+        self.assertIn(("where[0][attribute]", "name"), sent)
+        self.assertIn(("where[0][value]", "Acme"), sent)
+        # Guard against regression to JSON encoding.
+        self.assertFalse(any(k == "where" for k, _ in sent))
+
+    def test_get_nested_or_where_recurses_into_value_list(self) -> None:
+        session = FakeSession([FakeResponse(200, {"list": [], "total": 0})])
+        client = EspoClient(
+            base_url="https://crm.example",
+            api_key="key",
+            timeout=1,
+            session=session,
+            retry_sleep=0,
+        )
+
+        client.get(
+            "Contact",
+            params={
+                "where": [
+                    {
+                        "type": "or",
+                        "value": [
+                            {"type": "contains", "attribute": "name", "value": "ada"},
+                            {"type": "equals", "attribute": "emailAddress", "value": "ada@x"},
+                        ],
+                    }
+                ],
+            },
+        )
+
+        sent = session.calls[0]["params"]
+        self.assertIn(("where[0][type]", "or"), sent)
+        self.assertIn(("where[0][value][0][type]", "contains"), sent)
+        self.assertIn(("where[0][value][0][attribute]", "name"), sent)
+        self.assertIn(("where[0][value][1][attribute]", "emailAddress"), sent)
 
     def test_post_does_not_retry_to_avoid_duplicate_writes(self) -> None:
         session = FakeSession(
