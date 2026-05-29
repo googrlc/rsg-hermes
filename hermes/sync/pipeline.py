@@ -21,6 +21,8 @@ from hermes.sync.field_mapper import (
     INSURED_DEDUP_TARGET,
     detect_conflicts,
     map_insured_to_account,
+    map_insured_to_contact,
+    map_policy_to_opportunity,
     payload_hash,
 )
 from hermes.sync.nowcerts_client import NowCertsClient
@@ -189,6 +191,16 @@ def run_insured_to_account_sync(
         # ── E. Dequeue and apply to EspoCRM ──────────────────────────────
         if use_outbound_queue and not dry_run:
             _process_outbound_queue(supa, espo, run_id=run_id, result=result)
+
+        # ── E2. Sync Contacts from insured data ─────────────────────────
+        _sync_contacts_for_insureds(
+            espo, supa, raw_insureds, run_id=run_id, dry_run=dry_run,
+        )
+
+        # ── F. Sync Policies from NowCerts ───────────────────────────────
+        _sync_policies(
+            nc, espo, supa, run_id=run_id, since=since, dry_run=dry_run,
+        )
 
         # ── G. Finish the run ────────────────────────────────────────────
         status = "success" if result.ok else "partial"
@@ -608,6 +620,201 @@ def _process_outbound_queue(
             status="success",
             payload_hash=payload_hash(item["payload"]),
         )
+
+
+def _sync_contacts_for_insureds(
+    espo: EspoClient,
+    supa: SupabaseClient,
+    raw_insureds: list[dict[str, Any]],
+    *,
+    run_id: str,
+    dry_run: bool,
+) -> None:
+    """Create/update EspoCRM Contact records from NowCerts insured data.
+
+    Runs after Account sync so Accounts exist. For each insured:
+      - Finds the linked Account by momentumClientId
+      - Upserts a primary Contact (and co-insured Contact if present)
+    """
+    for record in raw_insureds:
+        source_id = str(record.get("database_id") or record.get("databaseId") or "")
+        if not source_id:
+            continue
+
+        # Resolve the Account ID in EspoCRM
+        account_match = _find_espo_account(espo, INSURED_DEDUP_TARGET, source_id)
+        account_id = account_match["id"] if account_match else None
+
+        if not account_id:
+            log.debug("No EspoCRM Account for NC insured %s — skipping Contact sync", source_id)
+            continue
+
+        # Primary Contact
+        contact_payload = map_insured_to_contact(
+            record, account_id=account_id, role="primary",
+        )
+        if contact_payload:
+            if dry_run:
+                log.info(
+                    "DRY RUN: would upsert Contact %s %s → Account %s",
+                    contact_payload.get("firstName", ""),
+                    contact_payload.get("lastName", ""),
+                    account_id,
+                )
+            else:
+                try:
+                    espo.upsert_contact(contact_payload)
+                    _log_audit(
+                        supa,
+                        workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
+                        run_id=run_id,
+                        object_type="Contact",
+                        source_id=source_id,
+                        dest_id=account_id,
+                        action="upsert",
+                        status="success",
+                    )
+                except EspoClientError as exc:
+                    log.warning("Contact upsert failed for NC insured %s: %s", source_id, exc)
+                    _log_audit(
+                        supa,
+                        workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
+                        run_id=run_id,
+                        object_type="Contact",
+                        source_id=source_id,
+                        dest_id=account_id,
+                        action="upsert",
+                        status="failed",
+                        message=str(exc)[:500],
+                    )
+
+        # Co-insured Contact (spouse)
+        co_contact_payload = map_insured_to_contact(
+            record, account_id=account_id, role="co_insured",
+        )
+        if co_contact_payload:
+            if dry_run:
+                log.info(
+                    "DRY RUN: would upsert co-insured Contact %s %s → Account %s",
+                    co_contact_payload.get("firstName", ""),
+                    co_contact_payload.get("lastName", ""),
+                    account_id,
+                )
+            else:
+                try:
+                    espo.upsert_contact(co_contact_payload)
+                except EspoClientError as exc:
+                    log.warning(
+                        "Co-insured Contact upsert failed for NC insured %s: %s",
+                        source_id, exc,
+                    )
+
+
+def _sync_policies(
+    nc: NowCertsClient,
+    espo: EspoClient,
+    supa: SupabaseClient,
+    *,
+    run_id: str,
+    since: str | None,
+    dry_run: bool,
+) -> None:
+    """Fetch NowCerts policies and sync them as EspoCRM Opportunities.
+
+    Each policy is linked to the correct Account via the insured's
+    database_id → momentumClientId mapping.
+    """
+    try:
+        raw_policies = nc.fetch_policies(since=since)
+    except Exception as exc:
+        log.warning("NowCerts policy fetch failed — skipping policy sync: %s", exc)
+        return
+
+    if not raw_policies:
+        log.info("No policies to sync from NowCerts")
+        return
+
+    log.info("Syncing %d NowCerts policies → EspoCRM Opportunities", len(raw_policies))
+
+    for policy in raw_policies:
+        insured_id = str(
+            policy.get("insuredDatabaseId")
+            or policy.get("InsuredDatabaseId")
+            or policy.get("insured_database_id")
+            or ""
+        )
+        if not insured_id:
+            continue
+
+        # Resolve Account in EspoCRM via the insured's momentumClientId
+        account_match = _find_espo_account(espo, INSURED_DEDUP_TARGET, insured_id)
+        if not account_match:
+            log.debug("No EspoCRM Account for NC insured %s — skipping policy", insured_id)
+            continue
+
+        account_id = account_match["id"]
+        account_name = account_match.get("name", "")
+
+        opp_payload = map_policy_to_opportunity(
+            policy, account_id=account_id, account_name=account_name,
+        )
+        if not opp_payload:
+            continue
+
+        policy_number = opp_payload.get("policyNumber", "")
+
+        if dry_run:
+            log.info(
+                "DRY RUN: would create Opportunity '%s' for Account %s",
+                opp_payload.get("name", "?"),
+                account_id,
+            )
+            continue
+
+        # Dedup: check if an Opportunity with this policy number already exists
+        if policy_number:
+            try:
+                existing = espo.find_one_by_field(
+                    "Opportunity", "policyNumber", policy_number,
+                    select="id,name",
+                )
+                if existing:
+                    log.debug(
+                        "Opportunity already exists for policy %s — skipping",
+                        policy_number,
+                    )
+                    continue
+            except EspoClientError:
+                pass
+
+        try:
+            espo.create("Opportunity", opp_payload)
+            _log_audit(
+                supa,
+                workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
+                run_id=run_id,
+                object_type="Opportunity",
+                source_id=insured_id,
+                dest_id=account_id,
+                action="create",
+                status="success",
+            )
+        except EspoClientError as exc:
+            log.warning(
+                "Opportunity create failed for policy %s: %s",
+                policy_number or "?", exc,
+            )
+            _log_audit(
+                supa,
+                workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
+                run_id=run_id,
+                object_type="Opportunity",
+                source_id=insured_id,
+                dest_id=account_id,
+                action="create",
+                status="failed",
+                message=str(exc)[:500],
+            )
 
 
 def _derive_queue_action_type(
