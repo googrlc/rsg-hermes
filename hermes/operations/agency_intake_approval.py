@@ -104,7 +104,7 @@ def _map_account_to_espo(account: dict[str, Any]) -> dict[str, Any]:
         "legal_name": "legalName",
         "dba": "dba",
         "fein": "fein",
-        "entity_type": "businessEntity",
+        "entity_type": "typeOfBusiness",
         "industry": "industry",
         "address": "billingAddressStreet",
         "city": "billingAddressCity",

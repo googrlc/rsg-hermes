@@ -66,13 +66,13 @@ class MapInsuredToAccountTests(unittest.TestCase):
         result = map_insured_to_account(
             self._commercial_insured(), is_first_sync=True,
         )
-        self.assertEqual(result["client_since"], "2025-01-15")
+        self.assertEqual(result["createDate"], "2025-01-15")
 
-    def test_client_since_omitted_on_subsequent_sync(self) -> None:
+    def test_create_date_omitted_on_subsequent_sync(self) -> None:
         result = map_insured_to_account(
             self._commercial_insured(), is_first_sync=False,
         )
-        self.assertNotIn("client_since", result)
+        self.assertNotIn("createDate", result)
 
     def test_address_fields_mapped(self) -> None:
         result = map_insured_to_account(self._commercial_insured())
@@ -92,16 +92,16 @@ class MapInsuredToAccountTests(unittest.TestCase):
 
     def test_append_notes_existing(self) -> None:
         insured = self._commercial_insured(personNotes="New note from AMS")
-        existing = {"communication_notes": "Old CRM note"}
+        existing = {"personNotes": "Old CRM note"}
         result = map_insured_to_account(insured, existing_espo=existing)
-        self.assertIn("Old CRM note", result["communication_notes"])
-        self.assertIn("New note from AMS", result["communication_notes"])
+        self.assertIn("Old CRM note", result["personNotes"])
+        self.assertIn("New note from AMS", result["personNotes"])
 
     def test_append_notes_no_duplicate(self) -> None:
         insured = self._commercial_insured(personNotes="Same note")
-        existing = {"communicationNotes": "Same note"}
+        existing = {"personNotes": "Same note"}
         result = map_insured_to_account(insured, existing_espo=existing)
-        self.assertEqual(result["communication_notes"], "Same note")
+        self.assertEqual(result["personNotes"], "Same note")
 
     def test_default_account_type_when_missing(self) -> None:
         insured = {"id": "NC-X", "commercialName": "Test", "changeDate": "2026-01-01"}

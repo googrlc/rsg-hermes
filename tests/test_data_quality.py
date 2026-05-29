@@ -22,9 +22,9 @@ class DataQualityTests(unittest.TestCase):
         policy_fields = {rule["field"] for rule in AUDIT_RULES["Policy"]}
 
         self.assertIn("account_status", account_fields)
-        self.assertIn("policy_number", policy_fields)
-        self.assertIn("effective_date", policy_fields)
-        self.assertIn("premium_amount", policy_fields)
+        self.assertIn("policyNumber", policy_fields)
+        self.assertIn("effectiveDate", policy_fields)
+        self.assertIn("premium", policy_fields)
         self.assertIn("accountId", policy_fields)
 
     def test_data_quality_scan_uses_espo_safe_page_size(self) -> None:
@@ -56,11 +56,11 @@ class DataQualityTests(unittest.TestCase):
                     {
                         "id": f"p{i}",
                         "name": f"Policy {i}",
-                        "policy_number": None,
+                        "policyNumber": None,
                         "accountId": None,
-                        "carrier": "Progressive",
-                        "effective_date": "2026-01-01",
-                        "premium_amount": "1000",
+                        "carrierName": "Progressive",
+                        "effectiveDate": "2026-01-01",
+                        "premium": "1000",
                     }
                     for i in range(offset, min(offset + max_size, total))
                 ]
@@ -72,7 +72,7 @@ class DataQualityTests(unittest.TestCase):
             for rule in result.data["entities"]["Policy"]["rules"]
         }
 
-        self.assertEqual(policy_rules["policy_number"], 201)
+        self.assertEqual(policy_rules["policyNumber"], 201)
         self.assertEqual(policy_rules["accountId"], 201)
 
     def test_stale_leads_uses_simple_list_read_and_filters_locally(self) -> None:
@@ -120,10 +120,10 @@ class DataQualityTests(unittest.TestCase):
                                 "name": "Atlas Auto",
                                 "accountId": "a1",
                                 "accountName": "Atlas Protection Group",
-                                "line_of_business": "Commercial Auto",
-                                "carrier": "Progressive",
-                                "premium_amount": "25000",
-                                "expiration_date": "2026-06-15",
+                                "lineOfBusiness": "Commercial Auto",
+                                "carrierName": "Progressive",
+                                "premium": "25000",
+                                "expirationDate": "2026-06-15",
                                 "status": "Active",
                             },
                             {
@@ -131,8 +131,8 @@ class DataQualityTests(unittest.TestCase):
                                 "name": "Reviewed WC",
                                 "accountId": "a2",
                                 "accountName": "Reviewed Co",
-                                "line_of_business": "Workers Comp",
-                                "expiration_date": "2026-06-20",
+                                "lineOfBusiness": "Workers Comp",
+                                "expirationDate": "2026-06-20",
                                 "status": "Active",
                             },
                         ],

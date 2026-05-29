@@ -241,7 +241,7 @@ def _query_stale_opportunities(*, client: EspoClient, now_local: datetime) -> Se
                 "date_label": _format_datetime(_pick(row, "modifiedAt")),
                 "date_prefix": "Last touched",
                 "category": "STALE LEADS",
-                "premium": _as_money(_pick(row, "premium_amount", "amount")),
+                "premium": _as_money(_pick(row, "premium", "amount")),
             }
         )
     return SentinelQueryResult(label="STALE LEADS", rows=filtered)
@@ -287,7 +287,7 @@ def _query_renewals(*, client: EspoClient, now_local: datetime) -> SentinelQuery
             "date_label": _format_date(_pick(row, "expirationDate", "expiration_date")),
             "date_prefix": "Exp",
             "category": "PROJECT 85 RENEWALS",
-            "premium": _as_money(_pick(row, "premium_amount", "amount")),
+            "premium": _as_money(_pick(row, "premium", "amount")),
             "action": _renewal_action_for_checkpoint(checkpoint_days, in_pipeline=in_pipeline),
             "checkpoint_days": checkpoint_days,
             "pipeline_stage": pipeline_stage or "Not in pipeline",
@@ -345,7 +345,7 @@ def _query_x_date_entity(
             "date_label": _format_date(_pick(row, "xDate", "x_date")),
             "date_prefix": "X-Date",
             "category": "X-DATE OPPORTUNITIES",
-            "premium": _as_money(_pick(row, "premium_amount", "amount")),
+            "premium": _as_money(_pick(row, "premium", "amount")),
             "action": "Re-quote",
             "carrier": _pick(row, "lostToCarrier", "carrier"),
             "stage": _pick(row, "stage", "status"),
