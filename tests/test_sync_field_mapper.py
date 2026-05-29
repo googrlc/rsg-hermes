@@ -52,10 +52,10 @@ class MapInsuredToAccountTests(unittest.TestCase):
 
     def test_account_type_enum_map(self) -> None:
         result = map_insured_to_account(self._commercial_insured())
-        self.assertEqual(result["accountType"], "Commercial Lines")
+        self.assertEqual(result["account_type"], "Commercial Lines")
 
         personal = map_insured_to_account(self._personal_insured())
-        self.assertEqual(personal["accountType"], "Personal Lines")
+        self.assertEqual(personal["account_type"], "Personal Lines")
 
     def test_dedup_key_mapped(self) -> None:
         result = map_insured_to_account(self._commercial_insured())
@@ -65,13 +65,13 @@ class MapInsuredToAccountTests(unittest.TestCase):
         result = map_insured_to_account(
             self._commercial_insured(), is_first_sync=True,
         )
-        self.assertEqual(result["clientSince"], "2025-01-15")
+        self.assertEqual(result["client_since"], "2025-01-15")
 
     def test_client_since_omitted_on_subsequent_sync(self) -> None:
         result = map_insured_to_account(
             self._commercial_insured(), is_first_sync=False,
         )
-        self.assertNotIn("clientSince", result)
+        self.assertNotIn("client_since", result)
 
     def test_address_fields_mapped(self) -> None:
         result = map_insured_to_account(self._commercial_insured())
@@ -87,31 +87,31 @@ class MapInsuredToAccountTests(unittest.TestCase):
     def test_lead_sources_first_element(self) -> None:
         insured = self._commercial_insured(leadSources=["Website", "Referral"])
         result = map_insured_to_account(insured)
-        self.assertEqual(result["referralSource"], "Website")
+        self.assertEqual(result["referral_source"], "Website")
 
     def test_append_notes_existing(self) -> None:
         insured = self._commercial_insured(personNotes="New note from AMS")
-        existing = {"communicationNotes": "Old CRM note"}
+        existing = {"communication_notes": "Old CRM note"}
         result = map_insured_to_account(insured, existing_espo=existing)
-        self.assertIn("Old CRM note", result["communicationNotes"])
-        self.assertIn("New note from AMS", result["communicationNotes"])
+        self.assertIn("Old CRM note", result["communication_notes"])
+        self.assertIn("New note from AMS", result["communication_notes"])
 
     def test_append_notes_no_duplicate(self) -> None:
         insured = self._commercial_insured(personNotes="Same note")
         existing = {"communicationNotes": "Same note"}
         result = map_insured_to_account(insured, existing_espo=existing)
-        self.assertEqual(result["communicationNotes"], "Same note")
+        self.assertEqual(result["communication_notes"], "Same note")
 
     def test_default_account_type_when_missing(self) -> None:
         insured = {"id": "NC-X", "commercialName": "Test", "changeDate": "2026-01-01"}
         result = map_insured_to_account(insured)
-        self.assertEqual(result["accountType"], "Commercial Lines")
+        self.assertEqual(result["account_type"], "Commercial Lines")
 
     def test_life_type_maps_to_personal_lines(self) -> None:
         insured = self._personal_insured()
         insured["insuredType"] = "Life"
         result = map_insured_to_account(insured)
-        self.assertEqual(result["accountType"], "Personal Lines")
+        self.assertEqual(result["account_type"], "Personal Lines")
 
 
 class DetectConflictsTests(unittest.TestCase):

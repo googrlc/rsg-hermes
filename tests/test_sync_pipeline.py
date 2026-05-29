@@ -143,7 +143,7 @@ class QueuedPipelineTests(unittest.TestCase):
             "object_type": "Account",
             "object_id": None,
             "action": "create",
-            "payload": {"name": "Acme Corp", "accountType": "Commercial Lines", "momentum_client_id": "NC-001"},
+            "payload": {"name": "Acme Corp", "account_type": "Commercial Lines", "momentum_client_id": "NC-001"},
             "mapping_id": "map-new",
         }
         supa.select.side_effect = [
@@ -185,7 +185,7 @@ class QueuedPipelineTests(unittest.TestCase):
             "object_type": "Account",
             "object_id": None,
             "action": "create",
-            "payload": {"name": "Acme Corp", "accountType": "Commercial Lines", "momentum_client_id": "NC-001"},
+            "payload": {"name": "Acme Corp", "account_type": "Commercial Lines", "momentum_client_id": "NC-001"},
             "mapping_id": None,
         }
         supa.select.side_effect = [
