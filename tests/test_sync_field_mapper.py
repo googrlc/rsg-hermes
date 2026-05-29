@@ -181,15 +181,17 @@ class MapPolicyToOpportunityTests(unittest.TestCase):
         base.update(overrides)
         return base
 
-    def test_bind_date_mirrors_effective_date(self) -> None:
-        # bindDate is layout/workflow-required on Opportunity create — POST
-        # 400s without it (validationFailure {field: bindDate, type: required}).
-        # For new policies bind date == effective date.
+    def test_bind_date_effective_date_proposed_all_mirror_eff_date(self) -> None:
+        # bindDate, effectiveDate, and proposedEffectiveDate are all
+        # layout/workflow-required on Opportunity create — POST 400s with
+        # `validationFailure {field: …, type: required}` for each in turn.
+        # NowCerts carries one effective date so all three mirror it.
         opp = map_policy_to_opportunity(
             self._policy(), account_id="acct-1", account_name="Acme"
         )
         self.assertIsNotNone(opp)
         self.assertEqual(opp["bindDate"], "2025-06-01")
+        self.assertEqual(opp["effectiveDate"], "2025-06-01")
         self.assertEqual(opp["proposedEffectiveDate"], "2025-06-01")
 
     def test_written_premium_mirrors_amount(self) -> None:
