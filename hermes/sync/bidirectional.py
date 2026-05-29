@@ -202,8 +202,14 @@ def run_hub_to_nowcerts(
 
                 if not dry_run:
                     resp = nc.create_insured(nc_payload)
-                    # Update golden record with NowCerts ID if returned
-                    nc_id = resp.get("DatabaseId") or resp.get("databaseId") or resp.get("id")
+                    # NowCerts /api/Insured/Insert returns the id under "insuredDatabaseId".
+                    # Other keys kept as defensive fallbacks.
+                    nc_id = (
+                        resp.get("insuredDatabaseId")
+                        or resp.get("DatabaseId")
+                        or resp.get("databaseId")
+                        or resp.get("id")
+                    )
                     if nc_id:
                         _link_nowcerts_id(supa, account["espocrm_id"], str(nc_id))
 
@@ -256,7 +262,9 @@ def run_hub_to_nowcerts(
                 if not dry_run:
                     policy_resp = nc.insert_policy(nc_policy_payload)
                     nc_policy_id = (
-                        policy_resp.get("DatabaseId")
+                        policy_resp.get("policyDatabaseId")
+                        or policy_resp.get("insuredDatabaseId")
+                        or policy_resp.get("DatabaseId")
                         or policy_resp.get("databaseId")
                         or policy_resp.get("id")
                         or "pushed"
