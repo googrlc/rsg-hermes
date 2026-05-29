@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import logging
@@ -424,6 +425,9 @@ def map_insured_to_contact(
     if last:
         result["lastName"] = last
 
+    # Composite name enables upsert_contact dedup by name-search fallback
+    result["name"] = f"{first} {last}".strip()
+
     if role == "primary":
         email = (nc_record.get("email") or "").strip()
         phone = (nc_record.get("cellPhone") or "").strip()
@@ -542,13 +546,13 @@ def map_policy_to_opportunity(
 
     if policy_number:
         result["policyNumber"] = policy_number
+    result["closeDate"] = eff_date or datetime.date.today().isoformat()
     if eff_date:
-        result["closeDate"] = eff_date
         result["proposedEffectiveDate"] = eff_date
     if exp_date:
         result["expirationDate"] = exp_date
 
-    premium = nc_policy.get("premium") or nc_policy.get("Premium")
+    premium = nc_policy.get("premium") if nc_policy.get("premium") is not None else nc_policy.get("Premium")
     if premium is not None:
         try:
             result["amount"] = float(premium)

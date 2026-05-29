@@ -736,6 +736,10 @@ def _sync_policies(
 
     log.info("Syncing %d NowCerts policies → EspoCRM Opportunities", len(raw_policies))
 
+    # Cache Account lookups to avoid redundant API calls when an insured
+    # has many policies.
+    _account_cache: dict[str, dict[str, Any] | None] = {}
+
     for policy in raw_policies:
         insured_id = str(
             policy.get("insuredDatabaseId")
@@ -747,7 +751,9 @@ def _sync_policies(
             continue
 
         # Resolve Account in EspoCRM via the insured's momentumClientId
-        account_match = _find_espo_account(espo, INSURED_DEDUP_TARGET, insured_id)
+        if insured_id not in _account_cache:
+            _account_cache[insured_id] = _find_espo_account(espo, INSURED_DEDUP_TARGET, insured_id)
+        account_match = _account_cache[insured_id]
         if not account_match:
             log.debug("No EspoCRM Account for NC insured %s — skipping policy", insured_id)
             continue

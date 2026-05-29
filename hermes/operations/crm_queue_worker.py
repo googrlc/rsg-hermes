@@ -246,10 +246,21 @@ async def _process_queue_async(
             _update_status(supa, queue_id, "SUCCESS", attempt_count)
             return True, None
     
-    # Process all items concurrently
-    tasks = [_process_item(item) for item in pending]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
+    # Group items by priority so higher-priority items (lower number) finish
+    # before dependents start.  This prevents the race where a Contact's
+    # _resolve_parent_id fires before its parent Account has been created.
+    priority_groups: dict[int, list[dict[str, Any]]] = {}
+    for item in pending:
+        p = int(item.get("priority") or 99)
+        priority_groups.setdefault(p, []).append(item)
+
+    results: list[tuple[bool, str | None] | Exception] = []
+    for _priority in sorted(priority_groups):
+        group = priority_groups[_priority]
+        tasks = [_process_item(item) for item in group]
+        group_results = await asyncio.gather(*tasks, return_exceptions=True)
+        results.extend(group_results)
+
     # Aggregate results
     for result in results:
         if isinstance(result, Exception):
