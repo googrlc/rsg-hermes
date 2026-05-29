@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from typing import Any
@@ -94,22 +93,41 @@ class EspoClient:
             "Content-Type": "application/json",
         }
 
-    def _query_params(self, params: dict[str, Any] | None) -> dict[str, str] | None:
-        """EspoCRM expects JSON-encoded complex GET params (where, orderBy, select)."""
+    def _query_params(
+        self, params: dict[str, Any] | None
+    ) -> list[tuple[str, str]] | None:
+        """Serialize EspoCRM GET params using bracket syntax (where[0][type]=...).
+
+        EspoCRM rejects JSON-encoded `where` on the v1 list endpoints and silently
+        returns the unfiltered first record. requests accepts list-of-tuples and
+        encodes each pair, so we emit one tuple per leaf value.
+        """
         if not params:
             return None
-        flat: dict[str, str] = {}
+        out: list[tuple[str, str]] = []
+
+        def emit(key: str, val: Any) -> None:
+            if val is None:
+                return
+            if isinstance(val, list):
+                for i, item in enumerate(val):
+                    emit(f"{key}[{i}]", item)
+            elif isinstance(val, dict):
+                for k, v in val.items():
+                    emit(f"{key}[{k}]", v)
+            elif isinstance(val, bool):
+                out.append((key, "true" if val else "false"))
+            else:
+                out.append((key, str(val)))
+
         for key, val in params.items():
             if key == "maxSize":
                 try:
                     val = min(int(val), self.max_list_size)
                 except (TypeError, ValueError):
                     pass
-            if isinstance(val, (list, dict)):
-                flat[key] = json.dumps(val)
-            else:
-                flat[key] = str(val)
-        return flat
+            emit(key, val)
+        return out
 
     def request(
         self,
