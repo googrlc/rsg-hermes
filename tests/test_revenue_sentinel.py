@@ -60,9 +60,9 @@ class FakeClient:
                         "name": "Atlas Auto",
                         "accountId": "acct-1",
                         "accountName": "Atlas Protection Group",
-                        "line_of_business": "Auto",
-                        "premium_amount": "35000",
-                        "expiration_date": "2026-07-30",
+                        "lineOfBusiness": "Auto",
+                        "premium": "35000",
+                        "expirationDate": "2026-07-30",
                         "status": "Active",
                     },
                     {
@@ -70,9 +70,9 @@ class FakeClient:
                         "name": "Ray Renewal",
                         "accountId": "acct-2",
                         "accountName": "Raymond Harrison",
-                        "line_of_business": "Auto",
-                        "premium_amount": "5000",
-                        "expiration_date": "2026-06-30",
+                        "lineOfBusiness": "Auto",
+                        "premium": "5000",
+                        "expirationDate": "2026-06-30",
                         "status": "Active",
                     },
                     {
@@ -80,9 +80,9 @@ class FakeClient:
                         "name": "Late Renewal",
                         "accountId": "acct-3",
                         "accountName": "Late Co",
-                        "line_of_business": "GL",
-                        "premium_amount": "2000",
-                        "expiration_date": "2026-05-31",
+                        "lineOfBusiness": "GL",
+                        "premium": "2000",
+                        "expirationDate": "2026-05-31",
                         "status": "Active",
                     }
                 ]
