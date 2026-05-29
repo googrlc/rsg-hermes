@@ -31,19 +31,19 @@ INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "coInsured_FirstName", "dst": "spouseFirstName", "transform": "direct"},
     {"src": "coInsured_LastName", "dst": "spouseLastName", "transform": "direct"},
     {"src": "coInsured_DateOfBirth", "dst": "spouseDob", "transform": "date_only"},
-    {"src": "insuredType", "dst": "accountType", "transform": "enum_map", "map": INSURED_TYPE_MAP},
+    {"src": "insuredType", "dst": "account_type", "transform": "enum_map", "map": INSURED_TYPE_MAP},
     {"src": "typeOfBusiness", "dst": "businessEntity", "transform": "direct"},
     {"src": "yearBusinessStarted", "dst": "cYearBusinessEst", "transform": "direct"},
-    {"src": "yearsInBusiness", "dst": "yearsInBusiness", "transform": "direct"},
-    {"src": "naics", "dst": "intelNaics", "transform": "direct"},
+    {"src": "yearsInBusiness", "dst": "years_in_business", "transform": "direct"},
+    {"src": "naics", "dst": "intel_naics", "transform": "direct"},
     {"src": "sicCode", "dst": "sicCode", "transform": "direct"},
     {"src": "fein", "dst": "fein", "transform": "direct"},
     {"src": "changeDate", "dst": "momentum_last_synced", "transform": "direct"},
-    {"src": "createDate", "dst": "clientSince", "transform": "date_only"},
-    {"src": "referralSourceCompanyName", "dst": "referralName", "transform": "direct"},
-    {"src": "leadSources", "dst": "referralSource", "transform": "first_element"},
-    {"src": "personNotes", "dst": "communicationNotes", "transform": "append"},
-    {"src": "agentOfRecordDate", "dst": "agentOfRecordDate", "transform": "date_only"},
+    {"src": "createDate", "dst": "client_since", "transform": "date_only"},
+    {"src": "referralSourceCompanyName", "dst": "referral_name", "transform": "direct"},
+    {"src": "leadSources", "dst": "referral_source", "transform": "first_element"},
+    {"src": "personNotes", "dst": "communication_notes", "transform": "append"},
+    {"src": "agentOfRecordDate", "dst": "agent_of_record_date", "transform": "date_only"},
     # Address fields (supplemental — not in rsg-data-schema mapping but useful)
     {"src": "addressLine1", "dst": "billingAddressStreet", "transform": "direct"},
     {"src": "city", "dst": "billingAddressCity", "transform": "direct"},
@@ -105,7 +105,7 @@ def map_insured_to_account(
     Args:
         nc_record: Raw NowCerts insured dict.
         existing_espo: Current EspoCRM Account data (for append transforms).
-        is_first_sync: If True, includes clientSince field.
+        is_first_sync: If True, includes client_since field.
 
     Returns:
         Dict ready for EspoCRM Account create/update.
@@ -162,13 +162,13 @@ def map_insured_to_account(
                 else:
                     result[dst_key] = new_val
 
-    # Only include clientSince on first sync
+    # Only include client_since on first sync
     if not is_first_sync:
-        result.pop("clientSince", None)
+        result.pop("client_since", None)
 
-    # accountType is required on create — ensure it's set
-    if "accountType" not in result:
-        result["accountType"] = "Commercial Lines"
+    # account_type is required on create — ensure it's set
+    if "account_type" not in result:
+        result["account_type"] = "Commercial Lines"
 
     return result
 
@@ -186,8 +186,8 @@ def detect_conflicts(
     """
     skip = ignore_fields or {
         "momentum_last_synced",
-        "communicationNotes",
-        "clientSince",
+        "communication_notes",
+        "client_since",
     }
     conflicts: list[dict[str, str]] = []
 
@@ -234,7 +234,7 @@ ACCOUNT_TO_INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "billingAddressPostalCode", "dst": "ZipCode", "transform": "direct"},
     {"src": "emailAddress", "dst": "EMail", "transform": "direct"},
     {"src": "phoneNumber", "dst": "Phone", "transform": "direct"},
-    {"src": "accountType", "dst": "Type", "transform": "enum_map", "map": ACCOUNT_TYPE_REVERSE_MAP},
+    {"src": "account_type", "dst": "Type", "transform": "enum_map", "map": ACCOUNT_TYPE_REVERSE_MAP},
     {"src": "businessEntity", "dst": "TypeOfBusiness", "transform": "direct"},
     {"src": "cYearBusinessEst", "dst": "YearBusinessStarted", "transform": "direct"},
     {"src": "website", "dst": "Website", "transform": "direct"},
@@ -302,7 +302,7 @@ def map_account_to_golden(espo_record: dict[str, Any]) -> dict[str, Any]:
         "name": espo_record.get("name", ""),
         "first_name": espo_record.get("primaryFirstName"),
         "last_name": espo_record.get("primaryLastName"),
-        "account_type": espo_record.get("accountType"),
+        "account_type": espo_record.get("account_type"),
         "fein": espo_record.get("fein"),
         "address_street": espo_record.get("billingAddressStreet"),
         "address_city": espo_record.get("billingAddressCity"),
