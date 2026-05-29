@@ -368,9 +368,7 @@ def map_policy_to_commission(
         "commission_amount": _first_non_none(policy_record, "commissionAmount", "agencyCommissionValue"),
         "agency_fee": policy_record.get("agencyFee"),
         "effective_date": _strip_date(policy_record.get("effectiveDate")),
-        "expiration_date": _strip_date(
-            _first_non_none(policy_record, "expirationDate"),
-        ),
+        "expiration_date": _strip_date(policy_record.get("expirationDate")),
         "policy_status": policy_record.get("status"),
         "source_system": "espocrm",
         "espocrm_id": policy_record.get("id"),

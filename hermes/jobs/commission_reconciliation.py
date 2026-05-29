@@ -237,7 +237,7 @@ def _policy_index(client: EspoClient) -> tuple[dict[str, dict[str, Any]], list[s
         payload = {
             "policy_id": str(row.get("id") or ""),
             "policy_number": canonical,
-            "carrier": str(_pick(row, "carrier") or ""),
+            "carrier": str(_pick(row, "carrierName", "carrier") or ""),
             "expected_commission": expected,
         }
         for candidate in candidates:
