@@ -7,6 +7,7 @@ import unittest
 from hermes.sync.field_mapper import (
     detect_conflicts,
     map_insured_to_account,
+    map_policy_to_opportunity,
     payload_hash,
 )
 
@@ -165,6 +166,44 @@ class DetectConflictsTests(unittest.TestCase):
         existing = {"name": "Acme", "fein": "123"}
         conflicts = detect_conflicts(source, existing)
         self.assertEqual(len(conflicts), 0)
+
+
+class MapPolicyToOpportunityTests(unittest.TestCase):
+    def _policy(self, **overrides) -> dict:
+        base = {
+            "number": "POL-0001",
+            "lineOfBusinesses": [{"lineOfBusinessName": "Personal Auto"}],
+            "totalPremium": 1408.0,
+            "effectiveDate": "2025-06-01T00:00:00",
+            "expirationDate": "2026-06-01T00:00:00",
+            "carrierName": "Progressive",
+        }
+        base.update(overrides)
+        return base
+
+    def test_written_premium_mirrors_amount(self) -> None:
+        # writtenPremium is layout-required on Opportunity create — POST 400s
+        # without it (validationFailure {field: writtenPremium, type: required}).
+        # NowCerts only carries one premium, so the mapper mirrors totalPremium
+        # into both amount and writtenPremium.
+        opp = map_policy_to_opportunity(
+            self._policy(), account_id="acct-1", account_name="Acme"
+        )
+        self.assertIsNotNone(opp)
+        self.assertEqual(opp["amount"], 1408.0)
+        self.assertEqual(opp["writtenPremium"], 1408.0)
+
+    def test_no_premium_no_written_premium(self) -> None:
+        # If NowCerts didn't carry premium at all, we shouldn't fabricate
+        # a writtenPremium = 0 — let the POST fail loudly so a human sees it.
+        opp = map_policy_to_opportunity(
+            self._policy(totalPremium=None, premium=None, Premium=None),
+            account_id="acct-1",
+            account_name="Acme",
+        )
+        self.assertIsNotNone(opp)
+        self.assertNotIn("amount", opp)
+        self.assertNotIn("writtenPremium", opp)
 
 
 class PayloadHashTests(unittest.TestCase):
