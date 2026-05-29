@@ -593,9 +593,15 @@ def map_policy_to_opportunity(
         premium = nc_policy.get("premium") if nc_policy.get("premium") is not None else nc_policy.get("Premium")
     if premium is not None:
         try:
-            result["amount"] = float(premium)
+            premium_f = float(premium)
         except (TypeError, ValueError):
-            pass
+            premium_f = None
+        if premium_f is not None:
+            result["amount"] = premium_f
+            # writtenPremium is layout-required on Opportunity create — POST
+            # 400s with `validationFailure {field: writtenPremium, type: required}`
+            # without it. NowCerts only carries one premium value, so mirror.
+            result["writtenPremium"] = premium_f
 
     carrier = (
         nc_policy.get("carrierName")
