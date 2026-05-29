@@ -348,10 +348,14 @@ def _enqueue_crm_writes(
         queue_ids.append(str(row.get("id")))
         plan["steps"].append({"order": 1, "entity": "Account", "queue_id": row.get("id")})
 
+    account_name = account.get("account_name") or ""
+
     for idx, contact in enumerate(contacts, start=1):
         if not contact:
             continue
         espo_contact = _map_contact_to_espo(contact)
+        if account_name:
+            espo_contact["accountName"] = account_name
         row = enqueue_crm_write(
             supa,
             entity_type="Contact",
@@ -369,6 +373,8 @@ def _enqueue_crm_writes(
             log.warning("Skipping opportunity without name/LOB: %s", opp)
             continue
         espo_opp = _map_opportunity_to_espo(opp)
+        if account_name:
+            espo_opp["accountName"] = account_name
         row = enqueue_crm_write(
             supa,
             entity_type="Opportunity",

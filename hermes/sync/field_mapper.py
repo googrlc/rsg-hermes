@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import logging
@@ -383,3 +384,191 @@ def map_commission_to_nowcerts_policy(
         payload["ExpirationDate"] = str(commission["expiration_date"])
 
     return payload
+
+
+# ---------------------------------------------------------------------------
+# NowCerts Insured → EspoCRM Contact
+# ---------------------------------------------------------------------------
+
+def map_insured_to_contact(
+    nc_record: dict[str, Any],
+    *,
+    account_id: str | None = None,
+    role: str = "primary",
+) -> dict[str, Any] | None:
+    """Extract a Contact payload from a NowCerts Insured record.
+
+    Args:
+        nc_record: Raw NowCerts insured dict.
+        account_id: EspoCRM Account ID to link the Contact to.
+        role: 'primary' for the named insured, 'co_insured' for co-insured/spouse.
+
+    Returns:
+        Dict ready for EspoCRM Contact create/update, or None if no usable name.
+    """
+    result: dict[str, Any] = {}
+
+    if role == "co_insured":
+        first = (nc_record.get("coInsured_FirstName") or "").strip()
+        last = (nc_record.get("coInsured_LastName") or "").strip()
+        dob = nc_record.get("coInsured_DateOfBirth")
+    else:
+        first = (nc_record.get("firstName") or "").strip()
+        last = (nc_record.get("lastName") or "").strip()
+        dob = nc_record.get("dateOfBirth")
+
+    if not first and not last:
+        return None
+
+    if first:
+        result["firstName"] = first
+    if last:
+        result["lastName"] = last
+
+    # Composite name enables upsert_contact dedup by name-search fallback
+    result["name"] = f"{first} {last}".strip()
+
+    if role == "primary":
+        email = (nc_record.get("email") or "").strip()
+        phone = (nc_record.get("cellPhone") or "").strip()
+        if email:
+            result["emailAddress"] = email
+        if phone:
+            result["phoneNumber"] = phone
+
+        address = (nc_record.get("addressLine1") or "").strip()
+        city = (nc_record.get("city") or "").strip()
+        state = (nc_record.get("state") or "").strip()
+        zip_code = (nc_record.get("zip") or "").strip()
+        if address:
+            result["addressStreet"] = address
+        if city:
+            result["addressCity"] = city
+        if state:
+            result["addressState"] = state
+        if zip_code:
+            result["addressPostalCode"] = zip_code
+
+    if dob:
+        stripped = _strip_date(dob)
+        if stripped:
+            result["dateOfBirth"] = stripped
+
+    if account_id:
+        result["accountId"] = account_id
+
+    if role == "co_insured":
+        result["description"] = "Co-Insured / Spouse (synced from NowCerts)"
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# NowCerts Policy → EspoCRM Opportunity
+# ---------------------------------------------------------------------------
+
+# Map NowCerts LOB strings to EspoCRM lineOfBusiness enum values.
+_NC_LOB_MAP: dict[str, str] = {
+    "commercial auto": "Commercial Auto",
+    "general liability": "General Liability",
+    "workers compensation": "Workers Comp",
+    "workers comp": "Workers Comp",
+    "commercial property": "Commercial Property",
+    "bop": "BOP",
+    "business owners": "BOP",
+    "professional liability": "Professional Liability",
+    "umbrella": "Umbrella",
+    "inland marine": "Inland Marine",
+    "builders risk": "Builders Risk",
+    "personal auto": "Personal Auto",
+    "homeowners": "Homeowners",
+    "renters": "Renters",
+    "life": "Life",
+    "health": "Health",
+    "medicare": "Medicare",
+    "group benefits": "Group Benefits",
+}
+
+
+def map_policy_to_opportunity(
+    nc_policy: dict[str, Any],
+    *,
+    account_id: str | None = None,
+    account_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Transform a NowCerts Policy record into an EspoCRM Opportunity payload.
+
+    Args:
+        nc_policy: Raw NowCerts policy dict from /api/PolicyDetailList.
+        account_id: EspoCRM Account ID to link the Opportunity to.
+        account_name: Account name for the Opportunity name.
+
+    Returns:
+        Dict ready for EspoCRM Opportunity create/update, or None if unusable.
+    """
+    policy_number = (
+        nc_policy.get("number")
+        or nc_policy.get("policyNumber")
+        or nc_policy.get("Number")
+        or ""
+    )
+    lob_raw = (
+        nc_policy.get("lineOfBusinessName")
+        or nc_policy.get("lineOfBusiness")
+        or nc_policy.get("LineOfBusinessName")
+        or ""
+    )
+
+    if not policy_number and not lob_raw:
+        return None
+
+    lob = _NC_LOB_MAP.get(lob_raw.strip().lower(), lob_raw) if lob_raw else "Other"
+
+    eff_date = _strip_date(
+        nc_policy.get("effectiveDate")
+        or nc_policy.get("EffectiveDate")
+    )
+    exp_date = _strip_date(
+        nc_policy.get("expirationDate")
+        or nc_policy.get("ExpirationDate")
+    )
+
+    name_parts = [account_name or "Insured", lob]
+    if eff_date:
+        name_parts.append(eff_date)
+    opp_name = " - ".join(name_parts)
+
+    result: dict[str, Any] = {
+        "name": opp_name,
+        "stage": "Closed Won",
+        "lineOfBusiness": lob,
+    }
+
+    if policy_number:
+        result["policyNumber"] = policy_number
+    result["closeDate"] = eff_date or datetime.date.today().isoformat()
+    if eff_date:
+        result["proposedEffectiveDate"] = eff_date
+    if exp_date:
+        result["expirationDate"] = exp_date
+
+    premium = nc_policy.get("premium") if nc_policy.get("premium") is not None else nc_policy.get("Premium")
+    if premium is not None:
+        try:
+            result["amount"] = float(premium)
+        except (TypeError, ValueError):
+            pass
+
+    carrier = (
+        nc_policy.get("carrierName")
+        or nc_policy.get("CarrierName")
+        or nc_policy.get("carrier")
+        or ""
+    )
+    if carrier:
+        result["carrier"] = carrier
+
+    if account_id:
+        result["accountId"] = account_id
+
+    return result

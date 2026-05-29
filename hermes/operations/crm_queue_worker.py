@@ -246,10 +246,21 @@ async def _process_queue_async(
             _update_status(supa, queue_id, "SUCCESS", attempt_count)
             return True, None
     
-    # Process all items concurrently
-    tasks = [_process_item(item) for item in pending]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
+    # Group items by priority so higher-priority items (lower number) finish
+    # before dependents start.  This prevents the race where a Contact's
+    # _resolve_parent_id fires before its parent Account has been created.
+    priority_groups: dict[int, list[dict[str, Any]]] = {}
+    for item in pending:
+        p = int(item.get("priority") or 99)
+        priority_groups.setdefault(p, []).append(item)
+
+    results: list[tuple[bool, str | None] | Exception] = []
+    for _priority in sorted(priority_groups):
+        group = priority_groups[_priority]
+        tasks = [_process_item(item) for item in group]
+        group_results = await asyncio.gather(*tasks, return_exceptions=True)
+        results.extend(group_results)
+
     # Aggregate results
     for result in results:
         if isinstance(result, Exception):
@@ -279,9 +290,39 @@ def _resolve_parent_id(
     properties: dict[str, Any],
     entity_type: str,
 ) -> None:
-    """Resolve parentName/parentType to accountId for entities that require it."""
-    if entity_type not in ("ClientNote",):
+    """Resolve parentName/parentType/accountName to accountId for entities that require it."""
+    if entity_type not in ("ClientNote", "Contact", "Opportunity"):
         return
+
+    # ── Contact: link via accountId (EspoCRM sets the primary Account) ───
+    if entity_type == "Contact":
+        if properties.get("accountId"):
+            return
+        account_name = properties.pop("accountName", None)
+        if account_name:
+            match = espo.find_one_by_field("Account", "name", account_name, select="id")
+            if match and match.get("id"):
+                properties["accountId"] = match["id"]
+                log.info("Resolved accountId for Contact: %s -> %s", account_name, match["id"])
+            else:
+                log.warning("Could not resolve Account '%s' for Contact", account_name)
+        return
+
+    # ── Opportunity: link via accountId ───────────────────────────────────
+    if entity_type == "Opportunity":
+        if properties.get("accountId"):
+            return
+        account_name = properties.pop("accountName", None)
+        if account_name:
+            match = espo.find_one_by_field("Account", "name", account_name, select="id")
+            if match and match.get("id"):
+                properties["accountId"] = match["id"]
+                log.info("Resolved accountId for Opportunity: %s -> %s", account_name, match["id"])
+            else:
+                log.warning("Could not resolve Account '%s' for Opportunity", account_name)
+        return
+
+    # ── ClientNote: existing parentType/parentName resolution ─────────────
     if properties.get("accountId"):
         return
     parent_type = properties.pop("parentType", None)
