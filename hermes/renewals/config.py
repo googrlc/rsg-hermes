@@ -37,7 +37,7 @@ TASK_SYNC_SOURCE = "Hermes"  # NOTE: must be added to Task.syncSource enum first
 DOC_TYPE_RENEWAL = "renewal"
 
 # --- Slack channels (RSG) — override via env if they change ---
-SLACK_GRETCHEN_TASKS = os.environ.get("SLACK_GRETCHEN_TASKS", "C0AMWAZBBJP")  # #gretchen-tasks
+SLACK_GRETCHEN_TASKS = os.environ.get("SLACK_GRETCHEN_TASKS", "C0AUP125PRU")  # #gretchen-tasks
 SLACK_THE_BOSS = os.environ.get("SLACK_THE_BOSS", "C0ANQUENX4P")              # #the-boss
 SLACK_RSG_WINS = os.environ.get("SLACK_RSG_WINS", "C0ANFKMDRUH")              # #rsg-wins
 
