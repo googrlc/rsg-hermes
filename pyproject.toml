@@ -17,6 +17,9 @@ dependencies = [
 # Read-only direct-Postgres lane to EspoCRM (hermes/integrations/espo_db.py).
 # Install with: pip install -e '.[db]'
 db = ["psycopg[binary]>=3.1"]
+# Gmail email-triage lane (hermes/integrations/gmail_client.py): service-account
+# token minting + domain-wide delegation. Install with: pip install -e '.[gmail]'
+gmail = ["google-auth>=2.20"]
 
 [project.scripts]
 hermes = "hermes.main:main"
