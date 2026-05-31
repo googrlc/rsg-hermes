@@ -42,6 +42,13 @@ DEFAULT_QUARANTINE_FOLDER = "Hermes Triage"
 GMAIL_TRIAGED_LABEL = "Hermes/Triaged"
 GMAIL_QUARANTINE_LABEL = "Hermes/Triage"
 
+# intake_submissions vocabulary (see its CHECK constraints). intake_kind is the
+# TYPE of intake (full_intake|task|note|update|other) — NOT the insurance line
+# of business; the classifier's LOB guess rides along in the payload instead.
+# agent is the human the intake belongs to (lamar|gretchen) — the mailbox owner.
+INTAKE_KIND = "full_intake"
+INTAKE_AGENT = "lamar"
+
 
 @dataclass
 class EmailTriageResult:
@@ -185,14 +192,15 @@ def _handle_actionable(
         "body_content_type": body.get("contentType", "text"),
         "body": body.get("content", "") or msg.get("bodyPreview", ""),
         "classifier_reason": verdict.reason,
+        "lob_guess": verdict.intake_kind,
     }
 
     insert_submission(
         supa,
         idempotency_key=internet_id,
         source="email-ms365",
-        agent="email-triage",
-        intake_kind=verdict.intake_kind,
+        agent=INTAKE_AGENT,
+        intake_kind=INTAKE_KIND,
         client_identifier=_sender_address(msg) or None,
         lob_code=None,
         captured_at=datetime.now(timezone.utc),
@@ -314,14 +322,15 @@ def _handle_actionable_gmail(
         "body_content_type": "text",
         "body": client.extract_text(full),
         "classifier_reason": verdict.reason,
+        "lob_guess": verdict.intake_kind,
     }
 
     insert_submission(
         supa,
         idempotency_key=internet_id,
         source="email-gmail",
-        agent="email-triage",
-        intake_kind=verdict.intake_kind,
+        agent=INTAKE_AGENT,
+        intake_kind=INTAKE_KIND,
         client_identifier=sender or None,
         lob_code=None,
         captured_at=datetime.now(timezone.utc),
