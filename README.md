@@ -34,6 +34,7 @@ hermes --commission-reconcile-file ./statements/carrier.csv
 hermes --ops-doctor             # check Supabase + Hermes table health
 hermes --process-crm-queue      # dequeue pending CRM writes → EspoCRM
 hermes --process-crm-queue-dry-run
+hermes --curate-skills          # report-only age audit of .claude/skills (never deletes)
 hermes --snapshot-kpis          # record system/finance/renewal KPIs
 hermes 'What is Jane phone'
 hermes 'total premium for Acme'

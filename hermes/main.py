@@ -304,6 +304,11 @@ def main() -> int:
         help="Record system health, finance, and renewal KPI snapshots",
     )
     parser.add_argument(
+        "--curate-skills",
+        action="store_true",
+        help="Report-only age audit of .claude/skills (flags stale/review candidates; never deletes)",
+    )
+    parser.add_argument(
         "--repair-policy-accounts",
         action="store_true",
         help="Link Policies to Accounts by insuredMomentumId -> Account.momentum_client_id",
@@ -423,6 +428,13 @@ def main() -> int:
             print(f"Supabase connection failed: {e}", file=sys.stderr)
             return 2
         report = run_ops_doctor(supa)
+        print("\n".join(report.format_lines()))
+        return 0 if report.ok else 1
+
+    if args.curate_skills:
+        from hermes.jobs import skill_curator
+
+        report = skill_curator.run()
         print("\n".join(report.format_lines()))
         return 0 if report.ok else 1
 
