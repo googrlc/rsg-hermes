@@ -56,7 +56,7 @@ def has_existing_task(espo, renewal_id: str) -> bool:
 def create_renewal_task(espo, renewal: dict, assignee_id: str | None) -> dict | None:
     renewal_id = renewal.get("id")
     account = renewal.get("accountName") or renewal.get("name") or "Client"
-    lob = renewal.get("lineOfBusiness") or "Renewal"
+    lob = renewal.get("line_of_business") or "Renewal"
 
     payload = {
         "name": f"Renewal prep — {account} ({lob})",

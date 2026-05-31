@@ -66,14 +66,14 @@ def _worksheet_doc(renewal: dict) -> str:
     return (
         f"# {name}\n\n"
         f"- Carrier: {renewal.get('carrier', '—')}\n"
-        f"- Line of business: {renewal.get('lineOfBusiness', '—')}\n"
-        f"- Expiring premium: {renewal.get('currentPremium', '—')}\n"
-        f"- Renewal premium: {renewal.get('renewalPremium', '—')}\n"
-        f"- Premium change: {renewal.get('premiumChange', '—')}%\n"
+        f"- Line of business: {renewal.get('line_of_business', '—')}\n"
+        f"- Expiring premium: {renewal.get('current_premium', '—')}\n"
+        f"- Renewal premium: {renewal.get('renewal_premium', '—')}\n"
+        f"- Premium change: {renewal.get('premium_change', '—')}%\n"
         f"- Outcome: {renewal.get('stage', '—')}\n"
-        f"- Lost reason: {renewal.get('lostReason', '—')}\n"
-        f"- Client states: {renewal.get('renewalNotes', '—')}\n"
-        f"- Renewal effective date: {renewal.get('renewalEffectiveDate', '—')}\n"
+        f"- Lost reason: {renewal.get('lost_reason', '—')}\n"
+        f"- Client states: {renewal.get('renewal_notes', '—')}\n"
+        f"- Renewal effective date: {renewal.get('renewal_effective_date', '—')}\n"
     )
 
 
@@ -96,9 +96,9 @@ def _on_won(renewal: dict) -> dict:
     try:
         SlackNotifier(channel=config.SLACK_RSG_WINS).post_message(
             text=(f"*Renewal retained — {acct}*\n"
-                  f"{renewal.get('lineOfBusiness', '')} · renewal premium "
-                  f"{renewal.get('renewalPremium', '—')} "
-                  f"({renewal.get('premiumChange', '—')}% change)")
+                  f"{renewal.get('line_of_business', '')} · renewal premium "
+                  f"{renewal.get('renewal_premium', '—')} "
+                  f"({renewal.get('premium_change', '—')}% change)")
         )
     except Exception as e:
         log.warning("Win notify failed: %s", e)
@@ -111,9 +111,9 @@ def _on_lost(renewal: dict) -> dict:
     try:
         SlackNotifier(channel=config.SLACK_THE_BOSS).post_message(
             text=(f"*Renewal lost — {acct}*\n"
-                  f"{renewal.get('lineOfBusiness', '')} · reason: "
-                  f"*{renewal.get('lostReason', '—')}*\n"
-                  f"Client states: {renewal.get('renewalNotes', '—')}")
+                  f"{renewal.get('line_of_business', '')} · reason: "
+                  f"*{renewal.get('lost_reason', '—')}*\n"
+                  f"Client states: {renewal.get('renewal_notes', '—')}")
         )
     except Exception as e:
         log.warning("Loss notify failed: %s", e)

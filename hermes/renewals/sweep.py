@@ -20,9 +20,11 @@ from .tasks import _rows, resolve_gretchen_id, has_existing_task, create_renewal
 
 log = logging.getLogger(__name__)
 
+# EspoCRM Renewal custom fields are snake_case at the API layer (confirmed live:
+# current_premium, expiration_date, line_of_business — NOT camelCase).
 _SELECT = (
-    "id,name,accountId,accountName,contactId,carrier,lineOfBusiness,"
-    "currentPremium,expirationDate,urgency"
+    "id,name,accountId,accountName,contactId,carrier,line_of_business,"
+    "current_premium,expiration_date,urgency"
 )
 
 # Hard ceiling so a misconfigured run can never task the entire backlog unobserved.
@@ -41,7 +43,7 @@ def run(limit: int | None = None) -> dict:
     body = espo.get(config.RENEWAL_ENTITY, params={
         "maxSize": limit or _MAX_CANDIDATES,
         "select": _SELECT,
-        "orderBy": "expirationDate",
+        "orderBy": "expiration_date",
         "order": "asc",
         "where": [
             {"type": "equals", "attribute": "stage", "value": config.STAGE_IDENTIFIED},
@@ -78,7 +80,7 @@ def _notify(created: list) -> None:
     for r in created:
         acct = r.get("accountName") or r.get("name")
         lines.append(
-            f"• {acct} — {r.get('lineOfBusiness', '')} — expires {r.get('expirationDate', '')}"
+            f"• {acct} — {r.get('line_of_business', '')} — expires {r.get('expiration_date', '')}"
         )
     try:
         SlackNotifier(channel=config.SLACK_GRETCHEN_TASKS).post_message(text="\n".join(lines))

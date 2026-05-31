@@ -19,9 +19,9 @@ def _money(v) -> str:
 def build_card(renewal: dict) -> str:
     account = renewal.get("accountName") or renewal.get("name") or "this client"
     carrier = renewal.get("carrier") or "—"
-    lob = renewal.get("lineOfBusiness") or "—"
-    current = _money(renewal.get("currentPremium"))
-    exp = renewal.get("expirationDate") or "—"
+    lob = renewal.get("line_of_business") or "—"
+    current = _money(renewal.get("current_premium"))
+    exp = renewal.get("expiration_date") or "—"
     urgency = renewal.get("urgency") or "—"
     std = f"{config.BAND_STANDARD_MAX:.0f}"
     rev = f"{config.BAND_REVIEW_MAX:.0f}"

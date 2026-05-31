@@ -15,14 +15,14 @@ def _sample_renewal():
         "accountName": "Martinez Landscaping LLC",
         "accountId": "a1",
         "carrier": "Progressive Commercial",
-        "lineOfBusiness": "Commercial Auto",
-        "currentPremium": 8420,
-        "renewalPremium": 9140,
-        "premiumChange": 8.5,
-        "expirationDate": "2026-07-14",
+        "line_of_business": "Commercial Auto",
+        "current_premium": 8420,
+        "renewal_premium": 9140,
+        "premium_change": 8.5,
+        "expiration_date": "2026-07-14",
         "urgency": "High",
-        "lostReason": None,
-        "renewalNotes": None,
+        "lost_reason": None,
+        "renewal_notes": None,
     }
 
 
@@ -124,8 +124,8 @@ def test_handle_won_files_and_posts_win(monkeypatch, captured):
 def test_handle_lost_files_and_posts_loss(monkeypatch, captured):
     r = _sample_renewal()
     r["stage"] = rconfig.STAGE_LOST
-    r["lostReason"] = "Price"
-    r["renewalNotes"] = "client states a competitor came in 20% lower"
+    r["lost_reason"] = "Price"
+    r["renewal_notes"] = "client states a competitor came in 20% lower"
     _patch_espo(monkeypatch, r)
     result = complete.handle(_payload())
     assert result["action"] == "lost"
