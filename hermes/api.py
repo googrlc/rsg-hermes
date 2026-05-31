@@ -842,6 +842,20 @@ async def slack_crm_entry_webhook(request: Request, background_tasks: Background
     return {"ok": True, "queued": True, "event_id": event_id}
 
 
+@app.post("/renewals/complete")
+async def renewals_complete_webhook(request: Request):
+    """EspoCRM service.task_completed webhook for Renewal tasks.
+
+    Auth is the shared X-Service-Webhook-Secret header (EspoCRM config
+    serviceWebhookSecret == Hermes env SERVICE_WEBHOOK_SECRET).
+    """
+    from hermes.renewals import complete as renewals_complete
+
+    if not renewals_complete.verify_secret(request.headers.get("X-Service-Webhook-Secret")):
+        raise HTTPException(status_code=401, detail="bad webhook secret")
+    return renewals_complete.handle(await request.json())
+
+
 def main() -> int:
     load_dotenv()
     logging.basicConfig(level=os.environ.get("HERMES_API_LOG_LEVEL", "INFO"))

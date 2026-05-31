@@ -118,6 +118,17 @@ def main() -> int:
         help="Check sentinel freshness/config status without posting",
     )
     parser.add_argument(
+        "--renewal-sweep",
+        action="store_true",
+        help="Create renewal prep tasks for Identified renewals (Gretchen)",
+    )
+    parser.add_argument(
+        "--renewal-sweep-limit",
+        type=int,
+        default=None,
+        help="Cap renewal-sweep candidates (use 1 for a safe first live run)",
+    )
+    parser.add_argument(
         "--commission-audit",
         action="store_true",
         help="Run Revenue Integrity commission blind-spot audit once",
@@ -734,6 +745,14 @@ def main() -> int:
             for warning in result.warnings:
                 print(f"- {warning}")
         return 0 if result.ok else 1
+
+    if args.renewal_sweep:
+        from hermes.renewals.sweep import run as renewal_sweep
+
+        result = renewal_sweep(limit=args.renewal_sweep_limit)
+        print(f"Renewal sweep: {result['created']} task(s) created of "
+              f"{result['candidates']} candidate(s)")
+        return 0
 
     if args.revenue_sentinel_health:
         from hermes.jobs import revenue_sentinel
