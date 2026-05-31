@@ -68,13 +68,28 @@ SUPERMEMORY_BASE_URL=https://api.supermemory.ai
 HERMES_DRIVE_ROOT_FOLDER=Hermes Docs    # Drive mirror root (when enabled)
 ```
 
-## Status / follow-ons
+## Saving via the API
 
-- ✅ Supermemory + Supabase index + CLI + `save_document` — live and tested.
-- ⏳ **Drive mirror** — needs the Drive API enabled and scope
-  `https://www.googleapis.com/auth/drive` added to the Gmail service account's
-  domain-wide delegation (client ID `108633220303303849535`).
-- ⏳ **Producers** — wire proposal-builder / crm-note-structurer /
-  renewal-review / comparison+appetite to call `save_document`.
-- ⏳ **Agent OS panel** — a Documents view listing `hermes_documents` as
-  folders → documents.
+```
+POST /api/documents/save
+{ "title": "...", "content": "...", "account_name": "Acme Co",
+  "doc_type": "proposal", "source": "proposal-builder" }
+```
+Read side (Agent OS): `GET /api/documents/folders`, `GET /api/documents?space=&name=`.
+
+## Status
+
+- ✅ Supermemory + Supabase index + CLI + `save_document`.
+- ✅ **Drive mirror** — uploads each doc as a Google Doc into per-client folders
+  under `HERMES_DRIVE_ROOT_FOLDER` (auto-enabled; `HERMES_DRIVE_MIRROR=false`
+  to disable). Owner set by `HERMES_DRIVE_SUBJECT`.
+- ✅ **Producers** — proposal-builder, crm-note-structurer, renewal-review, and
+  carrier-appetite each carry a "Save to the document library" step.
+- ✅ **Agent OS panel** — Documents view (folders → documents, preview + Drive
+  link) in Mission Control.
+
+### Server deployment note
+
+The Drive mirror needs the service-account JSON readable inside the container
+(`GMAIL_SA_KEY_PATH`) and `HERMES_DRIVE_SUBJECT` set to the Drive-owning
+Workspace user (the `.com` Google user, NOT the `.net` 365 mailbox).

@@ -415,6 +415,46 @@ async def sync_health():
 # ---------------------------------------------------------------------------
 
 
+class DocumentSaveRequest(BaseModel):
+    title: str
+    content: str
+    doc_type: str = "other"
+    account_name: str | None = None
+    folder: str | None = None
+    summary: str | None = None
+    source: str | None = None
+    created_by: str | None = None
+
+
+@app.post("/api/documents/save")
+async def documents_save(req: DocumentSaveRequest):
+    """Save a document to the library (Supermemory + Drive mirror + index).
+
+    ``account_name`` => client folder; otherwise it lands in the internal
+    space under ``folder`` (default 'General').
+    """
+    from hermes.documents.store import DocumentStoreError, save_document
+
+    try:
+        row = save_document(
+            title=req.title,
+            content=req.content,
+            doc_type=req.doc_type,
+            account_name=req.account_name,
+            folder=req.folder,
+            summary=req.summary,
+            source=req.source or "api",
+            created_by=req.created_by,
+            supa=_get_supa(),
+        )
+    except DocumentStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("documents_save failed title=%s", req.title)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return row
+
+
 @app.get("/api/documents/folders")
 async def documents_folders():
     """Folder tree for Agent OS: one entry per (space, name) with a count."""
