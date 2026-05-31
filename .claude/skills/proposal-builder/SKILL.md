@@ -239,3 +239,22 @@ The proposal builder can emit:
 - `crm-note-structurer` — bodies for the CRM-side Quote Summary note
 - `crm-intake-writer` — assembles any opportunity/note updates that the
   proposal triggers
+
+## Save to the document library
+
+When the proposal/comparison packet is final, persist it so it appears in
+**Agent OS → Documents** (under the client's folder) and the agent's
+Holographic Memory (Supermemory + Google Drive mirror):
+
+```bash
+hermes --doc-add \
+  --doc-title "<client> — <LOB> Proposal" \
+  --doc-account "<EspoCRM account name>" \
+  --doc-type proposal \
+  --doc-file <path>          # or pipe the document via stdin
+```
+
+Use `--doc-type comparison` for a side-by-side. Or POST `/api/documents/save`
+to the Hermes API: `{ "title", "content", "account_name", "doc_type":
+"proposal", "source": "proposal-builder" }`. `account_name` = the client's
+EspoCRM account so it files under that client's folder.

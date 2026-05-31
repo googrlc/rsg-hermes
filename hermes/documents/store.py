@@ -15,6 +15,7 @@ Folder model:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from hermes.integrations.supabase_client import SupabaseClient
@@ -36,6 +37,25 @@ VALID_DOC_TYPES = (
 
 class DocumentStoreError(Exception):
     """Raised when a document cannot be persisted."""
+
+
+def _default_drive() -> Any | None:
+    """Build a Drive client from env, or None when the mirror is off/unconfigured.
+
+    The mirror is best-effort: any failure here just means the document still
+    saves to Supermemory + the index, without a Drive copy.
+    """
+    if os.environ.get("HERMES_DRIVE_MIRROR", "true").strip().lower() in ("0", "false", "no"):
+        return None
+    if not os.environ.get("GMAIL_SA_KEY_PATH"):
+        return None
+    try:
+        from hermes.integrations.gdrive_client import GDriveClient
+
+        return GDriveClient()
+    except Exception as exc:  # noqa: BLE001 — Drive is optional
+        log.warning("doc-store: Drive mirror unavailable: %s", exc)
+        return None
 
 
 def save_document(
@@ -74,6 +94,8 @@ def save_document(
 
     supa = supa or SupabaseClient()
     sm = sm or SupermemoryClient()
+    if drive is None:
+        drive = _default_drive()
 
     metadata = {
         "doc_type": doc_type,

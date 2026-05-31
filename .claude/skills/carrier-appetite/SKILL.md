@@ -186,3 +186,21 @@ The output feeds:
 - `proposal-builder`
 - `commercial-risk-intake`
 - `renewal-review`
+
+## Save to the document library
+
+When you produce a carrier-fit / appetite summary worth keeping, file it in
+**Agent OS → Documents** (under the client's folder) + Holographic Memory:
+
+```bash
+hermes --doc-add \
+  --doc-title "<client> — Carrier Appetite (<LOB>)" \
+  --doc-account "<EspoCRM account name>" \
+  --doc-type appetite \
+  --doc-file <path>          # or pipe the summary via stdin
+```
+
+Or POST `/api/documents/save`: `{ "title", "content", "account_name",
+"doc_type": "appetite", "source": "carrier-appetite" }`. For a generic
+appetite note not tied to one client, drop `account_name` and pass
+`--doc-folder "Carrier Appetite"` instead.

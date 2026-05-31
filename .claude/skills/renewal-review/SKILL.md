@@ -217,3 +217,19 @@ Do **not** use this skill for:
 - `crm-intake-writer` — cross-sell Opportunity drafting
 - `proposal-builder` — remarket submission packet
 - `revenue-sentinel` — upstream trigger
+
+## Save to the document library
+
+After the renewal review is written, persist it so it shows in **Agent OS →
+Documents** (under the client's folder) + Holographic Memory:
+
+```bash
+hermes --doc-add \
+  --doc-title "<client> — <policy/LOB> Renewal Review" \
+  --doc-account "<EspoCRM account name>" \
+  --doc-type renewal \
+  --doc-file <path>          # or pipe the review via stdin
+```
+
+Or POST `/api/documents/save`: `{ "title", "content", "account_name",
+"doc_type": "renewal", "source": "renewal-review" }`.

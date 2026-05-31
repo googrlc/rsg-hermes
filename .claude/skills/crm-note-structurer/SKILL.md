@@ -141,3 +141,19 @@ retrieval layer.
 - `hermes-training/espocrm/workflows.md` — canonical LOB vocabulary
 - `crm-intake-writer` — receives `note.body` as part of the unified payload
 - `crm-fact-retriever` — consumes `facts[]` produced alongside the note
+
+## Save to the document library
+
+In addition to the CRM note, file the structured write-up in **Agent OS →
+Documents** (under the client's folder) + Holographic Memory:
+
+```bash
+hermes --doc-add \
+  --doc-title "<client> — <headline>" \
+  --doc-account "<EspoCRM account name>" \
+  --doc-type note \
+  --doc-file <path>          # or pipe the note body via stdin
+```
+
+Or POST `/api/documents/save`: `{ "title", "content", "account_name",
+"doc_type": "note", "source": "crm-note-structurer" }`.
