@@ -153,6 +153,23 @@ def test_won_card_is_compact_with_buttons(monkeypatch, captured):
     assert any(a and a.startswith("renewal_ack_") for a in action_ids)
 
 
+def test_acknowledge_is_idempotent():
+    # build a real won card, then acknowledge it twice
+    blocks = complete._completion_blocks(
+        _sample_renewal(), header="✅ won", task_url="http://t", worksheet_url="http://w")
+    # first ack: button removed, footer added
+    acked = complete.apply_acknowledgement(blocks, "U123")
+    assert acked is not None
+    flat = repr(acked)
+    assert "Acknowledged by <@U123>" in flat
+    action_ids = [e.get("action_id") for b in acked
+                  if b.get("type") == "actions" for e in b.get("elements", [])]
+    assert not any(a and a.startswith("renewal_ack_") for a in action_ids)  # ack button gone
+    assert any(a == "renewal_open_worksheet" for a in action_ids)           # link buttons kept
+    # second ack on the already-acked card: no-op
+    assert complete.apply_acknowledgement(acked, "U999") is None
+
+
 def test_handle_in_flight_does_not_file(monkeypatch, captured):
     r = _sample_renewal()
     r["stage"] = rconfig.STAGE_QUOTE_REQUESTED

@@ -381,14 +381,21 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
 
     @app.action(re.compile(r"^renewal_ack_"))
     def on_renewal_acknowledge(ack: Any, body: dict[str, Any], action: dict[str, Any], respond: Any) -> None:
-        """Acknowledge button on a renewal won/lost card -> record who acked, in-channel."""
+        """Acknowledge button on a renewal won/lost card.
+
+        Fires once: replaces the card in place (button removed, "Acknowledged by
+        @user" footer added). Repeat clicks find the card already acknowledged and
+        do nothing — no duplicate messages.
+        """
         ack()
+        from hermes.renewals.complete import apply_acknowledgement
+
+        message = (body.get("message") if isinstance(body, dict) else None) or {}
         user_id = ((body.get("user") or {}).get("id") if isinstance(body, dict) else None) or "someone"
-        respond(
-            text=f":white_check_mark: Renewal acknowledged by <@{user_id}>",
-            response_type="in_channel",
-            replace_original=False,
-        )
+        new_blocks = apply_acknowledgement(message.get("blocks") or [], user_id)
+        if new_blocks is None:
+            return  # already acknowledged — idempotent no-op
+        respond(replace_original=True, blocks=new_blocks, text="Renewal acknowledged")
 
     handler = SocketModeHandler(app, app_token)
     handler.start()

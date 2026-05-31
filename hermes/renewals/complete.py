@@ -134,6 +134,42 @@ def _completion_blocks(renewal: dict, *, header: str, task_url: str | None,
     return blocks
 
 
+ACK_BLOCK_ID = "renewal_acked"
+
+
+def apply_acknowledgement(blocks: list[dict], user_id: str) -> list[dict] | None:
+    """Rewrite a completion card to its acknowledged state.
+
+    Removes the Acknowledge button (keeps the link buttons) and appends a context
+    line crediting the acknowledger. Returns None if the card is ALREADY
+    acknowledged (presence of the ``renewal_acked`` block) so repeated clicks are
+    idempotent no-ops — the button only ever fires once.
+    """
+    blocks = blocks or []
+    if any(b.get("block_id") == ACK_BLOCK_ID for b in blocks):
+        return None
+
+    out: list[dict] = []
+    for b in blocks:
+        if b.get("type") == "actions":
+            kept = [e for e in b.get("elements", [])
+                    if not str(e.get("action_id", "")).startswith("renewal_ack_")]
+            if kept:
+                nb = dict(b)
+                nb["elements"] = kept
+                out.append(nb)
+            # if only the ack button was there, drop the whole actions block
+        else:
+            out.append(b)
+
+    out.append({
+        "type": "context",
+        "block_id": ACK_BLOCK_ID,
+        "elements": [{"type": "mrkdwn", "text": f":white_check_mark: Acknowledged by <@{user_id}>"}],
+    })
+    return out
+
+
 def _worksheet_url(renewal: dict, doc: dict | None) -> str | None:
     # Prefer the freshly-filed Google Doc; fall back to the live Renewal record.
     return (doc or {}).get("drive_url") or _renewal_url(renewal.get("id"))
