@@ -309,6 +309,11 @@ def main() -> int:
         help="Report-only age audit of .claude/skills (flags stale/review candidates; never deletes)",
     )
     parser.add_argument(
+        "--espo-db-doctor",
+        action="store_true",
+        help="Check the read-only direct-Postgres lane to EspoCRM (connectivity, read-only guard, pg_trgm, schema)",
+    )
+    parser.add_argument(
         "--repair-policy-accounts",
         action="store_true",
         help="Link Policies to Accounts by insuredMomentumId -> Account.momentum_client_id",
@@ -437,6 +442,30 @@ def main() -> int:
         report = skill_curator.run()
         print("\n".join(report.format_lines()))
         return 0 if report.ok else 1
+
+    if args.espo_db_doctor:
+        from hermes.integrations import espo_db
+
+        if not espo_db.is_configured():
+            print(
+                "Read lane not configured. Set ESPO_DB_HOST, ESPO_DB_NAME, ESPO_DB_USER "
+                "(and ESPO_DB_PASSWORD) to enable direct-Postgres reads.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            db = espo_db.EspoDb()
+            health = db.check_health()
+        except espo_db.EspoDbError as e:
+            print(f"Read lane error: {e}", file=sys.stderr)
+            return 2
+        finally:
+            try:
+                db.close()  # type: ignore[possibly-undefined]
+            except Exception:
+                pass
+        print("\n".join(health.format_lines()))
+        return 0 if health.ok else 1
 
     if args.snapshot_kpis:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError

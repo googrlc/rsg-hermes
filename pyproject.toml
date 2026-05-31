@@ -13,6 +13,11 @@ dependencies = [
   "uvicorn>=0.23.0",
 ]
 
+[project.optional-dependencies]
+# Read-only direct-Postgres lane to EspoCRM (hermes/integrations/espo_db.py).
+# Install with: pip install -e '.[db]'
+db = ["psycopg[binary]>=3.1"]
+
 [project.scripts]
 hermes = "hermes.main:main"
 hermes-api = "hermes.api:main"
