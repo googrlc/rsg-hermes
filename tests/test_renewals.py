@@ -153,6 +153,16 @@ def test_won_card_is_compact_with_buttons(monkeypatch, captured):
     assert any(a and a.startswith("renewal_ack_") for a in action_ids)
 
 
+def test_worksheet_links_back_to_records(monkeypatch):
+    monkeypatch.setattr(rconfig, "ESPO_BASE_URL", "https://espo.example.com")
+    r = _sample_renewal()
+    r["accountId"] = "ACC1"
+    doc = complete._worksheet_doc(r)
+    assert "## Links" in doc
+    assert "https://espo.example.com/#Account/view/ACC1" in doc      # client record
+    assert "https://espo.example.com/#Renewal/view/r1" in doc        # renewal record
+
+
 def test_acknowledge_is_idempotent():
     # build a real won card, then acknowledge it twice
     blocks = complete._completion_blocks(

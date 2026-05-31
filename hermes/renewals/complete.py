@@ -64,8 +64,9 @@ def handle(payload: dict) -> dict:
 
 def _worksheet_doc(renewal: dict) -> str:
     name = renewal.get("name") or renewal.get("accountName") or "Renewal"
-    return (
+    body = (
         f"# {name}\n\n"
+        f"- Client: {renewal.get('accountName', '—')}\n"
         f"- Carrier: {renewal.get('carrier', '—')}\n"
         f"- Line of business: {renewal.get('line_of_business', '—')}\n"
         f"- Expiring premium: {renewal.get('current_premium', '—')}\n"
@@ -76,6 +77,15 @@ def _worksheet_doc(renewal: dict) -> str:
         f"- Client states: {renewal.get('renewal_notes', '—')}\n"
         f"- Renewal effective date: {renewal.get('renewal_effective_date', '—')}\n"
     )
+    # Links back into the CRM. Full URLs (not markdown) so Google Docs
+    # auto-linkifies them into clickable links.
+    links = ["\n## Links"]
+    acct_url = _account_url(renewal.get("accountId"))
+    ren_url = _renewal_url(renewal.get("id"))
+    links.append(f"- Client record: {acct_url}" if acct_url else "- Client record: —")
+    if ren_url:
+        links.append(f"- Renewal worksheet (CRM): {ren_url}")
+    return body + "\n".join(links) + "\n"
 
 
 def _file_worksheet(renewal: dict, outcome: str) -> dict:
@@ -99,6 +109,11 @@ def _task_url(task_id: str | None) -> str | None:
 def _renewal_url(renewal_id: str | None) -> str | None:
     base = config.ESPO_BASE_URL
     return f"{base}/#{config.RENEWAL_ENTITY}/view/{renewal_id}" if base and renewal_id else None
+
+
+def _account_url(account_id: str | None) -> str | None:
+    base = config.ESPO_BASE_URL
+    return f"{base}/#Account/view/{account_id}" if base and account_id else None
 
 
 def _completion_blocks(renewal: dict, *, header: str, task_url: str | None,
