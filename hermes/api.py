@@ -410,6 +410,41 @@ async def sync_health():
     }
 
 
+# ---------------------------------------------------------------------------
+# Document library — Agent OS reads these to render folders -> documents
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/documents/folders")
+async def documents_folders():
+    """Folder tree for Agent OS: one entry per (space, name) with a count."""
+    from hermes.documents.store import list_folders
+
+    return {"folders": list_folders(_get_supa())}
+
+
+@app.get("/api/documents")
+async def documents_in_folder(space: str, name: str):
+    """Documents in one folder. ``space`` is 'client' or 'internal';
+    ``name`` is the account (client) or freeform folder (internal)."""
+    from hermes.documents.store import list_documents
+
+    if space not in ("client", "internal"):
+        raise HTTPException(status_code=400, detail="space must be 'client' or 'internal'")
+    return {"documents": list_documents(space=space, name=name, supa=_get_supa())}
+
+
+@app.get("/api/documents/{doc_id}")
+async def document_detail(doc_id: str):
+    """One document index row (title, preview, drive_url, supermemory_id, …)."""
+    from hermes.documents.store import get_document
+
+    row = get_document(doc_id, _get_supa())
+    if row is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return row
+
+
 @app.post("/agency-intake", response_model=AgencyIntakeResponse)
 async def agency_intake(req: AgencyIntakeRequest):
     """Stage an agency intake draft. Returns draft_id + approval prompt.

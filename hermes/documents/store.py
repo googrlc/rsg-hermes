@@ -161,3 +161,12 @@ def list_documents(
         params={"space": f"eq.{space}", field: f"eq.{name}", "order": "created_at.desc"},
         limit=limit,
     )
+
+
+def get_document(
+    doc_id: str, supa: SupabaseClient | None = None
+) -> dict[str, Any] | None:
+    """Fetch one document index row by id."""
+    supa = supa or SupabaseClient()
+    rows = supa.select(TABLE, params={"id": f"eq.{doc_id}"}, limit=1)
+    return rows[0] if rows else None
