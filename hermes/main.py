@@ -278,6 +278,24 @@ def main() -> int:
         default=24,
         help="Lookback window in hours for email triage (default: 24)",
     )
+    # --- Document library (Supermemory + index; freeform internal refs) ---
+    parser.add_argument(
+        "--doc-add",
+        action="store_true",
+        help="Save a document to the Hermes library (Supermemory + index)",
+    )
+    parser.add_argument("--doc-title", help="Document title (with --doc-add)")
+    parser.add_argument(
+        "--doc-type", default="reference",
+        choices=["proposal", "note", "renewal", "comparison", "appetite", "reference", "other"],
+        help="Document type (default: reference)",
+    )
+    parser.add_argument("--doc-account", help="Client account name (client folder)")
+    parser.add_argument("--doc-folder", help="Internal freeform folder name (default: General)")
+    parser.add_argument("--doc-file", help="Read document content from this file (else stdin)")
+    parser.add_argument(
+        "--doc-folders", action="store_true", help="List the document library folder tree"
+    )
     parser.add_argument(
         "--ops-doctor",
         action="store_true",
@@ -517,6 +535,42 @@ def main() -> int:
             for err in triage_result.errors:
                 print(f"- {err}")
         return 0 if triage_result.ok else 1
+
+    # --- Document library (Supabase + Supermemory; no EspoCRM required) ---
+    if args.doc_folders:
+        from hermes.documents.store import list_folders
+        for f in list_folders():
+            print(f"[{f['space']:8}] {f['name']}  ({f['document_count']})")
+        return 0
+
+    if args.doc_add:
+        from hermes.documents.store import save_document, DocumentStoreError
+        if not args.doc_title:
+            print("--doc-add requires --doc-title", file=sys.stderr)
+            return 2
+        if args.doc_file:
+            with open(args.doc_file, encoding="utf-8") as fh:
+                content = fh.read()
+        else:
+            content = sys.stdin.read()
+        if not content.strip():
+            print("No content provided (use --doc-file or pipe via stdin)", file=sys.stderr)
+            return 2
+        try:
+            row = save_document(
+                title=args.doc_title,
+                content=content,
+                doc_type=args.doc_type,
+                account_name=args.doc_account,
+                folder=args.doc_folder,
+                source="manual",
+            )
+        except DocumentStoreError as e:
+            print(f"Document save failed: {e}", file=sys.stderr)
+            return 2
+        where = row["account_name"] if row["space"] == "client" else row["folder"]
+        print(f"Saved '{row['title']}' to [{row['space']}] {where} (id={row['id']})")
+        return 0
 
     # --- Supabase-only commands (no EspoCRM credentials required) ---
     if args.ops_doctor:
