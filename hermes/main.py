@@ -250,6 +250,34 @@ def main() -> int:
         help="Lookback window in hours for sync (default: 24)",
     )
     # --- Hermes Operations Center commands ---
+    # --- Email triage (Microsoft 365 first; reads inbox, routes mail) ---
+    parser.add_argument(
+        "--email-triage",
+        action="store_true",
+        help="LIVE: triage mailbox(es) — actionable mail -> intake_submissions, noise -> quarantine folder",
+    )
+    parser.add_argument(
+        "--email-triage-dry-run",
+        action="store_true",
+        help="Preview email triage: classify and log per-message actions without inserting or moving anything",
+    )
+    parser.add_argument(
+        "--email-provider",
+        default="ms365",
+        choices=["ms365", "gmail"],
+        help="Mail provider to triage (default: ms365)",
+    )
+    parser.add_argument(
+        "--email-mailboxes",
+        default="",
+        help="Comma-separated mailbox UPNs to triage (default: MS365_MAILBOXES env)",
+    )
+    parser.add_argument(
+        "--email-since-hours",
+        type=int,
+        default=24,
+        help="Lookback window in hours for email triage (default: 24)",
+    )
     parser.add_argument(
         "--ops-doctor",
         action="store_true",
@@ -421,6 +449,74 @@ def main() -> int:
             for err in bidi_result.errors:
                 print(f"- {err}")
         return 0 if bidi_result.ok else 1
+
+    # --- Email triage (requires the provider client + Supabase) ---
+    if args.email_triage or args.email_triage_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+
+        dry_run = args.email_triage_dry_run
+        provider = args.email_provider
+        default_mailboxes_env = (
+            "GMAIL_MAILBOXES" if provider == "gmail" else "MS365_MAILBOXES"
+        )
+        mailboxes = [
+            m.strip()
+            for m in (args.email_mailboxes or os.environ.get(default_mailboxes_env, "")).split(",")
+            if m.strip()
+        ]
+        if not mailboxes:
+            print(
+                f"No mailboxes to triage. Pass --email-mailboxes or set {default_mailboxes_env}.",
+                file=sys.stderr,
+            )
+            return 2
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+
+        if provider == "ms365":
+            from hermes.integrations.ms365_client import MS365Client, MS365ClientError
+            from hermes.sync.email_triage import run_ms365_triage
+
+            try:
+                ms = MS365Client()
+            except MS365ClientError as e:
+                print(f"Microsoft 365 connection failed: {e}", file=sys.stderr)
+                return 2
+            triage_result = run_ms365_triage(
+                ms, supa,
+                mailboxes=mailboxes,
+                since_hours=args.email_since_hours,
+                dry_run=dry_run,
+            )
+        elif provider == "gmail":
+            from hermes.integrations.gmail_client import GmailClient, GmailClientError
+            from hermes.sync.email_triage import run_gmail_triage
+
+            try:
+                gm = GmailClient()
+            except GmailClientError as e:
+                print(f"Gmail connection failed: {e}", file=sys.stderr)
+                return 2
+            triage_result = run_gmail_triage(
+                gm, supa,
+                mailboxes=mailboxes,
+                since_hours=args.email_since_hours,
+                dry_run=dry_run,
+            )
+        else:
+            print(f"Unsupported email provider: {provider}", file=sys.stderr)
+            return 2
+
+        print(triage_result.message)
+        if triage_result.errors:
+            print("Errors:")
+            for err in triage_result.errors:
+                print(f"- {err}")
+        return 0 if triage_result.ok else 1
 
     # --- Supabase-only commands (no EspoCRM credentials required) ---
     if args.ops_doctor:
