@@ -12,6 +12,8 @@ RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-interaction --no-ansi --no-root
 
 COPY . .
-RUN pip install -e .
+# [gmail] extra pulls google-auth, needed at runtime by the Gmail email-triage
+# lane and the Google Drive document mirror.
+RUN pip install -e '.[gmail]'
 
 ENTRYPOINT []
