@@ -32,8 +32,10 @@ hermes --eom-scorecard
 hermes --eom-scorecard-dry-run
 hermes --commission-reconcile-file ./statements/carrier.csv
 hermes --ops-doctor             # check Supabase + Hermes table health
+hermes --espo-db-doctor         # check read-only direct-Postgres lane to EspoCRM (read-only)
 hermes --process-crm-queue      # dequeue pending CRM writes → EspoCRM
 hermes --process-crm-queue-dry-run
+hermes --curate-skills          # report-only age audit of .claude/skills (never deletes)
 hermes --snapshot-kpis          # record system/finance/renewal KPIs
 hermes 'What is Jane phone'
 hermes 'total premium for Acme'
@@ -107,6 +109,19 @@ The schema lives in `supabase/migrations/` and seed data in `supabase/seeds/`. T
 - **CRM Queue Worker** — queue → EspoCRM → receipt pipeline
 - **KPI Writer** — snapshot metrics for dashboards
 - **Renewal Tracker** — Project 85 lifecycle management via Supabase
+
+## EspoCRM Read Lane (direct Postgres)
+
+Hermes can read EspoCRM's backend directly for fast fuzzy matching, duplicate
+detection, and analytics — **read-only by construction** (SELECT-only role + a
+read-only session). Writes still go through Espo's REST API so all hooks, ACL, and
+Stream logic fire. See [`docs/espocrm-read-lane.md`](docs/espocrm-read-lane.md) for
+setup; the lane is optional and off unless the `ESPO_DB_*` env vars are set.
+
+```bash
+pip install -e '.[db]'
+hermes --espo-db-doctor   # validate connectivity, read-only guard, pg_trgm, schema
+```
 
 ## TLS Note
 
