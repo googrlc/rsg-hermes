@@ -373,5 +373,22 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
 
         respond(text=text, response_type="ephemeral", replace_original=False)
 
+    @app.action(re.compile(r"^renewal_open_"))
+    def on_renewal_open_link(ack: Any, body: dict[str, Any], action: dict[str, Any], respond: Any) -> None:
+        # URL buttons (Renewal Worksheet / Open Task): Slack opens the link;
+        # we just acknowledge so the bot doesn't log an unhandled action.
+        ack()
+
+    @app.action(re.compile(r"^renewal_ack_"))
+    def on_renewal_acknowledge(ack: Any, body: dict[str, Any], action: dict[str, Any], respond: Any) -> None:
+        """Acknowledge button on a renewal won/lost card -> record who acked, in-channel."""
+        ack()
+        user_id = ((body.get("user") or {}).get("id") if isinstance(body, dict) else None) or "someone"
+        respond(
+            text=f":white_check_mark: Renewal acknowledged by <@{user_id}>",
+            response_type="in_channel",
+            replace_original=False,
+        )
+
     handler = SocketModeHandler(app, app_token)
     handler.start()

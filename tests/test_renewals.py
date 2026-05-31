@@ -92,7 +92,7 @@ def captured(monkeypatch):
             self.channel = channel
 
         def post_message(self, *, text, blocks=None):
-            calls["slack"].append({"channel": self.channel, "text": text})
+            calls["slack"].append({"channel": self.channel, "text": text, "blocks": blocks})
 
     monkeypatch.setattr(complete, "save_document", fake_save_document)
     monkeypatch.setattr(complete, "SlackNotifier", FakeSlack)
@@ -132,6 +132,25 @@ def test_handle_lost_files_and_posts_loss(monkeypatch, captured):
     assert len(captured["saved"]) == 1
     assert captured["slack"][0]["channel"] == rconfig.SLACK_THE_BOSS
     assert "Price" in captured["slack"][0]["text"]
+
+
+def test_won_card_is_compact_with_buttons(monkeypatch, captured):
+    r = _sample_renewal()
+    r["stage"] = rconfig.STAGE_WON
+    _patch_espo(monkeypatch, r)
+    complete.handle({"eventType": "service.task_completed",
+                     "task": {"parentType": "Renewal", "parentId": "r1",
+                              "id": "task1", "status": "Completed"}})
+    blocks = captured["slack"][0]["blocks"]
+    assert blocks, "won message must use Block Kit blocks"
+    flat = repr(blocks)
+    # compact fields, not a full description
+    assert "Client:" in flat and "Line of business:" in flat and "Renewal date:" in flat
+    assert "premium" not in flat.lower()  # no full premium dump in the card
+    # acknowledge button present with a renewal_ack_ action id
+    action_ids = [e.get("action_id") for b in blocks
+                  if b.get("type") == "actions" for e in b.get("elements", [])]
+    assert any(a and a.startswith("renewal_ack_") for a in action_ids)
 
 
 def test_handle_in_flight_does_not_file(monkeypatch, captured):

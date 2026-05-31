@@ -53,3 +53,6 @@ BAND_REVIEW_MAX = 25.0     # 10-24% -> hold + flag Lamar; >=25% -> urgent remark
 
 # --- Webhook auth (matches EspoCRM config: serviceWebhookSecret) ---
 SERVICE_WEBHOOK_SECRET = os.environ.get("SERVICE_WEBHOOK_SECRET", "")
+
+# --- EspoCRM base URL (for Slack deep-links to the Task / Renewal worksheet) ---
+ESPO_BASE_URL = os.environ.get("ESPO_URL", "").rstrip("/")

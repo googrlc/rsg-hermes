@@ -41,6 +41,7 @@ def handle(payload: dict) -> dict:
     renewal_id = task.get("parentId")
     if not renewal_id:
         return {"skipped": "no parentId"}
+    task_id = task.get("id")
 
     espo = EspoClient()
     renewal = espo.get(f"{config.RENEWAL_ENTITY}/{renewal_id}")
@@ -49,9 +50,9 @@ def handle(payload: dict) -> dict:
     stage = renewal.get("stage")
 
     if stage == config.STAGE_WON:
-        return _on_won(renewal)
+        return _on_won(renewal, task_id)
     if stage == config.STAGE_LOST:
-        return _on_lost(renewal)
+        return _on_lost(renewal, task_id)
     if stage in config.IN_FLIGHT_STAGES:
         log.info("Renewal %s in-flight at '%s' — no filing.", renewal_id, stage)
         return {"stage": stage, "action": "in_flight"}
@@ -90,30 +91,87 @@ def _file_worksheet(renewal: dict, outcome: str) -> dict:
     )
 
 
-def _on_won(renewal: dict) -> dict:
+def _task_url(task_id: str | None) -> str | None:
+    base = config.ESPO_BASE_URL
+    return f"{base}/#Task/view/{task_id}" if base and task_id else None
+
+
+def _renewal_url(renewal_id: str | None) -> str | None:
+    base = config.ESPO_BASE_URL
+    return f"{base}/#{config.RENEWAL_ENTITY}/view/{renewal_id}" if base and renewal_id else None
+
+
+def _completion_blocks(renewal: dict, *, header: str, task_url: str | None,
+                       worksheet_url: str | None) -> list[dict]:
+    """Compact Slack card: client / LOB / renewal date + worksheet, task, and
+    acknowledge buttons. No full description — the detail lives on the worksheet."""
+    client = renewal.get("accountName") or renewal.get("name") or "—"
+    lob = renewal.get("line_of_business") or "—"
+    rdate = renewal.get("renewal_effective_date") or renewal.get("expiration_date") or "—"
+
+    blocks: list[dict] = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": header}},
+        {"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*Client:*\n{client}"},
+            {"type": "mrkdwn", "text": f"*Line of business:*\n{lob}"},
+            {"type": "mrkdwn", "text": f"*Renewal date:*\n{rdate}"},
+        ]},
+    ]
+    elements: list[dict] = []
+    if worksheet_url:
+        elements.append({"type": "button", "action_id": "renewal_open_worksheet",
+                         "text": {"type": "plain_text", "text": "📄 Renewal Worksheet"},
+                         "url": worksheet_url})
+    if task_url:
+        elements.append({"type": "button", "action_id": "renewal_open_task",
+                         "text": {"type": "plain_text", "text": "📋 Open Task"},
+                         "url": task_url})
+    rid = renewal.get("id") or ""
+    elements.append({"type": "button", "style": "primary", "value": rid,
+                     "action_id": f"renewal_ack_{rid}",
+                     "text": {"type": "plain_text", "text": "✅ Acknowledge"}})
+    blocks.append({"type": "actions", "block_id": f"renewal_actions_{rid}", "elements": elements})
+    return blocks
+
+
+def _worksheet_url(renewal: dict, doc: dict | None) -> str | None:
+    # Prefer the freshly-filed Google Doc; fall back to the live Renewal record.
+    return (doc or {}).get("drive_url") or _renewal_url(renewal.get("id"))
+
+
+def _on_won(renewal: dict, task_id: str | None = None) -> dict:
     doc = _file_worksheet(renewal, "won")
-    acct = renewal.get("accountName") or renewal.get("name")
+    client = renewal.get("accountName") or renewal.get("name") or "this client"
+    blocks = _completion_blocks(
+        renewal,
+        header=f"✅ *Renewal retained — {client}*",
+        task_url=_task_url(task_id),
+        worksheet_url=_worksheet_url(renewal, doc),
+    )
     try:
         SlackNotifier(channel=config.SLACK_RSG_WINS).post_message(
-            text=(f"*Renewal retained — {acct}*\n"
-                  f"{renewal.get('line_of_business', '')} · renewal premium "
-                  f"{renewal.get('renewal_premium', '—')} "
-                  f"({renewal.get('premium_change', '—')}% change)")
+            text=f"Renewal retained — {client} ({renewal.get('line_of_business', '')})",
+            blocks=blocks,
         )
     except Exception as e:
         log.warning("Win notify failed: %s", e)
     return {"stage": config.STAGE_WON, "filed": bool(doc), "action": "won"}
 
 
-def _on_lost(renewal: dict) -> dict:
+def _on_lost(renewal: dict, task_id: str | None = None) -> dict:
     doc = _file_worksheet(renewal, "lost")
-    acct = renewal.get("accountName") or renewal.get("name")
+    client = renewal.get("accountName") or renewal.get("name") or "this client"
+    reason = renewal.get("lost_reason") or "—"
+    blocks = _completion_blocks(
+        renewal,
+        header=f"❌ *Renewal lost — {client}*\nReason: *{reason}*",
+        task_url=_task_url(task_id),
+        worksheet_url=_worksheet_url(renewal, doc),
+    )
     try:
         SlackNotifier(channel=config.SLACK_THE_BOSS).post_message(
-            text=(f"*Renewal lost — {acct}*\n"
-                  f"{renewal.get('line_of_business', '')} · reason: "
-                  f"*{renewal.get('lost_reason', '—')}*\n"
-                  f"Client states: {renewal.get('renewal_notes', '—')}")
+            text=f"Renewal lost — {client} — {reason}",
+            blocks=blocks,
         )
     except Exception as e:
         log.warning("Loss notify failed: %s", e)
