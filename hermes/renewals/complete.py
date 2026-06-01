@@ -18,6 +18,7 @@ from hermes.integrations.slack_notifier import SlackNotifier
 from hermes.documents.store import save_document
 
 from . import config
+from . import worksheet
 
 log = logging.getLogger(__name__)
 
@@ -63,20 +64,8 @@ def handle(payload: dict) -> dict:
 
 
 def _worksheet_doc(renewal: dict) -> str:
-    name = renewal.get("name") or renewal.get("accountName") or "Renewal"
-    body = (
-        f"# {name}\n\n"
-        f"- Client: {renewal.get('accountName', '—')}\n"
-        f"- Carrier: {renewal.get('carrier', '—')}\n"
-        f"- Line of business: {renewal.get('line_of_business', '—')}\n"
-        f"- Expiring premium: {renewal.get('current_premium', '—')}\n"
-        f"- Renewal premium: {renewal.get('renewal_premium', '—')}\n"
-        f"- Premium change: {renewal.get('premium_change', '—')}%\n"
-        f"- Outcome: {renewal.get('stage', '—')}\n"
-        f"- Lost reason: {renewal.get('lost_reason', '—')}\n"
-        f"- Client states: {renewal.get('renewal_notes', '—')}\n"
-        f"- Renewal effective date: {renewal.get('renewal_effective_date', '—')}\n"
-    )
+    # Worksheet body (facts / premium / checklist / outcome) + CRM links.
+    body = worksheet.build_worksheet_content(renewal)
     # Links back into the CRM. Full URLs (not markdown) so Google Docs
     # auto-linkifies them into clickable links.
     links = ["\n## Links"]

@@ -56,3 +56,19 @@ SERVICE_WEBHOOK_SECRET = os.environ.get("SERVICE_WEBHOOK_SECRET", "")
 
 # --- EspoCRM base URL (for Slack deep-links to the Task / Renewal worksheet) ---
 ESPO_BASE_URL = os.environ.get("ESPO_URL", "").rstrip("/")
+
+# --- Worksheet checkbox fields (bool fields on the Renewal record) ---
+# snake_case API names, matching the entity's existing field convention
+# (the live API exposes custom Renewal fields snake_case, e.g. renewal_premium).
+# These MUST match the bool field keys created in rsg-espocrm Renewal.json and
+# referenced by the Dynamic Logic required-on-stage rules.
+CHECKBOX_FIELDS = [
+    "renewal_reviewed",    # Renewal declaration pulled & reviewed
+    "account_confirmed",   # Account details confirmed (units / drivers)
+    "renewal_email_sent",  # Renewal email sent to client
+    "ams_updated",         # AMS (NowCerts) updated
+]
+
+# Optional branded Google Docs template (worksheet.fill_template). Unset => the
+# generated worksheet doc is filed (v1 path).
+RENEWAL_TEMPLATE_DOC_ID = os.environ.get("RENEWAL_TEMPLATE_DOC_ID")

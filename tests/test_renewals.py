@@ -4,7 +4,7 @@ No network: EspoClient, save_document, and SlackNotifier are monkeypatched.
 """
 import pytest
 
-from hermes.renewals import card, complete
+from hermes.renewals import card, complete, worksheet
 from hermes.renewals import config as rconfig
 
 
@@ -151,6 +151,37 @@ def test_won_card_is_compact_with_buttons(monkeypatch, captured):
     action_ids = [e.get("action_id") for b in blocks
                   if b.get("type") == "actions" for e in b.get("elements", [])]
     assert any(a and a.startswith("renewal_ack_") for a in action_ids)
+
+
+def _all_boxes(value: bool) -> dict:
+    """A renewal dict with every CHECKBOX_FIELDS key set to value."""
+    return {f: value for f in rconfig.CHECKBOX_FIELDS}
+
+
+def test_checkbox_fields_nonempty():
+    assert rconfig.CHECKBOX_FIELDS, "CHECKBOX_FIELDS must not be empty"
+
+
+def test_each_checkbox_field_flows_into_merge():
+    # every config checkbox must be read by merge_fields() — a rename in one
+    # place but not the other fails loudly.
+    base = worksheet.merge_fields(_all_boxes(False))
+    for field in rconfig.CHECKBOX_FIELDS:
+        toggled = _all_boxes(False)
+        toggled[field] = True
+        assert worksheet.merge_fields(toggled) != base, (
+            f"{field} in CHECKBOX_FIELDS is not consumed by merge_fields()"
+        )
+
+
+def test_each_checkbox_field_renders_in_worksheet():
+    base = worksheet.build_worksheet_content(_all_boxes(False))
+    for field in rconfig.CHECKBOX_FIELDS:
+        toggled = _all_boxes(False)
+        toggled[field] = True
+        assert worksheet.build_worksheet_content(toggled) != base, (
+            f"{field} in CHECKBOX_FIELDS does not affect the filed worksheet doc"
+        )
 
 
 def test_worksheet_links_back_to_records(monkeypatch):
