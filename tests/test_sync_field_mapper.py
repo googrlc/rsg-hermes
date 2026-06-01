@@ -133,12 +133,24 @@ class MapInsuredToAccountTests(unittest.TestCase):
                 msg=f"raw {raw!r} did not normalize",
             )
 
-    def test_phone_non_us_passes_through(self) -> None:
-        # Non-US / unparsable values flow through unchanged for human review
-        # rather than corrupting the record.
+    def test_phone_intl_canonicalized_to_e164(self) -> None:
+        # Already-valid international numbers are canonicalized to strict E.164
+        # (+ then digits, no spaces/dashes) so Espo's phone validator accepts
+        # them instead of rejecting the spaced/dashed raw form.
         insured = self._commercial_insured(cellPhone="+44 20 7946 0958")
         result = map_insured_to_account(insured)
-        self.assertEqual(result["phoneNumber"], "+44 20 7946 0958")
+        self.assertEqual(result["phoneNumber"], "+442079460958")
+
+    def test_phone_unnormalizable_is_omitted(self) -> None:
+        # Values we cannot turn into E.164 are dropped (field omitted) rather
+        # than sent as-is — sending a non-E.164 string fails the whole Account
+        # write with validationFailure {field: phoneNumber, type: valid}.
+        for bad in ["678-230", "ext 1234", "n/a", "see notes", "555-CALL"]:
+            insured = self._commercial_insured(cellPhone=bad)
+            result = map_insured_to_account(insured)
+            self.assertNotIn(
+                "phoneNumber", result, msg=f"un-normalizable {bad!r} should be omitted",
+            )
 
 
 class DetectConflictsTests(unittest.TestCase):

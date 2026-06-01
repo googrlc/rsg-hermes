@@ -24,6 +24,13 @@ _CONFLICTS_RE = re.compile(r"\bconflicts?\b", re.I)
 _ERRORS_RE = re.compile(r"\berrors?\b", re.I)
 _SINCE_RE = re.compile(r"\bsince\s+(\S+)", re.I)
 
+# Bidirectional-variant routing. These must NOT match a plain
+# "sync nowcerts [dry-run|since …]" command, which falls through to the
+# default NowCerts → EspoCRM pipeline.
+_BIDI_RE = re.compile(r"\b(bidirectional|bi-directional|both\s+ways?|two[\s-]way|round[\s-]?trip|full[\s-]?sync)\b", re.I)
+_CRM_TO_HUB_RE = re.compile(r"\b(crm|espo)\b.*\bhub\b", re.I)
+_HUB_TO_NC_RE = re.compile(r"\b(hub|push)\b.*\b(nowcerts|nc)\b", re.I)
+
 
 def handle(
     client: "EspoClient",
@@ -131,7 +138,7 @@ def _sync_conflicts(supa: "SupabaseClient") -> DispatchResult:
     try:
         conflicts = supa.select(
             "sync_conflicts",
-            columns="id,field_name,source_value,destination_value,resolution,created_at",
+            columns="id,field_name,nowcerts_value,espocrm_value,resolution,created_at",
             params={"resolution": "eq.pending", "order": "created_at.desc"},
             limit=10,
         )
@@ -144,8 +151,8 @@ def _sync_conflicts(supa: "SupabaseClient") -> DispatchResult:
     lines = [f"*{len(conflicts)} unresolved conflict(s):*"]
     for c in conflicts:
         field = c.get("field_name", "?")
-        src = str(c.get("source_value", ""))[:40]
-        dst = str(c.get("destination_value", ""))[:40]
+        src = str(c.get("nowcerts_value", ""))[:40]
+        dst = str(c.get("espocrm_value", ""))[:40]
         lines.append(f"  • *{field}*: NowCerts=`{src}` vs EspoCRM=`{dst}`")
 
     return DispatchResult(True, "\n".join(lines))
@@ -232,7 +239,7 @@ def _sync_errors(supa: "SupabaseClient") -> DispatchResult:
     try:
         errors = supa.select(
             "sync_errors",
-            columns="id,error_type,error_message,source_object_type,source_object_id,created_at",
+            columns="id,error_type,error_message,object_type,object_id,created_at",
             params={"order": "created_at.desc"},
             limit=10,
         )
@@ -246,7 +253,7 @@ def _sync_errors(supa: "SupabaseClient") -> DispatchResult:
     for e in errors:
         etype = e.get("error_type", "unknown")
         msg = str(e.get("error_message", ""))[:80]
-        obj = f"{e.get('source_object_type', '?')}:{e.get('source_object_id', '?')}"
+        obj = f"{e.get('object_type', '?')}:{e.get('object_id', '?')}"
         lines.append(f"  • [{etype}] {obj} — {msg}")
 
     return DispatchResult(True, "\n".join(lines))
