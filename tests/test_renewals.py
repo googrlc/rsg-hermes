@@ -4,7 +4,7 @@ No network: EspoClient, save_document, and SlackNotifier are monkeypatched.
 """
 import pytest
 
-from hermes.renewals import card, complete, worksheet
+from hermes.renewals import card, complete, sweep, worksheet
 from hermes.renewals import config as rconfig
 
 
@@ -231,3 +231,64 @@ def test_handle_ignores_non_completion_event(captured):
     result = complete.handle(_payload(event="service.task_started"))
     assert "skipped" in result
     assert captured["saved"] == []
+
+
+# --------------------------------------------------------------- sweep notify
+
+@pytest.fixture
+def captured_sweep(monkeypatch):
+    """Capture SlackNotifier posts at the point the sweep imports it (lazy import
+    from hermes.integrations.slack_notifier inside _notify)."""
+    posts = []
+
+    class FakeSlack:
+        def __init__(self, channel=None):
+            self.channel = channel
+
+        def post_message(self, *, text, blocks=None):
+            posts.append({"channel": self.channel, "text": text, "blocks": blocks})
+
+    import hermes.integrations.slack_notifier as sn
+    monkeypatch.setattr(sn, "SlackNotifier", FakeSlack)
+    monkeypatch.setattr(rconfig, "ESPO_BASE_URL", "https://espo.example.com")
+    return posts
+
+
+def test_sweep_notify_posts_one_card_per_renewal(captured_sweep):
+    r = _sample_renewal()
+    sweep._notify([(r, {"id": "task1"})])
+
+    # digest line + one card
+    assert len(captured_sweep) == 2
+    assert "1 renewal task(s) ready" in captured_sweep[0]["text"]
+
+    card_post = captured_sweep[1]
+    assert card_post["channel"] == rconfig.SLACK_GRETCHEN_TASKS
+    blocks = card_post["blocks"]
+    flat = repr(blocks)
+    # correct client + LOB mapping (not the renewal name, not "—")
+    assert "Martinez Landscaping LLC" in flat
+    assert "Commercial Auto" in flat
+    assert "Client:" in flat and "Line of business:" in flat and "Renewal date:" in flat
+    # actionable: worksheet (-> renewal record), open task (-> task), acknowledge
+    action_ids = [e.get("action_id") for b in blocks
+                  if b.get("type") == "actions" for e in b.get("elements", [])]
+    assert "renewal_open_worksheet" in action_ids
+    assert "renewal_open_task" in action_ids
+    assert any(a and a.startswith("renewal_ack_") for a in action_ids)
+    # task button deep-links the created task; worksheet links the renewal record
+    urls = [e.get("url") for b in blocks if b.get("type") == "actions"
+            for e in b.get("elements", []) if e.get("url")]
+    assert "https://espo.example.com/#Task/view/task1" in urls
+    assert "https://espo.example.com/#Renewal/view/r1" in urls
+
+
+def test_sweep_notify_noop_when_nothing_created(captured_sweep):
+    sweep._notify([])
+    assert captured_sweep == []
+
+
+def test_client_name_never_uses_renewal_name_whole():
+    # the screenshot bug: accountName empty -> must NOT show "X - LOB Renewal" whole
+    bad = {"id": "r9", "name": "Dream Chaser Trucking - Other Renewal"}
+    assert complete._client_name(bad) == "Dream Chaser Trucking"

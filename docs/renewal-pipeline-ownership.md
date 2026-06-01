@@ -21,7 +21,7 @@ live). Keep them identical.
 |---|---|---|
 | Create Renewal record from an expiring policy | **EspoCRM (native)** | `SyncRenewalsFromPolicies` scheduled job (daily 6am) + `Policy/ActivateAutomation` hook → `RenewalOrchestrator::syncFromPolicy()` |
 | Derive renewal fields (premium / LOB / carrier / expiration / urgency) | **EspoCRM (native)** | `Renewal/DeriveFields` hook → `RenewalOrchestrator` |
-| Create the **work task** (rich worksheet card, assigned to Gretchen) | **Hermes** | `hermes/renewals/sweep.py` (`hermes --renewal-sweep`) |
+| Create the **work task** (rich worksheet card, assigned to Gretchen) + post one Slack card per renewal to #gretchen-tasks | **Hermes** | `hermes/renewals/sweep.py` (`hermes --renewal-sweep`); card built by `complete.build_renewal_card` (same card as won/lost) |
 | Worksheet UI + required-field enforcement (Won can't be faked) | **EspoCRM** | `Renewal` entityDefs (4 checkbox bools) + `clientDefs` dynamic logic + detail layout |
 | Task completion → file worksheet (Google Doc) + Slack card | **Hermes** | `hermes/renewals/complete.py` via `POST /renewals/complete` (fired by EspoCRM `Task/SendServiceWebhook` dispatcher) |
 | Slack "Acknowledge" button (idempotent) | **Hermes** | `hermes/integrations/slack_socket.py` (`renewal_ack_*`) |

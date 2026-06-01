@@ -48,6 +48,7 @@ def handle(payload: dict) -> dict:
     renewal = espo.get(f"{config.RENEWAL_ENTITY}/{renewal_id}")
     if not isinstance(renewal, dict):
         return {"skipped": "renewal not found"}
+    _ensure_display_fields(espo, renewal)
     stage = renewal.get("stage")
 
     if stage == config.STAGE_WON:
@@ -105,13 +106,61 @@ def _account_url(account_id: str | None) -> str | None:
     return f"{base}/#Account/view/{account_id}" if base and account_id else None
 
 
-def _completion_blocks(renewal: dict, *, header: str, task_url: str | None,
+def _client_name(renewal: dict) -> str:
+    """Best client label for the card.
+
+    Prefer the linked account's name. Never fall back to the Renewal's own name as
+    the client — RenewalOrchestrator builds it as "{account} - {LOB} Renewal", so
+    using it whole reads wrong (the screenshot bug: "Dream Chaser Trucking - Other
+    Renewal" shown as the client). As a last resort, strip that suffix back to the
+    account portion.
+    """
+    acct = (renewal.get("accountName") or "").strip()
+    if acct:
+        return acct
+    name = (renewal.get("name") or "").strip()
+    if " - " in name:  # "{account} - {LOB} Renewal"
+        return name.split(" - ", 1)[0].strip() or "this client"
+    return name or "this client"
+
+
+def _lob(renewal: dict) -> str:
+    return (renewal.get("line_of_business") or "").strip() or "—"
+
+
+def _renewal_date(renewal: dict) -> str:
+    return renewal.get("renewal_effective_date") or renewal.get("expiration_date") or "—"
+
+
+def _ensure_display_fields(espo, renewal: dict) -> None:
+    """Backfill the card's display fields if a single-record fetch didn't carry
+    them. A full Renewal GET normally returns accountName + line_of_business, but
+    if accountName is empty while accountId is set, resolve it via the Account so
+    the card never falls back to the renewal name (see _client_name)."""
+    if (renewal.get("accountName") or "").strip():
+        return
+    acct_id = renewal.get("accountId")
+    if not acct_id:
+        return
+    try:
+        acct = espo.get(f"Account/{acct_id}")
+        if isinstance(acct, dict) and acct.get("name"):
+            renewal["accountName"] = acct["name"]
+    except Exception as e:  # display nicety only — never fail the webhook over it
+        log.debug("Account name backfill failed for %s: %s", acct_id, e)
+
+
+def build_renewal_card(renewal: dict, *, header: str, task_url: str | None,
                        worksheet_url: str | None) -> list[dict]:
     """Compact Slack card: client / LOB / renewal date + worksheet, task, and
-    acknowledge buttons. No full description — the detail lives on the worksheet."""
-    client = renewal.get("accountName") or renewal.get("name") or "—"
-    lob = renewal.get("line_of_business") or "—"
-    rdate = renewal.get("renewal_effective_date") or renewal.get("expiration_date") or "—"
+    acknowledge buttons. No full description — the detail lives on the worksheet.
+
+    Shared by the renewal sweep (task ready -> #gretchen-tasks) and the completion
+    webhook (won -> #rsg-wins, lost -> #the-boss) so every renewal card looks the
+    same and the client/LOB mapping lives in one place."""
+    client = _client_name(renewal)
+    lob = _lob(renewal)
+    rdate = _renewal_date(renewal)
 
     blocks: list[dict] = [
         {"type": "section", "text": {"type": "mrkdwn", "text": header}},
@@ -136,6 +185,10 @@ def _completion_blocks(renewal: dict, *, header: str, task_url: str | None,
                      "text": {"type": "plain_text", "text": "✅ Acknowledge"}})
     blocks.append({"type": "actions", "block_id": f"renewal_actions_{rid}", "elements": elements})
     return blocks
+
+
+# Back-compat alias (referenced by tests and earlier call sites).
+_completion_blocks = build_renewal_card
 
 
 ACK_BLOCK_ID = "renewal_acked"
@@ -181,8 +234,8 @@ def _worksheet_url(renewal: dict, doc: dict | None) -> str | None:
 
 def _on_won(renewal: dict, task_id: str | None = None) -> dict:
     doc = _file_worksheet(renewal, "won")
-    client = renewal.get("accountName") or renewal.get("name") or "this client"
-    blocks = _completion_blocks(
+    client = _client_name(renewal)
+    blocks = build_renewal_card(
         renewal,
         header=f"✅ *Renewal retained — {client}*",
         task_url=_task_url(task_id),
@@ -200,9 +253,9 @@ def _on_won(renewal: dict, task_id: str | None = None) -> dict:
 
 def _on_lost(renewal: dict, task_id: str | None = None) -> dict:
     doc = _file_worksheet(renewal, "lost")
-    client = renewal.get("accountName") or renewal.get("name") or "this client"
+    client = _client_name(renewal)
     reason = renewal.get("lost_reason") or "—"
-    blocks = _completion_blocks(
+    blocks = build_renewal_card(
         renewal,
         header=f"❌ *Renewal lost — {client}*\nReason: *{reason}*",
         task_url=_task_url(task_id),

@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 # current_premium, expiration_date, line_of_business — NOT camelCase).
 _SELECT = (
     "id,name,accountId,accountName,contactId,carrier,line_of_business,"
-    "current_premium,expiration_date,urgency"
+    "current_premium,expiration_date,renewal_effective_date,urgency"
 )
 
 # Hard ceiling so a misconfigured run can never task the entire backlog unobserved.
@@ -53,14 +53,14 @@ def run(limit: int | None = None) -> dict:
     if limit:
         renewals = renewals[:limit]
 
-    created = []
+    created = []  # list of (renewal, task) pairs — task carries the id for the card's "Open Task" button
     for r in renewals:
         try:
             if has_existing_task(espo, r["id"]):
                 continue
             task = create_renewal_task(espo, r, gretchen_id)
             if task:
-                created.append(r)
+                created.append((r, task))
         except Exception:  # one bad record shouldn't kill the sweep
             log.exception("Failed to create task for Renewal %s", r.get("id"))
 
@@ -71,18 +71,40 @@ def run(limit: int | None = None) -> dict:
 
 
 def _notify(created: list) -> None:
+    """Post one rich card per new renewal to #gretchen-tasks.
+
+    Same compact card the won/lost webhook posts (Client / LOB / Renewal date +
+    📄 Renewal Worksheet · 📋 Open Task · ✅ Acknowledge), so every renewal looks
+    the same end-to-end. The worksheet button deep-links the Renewal record (no
+    Google Doc is filed until completion); the task button opens the new task.
+    """
     if not created:
         return
     # Imported lazily so the sweep can run (and be unit-tested) without Slack creds.
     from hermes.integrations.slack_notifier import SlackNotifier
+    from .complete import build_renewal_card, _client_name, _task_url, _renewal_url
 
-    lines = [f"*{len(created)} renewal task(s) ready*"]
-    for r in created:
-        acct = r.get("accountName") or r.get("name")
-        lines.append(
-            f"• {acct} — {r.get('line_of_business', '')} — expires {r.get('expiration_date', '')}"
-        )
+    notifier = SlackNotifier(channel=config.SLACK_GRETCHEN_TASKS)
+
+    # Lead with a one-line digest so a multi-renewal sweep is still scannable...
     try:
-        SlackNotifier(channel=config.SLACK_GRETCHEN_TASKS).post_message(text="\n".join(lines))
+        notifier.post_message(text=f"*{len(created)} renewal task(s) ready*")
     except Exception as e:  # Slack is a nice-to-have, never fatal
-        log.warning("Renewal sweep Slack notify failed: %s", e)
+        log.warning("Renewal sweep Slack digest failed: %s", e)
+
+    # ...then a card per renewal, each independently actionable.
+    for renewal, task in created:
+        client = _client_name(renewal)
+        blocks = build_renewal_card(
+            renewal,
+            header=f"📋 *Renewal task ready — {client}*",
+            task_url=_task_url((task or {}).get("id")),
+            worksheet_url=_renewal_url(renewal.get("id")),
+        )
+        try:
+            notifier.post_message(
+                text=f"Renewal task ready — {client}",
+                blocks=blocks,
+            )
+        except Exception as e:  # one card failing must not stop the rest
+            log.warning("Renewal sweep card failed for %s: %s", renewal.get("id"), e)
