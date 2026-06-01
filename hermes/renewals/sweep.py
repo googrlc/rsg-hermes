@@ -64,25 +64,10 @@ def run(limit: int | None = None) -> dict:
         except Exception:  # one bad record shouldn't kill the sweep
             log.exception("Failed to create task for Renewal %s", r.get("id"))
 
-    _notify(created)
+    # No Slack post here on purpose: every Task.create already fires the org-wide
+    # `Task.create -> rsg-task-assigned-slack` webhook, which notifies Gretchen.
+    # The sweep used to post its own #gretchen-tasks digest too — that double-
+    # notified. One notification per renewal task, via the existing webhook.
     log.info("Renewal sweep: %d task(s) created of %d candidate(s)",
              len(created), len(renewals))
     return {"candidates": len(renewals), "created": len(created)}
-
-
-def _notify(created: list) -> None:
-    if not created:
-        return
-    # Imported lazily so the sweep can run (and be unit-tested) without Slack creds.
-    from hermes.integrations.slack_notifier import SlackNotifier
-
-    lines = [f"*{len(created)} renewal task(s) ready*"]
-    for r in created:
-        acct = r.get("accountName") or r.get("name")
-        lines.append(
-            f"• {acct} — {r.get('line_of_business', '')} — expires {r.get('expiration_date', '')}"
-        )
-    try:
-        SlackNotifier(channel=config.SLACK_GRETCHEN_TASKS).post_message(text="\n".join(lines))
-    except Exception as e:  # Slack is a nice-to-have, never fatal
-        log.warning("Renewal sweep Slack notify failed: %s", e)
