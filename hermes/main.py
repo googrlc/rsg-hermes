@@ -201,6 +201,18 @@ def main() -> int:
         default=None,
         help="Only sync records changed since this ISO datetime (e.g. 2026-05-01T00:00:00)",
     )
+    parser.add_argument(
+        "--enrich-nowcerts",
+        type=str,
+        default=None,
+        metavar="ACCOUNT_ID",
+        help="Syncback: enrich the linked NowCerts insured from one ACTIVE EspoCRM account (upsert by DatabaseId)",
+    )
+    parser.add_argument(
+        "--enrich-nowcerts-dry-run",
+        action="store_true",
+        help="Preview the NowCerts enrichment payload for --enrich-nowcerts without writing to the AMS",
+    )
     # --- Nightly CRM Changelog ---
     parser.add_argument(
         "--changelog",
@@ -421,6 +433,25 @@ def main() -> int:
             for err in sync_result.errors:
                 print(f"- {err}")
         return 0 if sync_result.ok else 1
+
+    # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
+    if args.enrich_nowcerts:
+        import json as _json
+
+        from hermes.sync.enrich import enrich_insured_from_account
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+
+        try:
+            espo = EspoClient()
+            nc = NowCertsClient()
+        except (EspoClientError, NowCertsClientError) as e:
+            print(f"connection failed: {e}", file=sys.stderr)
+            return 2
+        res = enrich_insured_from_account(
+            espo, nc, args.enrich_nowcerts, dry_run=args.enrich_nowcerts_dry_run,
+        )
+        print(_json.dumps(res, indent=2, default=str))
+        return 0 if res.get("ok") or res.get("action") == "skip" else 1
 
     # --- Bidirectional sync (requires NowCerts + Supabase + EspoCRM) ---
     _bidi = args.sync_bidirectional or args.sync_bidirectional_dry_run

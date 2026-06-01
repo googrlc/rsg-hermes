@@ -856,6 +856,43 @@ async def renewals_complete_webhook(request: Request):
     return renewals_complete.handle(await request.json())
 
 
+@app.post("/api/hermes/nowcerts-enrich")
+async def nowcerts_enrich_webhook(request: Request):
+    """EspoCRM webhook: enrich the linked NowCerts insured from an ACTIVE account.
+
+    Auth: shared X-Service-Webhook-Secret header (== SERVICE_WEBHOOK_SECRET).
+    Enrich-only — only accounts with lifecycle_status=Active and a
+    momentum_client_id are pushed, via NowCerts upsert-by-DatabaseId, so it can
+    never create a new insured. Add ?dry_run=1 to preview the payload without
+    writing to the AMS. Accepts an EspoCRM webhook array or a single record.
+    """
+    from hermes.renewals import complete as renewals_complete
+
+    if not renewals_complete.verify_secret(request.headers.get("X-Service-Webhook-Secret")):
+        raise HTTPException(status_code=401, detail="bad webhook secret")
+
+    body = await request.json()
+    records = body if isinstance(body, list) else [body]
+    ids = [
+        (r.get("id") or r.get("accountId") or r.get("entityId"))
+        for r in records
+        if isinstance(r, dict) and (r.get("id") or r.get("accountId") or r.get("entityId"))
+    ]
+    if not ids:
+        raise HTTPException(status_code=400, detail="no account id in webhook payload")
+
+    dry = str(request.query_params.get("dry_run", "")).lower() in ("1", "true", "yes")
+
+    from hermes.core.client import EspoClient
+    from hermes.sync.enrich import enrich_insured_from_account
+    from hermes.sync.nowcerts_client import NowCertsClient
+
+    espo = EspoClient()
+    nc = NowCertsClient()
+    results = [enrich_insured_from_account(espo, nc, i, dry_run=dry) for i in ids]
+    return {"count": len(results), "dry_run": dry, "results": results}
+
+
 def main() -> int:
     load_dotenv()
     logging.basicConfig(level=os.environ.get("HERMES_API_LOG_LEVEL", "INFO"))

@@ -278,6 +278,10 @@ ACCOUNT_TO_INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "spouseLastName", "dst": "CoInsured_LastName", "transform": "direct"},
     {"src": "dateOfBirth", "dst": "DateOfBirth", "transform": "date_only"},
     {"src": "spouseDob", "dst": "CoInsured_DateOfBirth", "transform": "date_only"},
+    {"src": "maritalStatus", "dst": "MaritalStatus", "transform": "direct"},
+    {"src": "gender", "dst": "Gender", "transform": "direct"},
+    {"src": "communication_notes", "dst": "PersonNotes", "transform": "direct"},
+    {"src": "general_notes", "dst": "Note", "transform": "direct"},
 ]
 
 
