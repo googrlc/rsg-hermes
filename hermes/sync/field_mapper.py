@@ -75,9 +75,12 @@ def _to_e164_us(raw: Any) -> str | None:
     EspoCRM's phoneNumber validator rejects every non-E.164 form: NowCerts
     sends `678-230-5750` style raw strings, which produce
     `validationFailure {field: phoneNumber, type: valid}` on PUT/POST and
-    fail the entire Account/Contact update. Returns None for empty input
-    and the unchanged string for non-US / unparsable values so they flow
-    through for human review rather than silently corrupting the record.
+    fail the entire Account/Contact update. We therefore normalize US 10/11-
+    digit numbers to `+1XXXXXXXXXX`, pass through values that are already
+    valid E.164 (e.g. international `+44…`), and return None for anything we
+    cannot normalize — omitting the field is safe (the raw value stays in
+    NowCerts + inbound staging for review), whereas sending a non-E.164
+    string fails the entire account/contact write.
     """
     if raw is None:
         return None
@@ -89,7 +92,11 @@ def _to_e164_us(raw: Any) -> str | None:
         digits = digits[1:]
     if len(digits) == 10:
         return f"+1{digits}"
-    return s
+    # Already-valid E.164 (e.g. international): canonicalize to +<digits>.
+    if s.startswith("+") and 7 <= len(digits) <= 15:
+        return f"+{digits}"
+    # Un-normalizable → omit rather than send a value EspoCRM will reject.
+    return None
 
 
 def _first_element(val: Any) -> Any:

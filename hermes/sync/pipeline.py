@@ -966,19 +966,21 @@ def _log_conflict(
     dest_id: str,
     conflict: dict[str, str],
 ) -> None:
+    # NOTE: column names mirror the live `sync_conflicts` schema (nowcerts_*/
+    # espocrm_* jsonb pair, *_id text columns). The table has no run_id/
+    # mapping_id columns, so those linkages are not persisted here.
     try:
         row: dict[str, Any] = {
-            "run_id": run_id,
             "object_type": "Account",
-            "source_object_id": source_id,
+            "nowcerts_id": source_id,
+            "espocrm_id": dest_id,
             "dest_object_id": dest_id,
             "field_name": conflict["field_name"],
-            "source_value": conflict["source_value"],
-            "dest_value": conflict["dest_value"],
+            "nowcerts_value": conflict["source_value"],
+            "espocrm_value": conflict["dest_value"],
+            "status": "pending",
             "resolution": "pending",
         }
-        if mapping_id:
-            row["mapping_id"] = mapping_id
         supa.insert("sync_conflicts", row)
     except SupabaseClientError:
         log.exception("Failed to write sync conflict")

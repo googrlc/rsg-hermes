@@ -103,16 +103,20 @@ class NowCertsClient:
     def fetch_insureds(
         self,
         *,
-        page_size: int = 50,
+        page_size: int = 100,
         since: str | None = None,
-        max_pages: int = 100,
+        max_pages: int = 1000,
     ) -> list[dict[str, Any]]:
         """Fetch all Insured records with OData pagination.
 
         Args:
             page_size: records per page ($top).
             since: ISO datetime filter — only records with changeDate >= since.
-            max_pages: safety cap on number of pages fetched.
+            max_pages: safety cap on number of pages fetched. Pagination stops
+                early on the first partial/empty page, so this only bounds a
+                runaway full backfill. Defaults are sized for a full first load
+                (page_size * max_pages = 100k); a `since` incremental stops
+                after a page or two.
 
         Returns:
             List of raw insured dicts from the NowCerts API.
@@ -147,6 +151,12 @@ class NowCertsClient:
             if len(records) < page_size:
                 break
             skip += page_size
+        else:
+            log.warning(
+                "NowCerts: hit max_pages=%d (page_size=%d) — insured list may be "
+                "TRUNCATED at %d records; raise max_pages for a complete backfill.",
+                max_pages, page_size, len(all_records),
+            )
 
         log.info("NowCerts: total insureds fetched = %d", len(all_records))
         return all_records
@@ -154,11 +164,16 @@ class NowCertsClient:
     def fetch_policies(
         self,
         *,
-        page_size: int = 50,
+        page_size: int = 100,
         since: str | None = None,
-        max_pages: int = 100,
+        max_pages: int = 1000,
     ) -> list[dict[str, Any]]:
-        """Fetch all Policy records with OData pagination."""
+        """Fetch all Policy records with OData pagination.
+
+        Defaults are sized for a full first load (page_size * max_pages =
+        100k); pagination stops early on the first partial page, so a `since`
+        incremental stops after a page or two.
+        """
         all_records: list[dict[str, Any]] = []
         skip = 0
         for page in range(max_pages):
@@ -188,6 +203,12 @@ class NowCertsClient:
             if len(records) < page_size:
                 break
             skip += page_size
+        else:
+            log.warning(
+                "NowCerts: hit max_pages=%d (page_size=%d) — policy list may be "
+                "TRUNCATED at %d records; raise max_pages for a complete backfill.",
+                max_pages, page_size, len(all_records),
+            )
 
         log.info("NowCerts: total policies fetched = %d", len(all_records))
         return all_records

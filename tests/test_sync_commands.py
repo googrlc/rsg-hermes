@@ -91,8 +91,8 @@ class TestSyncConflicts:
             {
                 "id": "c-1",
                 "field_name": "phoneNumber",
-                "source_value": "555-0100",
-                "destination_value": "555-0200",
+                "nowcerts_value": "555-0100",
+                "espocrm_value": "555-0200",
                 "resolution": "pending",
                 "created_at": "2026-05-07T12:00:00Z",
             },
@@ -117,8 +117,8 @@ class TestSyncErrors:
                 "id": "e-1",
                 "error_type": "api_error",
                 "error_message": "EspoCRM 500 Internal Server Error",
-                "source_object_type": "Insured",
-                "source_object_id": "nc-123",
+                "object_type": "Insured",
+                "object_id": "nc-123",
                 "created_at": "2026-05-07T12:00:00Z",
             },
         ]
