@@ -63,6 +63,23 @@
   .savelink{display:inline-block;margin-top:8px;font-size:11px;color:var(--muted);cursor:pointer}
   .savelink:hover{color:var(--teal)}
 
+  /* team queue */
+  .tq-group{margin-bottom:16px}
+  .tq-head{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin:4px 0 8px;display:flex;gap:8px;align-items:center}
+  .tq-head .tq-count{font-family:var(--mono);color:var(--muted-2)}
+  .tq{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel);margin-bottom:7px;transition:opacity .3s}
+  .tq .ck{width:18px;height:18px;border-radius:5px;border:1.5px solid var(--muted-2);flex-shrink:0;cursor:pointer;display:grid;place-items:center;font-size:12px;color:transparent}
+  .tq .ck:hover{border-color:var(--teal)}
+  .tq.done{opacity:.45}
+  .tq.done .ck{background:var(--teal);border-color:var(--teal);color:#0e1526}
+  .tq.done .tt{text-decoration:line-through}
+  .tq .tt{flex:1;font-size:12.5px}
+  .tq .tt small{display:block;color:var(--muted-2);font-size:10px;font-family:var(--mono);margin-top:2px}
+  .tq .due{font-size:10px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .tq .due.over{background:#ef444420;color:#ff6b78}
+  .tq .due.soon{background:#f5b94220;color:var(--amber)}
+  .tq .due.ok{background:#22c55e20;color:#4ade80}
+
   .dash-hd{margin-bottom:16px}
   .dash-hd .t{font-size:20px;font-weight:700;letter-spacing:-.3px}
   .dash-hd .t small{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:4px}
@@ -170,6 +187,7 @@
 
     <div class="viewtabs">
       <div class="vtab on" id="tab-dash" onclick="setView('dash')">⊞ Command Center</div>
+      <div class="vtab" id="tab-team" onclick="setView('team')">✅ Team Queue</div>
       <div class="vtab" id="tab-chat" onclick="setView('chat')">💬 Ask Hermes</div>
     </div>
 
@@ -212,6 +230,12 @@
         <div id="drafts"></div>
         <div class="note" style="margin-top:8px">Drafts are staged for your review — <b>nothing is sent automatically</b>. Edit and send each manually.</div>
       </div>
+     </section>
+
+     <section id="view-team" style="display:none">
+       <div class="dash-hd"><div class="t">Team Queue
+         <small>Open tasks, most urgent first. Check one off when it's done — it updates the CRM.</small></div></div>
+       <div id="team-list"><div class="empty">Loading tasks…</div></div>
      </section>
 
      <section id="view-chat" class="chat" style="display:none">
@@ -398,13 +422,54 @@
     } catch (e) { /* ignore */ }
   }
 
-  // ---- Phase 3: Ask Hermes command bar ----
+  // ---- views: dashboard / team / chat ----
   function setView(v) {
-    const dash = v !== 'chat';
-    document.getElementById('view-dash').style.display = dash ? '' : 'none';
-    document.getElementById('view-chat').style.display = dash ? 'none' : 'flex';
-    document.getElementById('tab-dash').classList.toggle('on', dash);
-    document.getElementById('tab-chat').classList.toggle('on', !dash);
+    const views = {dash: 'view-dash', team: 'view-team', chat: 'view-chat'};
+    for (const [k, id] of Object.entries(views)) {
+      const on = (k === v);
+      document.getElementById(id).style.display = on ? (k === 'chat' ? 'flex' : '') : 'none';
+      const tab = document.getElementById('tab-' + k);
+      if (tab) tab.classList.toggle('on', on);
+    }
+    if (v === 'team') loadTeam();
+  }
+
+  // ---- Team Queue ----
+  function dueCls(days) { if (days == null) return ''; if (days < 0) return 'over'; if (days <= 3) return 'soon'; return 'ok'; }
+  function renderTask(t) {
+    const meta = [t.related, t.priority].filter(Boolean).map(esc).join(' · ');
+    return '<div class="tq" data-id="' + t.id + '">'
+      + '<span class="ck" onclick="completeTask(this)">✓</span>'
+      + '<span class="tt">' + esc(t.title) + '<small>' + meta + '</small></span>'
+      + '<span class="due ' + dueCls(t.due_days) + '">' + esc(t.due_label) + '</span></div>';
+  }
+  async function loadTeam() {
+    const el = document.getElementById('team-list');
+    try {
+      const r = await fetch('/api/command-center/tasks');
+      const d = await r.json();
+      if (!d.tasks || !d.tasks.length) { el.innerHTML = '<div class="empty">No open tasks 🎉</div>'; return; }
+      const groups = d.by_assignee || {};
+      el.innerHTML = Object.keys(groups).map(who =>
+        '<div class="tq-group"><div class="tq-head">' + esc(who) + ' <span class="tq-count">' + groups[who].length + '</span></div>'
+        + groups[who].map(renderTask).join('') + '</div>'
+      ).join('');
+    } catch (e) {
+      el.innerHTML = '<div class="err">⚠ Could not load tasks: ' + e.message + '</div>';
+    }
+  }
+  async function completeTask(ck) {
+    const row = ck.closest('.tq'); const id = row.dataset.id;
+    if (row.classList.contains('done')) return;
+    row.classList.add('done');
+    try {
+      const r = await fetch('/api/command-center/tasks/' + id + '/complete', {method: 'POST'});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setTimeout(() => row.remove(), 600);
+    } catch (e) {
+      row.classList.remove('done');
+      alert('Could not complete task: ' + e.message);
+    }
   }
 
   function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
