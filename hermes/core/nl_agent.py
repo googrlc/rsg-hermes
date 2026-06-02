@@ -153,6 +153,40 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "list_skills",
+            "description": (
+                "List Hermes's own capabilities — the live tools it can run plus the domain "
+                "playbooks available. Use when asked 'what can you do', 'what are your skills', "
+                "'list your capabilities', or 'how can you help'."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_research",
+            "description": (
+                "Research a business/client on the public web — website, owners, "
+                "NAICS/SIC, phone, address, insurance context. Use when asked to look a "
+                "company up online, find info on a prospect, or 'go to the web' for client "
+                "data. Provide the business name (plus city/state if known)."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["business"],
+                "properties": {
+                    "business": {
+                        "type": "string",
+                        "description": "Business name, optionally with city/state.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "renewals_overview",
             "description": (
                 "Upcoming policy renewals and at-risk/retention clients from the Project 85 "
@@ -297,18 +331,32 @@ _TOOLS: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
-You are Hermes, the CRM assistant for Risk Solutions Group (RSG), an insurance agency.
-You help Lamar and team interact with their EspoCRM system using natural language.
+You are Hermes — the AI right hand and chief of staff for Risk Solutions Group (RSG),
+an independent insurance agency in Georgia. You are talking with Lamar Coates, RSG's
+owner and operator. Address him by name and speak like a sharp, warm, proactive
+account manager who knows the agency — not a generic chatbot or a database.
 
-Your capabilities:
+About RSG (use this context; don't ask Lamar to re-explain it):
+- Independent agency writing commercial, personal, benefits, life, and Medicare lines.
+- The #1 priority is RETENTION and protecting the book — client retention has been
+  ~55% vs an ~84% industry benchmark, so renewals and at-risk clients matter most.
+- You sit on top of EspoCRM, a Supabase data hub, and NowCerts policy data.
+
+Voice: conversational, concrete, and brief. Lead with the answer and the next action.
+Never reply "I don't know who you are" — you know it's Lamar at RSG. If you truly lack
+a data point, say what you'd look up and offer to fetch it.
+
+Your capabilities (use the tools — never guess at CRM data):
 - Search and look up any CRM record (Account, Contact, Lead, Opportunity, Policy, Task)
 - Retrieve specific field values (FEIN, DOT number, phone, email, premium, etc.)
 - Run reports (pipeline, KPIs, stale leads, renewals, data quality, commissions)
 - Show upcoming renewals and at-risk/retention clients (Project 85 watchlist) via renewals_overview
+- Research a business/client on the public web via web_research (website, owners, NAICS/SIC, contact info)
 - Create new records (contacts, leads, accounts, opportunities, tasks)
 - Update existing records
 - Process casual lead intake (dictated meeting notes → structured CRM entries)
 - Merge duplicate records
+- List your own capabilities via list_skills when Lamar asks what you can do
 
 Field aliases you should know:
 - FEIN / EIN / tax ID → field "fein" on Account
@@ -322,6 +370,7 @@ When the user asks about a company or person, search the appropriate entity.
 When they ask for a specific data point, use get_field_value.
 When they ask for a report or overview, use run_report.
 When they ask who renews soon, who's at risk, retention, or the save-list, use renewals_overview.
+When they ask to look a business up online, research a prospect, or "go to the web" for client data, use web_research.
 When they describe meeting someone or dictate lead info, use intake_lead.
 For questions you can answer from CRM data, always use a tool — never guess.
 If a search returns multiple matches, present them clearly.
@@ -396,6 +445,21 @@ def _exec_report(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
 def _exec_total_premium(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
     from hermes.commands.lookup import handle
     return handle(client, f"total premium for {args['account_name']}")
+
+
+def _exec_list_skills(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    from hermes.operations.skills_catalog import render_text
+
+    return DispatchResult(True, render_text())
+
+
+def _exec_web_research(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    from hermes.commands.business_research import handle as research_handle
+
+    business = (args.get("business") or "").strip()
+    if not business:
+        return DispatchResult(False, "Tell me which business to research (name, and city/state if you have it).")
+    return research_handle(client, f"research business {business}")
 
 
 def _exec_renewals(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
@@ -495,6 +559,8 @@ _EXECUTORS: dict[str, Any] = {
     "run_report": _exec_report,
     "total_premium": _exec_total_premium,
     "renewals_overview": _exec_renewals,
+    "web_research": _exec_web_research,
+    "list_skills": _exec_list_skills,
     "create_record": _exec_create,
     "update_record": _exec_update,
     "intake_lead": _exec_intake,

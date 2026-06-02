@@ -25,7 +25,8 @@
   body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:13px;-webkit-font-smoothing:antialiased;overflow:hidden}
   body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
     background:radial-gradient(900px 500px at 78% -10%, #4a9eff14, transparent 60%),radial-gradient(700px 400px at 0% 100%, #f9731610, transparent 55%)}
-  .app{display:grid;grid-template-columns:56px 1fr;height:100vh;position:relative;z-index:1}
+  .app{display:grid;grid-template-columns:56px 1fr 300px;height:100vh;position:relative;z-index:1}
+  @media (max-width:1100px){.app{grid-template-columns:56px 1fr}.filespanel{display:none}}
   ::-webkit-scrollbar{width:8px;height:8px}
   ::-webkit-scrollbar-thumb{background:#2f3c66;border-radius:8px}
 
@@ -37,7 +38,7 @@
   .rail-spacer{flex:1}
 
   /* main */
-  .center{display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+  .center{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
   .topbar{height:54px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;background:var(--sidebar);flex-shrink:0}
   .topbar .b{display:flex;align-items:baseline;gap:8px}
   .topbar .b b{font-size:15px}
@@ -45,7 +46,22 @@
   .topbar h1{font-size:13px;font-weight:600;flex:1;color:var(--muted);text-align:right}
   .tag{font-size:11px;padding:4px 11px;border-radius:20px;border:1px solid var(--border);color:var(--muted);background:#141d36;display:flex;align-items:center;gap:6px}
   .tag.live{color:var(--teal);border-color:#2dd4bf44}
-  .view{flex:1;overflow-y:auto;padding:20px 22px 60px}
+  .view{flex:1;min-height:0;overflow-y:auto;padding:20px 22px 40px}
+
+  /* right-hand Files panel */
+  .filespanel{background:var(--sidebar);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+  .fp-head{height:54px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:0 14px;font-weight:600;font-size:13px;flex-shrink:0}
+  .fp-head .fp-sub{font-size:10px;color:var(--muted-2);font-weight:400;margin-left:auto;font-family:var(--mono)}
+  .fp-list{flex:1;overflow-y:auto;min-height:0;padding:8px}
+  .fp-empty{color:var(--muted-2);font-size:11.5px;text-align:center;padding:24px 10px;line-height:1.6}
+  .fitem{background:#0e1526;border:1px solid var(--border);border-radius:8px;padding:9px 10px;margin-bottom:7px}
+  .fitem .ft{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fitem .fm{font-size:9.5px;color:var(--muted-2);font-family:var(--mono);margin-top:3px;display:flex;gap:6px;align-items:center}
+  .fitem .fk{padding:1px 6px;border-radius:4px;background:#1d2a4d;color:var(--blue)}
+  .fitem a.fdl{display:inline-block;margin-top:7px;font-size:11px;color:var(--teal);text-decoration:none}
+  .fitem a.fdl:hover{text-decoration:underline}
+  .savelink{display:inline-block;margin-top:8px;font-size:11px;color:var(--muted);cursor:pointer}
+  .savelink:hover{color:var(--teal)}
 
   .dash-hd{margin-bottom:16px}
   .dash-hd .t{font-size:20px;font-weight:700;letter-spacing:-.3px}
@@ -219,6 +235,13 @@
       </div>
     </div>
   </main>
+
+  <aside class="filespanel">
+    <div class="fp-head">📁 Files <span class="fp-sub">Hermes-created</span></div>
+    <div class="fp-list" id="fp-list">
+      <div class="fp-empty">No files yet.<br>Ask Hermes something, then “Save to Files”, or export a save-list.</div>
+    </div>
+  </aside>
 </div>
 
 <script>
@@ -418,6 +441,7 @@
       const msg = d.message || (d.detail ? ('Error: ' + d.detail) : 'No response.');
       thinking.querySelector('.bubble').classList.remove('think');
       thinking.querySelector('.bubble').textContent = msg;
+      addSaveLink(thinking, prompt, msg);
     } catch (e) {
       thinking.querySelector('.bubble').textContent = '⚠ Could not reach Hermes: ' + e.message;
     } finally {
@@ -426,9 +450,51 @@
     }
   }
 
+  // ---- Files panel ----
+  async function loadFiles() {
+    try {
+      const r = await fetch('/api/command-center/files');
+      const d = await r.json();
+      const el = document.getElementById('fp-list');
+      if (!d.files || !d.files.length) {
+        el.innerHTML = '<div class="fp-empty">No files yet.<br>Ask Hermes something, then “Save to Files”, or export a save-list.</div>';
+        return;
+      }
+      el.innerHTML = d.files.map(f =>
+        '<div class="fitem"><div class="ft">' + esc(f.title) + '</div>'
+        + '<div class="fm"><span class="fk">' + esc(f.kind || 'file') + '</span><span>' + (f.created_at || '').slice(0, 10) + '</span></div>'
+        + '<a class="fdl" href="/api/command-center/files/' + f.id + '/download" download>↓ download</a></div>'
+      ).join('');
+    } catch (e) { /* ignore */ }
+  }
+
+  async function saveTextToFiles(title, content, kind) {
+    const r = await fetch('/api/command-center/files', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({title: (title || 'Hermes note').slice(0, 80), content, kind: kind || 'answer'}),
+    });
+    await loadFiles();
+    return r.ok;
+  }
+
+  function addSaveLink(msgEl, prompt, answer) {
+    const a = document.createElement('span');
+    a.className = 'savelink';
+    a.textContent = '💾 Save to Files';
+    a.onclick = async () => {
+      a.textContent = 'Saving…';
+      const ok = await saveTextToFiles(prompt, '# ' + prompt + '\n\n' + answer, 'answer');
+      a.textContent = ok ? '✓ Saved to Files' : '⚠ Save failed';
+    };
+    const b = msgEl.querySelector('.bubble');
+    b.appendChild(document.createElement('br'));
+    b.appendChild(a);
+  }
+
   load();
   loadRetention();
   loadDrafts();
+  loadFiles();
 </script>
 </body>
 </html>
