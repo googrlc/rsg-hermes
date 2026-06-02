@@ -432,6 +432,16 @@ async def command_center_ask(req: AskRequest):
             ),
             "requires_confirmation": True,
         }
+    # Command-Center intents (renewals / at-risk) answer from live data first;
+    # the generic dispatcher would otherwise treat the question as a name search.
+    try:
+        from hermes.operations.command_center_qa import answer_question
+
+        cc_answer = answer_question(_get_supa(), prompt)
+        if cc_answer is not None:
+            return {"ok": True, "message": cc_answer, "source": "command-center"}
+    except Exception:
+        log.exception("command-center qa failed; falling back to dispatcher: %s", prompt)
     try:
         result = _get_dispatcher().dispatch(_get_espo(), prompt, confirmed=False)
         return {"ok": result.ok, "message": result.message, "data": result.data}

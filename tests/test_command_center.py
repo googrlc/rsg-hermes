@@ -300,6 +300,59 @@ class TestAskHermes:
         resp = client.post("/api/command-center/ask", json={"prompt": "  "})
         assert resp.status_code == 400
 
+    @patch("hermes.api._get_supa")
+    @patch("hermes.api._get_dispatcher")
+    def test_ask_renewal_question_uses_data_not_dispatcher(self, mock_disp, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [
+            {"id": "1", "policy_number": "Acme | General Liability | 9", "client_name": "Acme",
+             "expiration_date": (date.today() + timedelta(days=3)).isoformat(),
+             "premium_current": 5000, "risk_status": "CRITICAL"},
+        ]
+        mock_get_supa.return_value = supa
+        resp = client.post("/api/command-center/ask",
+                           json={"prompt": "Who renews this week and what should I do about each one?"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source"] == "command-center"
+        assert "Acme" in data["message"] and "renew" in data["message"].lower()
+        mock_disp.return_value.dispatch.assert_not_called()  # never hit the name-search dispatcher
+
+
+class TestCommandCenterQA:
+    TODAY = date(2026, 6, 2)
+
+    def _rows(self):
+        t = self.TODAY
+        return [
+            {"id": "1", "policy_number": "Acme | General Liability | 9", "client_name": "Acme",
+             "expiration_date": (t + timedelta(days=3)).isoformat(), "premium_current": 5000, "risk_status": "CRITICAL"},
+            {"id": "2", "policy_number": "Beta | Workers Comp | 8", "client_name": "Beta Inc",
+             "expiration_date": (t + timedelta(days=45)).isoformat(), "premium_current": 12000, "risk_status": "AT_RISK"},
+            {"id": "3", "policy_number": "Gamma | GL | 7", "client_name": "Gamma",
+             "expiration_date": (t + timedelta(days=200)).isoformat(), "premium_current": 9000, "risk_status": "SAFE"},
+        ]
+
+    def test_non_matching_prompt_returns_none(self):
+        from hermes.operations.command_center_qa import answer_question
+        supa = MagicMock()
+        assert answer_question(supa, "what's the weather", today=self.TODAY) is None
+        supa.select.assert_not_called()
+
+    def test_this_week_window(self):
+        from hermes.operations.command_center_qa import answer_question
+        supa = MagicMock(); supa.select.return_value = self._rows()
+        ans = answer_question(supa, "Who renews this week?", today=self.TODAY)
+        assert "next 7 days" in ans and "Acme" in ans and "Beta" not in ans
+
+    def test_at_risk_question(self):
+        from hermes.operations.command_center_qa import answer_question
+        supa = MagicMock(); supa.select.return_value = self._rows()
+        ans = answer_question(supa, "Which clients are most at risk of leaving?", today=self.TODAY)
+        # both CRITICAL + AT_RISK in 90d, biggest premium first
+        assert "Beta Inc" in ans and "Acme" in ans
+        assert ans.index("Beta Inc") < ans.index("Acme")
+
 
 class TestRenewalsEndpoint:
     @patch("hermes.api._get_supa")
