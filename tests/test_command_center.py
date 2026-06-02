@@ -277,6 +277,30 @@ class TestPhase2Endpoints:
         assert resp.json()["created"] == 1
 
 
+class TestAskHermes:
+    @patch("hermes.api._get_espo")
+    @patch("hermes.api._get_dispatcher")
+    def test_ask_routes_to_dispatcher(self, mock_disp, mock_espo, client) -> None:
+        from hermes.core.dispatcher import DispatchResult
+        mock_disp.return_value.dispatch.return_value = DispatchResult(True, "3D Pumps renews June 14.")
+        resp = client.post("/api/command-center/ask", json={"prompt": "When does 3D Pumps renew?"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True and "3D Pumps" in data["message"]
+        # confirmed=False enforced (read-only posture)
+        assert mock_disp.return_value.dispatch.call_args.kwargs["confirmed"] is False
+
+    def test_ask_blocks_write_intent(self, client) -> None:
+        resp = client.post("/api/command-center/ask", json={"prompt": "create a new lead for Acme Corp"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False and data["requires_confirmation"] is True
+
+    def test_ask_empty_prompt(self, client) -> None:
+        resp = client.post("/api/command-center/ask", json={"prompt": "  "})
+        assert resp.status_code == 400
+
+
 class TestRenewalsEndpoint:
     @patch("hermes.api._get_supa")
     def test_endpoint_returns_summary(self, mock_get_supa, client) -> None:

@@ -409,6 +409,37 @@ async def command_center_renewals():
     return summarize_renewals(rows)
 
 
+class AskRequest(BaseModel):
+    prompt: str
+
+
+@app.post("/api/command-center/ask")
+async def command_center_ask(req: AskRequest):
+    """Ask Hermes from the Command Center command bar (Phase 3).
+
+    Routes the prompt through the real dispatcher. Read-only posture: write-intent
+    prompts are never auto-confirmed — they return a nudge to use the proper flow.
+    """
+    prompt = (req.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Empty prompt.")
+    if requires_confirmation(prompt):
+        return {
+            "ok": False,
+            "message": (
+                "That looks like it would change CRM data. The command bar is read-only — "
+                "use the intake/approval flow for writes."
+            ),
+            "requires_confirmation": True,
+        }
+    try:
+        result = _get_dispatcher().dispatch(_get_espo(), prompt, confirmed=False)
+        return {"ok": result.ok, "message": result.message, "data": result.data}
+    except Exception as exc:
+        log.exception("command-center ask failed: %s", prompt)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @app.get("/api/command-center/retention")
 async def command_center_retention():
     """Latest retention snapshot for the loud Retention card (Phase 2)."""
