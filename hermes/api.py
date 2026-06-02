@@ -423,31 +423,36 @@ async def command_center_ask(req: AskRequest):
     prompt = (req.prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Empty prompt.")
-    if requires_confirmation(prompt):
-        return {
-            "ok": False,
-            "message": (
-                "That looks like it would change CRM data. The command bar is read-only — "
-                "use the intake/approval flow for writes."
-            ),
-            "requires_confirmation": True,
-        }
-    # Command-Center intents (renewals / at-risk) answer from live data first;
-    # the generic dispatcher would otherwise treat the question as a name search.
-    try:
-        from hermes.operations.command_center_qa import answer_question
 
-        cc_answer = answer_question(_get_supa(), prompt)
-        if cc_answer is not None:
-            return {"ok": True, "message": cc_answer, "source": "command-center"}
-    except Exception:
-        log.exception("command-center qa failed; falling back to dispatcher: %s", prompt)
+    dispatcher = _get_dispatcher()
+    # Full conversational agent (all Hermes skills, incl. renewals_overview). Writes
+    # are previewed only — confirmed=False is always passed, so nothing executes.
+    if getattr(dispatcher, "use_openai", False):
+        try:
+            result = dispatcher.dispatch(_get_espo(), prompt, confirmed=False)
+        except Exception as exc:
+            log.exception("command-center ask failed: %s", prompt)
+            raise HTTPException(status_code=502, detail=str(exc))
+        data = result.data if isinstance(result.data, dict) else None
+        return {
+            "ok": result.ok,
+            "message": result.message,
+            "data": result.data,
+            "requires_confirmation": bool(data.get("requires_confirmation")) if data else False,
+        }
+
+    # No LLM configured: deterministic grounded fallback for renewal/at-risk questions.
+    from hermes.operations.command_center_qa import answer_question
+
+    cc_answer = answer_question(_get_supa(), prompt, use_llm=False)
+    if cc_answer is not None:
+        return {"ok": True, "message": cc_answer, "source": "command-center"}
     try:
-        result = _get_dispatcher().dispatch(_get_espo(), prompt, confirmed=False)
-        return {"ok": result.ok, "message": result.message, "data": result.data}
+        result = dispatcher.dispatch(_get_espo(), prompt, confirmed=False)
     except Exception as exc:
         log.exception("command-center ask failed: %s", prompt)
         raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": result.ok, "message": result.message, "data": result.data}
 
 
 @app.get("/api/command-center/retention")
