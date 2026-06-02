@@ -409,6 +409,28 @@ async def command_center_renewals():
     return summarize_renewals(rows)
 
 
+@app.get("/api/command-center/tasks")
+async def command_center_tasks():
+    """Open team tasks (Gretchen/Lamar) in plain English, most urgent first."""
+    from hermes.operations.team_queue import group_by_assignee, list_open_tasks
+
+    tasks = list_open_tasks(_get_espo())
+    return {"tasks": tasks, "count": len(tasks), "by_assignee": group_by_assignee(tasks)}
+
+
+@app.post("/api/command-center/tasks/{task_id}/complete")
+async def command_center_complete_task(task_id: str):
+    """Mark a team task done (writes status=Completed back to EspoCRM)."""
+    from hermes.operations.team_queue import complete_task
+
+    try:
+        complete_task(_get_espo(), task_id)
+    except Exception as exc:
+        log.exception("complete task failed: %s", task_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "id": task_id, "status": "Completed"}
+
+
 @app.get("/api/command-center/skills")
 async def command_center_skills():
     """List Hermes's capabilities — live tools + domain playbooks."""
