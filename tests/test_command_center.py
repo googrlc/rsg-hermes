@@ -280,21 +280,16 @@ class TestPhase2Endpoints:
 class TestAskHermes:
     @patch("hermes.api._get_espo")
     @patch("hermes.api._get_dispatcher")
-    def test_ask_routes_to_dispatcher(self, mock_disp, mock_espo, client) -> None:
+    def test_ask_routes_to_full_agent(self, mock_disp, mock_espo, client) -> None:
         from hermes.core.dispatcher import DispatchResult
+        mock_disp.return_value.use_openai = True
         mock_disp.return_value.dispatch.return_value = DispatchResult(True, "3D Pumps renews June 14.")
         resp = client.post("/api/command-center/ask", json={"prompt": "When does 3D Pumps renew?"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True and "3D Pumps" in data["message"]
-        # confirmed=False enforced (read-only posture)
+        # writes preview only — confirmed=False always passed to the agent
         assert mock_disp.return_value.dispatch.call_args.kwargs["confirmed"] is False
-
-    def test_ask_blocks_write_intent(self, client) -> None:
-        resp = client.post("/api/command-center/ask", json={"prompt": "create a new lead for Acme Corp"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is False and data["requires_confirmation"] is True
 
     def test_ask_empty_prompt(self, client) -> None:
         resp = client.post("/api/command-center/ask", json={"prompt": "  "})
@@ -302,7 +297,9 @@ class TestAskHermes:
 
     @patch("hermes.api._get_supa")
     @patch("hermes.api._get_dispatcher")
-    def test_ask_renewal_question_uses_data_not_dispatcher(self, mock_disp, mock_get_supa, client) -> None:
+    def test_ask_no_llm_falls_back_to_grounded_renewals(self, mock_disp, mock_get_supa, client) -> None:
+        # No OpenAI key → deterministic grounded renewals answer, dispatcher not used.
+        mock_disp.return_value.use_openai = False
         supa = MagicMock()
         supa.select.return_value = [
             {"id": "1", "policy_number": "Acme | General Liability | 9", "client_name": "Acme",
@@ -316,7 +313,7 @@ class TestAskHermes:
         data = resp.json()
         assert data["source"] == "command-center"
         assert "Acme" in data["message"] and "renew" in data["message"].lower()
-        mock_disp.return_value.dispatch.assert_not_called()  # never hit the name-search dispatcher
+        mock_disp.return_value.dispatch.assert_not_called()
 
 
 class TestCommandCenterQA:
@@ -336,22 +333,48 @@ class TestCommandCenterQA:
     def test_non_matching_prompt_returns_none(self):
         from hermes.operations.command_center_qa import answer_question
         supa = MagicMock()
-        assert answer_question(supa, "what's the weather", today=self.TODAY) is None
+        assert answer_question(supa, "what's the weather", today=self.TODAY, use_llm=False) is None
         supa.select.assert_not_called()
 
     def test_this_week_window(self):
         from hermes.operations.command_center_qa import answer_question
         supa = MagicMock(); supa.select.return_value = self._rows()
-        ans = answer_question(supa, "Who renews this week?", today=self.TODAY)
+        ans = answer_question(supa, "Who renews this week?", today=self.TODAY, use_llm=False)
         assert "next 7 days" in ans and "Acme" in ans and "Beta" not in ans
 
     def test_at_risk_question(self):
         from hermes.operations.command_center_qa import answer_question
         supa = MagicMock(); supa.select.return_value = self._rows()
-        ans = answer_question(supa, "Which clients are most at risk of leaving?", today=self.TODAY)
+        ans = answer_question(supa, "Which clients are most at risk of leaving?", today=self.TODAY, use_llm=False)
         # both CRITICAL + AT_RISK in 90d, biggest premium first
         assert "Beta Inc" in ans and "Acme" in ans
         assert ans.index("Beta Inc") < ans.index("Acme")
+
+    def test_renewals_facts_scope(self):
+        from hermes.operations.command_center_qa import renewals_facts
+        supa = MagicMock(); supa.select.return_value = self._rows()
+        upc = renewals_facts(supa, scope="upcoming", within_days=7, today=self.TODAY)
+        assert "Acme" in upc and "Beta" not in upc
+        risk = renewals_facts(supa, scope="at_risk", today=self.TODAY)
+        assert "Beta Inc" in risk and "Gamma" not in risk  # SAFE excluded
+
+
+class TestNlAgentRenewalsTool:
+    def test_renewals_tool_registered_and_executes(self):
+        from hermes.core.nl_agent import _EXECUTORS, _TOOLS
+        names = {t["function"]["name"] for t in _TOOLS}
+        assert "renewals_overview" in names and "renewals_overview" in _EXECUTORS
+
+        with patch("hermes.integrations.supabase_client.SupabaseClient") as cls:
+            inst = MagicMock()
+            inst.select.return_value = [
+                {"id": "1", "policy_number": "Acme | GL | 9", "client_name": "Acme",
+                 "expiration_date": (date.today() + timedelta(days=5)).isoformat(),
+                 "premium_current": 5000, "risk_status": "CRITICAL"},
+            ]
+            cls.return_value = inst
+            res = _EXECUTORS["renewals_overview"](None, {"scope": "upcoming", "within_days": 30})
+            assert res.ok and "Acme" in res.message
 
 
 class TestRenewalsEndpoint:

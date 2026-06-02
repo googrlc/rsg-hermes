@@ -153,6 +153,34 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "renewals_overview",
+            "description": (
+                "Upcoming policy renewals and at-risk/retention clients from the Project 85 "
+                "renewal watchlist (classified risk + premium). Use for 'who renews this week/"
+                "month', 'what's coming up for renewal', 'who's at risk of leaving', 'retention', "
+                "'who should I save', 'the save-list'. Returns clients with premium, days until "
+                "renewal, and risk status."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["scope"],
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["upcoming", "at_risk"],
+                        "description": "upcoming = renewals due soon; at_risk = CRITICAL/AT_RISK clients.",
+                    },
+                    "within_days": {
+                        "type": "integer",
+                        "description": "Window for upcoming renewals (7=this week, 30=this month). Default 30.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_record",
             "description": (
                 "Create a new CRM record (Contact, Lead, Account, Opportunity, Task). "
@@ -276,6 +304,7 @@ Your capabilities:
 - Search and look up any CRM record (Account, Contact, Lead, Opportunity, Policy, Task)
 - Retrieve specific field values (FEIN, DOT number, phone, email, premium, etc.)
 - Run reports (pipeline, KPIs, stale leads, renewals, data quality, commissions)
+- Show upcoming renewals and at-risk/retention clients (Project 85 watchlist) via renewals_overview
 - Create new records (contacts, leads, accounts, opportunities, tasks)
 - Update existing records
 - Process casual lead intake (dictated meeting notes → structured CRM entries)
@@ -292,6 +321,7 @@ Field aliases you should know:
 When the user asks about a company or person, search the appropriate entity.
 When they ask for a specific data point, use get_field_value.
 When they ask for a report or overview, use run_report.
+When they ask who renews soon, who's at risk, retention, or the save-list, use renewals_overview.
 When they describe meeting someone or dictate lead info, use intake_lead.
 For questions you can answer from CRM data, always use a tool — never guess.
 If a search returns multiple matches, present them clearly.
@@ -366,6 +396,19 @@ def _exec_report(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
 def _exec_total_premium(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
     from hermes.commands.lookup import handle
     return handle(client, f"total premium for {args['account_name']}")
+
+
+def _exec_renewals(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes.operations.command_center_qa import renewals_facts
+
+    scope = args.get("scope", "upcoming")
+    within = int(args.get("within_days") or 30)
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:
+        return DispatchResult(False, f"Renewal data unavailable: {exc}")
+    return DispatchResult(True, renewals_facts(supa, scope=scope, within_days=within))
 
 
 def _exec_create(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
@@ -451,6 +494,7 @@ _EXECUTORS: dict[str, Any] = {
     "get_field_value": _exec_get_field,
     "run_report": _exec_report,
     "total_premium": _exec_total_premium,
+    "renewals_overview": _exec_renewals,
     "create_record": _exec_create,
     "update_record": _exec_update,
     "intake_lead": _exec_intake,
