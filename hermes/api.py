@@ -15,7 +15,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -409,6 +409,66 @@ async def command_center_renewals():
     return summarize_renewals(rows)
 
 
+@app.get("/api/command-center/skills")
+async def command_center_skills():
+    """List Hermes's capabilities — live tools + domain playbooks."""
+    from hermes.operations.skills_catalog import catalog
+
+    return catalog()
+
+
+class FileSaveRequest(BaseModel):
+    title: str
+    content: str
+    kind: str = "note"
+    content_type: str = "text/markdown"
+    file_ext: str = "md"
+
+
+@app.post("/api/command-center/files")
+async def command_center_save_file(req: FileSaveRequest):
+    """Save a file Hermes created (note/report/answer/save-list) for the Files panel."""
+    from hermes.operations.files_store import save_file
+
+    if not (req.content or "").strip():
+        raise HTTPException(status_code=400, detail="Empty content.")
+    try:
+        return save_file(
+            _get_supa(),
+            title=req.title,
+            content=req.content,
+            kind=req.kind,
+            content_type=req.content_type,
+            file_ext=req.file_ext,
+        )
+    except Exception as exc:
+        log.exception("save file failed: %s", req.title)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/command-center/files")
+async def command_center_list_files():
+    """List files Hermes has created (newest first)."""
+    from hermes.operations.files_store import list_files
+
+    return {"files": list_files(_get_supa())}
+
+
+@app.get("/api/command-center/files/{file_id}/download")
+async def command_center_download_file(file_id: str):
+    """Download a Hermes file as an attachment."""
+    from hermes.operations.files_store import download_filename, get_file
+
+    row = get_file(_get_supa(), file_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="File not found.")
+    return Response(
+        content=row.get("content") or "",
+        media_type=row.get("content_type") or "text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{download_filename(row)}"'},
+    )
+
+
 class AskRequest(BaseModel):
     prompt: str
 
@@ -437,10 +497,14 @@ async def command_center_ask(req: AskRequest):
         except Exception:
             log.exception("command-center renewals answer failed; using dispatcher: %s", prompt)
 
-    # Everything else → full Hermes dispatcher (all skills + conversational agent).
-    # confirmed=False → any write intent is previewed, never executed.
+    # Everything else → the conversational agent directly (knows it's Lamar at RSG;
+    # has CRM lookups, reports, renewals, and web_research). Going straight to the
+    # agent avoids the dispatcher's "who/what/find" route hijacking natural questions
+    # into a name search. confirmed=False → any write intent is previewed, never run.
+    from hermes.core.nl_agent import ask as nl_ask
+
     try:
-        result = _get_dispatcher().dispatch(_get_espo(), prompt, confirmed=False)
+        result = nl_ask(_get_espo(), prompt, confirmed=False)
     except Exception as exc:
         log.exception("command-center ask failed: %s", prompt)
         raise HTTPException(status_code=502, detail=str(exc))

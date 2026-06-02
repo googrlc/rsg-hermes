@@ -279,16 +279,16 @@ class TestPhase2Endpoints:
 
 class TestAskHermes:
     @patch("hermes.api._get_espo")
-    @patch("hermes.api._get_dispatcher")
-    def test_ask_non_renewal_routes_to_dispatcher(self, mock_disp, mock_espo, client) -> None:
+    @patch("hermes.core.nl_agent.ask")
+    def test_ask_non_renewal_routes_to_agent(self, mock_ask, mock_espo, client) -> None:
         from hermes.core.dispatcher import DispatchResult
-        mock_disp.return_value.dispatch.return_value = DispatchResult(True, "We have 554 accounts.")
+        mock_ask.return_value = DispatchResult(True, "We have 554 accounts.")
         resp = client.post("/api/command-center/ask", json={"prompt": "How many accounts do we have?"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True and "554" in data["message"]
-        # writes preview only — confirmed=False always passed to the agent
-        assert mock_disp.return_value.dispatch.call_args.kwargs["confirmed"] is False
+        # conversational agent, writes previewed only
+        assert mock_ask.call_args.kwargs["confirmed"] is False
 
     def test_ask_empty_prompt(self, client) -> None:
         resp = client.post("/api/command-center/ask", json={"prompt": "  "})
@@ -357,12 +357,68 @@ class TestCommandCenterQA:
         assert "Beta Inc" in risk and "Gamma" not in risk  # SAFE excluded
 
 
-class TestNlAgentRenewalsTool:
-    def test_renewals_tool_registered_and_executes(self):
+class TestFilesStore:
+    def test_save_file_rejects_empty(self):
+        from hermes.operations.files_store import save_file
+        supa = MagicMock()
+        with pytest.raises(ValueError):
+            save_file(supa, title="x", content="   ")
+        supa.insert.assert_not_called()
+
+    def test_save_file_normalises(self):
+        from hermes.operations.files_store import save_file
+        supa = MagicMock(); supa.insert.side_effect = lambda t, row: {**row, "id": "f1"}
+        out = save_file(supa, title="My Note", content="hi", kind="bogus")
+        assert out["kind"] == "other" and supa.insert.call_args[0][0] == "hermes_files"
+
+    def test_download_filename_sanitises(self):
+        from hermes.operations.files_store import download_filename
+        assert download_filename({"title": "Save list: at-risk!", "file_ext": "md"}) == "Save_list_at-risk.md"
+        assert download_filename({"title": None}).endswith(".md")
+
+
+class TestFilesEndpoints:
+    @patch("hermes.api._get_supa")
+    def test_save_and_list(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        supa.insert.side_effect = lambda t, row: {**row, "id": "f1"}
+        supa.select.return_value = [{"id": "f1", "title": "Note", "kind": "note",
+                                     "content_type": "text/markdown", "file_ext": "md",
+                                     "source": "command-center", "created_by": "hermes",
+                                     "created_at": "2026-06-02"}]
+        mock_get_supa.return_value = supa
+        r = client.post("/api/command-center/files", json={"title": "Note", "content": "hello"})
+        assert r.status_code == 200 and r.json()["id"] == "f1"
+        r2 = client.get("/api/command-center/files")
+        assert r2.status_code == 200 and r2.json()["files"][0]["title"] == "Note"
+
+    @patch("hermes.api._get_supa")
+    def test_download_sets_attachment_header(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [{"id": "f1", "title": "At Risk", "content": "# body",
+                                     "content_type": "text/markdown", "file_ext": "md"}]
+        mock_get_supa.return_value = supa
+        r = client.get("/api/command-center/files/f1/download")
+        assert r.status_code == 200
+        assert r.text == "# body"
+        assert 'attachment; filename="At_Risk.md"' in r.headers["content-disposition"]
+
+    @patch("hermes.api._get_supa")
+    def test_download_404(self, mock_get_supa, client) -> None:
+        supa = MagicMock(); supa.select.return_value = []
+        mock_get_supa.return_value = supa
+        assert client.get("/api/command-center/files/missing/download").status_code == 404
+
+
+class TestNlAgentTools:
+    def test_core_tools_registered(self):
         from hermes.core.nl_agent import _EXECUTORS, _TOOLS
         names = {t["function"]["name"] for t in _TOOLS}
-        assert "renewals_overview" in names and "renewals_overview" in _EXECUTORS
+        for tool in ("renewals_overview", "web_research", "list_skills"):
+            assert tool in names and tool in _EXECUTORS
 
+    def test_renewals_tool_executes(self):
+        from hermes.core.nl_agent import _EXECUTORS
         with patch("hermes.integrations.supabase_client.SupabaseClient") as cls:
             inst = MagicMock()
             inst.select.return_value = [
@@ -373,6 +429,28 @@ class TestNlAgentRenewalsTool:
             cls.return_value = inst
             res = _EXECUTORS["renewals_overview"](None, {"scope": "upcoming", "within_days": 30})
             assert res.ok and "Acme" in res.message
+
+    def test_list_skills_tool(self):
+        from hermes.core.nl_agent import _EXECUTORS
+        res = _EXECUTORS["list_skills"](None, {})
+        assert res.ok and "tools I can run" in res.message
+
+
+class TestSkillsCatalog:
+    def test_catalog_lists_tools_and_skills(self):
+        from hermes.operations.skills_catalog import catalog
+        cat = catalog()
+        names = {t["name"] for t in cat["runtime_tools"]}
+        assert {"renewals_overview", "web_research", "list_skills"} <= names
+        assert cat["counts"]["runtime_tools"] >= 8
+        # domain skills are read from .claude/skills (present in repo)
+        assert cat["counts"]["domain_skills"] >= 1
+
+    def test_skills_endpoint(self, client):
+        resp = client.get("/api/command-center/skills")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "runtime_tools" in body and "domain_skills" in body
 
 
 class TestRenewalsEndpoint:
