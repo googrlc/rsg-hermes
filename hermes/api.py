@@ -409,6 +409,46 @@ async def command_center_renewals():
     return summarize_renewals(rows)
 
 
+@app.get("/api/command-center/retention")
+async def command_center_retention():
+    """Latest retention snapshot for the loud Retention card (Phase 2)."""
+    supa = _get_supa()
+    snap = supa.select("agency_snapshots", params={"order": "snapshot_date.desc"}, limit=1)
+    s = snap[0] if snap else {}
+    return {
+        "retention_rate": s.get("retention_rate"),
+        "snapshot_date": s.get("snapshot_date"),
+        "benchmark": 84.0,
+        "active_premium": s.get("active_premium"),
+        "client_count": s.get("client_count"),
+        "policy_count": s.get("policy_count"),
+    }
+
+
+class SaveListRequest(BaseModel):
+    limit: int = 10
+    within_days: int = 60
+
+
+@app.post("/api/command-center/save-list")
+async def command_center_build_save_list(req: SaveListRequest):
+    """Build + stage a retention save-list (top at-risk renewals → DRAFT outreach).
+
+    Writes DRAFT rows only; nothing is auto-sent. The sole write action in Phase 2.
+    """
+    from hermes.operations.save_list import create_save_list
+
+    return create_save_list(_get_supa(), limit=req.limit, within_days=req.within_days)
+
+
+@app.get("/api/command-center/save-list")
+async def command_center_list_save_list():
+    """Open (DRAFT) outreach awaiting human review/send."""
+    from hermes.operations.save_list import list_open_drafts
+
+    return {"drafts": list_open_drafts(_get_supa())}
+
+
 @app.get("/api/hermes/sync-health")
 async def sync_health():
     """Queue-centric health snapshot for dashboard SyncHealthCheck component."""
