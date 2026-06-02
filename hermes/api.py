@@ -424,35 +424,33 @@ async def command_center_ask(req: AskRequest):
     if not prompt:
         raise HTTPException(status_code=400, detail="Empty prompt.")
 
-    dispatcher = _get_dispatcher()
-    # Full conversational agent (all Hermes skills, incl. renewals_overview). Writes
-    # are previewed only — confirmed=False is always passed, so nothing executes.
-    if getattr(dispatcher, "use_openai", False):
+    # Renewal/at-risk questions: answer conversationally from grounded data. The
+    # dispatcher's "who/what/find" route would otherwise treat "who renews this
+    # week" as a name search.
+    from hermes.operations.command_center_qa import answer_question, is_renewal_intent
+
+    if is_renewal_intent(prompt):
         try:
-            result = dispatcher.dispatch(_get_espo(), prompt, confirmed=False)
-        except Exception as exc:
-            log.exception("command-center ask failed: %s", prompt)
-            raise HTTPException(status_code=502, detail=str(exc))
-        data = result.data if isinstance(result.data, dict) else None
-        return {
-            "ok": result.ok,
-            "message": result.message,
-            "data": result.data,
-            "requires_confirmation": bool(data.get("requires_confirmation")) if data else False,
-        }
+            cc_answer = answer_question(_get_supa(), prompt)
+            if cc_answer is not None:
+                return {"ok": True, "message": cc_answer, "source": "command-center"}
+        except Exception:
+            log.exception("command-center renewals answer failed; using dispatcher: %s", prompt)
 
-    # No LLM configured: deterministic grounded fallback for renewal/at-risk questions.
-    from hermes.operations.command_center_qa import answer_question
-
-    cc_answer = answer_question(_get_supa(), prompt, use_llm=False)
-    if cc_answer is not None:
-        return {"ok": True, "message": cc_answer, "source": "command-center"}
+    # Everything else → full Hermes dispatcher (all skills + conversational agent).
+    # confirmed=False → any write intent is previewed, never executed.
     try:
-        result = dispatcher.dispatch(_get_espo(), prompt, confirmed=False)
+        result = _get_dispatcher().dispatch(_get_espo(), prompt, confirmed=False)
     except Exception as exc:
         log.exception("command-center ask failed: %s", prompt)
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": result.ok, "message": result.message, "data": result.data}
+    data = result.data if isinstance(result.data, dict) else None
+    return {
+        "ok": result.ok,
+        "message": result.message,
+        "data": result.data,
+        "requires_confirmation": bool(data.get("requires_confirmation")) if data else False,
+    }
 
 
 @app.get("/api/command-center/retention")

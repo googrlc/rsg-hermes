@@ -96,6 +96,12 @@ def renewals_facts(
     return f"{len(items)} {label} ({_money(total)} premium at stake):\n{lines}"
 
 
+def is_renewal_intent(prompt: str) -> bool:
+    """True when the prompt is about renewals or at-risk/retention clients."""
+    p = (prompt or "").lower()
+    return any(k in p for k in RENEWAL_KEYWORDS) or any(k in p for k in RISK_KEYWORDS)
+
+
 def _retrieve(supa, prompt: str, today: date) -> str | None:
     p = (prompt or "").lower()
     is_renewal = any(k in p for k in RENEWAL_KEYWORDS)
