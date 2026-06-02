@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 log = logging.getLogger(__name__)
@@ -55,6 +57,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Agency Command Center static UI (served at /command-center/).
+# Lives under hermes/webui/ and is bind-mounted in the container, so edits go
+# live; only new API routes need an `up -d hermes-api` recreate.
+_WEBUI_DIR = Path(__file__).parent / "webui"
+if _WEBUI_DIR.is_dir():
+    app.mount(
+        "/command-center",
+        StaticFiles(directory=str(_WEBUI_DIR), html=True),
+        name="command-center",
+    )
 
 _espo = None
 _dispatcher = None
@@ -372,6 +385,28 @@ async def dashboard_dispatch(req: DispatchRequest):
 async def openclaw_enqueue(req: OpenClawEnqueueRequest):
     """Dedicated OpenClaw producer endpoint (same contract as ai_enrichment on /api/hermes/dispatch)."""
     return _accept_openclaw_enqueue(req)
+
+
+@app.get("/api/command-center/renewals")
+async def command_center_renewals():
+    """Live Renewals Cockpit data (Command Center, Phase 1).
+
+    Server-side, service-role read of ``project_85_renewals`` aggregated into
+    urgency buckets + the next-90-day list. No anon key ever reaches the browser.
+    """
+    from hermes.operations.renewal_tracker import summarize_renewals
+
+    supa = _get_supa()
+    rows = supa.select(
+        "project_85_renewals",
+        columns=(
+            "id,policy_number,client_name,expiration_date,premium_current,"
+            "premium_renewal,increase_percentage,risk_status,ai_strategy_notes,last_contact_date"
+        ),
+        params={"order": "expiration_date.asc"},
+        limit=1000,
+    )
+    return summarize_renewals(rows)
 
 
 @app.get("/api/hermes/sync-health")

@@ -114,6 +114,100 @@ def get_renewals_expiring_within(
     )
 
 
+# ---------------------------------------------------------------------------
+# Command Center — Renewals Cockpit (Phase 1)
+# ---------------------------------------------------------------------------
+
+# Buckets are ordered most-urgent-first; ``upcoming`` covers the next 90 days.
+RENEWAL_BUCKETS = ("past_due", "le7", "le30", "le60", "le90", "gt90", "no_date")
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _bucket_for(days_until: int | None) -> str:
+    if days_until is None:
+        return "no_date"
+    if days_until < 0:
+        return "past_due"
+    if days_until <= 7:
+        return "le7"
+    if days_until <= 30:
+        return "le30"
+    if days_until <= 60:
+        return "le60"
+    if days_until <= 90:
+        return "le90"
+    return "gt90"
+
+
+def summarize_renewals(
+    rows: list[dict[str, Any]],
+    *,
+    today: date | None = None,
+) -> dict[str, Any]:
+    """Pure aggregation for the Command Center Renewals Cockpit.
+
+    Given raw ``project_85_renewals`` rows, returns urgency buckets (with counts
+    and summed current premium) plus a list of renewals expiring in the next 90
+    days, sorted by urgency then premium. No network — safe to unit-test.
+    """
+    today = today or date.today()
+    buckets = {b: {"count": 0, "premium_current": 0.0} for b in RENEWAL_BUCKETS}
+    upcoming: list[dict[str, Any]] = []
+
+    for row in rows:
+        exp = _parse_iso_date(row.get("expiration_date"))
+        days_until = (exp - today).days if exp is not None else None
+        bucket = _bucket_for(days_until)
+        premium = _as_float(row.get("premium_current")) or 0.0
+        buckets[bucket]["count"] += 1
+        buckets[bucket]["premium_current"] += premium
+
+        if days_until is not None and 0 <= days_until <= 90:
+            upcoming.append(
+                {
+                    "id": row.get("id"),
+                    "client_name": row.get("client_name"),
+                    "policy_number": row.get("policy_number"),
+                    "expiration_date": exp.isoformat() if exp else None,
+                    "days_until": days_until,
+                    "premium_current": _as_float(row.get("premium_current")),
+                    "premium_renewal": _as_float(row.get("premium_renewal")),
+                    "increase_percentage": _as_float(row.get("increase_percentage")),
+                    "risk_status": row.get("risk_status"),
+                    "ai_strategy_notes": row.get("ai_strategy_notes"),
+                    "last_contact_date": row.get("last_contact_date"),
+                }
+            )
+
+    upcoming.sort(key=lambda r: (r["days_until"], -(r["premium_current"] or 0.0)))
+    for stats in buckets.values():
+        stats["premium_current"] = round(stats["premium_current"], 2)
+
+    return {
+        "as_of": today.isoformat(),
+        "buckets": buckets,
+        "upcoming": upcoming,
+        "upcoming_count": len(upcoming),
+        "past_due_count": buckets["past_due"]["count"],
+        "total": len(rows),
+    }
+
+
 def escalate_risk(
     supa: SupabaseClient,
     *,
