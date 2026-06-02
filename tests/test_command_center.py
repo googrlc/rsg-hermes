@@ -280,14 +280,13 @@ class TestPhase2Endpoints:
 class TestAskHermes:
     @patch("hermes.api._get_espo")
     @patch("hermes.api._get_dispatcher")
-    def test_ask_routes_to_full_agent(self, mock_disp, mock_espo, client) -> None:
+    def test_ask_non_renewal_routes_to_dispatcher(self, mock_disp, mock_espo, client) -> None:
         from hermes.core.dispatcher import DispatchResult
-        mock_disp.return_value.use_openai = True
-        mock_disp.return_value.dispatch.return_value = DispatchResult(True, "3D Pumps renews June 14.")
-        resp = client.post("/api/command-center/ask", json={"prompt": "When does 3D Pumps renew?"})
+        mock_disp.return_value.dispatch.return_value = DispatchResult(True, "We have 554 accounts.")
+        resp = client.post("/api/command-center/ask", json={"prompt": "How many accounts do we have?"})
         assert resp.status_code == 200
         data = resp.json()
-        assert data["ok"] is True and "3D Pumps" in data["message"]
+        assert data["ok"] is True and "554" in data["message"]
         # writes preview only — confirmed=False always passed to the agent
         assert mock_disp.return_value.dispatch.call_args.kwargs["confirmed"] is False
 
@@ -295,11 +294,10 @@ class TestAskHermes:
         resp = client.post("/api/command-center/ask", json={"prompt": "  "})
         assert resp.status_code == 400
 
+    @patch("hermes.operations.command_center_qa._llm_answer", return_value=None)
     @patch("hermes.api._get_supa")
     @patch("hermes.api._get_dispatcher")
-    def test_ask_no_llm_falls_back_to_grounded_renewals(self, mock_disp, mock_get_supa, client) -> None:
-        # No OpenAI key → deterministic grounded renewals answer, dispatcher not used.
-        mock_disp.return_value.use_openai = False
+    def test_ask_renewal_intent_answered_from_data(self, mock_disp, mock_get_supa, _no_llm, client) -> None:
         supa = MagicMock()
         supa.select.return_value = [
             {"id": "1", "policy_number": "Acme | General Liability | 9", "client_name": "Acme",
@@ -313,7 +311,7 @@ class TestAskHermes:
         data = resp.json()
         assert data["source"] == "command-center"
         assert "Acme" in data["message"] and "renew" in data["message"].lower()
-        mock_disp.return_value.dispatch.assert_not_called()
+        mock_disp.return_value.dispatch.assert_not_called()  # renewals never hit the name-search route
 
 
 class TestCommandCenterQA:
