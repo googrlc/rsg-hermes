@@ -102,6 +102,32 @@
   .rpill b{font-family:var(--mono)}
   .rpill .pdot{width:7px;height:7px;border-radius:50%}
   .rpill .pm{color:var(--muted-2);font-family:var(--mono);font-size:10px}
+  /* view tabs + chat + command bar (Phase 3) */
+  .viewtabs{display:flex;gap:4px;padding:10px 20px 0;background:var(--bg);flex-shrink:0}
+  .vtab{font-size:12px;font-weight:500;padding:8px 15px;border-radius:9px 9px 0 0;color:var(--muted);cursor:pointer;border:1px solid transparent;border-bottom:none;display:flex;align-items:center;gap:7px}
+  .vtab:hover{color:var(--text)}
+  .vtab.on{background:var(--panel);color:var(--text);border-color:var(--border)}
+  .chat{display:flex;flex-direction:column;height:100%}
+  .msgs{flex:1;overflow-y:auto;padding:6px 2px}
+  .msg{display:flex;gap:11px;margin-bottom:16px;max-width:760px}
+  .msg.me{margin-left:auto;flex-direction:row-reverse}
+  .ava{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-weight:700;font-size:12px;flex-shrink:0}
+  .ava.h{background:linear-gradient(135deg,#fb923c,#f97316);color:#1a1a2e}
+  .ava.u{background:#2b375e;color:var(--text)}
+  .bubble{font-size:13px;line-height:1.6;color:#cfd6e6;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 13px;white-space:pre-wrap}
+  .msg.me .bubble{background:#1d2a4d;border-color:#34457a}
+  .bubble.think{color:var(--muted)}
+  .chat-empty{color:var(--muted-2);text-align:center;padding:30px 0;font-size:12.5px}
+  .cmdbar{flex-shrink:0;border-top:1px solid var(--border);background:var(--sidebar);padding:11px 18px 13px}
+  .quick{display:flex;gap:7px;margin-bottom:9px;flex-wrap:wrap}
+  .qbtn{font-size:11px;padding:5px 11px;border-radius:20px;border:1px solid var(--border);background:#141d36;color:var(--muted);cursor:pointer}
+  .qbtn:hover{color:var(--text);border-color:var(--teal);background:#16213e}
+  .cmdbox{display:flex;align-items:center;gap:10px;background:#0e1526;border:1px solid var(--border);border-radius:11px;padding:11px 14px}
+  .cmdbox:focus-within{border-color:var(--teal);box-shadow:0 0 0 3px #2dd4bf1a}
+  .cmdbox .hi{color:var(--orange);font-weight:700;font-family:var(--mono);font-size:13px}
+  .cmdbox input{flex:1;background:none;border:none;outline:none;color:var(--text);font-family:var(--sans);font-size:13px}
+  .cmdbox input::placeholder{color:var(--muted-2)}
+  .cmdbox .send{color:var(--teal);cursor:pointer;font-size:15px}
   .empty,.err{color:var(--muted);font-size:12.5px;padding:18px 0;text-align:center}
   .err{color:#ff9aa6}
   .note{font-size:11px;color:var(--muted-2);line-height:1.6;padding:4px 2px}
@@ -126,7 +152,13 @@
       <span class="tag live">● live data</span>
     </div>
 
+    <div class="viewtabs">
+      <div class="vtab on" id="tab-dash" onclick="setView('dash')">⊞ Command Center</div>
+      <div class="vtab" id="tab-chat" onclick="setView('chat')">💬 Ask Hermes</div>
+    </div>
+
     <div class="view">
+     <section id="view-dash">
       <div class="dash-hd">
         <div class="t">Renewals Cockpit
           <small>Protecting the book — every policy renewing in the next 90 days, most urgent first. Source: <code>project_85_renewals</code>.</small>
@@ -163,6 +195,27 @@
         <button class="savebtn" id="savebtn" onclick="buildSaveList()">→ Build the save-list (top at-risk renewals, draft outreach)</button>
         <div id="drafts"></div>
         <div class="note" style="margin-top:8px">Drafts are staged for your review — <b>nothing is sent automatically</b>. Edit and send each manually.</div>
+      </div>
+     </section>
+
+     <section id="view-chat" class="chat" style="display:none">
+       <div class="msgs" id="msgs">
+         <div class="chat-empty">Ask Hermes about renewals, clients, quotes, or the book — answers come from the live CRM. Read-only: writes go through the proper approval flow.</div>
+       </div>
+     </section>
+    </div>
+
+    <div class="cmdbar">
+      <div class="quick">
+        <span class="qbtn" onclick="ask(&quot;Who renews this week and what should I do about each one?&quot;)">🔄 This week's renewals</span>
+        <span class="qbtn" onclick="ask(&quot;Which of my clients are most at risk of leaving and why?&quot;)">🩸 Who's at risk?</span>
+        <span class="qbtn" onclick="ask(&quot;What should Gretchen work on next?&quot;)">✅ Gretchen's next task</span>
+        <span class="qbtn" onclick="ask(&quot;What open opportunities should I be selling this week?&quot;)">💰 What can I sell now?</span>
+      </div>
+      <div class="cmdbox">
+        <span class="hi">H›</span>
+        <input id="cmd" placeholder="Ask Hermes anything — renewals, quotes, CRM, the whole book…" onkeydown="if(event.key==='Enter'){ask(this.value)}" />
+        <span class="send" onclick="ask(document.getElementById('cmd').value)">➤</span>
       </div>
     </div>
   </main>
@@ -320,6 +373,57 @@
       const d = await r.json();
       renderDrafts(d.drafts);
     } catch (e) { /* ignore */ }
+  }
+
+  // ---- Phase 3: Ask Hermes command bar ----
+  function setView(v) {
+    const dash = v !== 'chat';
+    document.getElementById('view-dash').style.display = dash ? '' : 'none';
+    document.getElementById('view-chat').style.display = dash ? 'none' : 'flex';
+    document.getElementById('tab-dash').classList.toggle('on', dash);
+    document.getElementById('tab-chat').classList.toggle('on', !dash);
+  }
+
+  function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+  function appendMsg(who, text, cls) {
+    const msgs = document.getElementById('msgs');
+    const empty = msgs.querySelector('.chat-empty');
+    if (empty) empty.remove();
+    const me = who === 'me';
+    const el = document.createElement('div');
+    el.className = 'msg' + (me ? ' me' : '');
+    el.innerHTML = '<div class="ava ' + (me ? 'u' : 'h') + '">' + (me ? 'You' : 'H') + '</div>'
+      + '<div class="bubble ' + (cls || '') + '">' + esc(text) + '</div>';
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
+    return el;
+  }
+
+  let asking = false;
+  async function ask(prompt) {
+    prompt = (prompt || '').trim();
+    if (!prompt || asking) return;
+    asking = true;
+    setView('chat');
+    document.getElementById('cmd').value = '';
+    appendMsg('me', prompt);
+    const thinking = appendMsg('hermes', 'Hermes is thinking…', 'think');
+    try {
+      const r = await fetch('/api/command-center/ask', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({prompt}),
+      });
+      const d = await r.json();
+      const msg = d.message || (d.detail ? ('Error: ' + d.detail) : 'No response.');
+      thinking.querySelector('.bubble').classList.remove('think');
+      thinking.querySelector('.bubble').textContent = msg;
+    } catch (e) {
+      thinking.querySelector('.bubble').textContent = '⚠ Could not reach Hermes: ' + e.message;
+    } finally {
+      asking = false;
+      document.getElementById('msgs').scrollTop = document.getElementById('msgs').scrollHeight;
+    }
   }
 
   load();
