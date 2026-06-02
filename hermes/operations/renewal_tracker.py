@@ -167,6 +167,9 @@ def summarize_renewals(
     """
     today = today or date.today()
     buckets = {b: {"count": 0, "premium_current": 0.0} for b in RENEWAL_BUCKETS}
+    by_risk: dict[str, dict[str, Any]] = {
+        s: {"count": 0, "premium_current": 0.0} for s in VALID_RISK_STATUSES
+    }
     upcoming: list[dict[str, Any]] = []
 
     for row in rows:
@@ -176,6 +179,11 @@ def summarize_renewals(
         premium = _as_float(row.get("premium_current")) or 0.0
         buckets[bucket]["count"] += 1
         buckets[bucket]["premium_current"] += premium
+
+        risk = row.get("risk_status")
+        if risk in by_risk:
+            by_risk[risk]["count"] += 1
+            by_risk[risk]["premium_current"] += premium
 
         if days_until is not None and 0 <= days_until <= 90:
             upcoming.append(
@@ -197,10 +205,13 @@ def summarize_renewals(
     upcoming.sort(key=lambda r: (r["days_until"], -(r["premium_current"] or 0.0)))
     for stats in buckets.values():
         stats["premium_current"] = round(stats["premium_current"], 2)
+    for stats in by_risk.values():
+        stats["premium_current"] = round(stats["premium_current"], 2)
 
     return {
         "as_of": today.isoformat(),
         "buckets": buckets,
+        "by_risk": by_risk,
         "upcoming": upcoming,
         "upcoming_count": len(upcoming),
         "past_due_count": buckets["past_due"]["count"],

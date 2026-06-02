@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes.api import app
+from hermes.operations.renewal_classifier import classify_risk, refresh_renewals
 from hermes.operations.renewal_tracker import summarize_renewals
 
 
@@ -85,6 +86,104 @@ class TestSummarizeRenewals:
     def test_handles_empty(self) -> None:
         out = summarize_renewals([], today=date(2026, 6, 2))
         assert out["total"] == 0 and out["upcoming"] == [] and out["past_due_count"] == 0
+
+    def test_by_risk_tally(self) -> None:
+        today = date(2026, 6, 2)
+        rows = [
+            {"risk_status": "LAPSED", "premium_current": 1000,
+             "expiration_date": (today - timedelta(days=5)).isoformat()},
+            {"risk_status": "CRITICAL", "premium_current": 2000,
+             "expiration_date": (today + timedelta(days=10)).isoformat()},
+            {"risk_status": "SAFE", "premium_current": 500,
+             "expiration_date": (today + timedelta(days=200)).isoformat()},
+        ]
+        out = summarize_renewals(rows, today=today)
+        assert out["by_risk"]["LAPSED"]["count"] == 1
+        assert out["by_risk"]["CRITICAL"]["premium_current"] == 2000
+        assert out["by_risk"]["RENEWED"]["count"] == 0
+
+
+class TestClassifyRisk:
+    TODAY = date(2026, 6, 2)
+
+    def _c(self, status, days, **kw):
+        exp = (self.TODAY + timedelta(days=days)).isoformat() if days is not None else None
+        return classify_risk(policy_status=status, expiration_date=exp, today=self.TODAY, **kw)
+
+    def test_terminal_states_from_policy_status(self) -> None:
+        assert self._c("Renewed", -10) == "RENEWED"
+        assert self._c("Expired", -10) == "LAPSED"
+        assert self._c("Cancelled", -10) == "LAPSED"
+        assert self._c("Flat Cancel", 30) == "LAPSED"
+        assert self._c("Non-Renewed", 30) == "LAPSED"
+
+    def test_pending_cancel_and_in_renewal(self) -> None:
+        assert self._c("Pending Cancel", 100) == "CRITICAL"
+        assert self._c("Up for Renewal", -5) == "CRITICAL"
+        assert self._c("Up for Renewal", 20) == "CRITICAL"
+        assert self._c("Renewing", 80) == "AT_RISK"
+
+    def test_active_and_unknown_by_timing(self) -> None:
+        assert self._c("Active", -1) == "CRITICAL"      # past x-date, not renewed
+        assert self._c("Active", 20) == "CRITICAL"      # <=30d
+        assert self._c("Active", 75) == "AT_RISK"       # <=90d
+        assert self._c("Active", 200) == "SAFE"         # >90d
+        assert self._c(None, None) == "SAFE"            # no status, no date
+        assert self._c("", 200) == "SAFE"
+
+    def test_increase_override_when_quote_exists(self) -> None:
+        assert self._c("Active", 200, increase_percentage=20.0) == "CRITICAL"
+        assert self._c("Active", 200, increase_percentage=8.0) == "AT_RISK"
+        # terminal status still wins over increase
+        assert self._c("Renewed", 200, increase_percentage=20.0) == "RENEWED"
+
+
+class TestRefreshRenewals:
+    def test_refresh_writes_changed_rows(self) -> None:
+        today = date(2026, 6, 2)
+        supa = MagicMock()
+        supa.select.side_effect = [
+            # project_85_renewals
+            [
+                {"id": "1", "policy_number": "P-1", "expiration_date": (today - timedelta(days=5)).isoformat(),
+                 "premium_current": 1000, "risk_status": "SAFE"},
+                {"id": "2", "policy_number": "P-2", "expiration_date": (today + timedelta(days=10)).isoformat(),
+                 "premium_current": None, "risk_status": "SAFE"},
+            ],
+            # crm_commissions
+            [
+                {"policy_number": "P-1", "policy_status": "Expired", "premium": 1000,
+                 "expiration_date": (today - timedelta(days=5)).isoformat()},
+                {"policy_number": "P-2", "policy_status": "Active", "premium": 2500,
+                 "expiration_date": (today + timedelta(days=10)).isoformat()},
+            ],
+        ]
+        summary = refresh_renewals(supa, dry_run=False, today=today)
+
+        assert summary["total"] == 2
+        assert summary["matched_commissions"] == 2
+        assert summary["by_risk"]["LAPSED"] == 1      # P-1 Expired
+        assert summary["by_risk"]["CRITICAL"] == 1    # P-2 Active, <=30d
+        assert summary["changed"] == 2
+        assert supa.update.call_count == 2
+        # P-2 had no premium_current → backfilled from commission
+        p2_update = [c for c in supa.update.call_args_list if c[0][1] == "2"][0][0][2]
+        assert p2_update["premium_current"] == 2500
+        assert p2_update["risk_status"] == "CRITICAL"
+
+    def test_dry_run_does_not_write(self) -> None:
+        today = date(2026, 6, 2)
+        supa = MagicMock()
+        supa.select.side_effect = [
+            [{"id": "1", "policy_number": "P-1", "expiration_date": (today - timedelta(days=5)).isoformat(),
+              "premium_current": 1000, "risk_status": "SAFE"}],
+            [{"policy_number": "P-1", "policy_status": "Expired", "premium": 1000,
+              "expiration_date": (today - timedelta(days=5)).isoformat()}],
+        ]
+        summary = refresh_renewals(supa, dry_run=True, today=today)
+        assert summary["dry_run"] is True
+        assert summary["changed"] == 1
+        supa.update.assert_not_called()
 
 
 class TestRenewalsEndpoint:

@@ -129,6 +129,16 @@ def main() -> int:
         help="Cap renewal-sweep candidates (use 1 for a safe first live run)",
     )
     parser.add_argument(
+        "--renewal-classify",
+        action="store_true",
+        help="Reclassify project_85_renewals risk_status from crm_commissions (Command Center)",
+    )
+    parser.add_argument(
+        "--renewal-classify-dry-run",
+        action="store_true",
+        help="Preview renewal reclassification without writing",
+    )
+    parser.add_argument(
         "--commission-audit",
         action="store_true",
         help="Run Revenue Integrity commission blind-spot audit once",
@@ -783,6 +793,24 @@ def main() -> int:
         result = renewal_sweep(limit=args.renewal_sweep_limit)
         print(f"Renewal sweep: {result['created']} task(s) created of "
               f"{result['candidates']} candidate(s)")
+        return 0
+
+    if args.renewal_classify or args.renewal_classify_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes.operations.renewal_classifier import refresh_renewals
+
+        summary = refresh_renewals(
+            SupabaseClient(),
+            dry_run=args.renewal_classify_dry_run,
+        )
+        verb = "Would change" if summary["dry_run"] else "Changed"
+        print(
+            f"Renewal classify ({'dry-run' if summary['dry_run'] else 'live'}): "
+            f"{summary['total']} renewals, {summary['matched_commissions']} matched to commissions, "
+            f"{verb} {summary['changed']}."
+        )
+        for status, stats in summary["by_risk"].items():
+            print(f"  {status}: {stats}")
         return 0
 
     if args.revenue_sentinel_health:
