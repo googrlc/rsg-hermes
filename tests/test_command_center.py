@@ -11,6 +11,12 @@ from fastapi.testclient import TestClient
 from hermes.api import app
 from hermes.operations.renewal_classifier import classify_risk, refresh_renewals
 from hermes.operations.renewal_tracker import summarize_renewals
+from hermes.operations.save_list import (
+    build_outreach_draft,
+    create_save_list,
+    parse_lob,
+    select_save_list,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -184,6 +190,91 @@ class TestRefreshRenewals:
         assert summary["dry_run"] is True
         assert summary["changed"] == 1
         supa.update.assert_not_called()
+
+
+class TestSaveList:
+    TODAY = date(2026, 6, 2)
+
+    def _renewals(self):
+        t = self.TODAY
+        return [
+            {"id": "1", "policy_number": "Big Co | Commercial Auto | 123", "client_name": "Big Co",
+             "expiration_date": (t + timedelta(days=20)).isoformat(), "premium_current": 30000, "risk_status": "CRITICAL"},
+            {"id": "2", "policy_number": "Mid Co | Workers Comp | 456", "client_name": "Mid Co Inc",
+             "expiration_date": (t + timedelta(days=50)).isoformat(), "premium_current": 12000, "risk_status": "AT_RISK"},
+            {"id": "3", "policy_number": "Safe Co | GL | 789", "client_name": "Safe Co",
+             "expiration_date": (t + timedelta(days=40)).isoformat(), "premium_current": 99000, "risk_status": "SAFE"},
+            {"id": "4", "policy_number": "Far Co | GL | 000", "client_name": "Far Co",
+             "expiration_date": (t + timedelta(days=120)).isoformat(), "premium_current": 50000, "risk_status": "CRITICAL"},
+        ]
+
+    def test_parse_lob(self) -> None:
+        assert parse_lob("Big Co | Commercial Auto | 123") == "Commercial Auto"
+        assert parse_lob("nopipes") is None
+        assert parse_lob(None) is None
+
+    def test_select_filters_and_sorts(self) -> None:
+        sel = select_save_list(self._renewals(), today=self.TODAY, limit=10, within_days=60)
+        # Safe (excluded), Far (>60d excluded) → only Big + Mid, sorted by premium desc
+        assert [r["client_name"] for r in sel] == ["Big Co", "Mid Co Inc"]
+        assert sel[0]["days_until"] == 20
+
+    def test_select_respects_limit(self) -> None:
+        sel = select_save_list(self._renewals(), today=self.TODAY, limit=1, within_days=60)
+        assert len(sel) == 1 and sel[0]["client_name"] == "Big Co"
+
+    def test_build_draft_content(self) -> None:
+        r = {**self._renewals()[0], "days_until": 20}
+        d = build_outreach_draft(r, today=self.TODAY)
+        assert d["status"] == "DRAFT"
+        assert d["line_of_business"] == "Commercial Auto"
+        assert "Big" in d["body"] and "renews" in d["body"]
+        assert d["channel"] == "email"
+
+    def test_create_save_list_stages_drafts(self) -> None:
+        supa = MagicMock()
+        supa.select.return_value = self._renewals()
+        supa.insert.side_effect = lambda table, row: {**row, "id": "draft-" + row["policy_number"][:3]}
+        out = create_save_list(supa, limit=10, within_days=60, today=self.TODAY, batch_id="batch-1")
+        assert out["created"] == 2
+        assert out["batch_id"] == "batch-1"
+        assert supa.insert.call_count == 2
+        assert all(c[0][0] == "renewal_outreach_drafts" for c in supa.insert.call_args_list)
+        assert all(d["status"] == "DRAFT" for d in out["drafts"])
+
+    def test_create_save_list_empty(self) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [self._renewals()[2]]  # only the SAFE one
+        out = create_save_list(supa, today=self.TODAY)
+        assert out["created"] == 0 and out["batch_id"] is None
+        supa.insert.assert_not_called()
+
+
+class TestPhase2Endpoints:
+    @patch("hermes.api._get_supa")
+    def test_retention_endpoint(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [{"retention_rate": 54.92, "snapshot_date": "2026-03-31",
+                                     "active_premium": 385000, "client_count": 81, "policy_count": 104}]
+        mock_get_supa.return_value = supa
+        resp = client.get("/api/command-center/retention")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["retention_rate"] == 54.92 and data["benchmark"] == 84.0
+
+    @patch("hermes.api._get_supa")
+    def test_build_save_list_endpoint(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [
+            {"id": "1", "policy_number": "Big Co | Commercial Auto | 123", "client_name": "Big Co",
+             "expiration_date": (date.today() + timedelta(days=20)).isoformat(),
+             "premium_current": 30000, "risk_status": "CRITICAL"},
+        ]
+        supa.insert.side_effect = lambda table, row: {**row, "id": "d1"}
+        mock_get_supa.return_value = supa
+        resp = client.post("/api/command-center/save-list", json={"limit": 5, "within_days": 60})
+        assert resp.status_code == 200
+        assert resp.json()["created"] == 1
 
 
 class TestRenewalsEndpoint:
