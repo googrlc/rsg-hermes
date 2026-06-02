@@ -77,6 +77,11 @@
   .chip.soon{background:#f5b94220;color:var(--amber)}
   .chip.ok{background:#22c55e20;color:#4ade80}
 
+  .riskbar{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+  .rpill{display:flex;align-items:center;gap:6px;font-size:11px;padding:5px 10px;border-radius:20px;background:#0e1526;border:1px solid var(--border)}
+  .rpill b{font-family:var(--mono)}
+  .rpill .pdot{width:7px;height:7px;border-radius:50%}
+  .rpill .pm{color:var(--muted-2);font-family:var(--mono);font-size:10px}
   .empty,.err{color:var(--muted);font-size:12.5px;padding:18px 0;text-align:center}
   .err{color:#ff9aa6}
   .note{font-size:11px;color:var(--muted-2);line-height:1.6;padding:4px 2px}
@@ -117,6 +122,8 @@
           <div class="segbox"><b>–</b><span>≤ 60 DAYS</span><div class="pm"></div></div>
           <div class="segbox"><b>–</b><span>≤ 90 DAYS</span><div class="pm"></div></div>
         </div>
+
+        <div class="riskbar" id="riskbar"></div>
 
         <div class="pastdue" id="pastdue" style="display:none"></div>
 
@@ -174,6 +181,20 @@
       box.querySelector('b').textContent = cum[i];
       box.querySelector('.pm').textContent = fmtMoney(cumPrem[i]);
     });
+
+    // risk breakdown (populated by the classification refresh job)
+    const RISK_META = {
+      CRITICAL: ['#ff6b78', 'Critical'], AT_RISK: ['#f5b942', 'At risk'],
+      LAPSED: ['#8b96b0', 'Lapsed'], RENEWED: ['#4ade80', 'Renewed'], SAFE: ['#4a9eff', 'Safe'],
+    };
+    const br = data.by_risk || {};
+    const rb = document.getElementById('riskbar');
+    rb.innerHTML = Object.keys(RISK_META).map(k => {
+      const s = br[k] || {count:0, premium_current:0};
+      const [color, label] = RISK_META[k];
+      return '<span class="rpill"><span class="pdot" style="background:'+color+'"></span>'
+        + label + ' <b>' + s.count + '</b> <span class="pm">' + fmtMoney(s.premium_current) + '</span></span>';
+    }).join('');
 
     // past-due banner (the silent lapses behind the 54.92% retention number)
     if (data.past_due_count > 0) {
