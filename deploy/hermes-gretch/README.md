@@ -31,6 +31,10 @@ entirely by environment. This runbook is the deploy + verification procedure.
    **scope tag**, not by account: the compose sets `HERMES_MEMORY_SCOPE=hermes-gretch`,
    so every memory this instance writes is tagged `scope:hermes-gretch` and reads are
    constrained to it. No bleed into Lamar's `scope:hermes-lamar`, and vice versa.
+   **Medicare PHI rule (3c):** memory for Medicare-lane interactions stores client
+   name + CRM link + task context ONLY. Enforced in `hermes/core/phi.py` —
+   `build_medicare_memory()` is an allowlist, and `add_document` redacts MBI / SSN /
+   eligibility detail from any Medicare-tagged write as a backstop.
 4. **Supabase migration** — apply once (adds the `agent_id` column the writes stamp):
    `supabase/migrations/20260611120000_agent_id_stamping.sql`.
 

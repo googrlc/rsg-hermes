@@ -138,6 +138,85 @@ def test_supermemory_unscoped_unchanged(monkeypatch):
     assert c._with_scope(["hermes-docs"]) == ["hermes-docs"]
 
 
+# ── Medicare-lane PHI guard (rule 3c) ────────────────────────────────────────
+def test_redact_phi_strips_mbi_ssn_and_eligibility():
+    from hermes.core import phi
+
+    assert phi.contains_phi("MBI 1EG4-TE5-MK73 on file")
+    out = phi.redact_phi("client 1EG4-TE5-MK73, SSN 123-45-6789, diagnosed with ESRD")
+    assert "1EG4" not in out and "123-45-6789" not in out
+    assert "diagnos" not in out.lower() and "ESRD" not in out
+    assert phi.REDACTED in out
+
+
+def test_build_medicare_memory_is_allowlist_only():
+    from hermes.core import phi
+
+    mem = phi.build_medicare_memory(
+        client_name="Mary Smith",
+        crm_link="https://crm/Account/abc123",
+        task_context="callback re: 1EG4-TE5-MK73 plan question",  # stray MBI
+    )
+    assert set(mem["row"].keys()) == {"client_name", "crm_link", "task_context", "lane"}
+    assert "1EG4" not in mem["content"]                       # redacted in content
+    assert "1EG4" not in mem["row"]["task_context"]           # and in the row
+    assert mem["metadata"]["crm_link"] == "https://crm/Account/abc123"
+    assert "type:interaction" in mem["container_tags"]
+
+
+def test_is_medicare_context():
+    from hermes.core import phi
+
+    assert phi.is_medicare_context(["gretchen-memory", "lane:gretchen-medicare"])
+    assert phi.is_medicare_context(["type:medicare"])
+    assert not phi.is_medicare_context(["client:acme", "type:dec_page"])
+
+
+def test_add_document_redacts_phi_for_medicare_tags():
+    sent = {}
+
+    class FakeSession:
+        def request(self, method, url, headers=None, json=None, timeout=None):
+            sent["payload"] = json
+
+            class R:
+                ok = True
+                content = b"{}"
+
+                def json(self_inner):
+                    return {}
+            return R()
+
+    c = supermemory_client.SupermemoryClient(api_key="k")
+    c.session = FakeSession()
+    c.add_document("note 1EG4-TE5-MK73", container_tags=["lane:gretchen-medicare"],
+                   metadata={"client_name": "Mary", "detail": "SSN 123-45-6789"})
+    assert "1EG4" not in sent["payload"]["content"]
+    assert "123-45-6789" not in sent["payload"]["metadata"]["detail"]
+
+
+def test_add_document_leaves_non_medicare_untouched():
+    sent = {}
+
+    class FakeSession:
+        def request(self, method, url, headers=None, json=None, timeout=None):
+            sent["payload"] = json
+
+            class R:
+                ok = True
+                content = b"{}"
+
+                def json(self_inner):
+                    return {}
+            return R()
+
+    c = supermemory_client.SupermemoryClient(api_key="k")
+    c.session = FakeSession()
+    # A commercial doc with a number that looks SSN-ish must NOT be altered.
+    c.add_document("EIN 12-3456789  refid 123-45-6789", container_tags=["client:acme", "type:dec_page"])
+    assert "123-45-6789" in sent["payload"]["content"]
+
+
 # ── ACORD 25 ─────────────────────────────────────────────────────────────────
 def test_from_espo_policy_maps_and_uses_endorsement_flags():
     account = {"name": "Acme LLC", "billing_address_city": "Atlanta", "billing_address_state": "GA"}

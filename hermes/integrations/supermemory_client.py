@@ -115,13 +115,30 @@ class SupermemoryClient:
         metadata: dict[str, Any] | None = None,
         custom_id: str | None = None,
     ) -> dict[str, Any]:
-        """Add a document. Returns {id, status} (status is usually 'queued')."""
+        """Add a document. Returns {id, status} (status is usually 'queued').
+
+        Medicare-lane PHI backstop: when the container tags mark this as
+        Medicare-lane memory, content and string metadata are run through
+        ``redact_phi`` so a stray MBI / SSN / eligibility detail can't be stored
+        (rule 3c). The allowlist builder ``phi.build_medicare_memory`` is the
+        primary control; this is defense in depth.
+        """
+        from hermes.core import phi
+
+        medicare = phi.is_medicare_context(container_tags)
+        if medicare:
+            content = phi.redact_phi(content)
+
         payload: dict[str, Any] = {"content": content, "containerTags": self._with_scope(container_tags)}
         if metadata:
             # Supermemory metadata values must be scalar (str/number/bool).
-            payload["metadata"] = {
+            scrubbed = {
                 k: v for k, v in metadata.items() if isinstance(v, (str, int, float, bool))
             }
+            if medicare:
+                scrubbed = {k: (phi.redact_phi(v) if isinstance(v, str) else v)
+                            for k, v in scrubbed.items()}
+            payload["metadata"] = scrubbed
         if custom_id:
             payload["customId"] = custom_id
         return self._request("POST", "/v3/documents", payload)
