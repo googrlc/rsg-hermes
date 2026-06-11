@@ -17,3 +17,8 @@ create table if not exists public.coi_drafts (
 
 create index if not exists idx_coi_drafts_agent on public.coi_drafts(agent_id, created_at);
 create index if not exists idx_coi_drafts_account on public.coi_drafts(account);
+
+-- Service-role access only (Hermes connects with the service-role key, which
+-- bypasses RLS). Enabling RLS with no policy keeps the anon/authenticated roles
+-- out — unlike the older cc_* tables, this one is not exposed to the anon key.
+alter table public.coi_drafts enable row level security;
