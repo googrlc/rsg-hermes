@@ -69,6 +69,20 @@ if _WEBUI_DIR.is_dir():
         name="command-center",
     )
 
+# New Command Center intake lane (routes under /api/command-center/intake,
+# page at /api/command-center/intake/page). Additive; failure to load must not
+# take down the rest of the API.
+try:
+    from hermes.command_center.api_routes import (
+        dashboard_router as _cc_dash_router,
+        router as _cc_intake_router,
+    )
+
+    app.include_router(_cc_intake_router)
+    app.include_router(_cc_dash_router)
+except Exception:  # pragma: no cover - surfaced in logs, never fatal
+    log.exception("command_center routes unavailable")
+
 _espo = None
 _dispatcher = None
 _supa = None
