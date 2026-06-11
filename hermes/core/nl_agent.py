@@ -330,7 +330,13 @@ _TOOLS: list[dict[str, Any]] = [
 # System prompt
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = """\
+# The system prompt is two parts:
+#   _DEFAULT_PERSONA  — identity, audience, and voice. This is what a persona file
+#                       (HERMES_PERSONA_FILE) replaces, so Gretchen's instance speaks
+#                       as her assistant while Lamar's speaks as his.
+#   _PLATFORM_GUIDE   — capabilities, field aliases, tool-routing, and write-safety
+#                       rules. Persona-agnostic; shared by every instance.
+_DEFAULT_PERSONA = """\
 You are Hermes — the AI right hand and chief of staff for Risk Solutions Group (RSG),
 an independent insurance agency in Georgia. You are talking with Lamar Coates, RSG's
 owner and operator. Address him by name and speak like a sharp, warm, proactive
@@ -344,8 +350,10 @@ About RSG (use this context; don't ask Lamar to re-explain it):
 
 Voice: conversational, concrete, and brief. Lead with the answer and the next action.
 Never reply "I don't know who you are" — you know it's Lamar at RSG. If you truly lack
-a data point, say what you'd look up and offer to fetch it.
+a data point, say what you'd look up and offer to fetch it."""
 
+
+_PLATFORM_GUIDE = """\
 Your capabilities (use the tools — never guess at CRM data):
 - Search and look up any CRM record (Account, Contact, Lead, Opportunity, Policy, Task)
 - Retrieve specific field values (FEIN, DOT number, phone, email, premium, etc.)
@@ -356,7 +364,7 @@ Your capabilities (use the tools — never guess at CRM data):
 - Update existing records
 - Process casual lead intake (dictated meeting notes → structured CRM entries)
 - Merge duplicate records
-- List your own capabilities via list_skills when Lamar asks what you can do
+- List your own capabilities via list_skills when asked what you can do
 
 Field aliases you should know:
 - FEIN / EIN / tax ID → field "fein" on Account
@@ -379,6 +387,24 @@ Be concise and direct in your responses.
 IMPORTANT: For write operations (create, update, merge, intake), if the caller
 has not confirmed the action, describe what you WOULD do and ask for confirmation.
 Only execute writes when the caller has set confirmed=true."""
+
+
+# Backwards-compatible default (Lamar's identity + the shared platform guide).
+_SYSTEM_PROMPT = _DEFAULT_PERSONA + "\n\n" + _PLATFORM_GUIDE
+
+
+def _compose_system_prompt() -> str:
+    """System prompt for this instance: persona overlay (if any) + platform guide.
+
+    When HERMES_PERSONA_FILE is set and readable, its contents fully replace the
+    default identity/voice; the shared platform guide (tools, field aliases,
+    write-safety rules) is always appended so every instance keeps the same
+    capabilities and guardrails.
+    """
+    from hermes.core.identity import load_persona
+
+    persona = load_persona() or _DEFAULT_PERSONA
+    return persona + "\n\n" + _PLATFORM_GUIDE
 
 
 # ---------------------------------------------------------------------------
@@ -615,7 +641,7 @@ def ask(
     model = os.environ.get("HERMES_OPENAI_MODEL", "gpt-4.1-mini")
     oai = OpenAI(api_key=api_key)
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": _compose_system_prompt()}]
     if conversation:
         messages.extend(conversation)
     messages.append({"role": "user", "content": text})

@@ -61,6 +61,9 @@ def enqueue_crm_write(
         raise ValueError("priority must be >= 1")
     normalized_payload = _normalize_queue_payload(payload)
 
+    from hermes.core.identity import agent_id
+
+    stamped_agent = agent_id()
     row = supa.insert(
         "crm_write_queue",
         {
@@ -72,12 +75,14 @@ def enqueue_crm_write(
             "priority": priority,
             "attempt_count": 0,
             "created_by_role": created_by_role,
+            "agent_id": stamped_agent,
         },
     )
     log.info(
-        "Enqueued CRM write: entity=%s role=%s queue_id=%s",
+        "Enqueued CRM write: entity=%s role=%s agent=%s queue_id=%s",
         entity_type,
         created_by_role,
+        stamped_agent,
         row.get("id"),
     )
     return row

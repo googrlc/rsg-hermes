@@ -25,11 +25,14 @@ def _now_iso() -> str:
 # ---- submissions ---------------------------------------------------------
 
 def create_submission(supa, *, lane: str, client_name: str, created_by: str = "gretchen") -> dict:
+    from hermes.core.identity import agent_id
+
     row = supa.insert(SUBMISSIONS, {
         "lane": lane,
         "client_name": client_name,
         "status": "draft",
         "created_by": created_by,
+        "agent_id": agent_id(),
     })
     log_event(supa, row["id"], created_by, "created", {"lane": lane})
     return row

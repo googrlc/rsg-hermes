@@ -24,6 +24,9 @@ node_modules/
 .env
 .env.local
 *.env.*
+# ...but DO track placeholder env templates (no secrets — safe to commit)
+!*.env.*.example
+!deploy/**/.env.*.example
 
 # Service-account keys / mounted secrets — never commit
 secrets/

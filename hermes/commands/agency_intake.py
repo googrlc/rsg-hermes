@@ -629,6 +629,8 @@ def stage_draft(
     if warnings:
         log.warning("Agency intake validation warnings: %s", warnings)
 
+    from hermes.core.identity import agent_id
+
     row = supa.insert(
         "agency_intake_drafts",
         {
@@ -641,6 +643,7 @@ def stage_draft(
             "lines_of_business": payload.get("lines_of_business") or [],
             "duplicate_search": payload.get("duplicate_search") or {},
             "status": "pending",
+            "agent_id": agent_id(),
         },
     )
     draft_id = str(row.get("id") or uuid.uuid4())
