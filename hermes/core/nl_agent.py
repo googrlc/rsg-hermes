@@ -646,11 +646,17 @@ def ask(
         messages.extend(conversation)
     messages.append({"role": "user", "content": text})
 
+    # Per-instance tool scoping: Gretchen's CRM-only instance disables web_research.
+    from hermes.core.identity import disabled_tools
+
+    disabled = disabled_tools()
+    active_tools = [t for t in _TOOLS if t["function"]["name"] not in disabled]
+
     try:
         response = oai.chat.completions.create(
             model=model,
             messages=messages,
-            tools=_TOOLS,
+            tools=active_tools,
             tool_choice="auto",
             temperature=0,
         )
@@ -675,6 +681,11 @@ def ask(
                 fn_args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
                 tool_results.append({"tool_call_id": tc.id, "content": "Invalid arguments."})
+                continue
+
+            if fn_name in disabled:
+                tool_results.append({"tool_call_id": tc.id,
+                                     "content": f"The {fn_name} capability is not available on this instance."})
                 continue
 
             executor = _EXECUTORS.get(fn_name)

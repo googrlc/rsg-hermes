@@ -43,6 +43,16 @@ def memory_scope() -> str:
     return (os.environ.get("HERMES_MEMORY_SCOPE") or agent_id()).strip()
 
 
+def disabled_tools() -> frozenset[str]:
+    """Tool names this instance must NOT expose (comma-separated HERMES_DISABLED_TOOLS).
+
+    Gretchen's instance is CRM-scoped — it sets HERMES_DISABLED_TOOLS=web_research
+    so the agent never offers public-web business research.
+    """
+    raw = os.environ.get("HERMES_DISABLED_TOOLS", "")
+    return frozenset(t.strip() for t in raw.split(",") if t.strip())
+
+
 @functools.lru_cache(maxsize=8)
 def load_persona(path: str | None = None) -> str:
     """Read the persona markdown for this instance, or '' if none is configured.

@@ -54,6 +54,26 @@ def test_load_persona_missing_file_is_empty(monkeypatch, tmp_path):
     assert "Gretchen" in identity.load_persona(str(p))
 
 
+def test_disabled_tools_parsing(monkeypatch):
+    monkeypatch.delenv("HERMES_DISABLED_TOOLS", raising=False)
+    assert identity.disabled_tools() == frozenset()
+    monkeypatch.setenv("HERMES_DISABLED_TOOLS", "web_research, foo ,")
+    assert identity.disabled_tools() == frozenset({"web_research", "foo"})
+
+
+def test_web_research_is_gateable():
+    # The gate only matters if the tool is actually in the registry — guard against
+    # a rename silently making HERMES_DISABLED_TOOLS=web_research a no-op.
+    from hermes.core import nl_agent
+
+    names = {t["function"]["name"] for t in nl_agent._TOOLS}
+    assert "web_research" in names
+    disabled = frozenset({"web_research"})
+    active = [t for t in nl_agent._TOOLS if t["function"]["name"] not in disabled]
+    assert "web_research" not in {t["function"]["name"] for t in active}
+    assert "search_records" in {t["function"]["name"] for t in active}  # CRM tools remain
+
+
 # ── persona overlay in the system prompt ─────────────────────────────────────
 def test_compose_system_prompt_uses_persona(monkeypatch, tmp_path):
     from hermes.core import nl_agent

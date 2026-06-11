@@ -26,5 +26,7 @@ services:
       - HERMES_AGENT_ID=hermes-gretch
       - HERMES_PERSONA_FILE=/app/personas/SOUL-GRETCHEN.md
       - HERMES_MEMORY_SCOPE=hermes-gretch
+      # Gretchen's scope is the CRM — no public-web business research.
+      - HERMES_DISABLED_TOOLS=web_research
     restart: unless-stopped
     command: ["hermes", "--slack"]

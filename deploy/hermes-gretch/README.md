@@ -9,6 +9,7 @@ entirely by environment. This runbook is the deploy + verification procedure.
 | `HERMES_AGENT_ID` | `hermes-lamar` | `hermes-gretch` (set in compose) |
 | `HERMES_PERSONA_FILE` | _(unset → default Hermes)_ | `/app/personas/SOUL-GRETCHEN.md` |
 | `HERMES_MEMORY_SCOPE` | `hermes-lamar` | `hermes-gretch` (isolated Supermemory) |
+| `HERMES_DISABLED_TOOLS` | _(none)_ | `web_research` — CRM-only, no public-web research |
 | Slack app | Hermes app | dedicated **hermes-gretch** app + tokens |
 | EspoCRM user | `api` | dedicated **hermes-gretch** API user |
 | NowCerts | (gated queue) | **none** — no `NOWCERTS_*`, no mcp/nowcerts mount |
