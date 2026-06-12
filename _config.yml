@@ -21,6 +21,5 @@ exclude:
   - poetry.lock
   - README.md
   - hermes
-  - openwebui
   - supabase
   - tests
