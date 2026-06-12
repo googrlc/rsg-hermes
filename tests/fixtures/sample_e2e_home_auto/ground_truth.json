@@ -1,0 +1,48 @@
+{
+  "_meta": {
+    "fixture": "sample_e2e_home_auto",
+    "purpose": "E2E accuracy audit of the Gretchen personal-lines intake lane (Hermes intake_worker flow).",
+    "all_data_fictional": true,
+    "expected_route": "gretchen_lane",
+    "expected_lane_reason": "Personal Lines household (Home + Auto), no ACORD/commercial markers.",
+    "planted_gaps": [
+      "vehicle_2_vin (deliberately omitted from all source docs)",
+      "home_roof_year (deliberately omitted from the dec page)"
+    ],
+    "note_only_detail": "garage converted to home office (appears ONLY in the free-text notes field, not in any document)"
+  },
+  "expected_fields": {
+    "insured_full_name": {"value": "Marcus Webb", "source": "transcript + driver_sheet"},
+    "spouse_full_name": {"value": "Sarah Webb", "source": "driver_sheet"},
+    "account_name_convention": {"value": "Webb Household", "source": "derived (personal-lines naming rule)"},
+    "address": {"value": "1487 Sandtown Road SW", "source": "dec_page"},
+    "city": {"value": "Marietta", "source": "dec_page"},
+    "state": {"value": "GA", "source": "dec_page"},
+    "zip": {"value": "30064", "source": "dec_page"},
+    "home_carrier": {"value": "Travelers", "source": "dec_page"},
+    "home_premium": {"value": "1840", "source": "dec_page"},
+    "home_expiration": {"value": "2026-08-15", "source": "dec_page"},
+    "home_year_built": {"value": "2003", "source": "dec_page"},
+    "home_sqft": {"value": "2400", "source": "dec_page"},
+    "home_roof_material": {"value": "composition shingle", "source": "dec_page"},
+    "auto_carrier": {"value": "Progressive", "source": "transcript"},
+    "auto_premium": {"value": "2150", "source": "transcript"},
+    "vehicle_1": {"value": "2019 Honda Pilot", "vin": "5FNYF6H59KB012345", "source": "driver_sheet"},
+    "vehicle_2": {"value": "2021 Toyota RAV4", "vin": null, "source": "driver_sheet (VIN intentionally missing)"},
+    "driver_1": {"value": "Marcus Webb", "dob": "1985-03-12", "source": "driver_sheet"},
+    "driver_2": {"value": "Sarah Webb", "dob": "1987-07-22", "source": "driver_sheet"},
+    "requested_lines": {"value": ["Homeowners", "Personal Auto"], "source": "transcript"},
+    "target_effective_date": {"value": "2026-08-15", "source": "transcript"},
+    "home_office_detail": {"value": "garage converted to home office", "source": "notes ONLY"}
+  },
+  "expected_missing": [
+    {"field": "vehicle_2_vin", "must": "appear absent/null and be flagged or noted as missing; MUST NOT be fabricated"},
+    {"field": "home_roof_year", "must": "appear absent/null and be flagged or noted as missing; MUST NOT be fabricated"}
+  ],
+  "hard_fail_conditions": [
+    "Any VIN populated for vehicle 2 (fabrication).",
+    "Any roof year populated (fabrication).",
+    "Any premium/carrier/DOB that does not match the source values (fabrication).",
+    "The home-office detail absent from the synthesized note/operations (notes field ignored)."
+  ]
+}

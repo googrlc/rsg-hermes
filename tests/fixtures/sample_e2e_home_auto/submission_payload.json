@@ -1,0 +1,23 @@
+{
+  "idempotency_key": "E2E-AUDIT-WEBB-HOMEAUTO-20260612",
+  "source": "manual_curl",
+  "agent": "gretchen",
+  "intake_kind": "full_intake",
+  "captured_at": "2026-06-12T04:00:00Z",
+  "client_identifier": "[TEST] Webb Household - E2E audit (fictional, do not contact)",
+  "lob_code": "PL",
+  "transcript": "[TEST SUBMISSION - FICTIONAL CLIENT, E2E AUDIT - DO NOT CONTACT OR CREATE A REAL RECORD]\n\nDiscovery call with Marcus Webb, a homeowner in Marietta, GA. Marcus is shopping his home and auto together as a package and wants to switch carriers at his home renewal. He currently has his homeowners with Travelers and his auto with Progressive. His auto is a 6-month Progressive policy running about $2,150 per year. He wants quotes for Homeowners and Personal Auto. Target effective date is August 15, 2026, to line up with his home renewal. Household is Marcus and his wife Sarah; both drive. Two vehicles in the household.",
+  "documents": [
+    {
+      "type": "dec_page",
+      "source_file": "webb_home_dec.pdf",
+      "raw_text": "TRAVELERS HOMEOWNERS — DECLARATIONS (RENEWAL)\nNamed Insured: Marcus Webb\nMailing/Risk Address: 1487 Sandtown Road SW, Marietta, GA 30064\nPolicy Term: 08/15/2025 - 08/15/2026 (expires 08/15/2026)\nAnnual Premium: $1,840.00\nDwelling: 2-story single family, Year Built 2003, 2,400 sq ft\nRoof: Composition shingle\nConstruction: Frame\nCoverage A Dwelling: $385,000   Coverage L Liability: $300,000\n(Note: roof replacement year not listed on this dec page.)"
+    },
+    {
+      "type": "drivers_license",
+      "source_file": "webb_driver_vehicle_sheet.pdf",
+      "raw_text": "HOUSEHOLD DRIVER & VEHICLE WORKSHEET\nDriver 1: Marcus Webb, DOB 03/12/1985, license GA, married\nDriver 2: Sarah Webb, DOB 07/22/1987, license GA, married\nVehicle 1: 2019 Honda Pilot EX-L, VIN 5FNYF6H59KB012345, garaged 30064\nVehicle 2: 2021 Toyota RAV4 XLE, VIN: (not provided - owner to send), garaged 30064"
+    }
+  ],
+  "notes": "Marcus mentioned during the call that the detached garage was converted into a home office last year. (This detail appears ONLY here in the notes, nowhere in the documents.)"
+}
