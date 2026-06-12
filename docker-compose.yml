@@ -38,6 +38,18 @@ services:
       - .:/app
     restart: unless-stopped
     command: ["hermes", "--run-crm-queue-worker", "--crm-queue-poll-seconds", "5"]
+  hermes-intake-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rsg-hermes-intake-worker
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    command: ["hermes", "--run-intake-worker", "--intake-poll-seconds", "5"]
   n8n:
     image: n8nio/n8n:latest
     container_name: rsg-n8n
