@@ -75,6 +75,7 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
     app = App(token=bot_token)
     fallback_channel = os.environ.get("HERMES_SLACK_FALLBACK_CHANNEL", "C0AFHN83ZE3")
     command_channel = os.environ.get("HERMES_SLACK_COMMAND_CHANNEL") or fallback_channel
+    conversation_enabled = os.environ.get("HERMES_SLACK_CONVERSATION", "off").lower() == "on"
 
     def _send_reply(
         *,
@@ -189,6 +190,8 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
 
     @app.event("app_mention")
     def on_mention(event: dict[str, Any], say: Any) -> None:
+        if not conversation_enabled:
+            return
         log.info("app_mention received: channel=%s user=%s", event.get("channel"), event.get("user"))
         text = event.get("text") or ""
         thread_ts = event.get("thread_ts") or event.get("ts")
@@ -234,6 +237,8 @@ def run_slack_socket(espo: EspoClient | None = None) -> None:
             return
 
         # Route 2: DMs and the @-mention command channel.
+        if not conversation_enabled:
+            return
         if not _is_direct_im(event) and not _is_command_channel(event, command_channel):
             return
         text = event.get("text") or ""
