@@ -1,0 +1,34 @@
+# Hermes scheduled automations — source of truth.
+#
+# Installed into root's crontab by deploy/cron/install-cron.sh, which replaces
+# everything between the markers below and preserves all other crontab entries
+# (Elestio backups, maintenance, watchtower). Edit HERE, then re-run the
+# installer — never hand-edit the live crontab. Run after every redeploy.
+#
+# Times are ET via CRON_TZ. All jobs are idempotent (dry-run/force guards or
+# natural dedup), so an overlapping/retried run won't double-post or double-write.
+#
+# DELIBERATELY EXCLUDED: NowCerts -> EspoCRM insured/account sync
+# (`--sync-nowcerts`, `--sync-bidirectional`). EspoCRM owns Accounts/Contacts now;
+# the only data that should flow NowCerts -> EspoCRM is policies, via a dedicated
+# policies-only job (see docs) — not these account-creating syncs.
+#
+# >>> hermes automations (managed by deploy/cron/install-cron.sh) >>>
+CRON_TZ=America/New_York
+# Outlook -> intake triage — every 30 min, 2h lookback (idempotent via Hermes Triaged category)
+*/30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
+# Dashboard KPI history — daily 6:00am ET (Supabase dashboard_kpis, no Slack)
+0 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --snapshot-kpis >> /root/hermes-cron.log 2>&1
+# Renewal risk reclassify — daily 7:30am ET (project_85_renewals, no Slack)
+30 7 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-classify >> /root/hermes-cron.log 2>&1
+# Revenue sentinel — Project 85 daily briefing -> #the-boss, weekdays 8:00am ET
+0 8 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --revenue-sentinel >> /root/hermes-cron.log 2>&1
+# Renewal prep-task sweep for Gretchen — weekdays 8:15am ET (creates EspoCRM Tasks)
+15 8 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-sweep >> /root/hermes-cron.log 2>&1
+# Commission audit (Revenue Integrity) — Mondays 7:00am ET -> Slack
+0 7 * * 1 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-audit >> /root/hermes-cron.log 2>&1
+# End-of-month revenue scorecard — 1st of month 7:00am ET -> Slack
+0 7 1 * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --eom-scorecard >> /root/hermes-cron.log 2>&1
+# Nightly CRM changelog -> #the-boss — 8:00pm ET
+0 20 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --changelog >> /root/hermes-cron.log 2>&1
+# <<< hermes automations <<<
