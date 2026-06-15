@@ -58,6 +58,8 @@
   .qitem .nm small{display:block;color:var(--muted-2);font-size:10px;font-family:var(--mono)}
   .tagx{font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;white-space:nowrap}
   .tagx.block{background:#ef444420;color:#ff6b78}.tagx.ok{background:#22c55e20;color:#4ade80}
+  .tagx.pend{background:#4a9eff20;color:#7db8ff}
+  .qts{font-family:var(--mono);font-size:10px;color:var(--muted-2);white-space:nowrap;margin-left:8px}
   .ap{font-size:11px;font-weight:700;padding:6px 11px;border-radius:8px;border:none;cursor:pointer;background:var(--green);color:#0e1526}
   .ap:disabled{opacity:.5;cursor:not-allowed}
   .seg{display:flex;gap:8px}
@@ -122,6 +124,13 @@
       </div>
       <div class="note" id="radar-note"></div>
     </div>
+  </div>
+
+  <!-- triaged email -->
+  <div class="card">
+    <div class="ch"><span class="lbl">Triaged email · Outlook intake</span><span class="ico">✉️</span></div>
+    <div id="email"><div class="empty">Loading…</div></div>
+    <div class="note" id="email-note">Actionable mail Hermes pulled from Outlook. <b>Ready</b> = awaiting your approval in Intake.</div>
   </div>
 
   <!-- feed -->
@@ -204,7 +213,27 @@ async function loadAuto(){
   }catch(e){ document.getElementById("auto-d").textContent="Python syncs"; }
 }
 
-loadKpis(); loadQueue(); loadRadar(); loadFeed(); loadAuto();
+async function loadEmail(){
+  const el=document.getElementById("email");
+  const tag = s => s==="awaiting_approval" ? '<span class="tagx ok">ready</span>'
+                 : s==="failed"            ? '<span class="tagx block">failed</span>'
+                 : `<span class="tagx pend">${esc(s)}</span>`;
+  try{
+    const d=await jget(API+"/dashboard/email-queue?limit=40");
+    if(!d.items.length){ el.innerHTML='<div class="empty">No triaged email yet — sweep runs every 30 min.</div>'; return; }
+    el.innerHTML = d.items.map(m=>`<div class="qitem">
+      <span class="nm">${esc(m.subject||"(no subject)")}<small>${esc(m.from||"")}${m.lob_guess?(" · "+esc(m.lob_guess)):""}</small></span>
+      ${tag(m.status)}
+      <span class="qts">${esc((m.received_at||"").slice(0,16).replace("T"," "))}</span>
+    </div>`).join("");
+    const c=d.counts||{};
+    const processing=(c.received||0)+(c.synthesizing||0)+(c.synthesized||0)+(c.drafting||0);
+    document.getElementById("email-note").innerHTML =
+      `<b>${c.awaiting_approval||0}</b> ready · <b>${processing}</b> processing · <b>${c.failed||0}</b> failed · ${d.total} shown. Source: intake_submissions (email-ms365 / gmail).`;
+  }catch(e){ el.innerHTML='<div class="err">⚠ '+e.message+'</div>'; }
+}
+
+loadKpis(); loadQueue(); loadRadar(); loadFeed(); loadAuto(); loadEmail();
 </script>
 </body>
 </html>

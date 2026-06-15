@@ -72,3 +72,35 @@ def approval_queue(supa, limit: int = 50) -> list[dict]:
 
 def activity_feed(supa, limit: int = 25) -> list[dict]:
     return supa.select("cc_review_events", params={"order": "at.desc"}, limit=limit)
+
+
+EMAIL_SOURCES = ("email-ms365", "email-gmail")
+
+
+def email_queue(supa, limit: int = 50) -> dict[str, Any]:
+    """Triaged inbound email — the intake_submissions rows the email lane
+    creates (Outlook/ms365 + Gmail). Surfaces the human-relevant header fields
+    from the payload so the Command Center can show what's waiting without
+    opening each row, plus a status rollup. ``awaiting_approval`` rows are the
+    ones a person needs to act on; ``failed`` rows flag a triage/synthesis gap.
+    """
+    rows = supa.select("intake_submissions", params={
+        "source": f"in.({','.join(EMAIL_SOURCES)})",
+        "order": "created_at.desc",
+    }, limit=limit)
+    items, counts = [], {}
+    for r in rows:
+        p = r.get("payload") or {}
+        status = r.get("status")
+        counts[status] = counts.get(status, 0) + 1
+        items.append({
+            "id": r.get("id"),
+            "status": status,
+            "source": r.get("source"),
+            "from": p.get("from") or p.get("from_address"),
+            "subject": p.get("subject"),
+            "received_at": p.get("received_at") or r.get("created_at"),
+            "lob_guess": p.get("lob_guess"),
+            "classifier_reason": p.get("classifier_reason"),
+        })
+    return {"items": items, "counts": counts, "total": len(items)}
