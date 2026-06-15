@@ -222,6 +222,29 @@ def _payload_dict_to_raw_text(payload: dict[str, Any]) -> str:
     if notes:
         parts.append(f"=== NOTES ===\n{notes}")
 
+    # Email transport (ms365 / gmail triage) — the message itself is the source
+    # content. Triage writes {channel: "email", from, subject, body, ...}; flatten
+    # those into an EMAIL section so the LLM contract stays identical to the other
+    # transports. Without this, email payloads have no recognised section and
+    # synthesis fails with "nothing to synthesize".
+    if payload.get("channel") == "email":
+        email_lines = ["=== EMAIL ==="]
+        sender = payload.get("from") or payload.get("from_address")
+        if sender:
+            email_lines.append(f"From: {sender}")
+        if payload.get("received_at"):
+            email_lines.append(f"Received: {payload.get('received_at')}")
+        subject = (payload.get("subject") or "").strip()
+        if subject:
+            email_lines.append(f"Subject: {subject}")
+        body = (payload.get("body") or "").strip()
+        if body:
+            email_lines.append("")
+            email_lines.append(body)
+        # Only emit the section if there is real content beyond the header label.
+        if len(email_lines) > 1:
+            parts.append("\n".join(email_lines))
+
     documents = payload.get("documents") or []
     if documents:
         doc_lines = ["=== DOCUMENTS ==="]
