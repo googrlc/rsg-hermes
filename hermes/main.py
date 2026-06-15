@@ -212,6 +212,28 @@ def main() -> int:
         help="Only sync records changed since this ISO datetime (e.g. 2026-05-01T00:00:00)",
     )
     parser.add_argument(
+        "--sync-policies",
+        action="store_true",
+        help="Run NowCerts → EspoCRM POLICIES-ONLY sync (upsert Policy by policy_number; never touches Accounts/Contacts)",
+    )
+    parser.add_argument(
+        "--sync-policies-dry-run",
+        action="store_true",
+        help="Preview the policies-only sync without writing to EspoCRM",
+    )
+    parser.add_argument(
+        "--sync-policies-since",
+        type=str,
+        default=None,
+        help="Only sync policies changed since this ISO datetime (e.g. 2026-06-01T00:00:00)",
+    )
+    parser.add_argument(
+        "--sync-policies-limit",
+        type=int,
+        default=None,
+        help="Cap the number of policies processed (useful for a first dry-run)",
+    )
+    parser.add_argument(
         "--enrich-nowcerts",
         type=str,
         default=None,
@@ -443,6 +465,42 @@ def main() -> int:
             for err in sync_result.errors:
                 print(f"- {err}")
         return 0 if sync_result.ok else 1
+
+    # --- NowCerts → EspoCRM policies-only sync (no Supabase, no account writes) ---
+    if args.sync_policies or args.sync_policies_dry_run:
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes.sync.policy_sync import run_policy_sync
+
+        try:
+            nc = NowCertsClient()
+        except NowCertsClientError as e:
+            print(f"NowCerts connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            espo = EspoClient()
+        except EspoClientError as e:
+            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
+            return 2
+
+        pol_result = run_policy_sync(
+            nc,
+            espo,
+            since=args.sync_policies_since,
+            dry_run=args.sync_policies_dry_run,
+            limit=args.sync_policies_limit,
+        )
+        print(pol_result.message)
+        if pol_result.skipped_accounts:
+            print(f"\nSkipped — no EspoCRM account ({len(pol_result.skipped_accounts)} insureds):")
+            for nm in pol_result.skipped_accounts[:50]:
+                print(f"- {nm}")
+            if len(pol_result.skipped_accounts) > 50:
+                print(f"... +{len(pol_result.skipped_accounts) - 50} more")
+        if pol_result.errors:
+            print("\nErrors:")
+            for err in pol_result.errors[:50]:
+                print(f"- {err}")
+        return 0 if pol_result.ok else 1
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
     if args.enrich_nowcerts:
