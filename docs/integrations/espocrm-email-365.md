@@ -56,16 +56,20 @@ Different grant type ⇒ separate registration.
 
 ## Step 3 — Create the email account
 
-**Shared/team mailbox → Group Email Account** (recommended for intake):
-**Administration → Inbound Emails → create**
-- Email Address = the mailbox; **Auth Method = Microsoft / OAuth** → **Connect**
-  (sign in as the mailbox owner, consent).
-- **Monitored folders:** `INBOX`. Enable **Fetch / import**.
-- Optional: auto-create **Lead** or **Case** from unknown senders; set the
-  assigned user/team.
+**Chosen path: Personal Email Account for `lamar@risksolutionsgroup.net`.**
+Tied to Lamar's user, threads onto the records he can see, and Lamar himself
+authorizes (no shared-mailbox setup needed). It's the same mailbox triage reads.
 
-**Personal mailbox (Lamar's own) → Personal Email Account**: same OAuth connect,
-under the user's Email settings — keeps it tied to Lamar and his record access.
+As **Lamar**, signed into EspoCRM: top-right avatar → **Preferences → Email
+Accounts → Add** (or the **Email** view → gear → **Personal Email Accounts**):
+- Email Address = `lamar@risksolutionsgroup.net`; **Auth Method = Microsoft / OAuth**
+  → **Connect** → sign in + consent.
+- **Monitored folders:** `INBOX` only (so triage-quarantined noise is skipped —
+  see *Coexistence*). Enable **Fetch / import**.
+
+> Later, if an agency-wide `intake@…` shared mailbox is wanted, add it as a
+> **Group Email Account** under *Administration → Inbound Emails* (visible to the
+> team, with auto-assignment / auto-create-Lead). Same OAuth provider from Step 2.
 
 ## Step 4 — Outbound (send from EspoCRM)
 
