@@ -17,7 +17,7 @@ and auto-thread onto the matching Contact / Lead / Account records. This is
 | EspoCRM version | 9.3.8 (open core) |
 | EspoCRM site URL | `https://rrespocrm-rsg-u69864.vm.elestio.app` |
 | OAuth redirect URI | `https://rrespocrm-rsg-u69864.vm.elestio.app/oauth-callback.php` (confirm the exact value EspoCRM shows on the Microsoft integration page) |
-| Mailbox to connect | `lamar@risksolutionsgroup.net` (the inbox triage already reads) or a shared `intake@…` |
+| Mailboxes to connect | `lamar@risksolutionsgroup.net` and `gretchen@risksolutionsgroup.net` — each a Personal Email Account under that user |
 | Current state | no inbound accounts, no outbound SMTP — fresh setup |
 
 ## Why a NEW Entra app (you can't reuse `hermes-mail-triage`)
@@ -56,16 +56,22 @@ Different grant type ⇒ separate registration.
 
 ## Step 3 — Create the email account
 
-**Chosen path: Personal Email Account for `lamar@risksolutionsgroup.net`.**
-Tied to Lamar's user, threads onto the records he can see, and Lamar himself
-authorizes (no shared-mailbox setup needed). It's the same mailbox triage reads.
+**Chosen path: a Personal Email Account for each user** —
+`lamar@risksolutionsgroup.net` (Lamar) and `gretchen@risksolutionsgroup.net`
+(Gretchen). Personal accounts are tied to that user, thread onto the records they
+can see, and **each person authorizes their own** (no shared-mailbox setup).
 
-As **Lamar**, signed into EspoCRM: top-right avatar → **Preferences → Email
-Accounts → Add** (or the **Email** view → gear → **Personal Email Accounts**):
-- Email Address = `lamar@risksolutionsgroup.net`; **Auth Method = Microsoft / OAuth**
-  → **Connect** → sign in + consent.
+Each user, signed into EspoCRM **as themselves**: top-right avatar →
+**Preferences → Email Accounts → Add** (or the **Email** view → gear → **Personal
+Email Accounts**):
+- Email Address = their own mailbox; **Auth Method = Microsoft / OAuth** →
+  **Connect** → sign in + consent **as that mailbox's owner**.
 - **Monitored folders:** `INBOX` only (so triage-quarantined noise is skipped —
   see *Coexistence*). Enable **Fetch / import**.
+
+> OAuth here is delegated — Gretchen must click **Connect** while logged in as
+> herself; Lamar cannot authorize Gretchen's mailbox for her. Both mailboxes use
+> the **same** Step-2 Microsoft provider; no second Entra app is needed.
 
 > Later, if an agency-wide `intake@…` shared mailbox is wanted, add it as a
 > **Group Email Account** under *Administration → Inbound Emails* (visible to the
