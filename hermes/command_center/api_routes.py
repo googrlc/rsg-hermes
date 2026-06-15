@@ -187,6 +187,23 @@ async def dashboard_email_queue(limit: int = 50):
     return dashboard.email_queue(_get_supa(), limit=limit)
 
 
+@dashboard_router.get("/retention-trend")
+async def dashboard_retention_trend(limit: int = 24):
+    return dashboard.retention_trend(_get_supa(), limit=limit)
+
+
+@dashboard_router.get("/pipeline")
+async def dashboard_pipeline():
+    # EspoCRM read — degrade gracefully if the CRM is unreachable so the rest
+    # of the dashboard still loads. Lazy import avoids an api.py import cycle.
+    from hermes.api import _get_espo
+    try:
+        return dashboard.pipeline_report(_get_espo())
+    except Exception as exc:  # noqa: BLE001 — surface, don't 500 the dashboard
+        log.warning("pipeline report failed: %s", exc)
+        raise HTTPException(503, f"pipeline unavailable: {exc}")
+
+
 @dashboard_router.get("/page", response_class=HTMLResponse)
 async def dashboard_page():
     html = Path(__file__).parent / "webui" / "dashboard.html"

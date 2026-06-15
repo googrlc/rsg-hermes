@@ -12,6 +12,7 @@ real premium/clients, not a placeholder, and compare retention to RSG's standing
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 RETENTION_GOAL = 75.0   # RSG standing target
@@ -104,3 +105,100 @@ def email_queue(supa, limit: int = 50) -> dict[str, Any]:
             "classifier_reason": p.get("classifier_reason"),
         })
     return {"items": items, "counts": counts, "total": len(items)}
+
+
+# ---- reports (Advanced-Pack-equivalent, on open core) --------------------
+
+def _to_float(v: Any) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def retention_trend(supa, limit: int = 24) -> dict[str, Any]:
+    """Retention rate over time from agency_snapshots — RSG's headline metric
+    (the book was 54.92%, target 75%). The dashboard KPI shows only the latest
+    point; this surfaces the trajectory the weekly book-health snapshots build.
+    """
+    rows = supa.select("agency_snapshots",
+                       params={"order": "snapshot_date.asc"}, limit=limit)
+    points = [{"date": r.get("snapshot_date"), "rate": r.get("retention_rate")}
+              for r in rows if r.get("retention_rate") is not None]
+    current = points[-1]["rate"] if points else None
+    first = points[0]["rate"] if points else None
+    return {
+        "points": points,
+        "goal": RETENTION_GOAL,
+        "current": current,
+        "delta": (round(current - first, 2) if current is not None and first is not None else None),
+        "count": len(points),
+    }
+
+
+# LOB is not a column on canonical_policies; opportunities carry it in the
+# description/name, matched heuristically (same list reports.py uses).
+_KNOWN_LOBS = [
+    "Commercial Auto", "GL/BOP", "Workers Comp", "Personal Lines",
+    "Medicare", "Life", "Property", "Umbrella",
+]
+
+# RSG opportunities leave the stock ``amount`` field empty — premium lives in
+# the custom ``writtenPremium`` (bound) and ``estimatedPremium`` (open) fields.
+# Coalesce per row: written first (actuals on closed deals), then estimated,
+# then amount. HERMES_PREMIUM_FIELD, if set, is tried before these.
+_PREMIUM_FIELDS = ["writtenPremium", "estimatedPremium", "amount"]
+
+
+def _premium_fields() -> list[str]:
+    env = os.environ.get("HERMES_PREMIUM_FIELD")
+    return ([env] if env else []) + [f for f in _PREMIUM_FIELDS if f != env]
+
+
+def pipeline_report(espo) -> dict[str, Any]:
+    """Open pipeline from EspoCRM opportunities, aggregated by stage and by
+    line of business. One Opportunity read, both rollups — mirrors the logic in
+    commands/reports.py but returns JSON for the dashboard.
+    """
+    fields = _premium_fields()
+    body = espo.get("Opportunity", params={
+        "maxSize": 500,
+        "select": "id,name,stage,accountName,description," + ",".join(fields),
+    })
+    rows = body.get("list", []) if isinstance(body, dict) else []
+
+    def _row_premium(r: dict) -> float:
+        for f in fields:
+            v = _to_float(r.get(f))
+            if v:
+                return v
+        return 0.0
+
+    stages: dict[str, dict] = {}
+    lob: dict[str, dict] = {}
+    total = 0.0
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        amt = _row_premium(r)
+        total += amt
+        st = r.get("stage") or "Unknown"
+        s = stages.setdefault(st, {"stage": st, "count": 0, "premium": 0.0})
+        s["count"] += 1
+        s["premium"] += amt
+        desc = str(r.get("description") or r.get("name") or "")
+        matched = "Other"
+        for l in _KNOWN_LOBS:
+            if l.lower() in desc.lower():
+                matched = l
+                break
+        b = lob.setdefault(matched, {"lob": matched, "count": 0, "premium": 0.0})
+        b["count"] += 1
+        b["premium"] += amt
+    rnd = lambda xs: [{**x, "premium": round(x["premium"])} for x in xs]
+    return {
+        "stages": rnd(sorted(stages.values(), key=lambda x: x["premium"], reverse=True)),
+        "lob": rnd(sorted(lob.values(), key=lambda x: x["premium"], reverse=True)),
+        "total": round(total),
+        "deals": len(rows),
+    }
