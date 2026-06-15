@@ -182,6 +182,11 @@ async def dashboard_feed(limit: int = 25):
     return {"events": dashboard.activity_feed(_get_supa(), limit=limit)}
 
 
+@dashboard_router.get("/email-queue")
+async def dashboard_email_queue(limit: int = 50):
+    return dashboard.email_queue(_get_supa(), limit=limit)
+
+
 @dashboard_router.get("/page", response_class=HTMLResponse)
 async def dashboard_page():
     html = Path(__file__).parent / "webui" / "dashboard.html"
