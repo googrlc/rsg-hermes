@@ -20,6 +20,16 @@ and auto-thread onto the matching Contact / Lead / Account records. This is
 | Mailboxes to connect | `lamar@risksolutionsgroup.net` and `gretchen@risksolutionsgroup.net` — each a Personal Email Account under that user |
 | Current state | no inbound accounts, no outbound SMTP — fresh setup |
 
+## Scope note — Gretchen is EspoCRM-email only (no triage)
+
+`gretchen@risksolutionsgroup.net` is connected to **EspoCRM native email only**.
+It is intentionally **not** added to the Hermes triage pipeline
+(`MS365_MAILBOXES`): Gretchen handles Personal Lines / **Medicare**, so her inbox
+can carry PHI, and triage would run message bodies through the OpenAI classifier
+and store them in Supabase `intake_submissions`. Native EspoCRM email keeps her
+mail inside the CRM she already accesses — no new PHI surface. Revisit only with
+PHI redaction added to the triage payload first.
+
 ## Why a NEW Entra app (you can't reuse `hermes-mail-triage`)
 
 The triage app holds **application** permission `Mail.ReadWrite` (client-credentials,
