@@ -13,14 +13,16 @@ is the primary tool.
 
 - A COI request comes in from a client or contractor.
 - Gretchen asks "what do I need for this COI?"
-- A request includes additional insured or waiver of subrogation language.
-- You need to check if special wording is required and whether the policy
-  supports it.
+- A request includes additional insured or waiver of subrogation
+  language.
+- You need to check if special wording is required and whether the
+  policy supports it.
 
 ## What to collect for every COI request
 
 1. Named insured (must match the policy exactly)
-2. Policy number (if available)
+2. Policy number (if available — look up in EspoCRM via find_account or
+   lookup)
 3. Certificate holder name
 4. Certificate holder address
 5. Email or fax delivery instructions
@@ -57,6 +59,10 @@ Common gaps:
    before issuing.
 9. Save and deliver to the client (Gretchen reviews and sends).
 
+Note: Policy data in EspoCRM may have amsLockState = Synced, meaning it
+was synced from NowCerts and is locked from manual edits. The CRM Policy
+record is for reference — the actual COI is processed in NowCerts.
+
 ## Additional insured wording rules
 
 - Additional insured status must be supported by the policy form or a
@@ -71,8 +77,8 @@ Common gaps:
 
 - Must be supported by the policy form or endorsement.
 - Common form: CG 2404.
-- If the policy does not have a waiver of subrogation endorsement, it must
-  be requested from the carrier.
+- If the policy does not have a waiver of subrogation endorsement, it
+  must be requested from the carrier.
 - Workers comp waivers require specific state compliance — check the
   state before promising.
 
@@ -114,6 +120,9 @@ Action Taken:
 Next Step:
 Due Date:
 ```
+
+The note goes through the CRM write queue — Hermes will ask for an
+approval token before writing.
 
 ## Contractor COI request email template
 

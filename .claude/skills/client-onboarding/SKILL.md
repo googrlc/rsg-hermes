@@ -23,10 +23,8 @@ system.
 
 - Search for duplicates first.
 - Create Account: Personal Household or Commercial Business.
-- Fill in: Account Type, Primary Line of Business, Assigned Service Rep
-  (Gretchen for personal lines, Lamar for commercial), Client Status
-  (Active), Renewal Month, Preferred Contact Method, Retention Risk
-  (Low for new clients).
+- Fill in: account_type, account_status (Active), assignedUserName
+  (Gretchen for personal lines, Lamar for commercial), annual_premium.
 - Save the account.
 
 ### 2. EspoCRM Contacts
@@ -35,7 +33,7 @@ system.
 - Create Contacts for spouse, business owner, office manager, or other
   relevant people.
 - Link each to the Account.
-- Fill in email, phone, address.
+- Fill in emailAddress, phoneNumber, householdRole.
 
 ### 3. EspoCRM Opportunities
 
@@ -46,15 +44,20 @@ Create one opportunity per line of business:
 - [Client Name] - Umbrella - New Business - [Year]
 - [Client Name] - Commercial Auto - New Business - [Year]
 
-Set stage to Closed-Won if already bound, or to Proposal Sent if still
-in process. Fill in: Expiration Date, Current Premium, Assigned To.
+Set stage to Closed Won if already bound, or to Discovery if still
+in process. Fill in: lineOfBusiness, amount (premium), closeDate,
+assignedUserName.
+
+New business stages (do not skip):
+Discovery -> Quoting -> Markets Out / Shopping -> Proposal Presented ->
+Negotiation -> Closed Won | Closed Lost
 
 ### 4. File folder structure
 
-Create in Google Drive or SharePoint:
+Create in Google Drive under "Hermes Docs":
 
 ```
-Client Documents /
+Hermes Docs /
   [Client Name] /
     2026 /
       Personal Auto /
@@ -62,9 +65,6 @@ Client Documents /
       Umbrella /
       Commercial Auto /
 ```
-
-Paste the folder link into the Account File Storage Link field in
-EspoCRM.
 
 ### 5. Welcome email
 
@@ -97,17 +97,13 @@ Risk Solutions Group
   business days.
 - Create an EspoCRM task: "30-day check-in" due in 30 days.
 
+All task creations go through the CRM write queue — Hermes will ask for
+an approval token (APPROVE ALL or APPROVE TASKS ONLY) before writing.
+
 ### 7. Cross-sell review
 
 After onboarding, check for cross-sell opportunities:
 - Has auto but no home? Flag home cross-sell.
 - Has home but no umbrella? Flag umbrella cross-sell.
 - Has auto + home but no life? Flag life cross-sell.
-- Create a cross-sell opportunity if appropriate.
-
-## n8n automation suggestion
-
-If onboarding is a repeat workflow, suggest:
-- Auto-create opportunities per LOB from the onboarding form.
-- Auto-create file folders from the new account.
-- Auto-create welcome + follow-up tasks.
+- Create a cross-sell opportunity if appropriate (stage: Discovery).

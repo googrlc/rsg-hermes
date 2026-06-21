@@ -1,6 +1,6 @@
 ---
 name: file-storage-guide
-description: File storage index for RSG — where client documents, internal SOPs, templates, COIs, CRM records, and automation configs live across Google Drive, SharePoint, NowCerts, EspoCRM, and n8n. Use when Gretchen asks "where do I put this?" or "where is that file?" or when recommending a file storage location.
+description: File storage index for RSG — where client documents, internal SOPs, templates, COIs, CRM records, and automation configs live across Google Drive, NowCerts, EspoCRM, and Supabase. Use when Gretchen asks "where do I put this?" or "where is that file?" or when recommending a file storage location.
 ---
 
 # File Storage Guide
@@ -20,21 +20,22 @@ do I put this?" and "where is that file?"
 
 | What | Where |
 |---|---|
-| Client documents (policies, apps, quotes) | Google Drive / SharePoint |
-| Internal SOPs | SharePoint |
-| Templates (emails, forms, checklists) | Google Drive / SharePoint |
+| Client documents (policies, apps, quotes) | Google Drive (root folder: "Hermes Docs") |
+| Internal SOPs | Google Drive / Hermes Docs |
+| Templates (emails, forms, checklists) | Google Drive / Hermes Docs |
 | Certificates of Insurance | NowCerts |
 | CRM records (accounts, contacts, opportunities, tasks, notes) | EspoCRM |
-| Bound policy data (insureds, premiums, policy details) | NowCerts |
+| Bound policy data (insureds, premiums, policy details) | NowCerts (synced to EspoCRM Policy entity) |
 | Daily assistant / commands | Hermes |
-| Automations and workflows | n8n |
+| Automations and workflows | n8n (defined in docker-compose, check if running) |
 | Analytics, snapshots, commission ledger | Supabase |
 | Slack messages and alerts | Slack |
+| Agency login links | RSG Launchpad (in OpenWebUI) |
 
 ## Client folder structure
 
 ```
-Client Documents /
+Hermes Docs /
   [Client Name] /
     [Year] /
       [Line of Business] /
@@ -42,17 +43,17 @@ Client Documents /
 
 Examples:
 ```
-Client Documents / Johnson Family / 2026 / Personal Auto /
-Client Documents / Johnson Family / 2026 / Home /
-Client Documents / ABC Plumbing LLC / 2026 / Commercial Auto /
-Client Documents / ABC Plumbing LLC / 2026 / COI /
+Hermes Docs / Johnson Family / 2026 / Personal Auto /
+Hermes Docs / Johnson Family / 2026 / Home /
+Hermes Docs / ABC Plumbing LLC / 2026 / Commercial Auto /
+Hermes Docs / ABC Plumbing LLC / 2026 / COI /
 ```
 
 ## Rules
 
-1. Every client should have a folder in Google Drive or SharePoint.
-2. The folder link should be in the EspoCRM Account File Storage Link
-   field.
+1. Every client should have a folder in Google Drive under "Hermes Docs".
+2. Hermes mirrors Drive files automatically when HERMES_DRIVE_MIRROR is
+   enabled.
 3. COIs stay in NowCerts — do not duplicate to Google Drive unless the
    client specifically requests a copy.
 4. CRM records (notes, tasks, opportunities) live in EspoCRM — do not
@@ -69,7 +70,7 @@ Client Documents / ABC Plumbing LLC / 2026 / COI /
 ## Escalation
 
 If a file cannot be found:
-1. Check the EspoCRM Account File Storage Link.
-2. Check Google Drive / SharePoint by client name.
+1. Check the EspoCRM Account for file references in notes.
+2. Check Google Drive (Hermes Docs) by client name.
 3. Check NowCerts for COIs and policy documents.
 4. If still not found, ask Gretchen or Lamar where it was saved.

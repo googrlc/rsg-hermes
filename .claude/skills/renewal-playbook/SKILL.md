@@ -20,32 +20,38 @@ with the step-by-step workflow, templates, and scripts Gretchen uses.
 
 ## The 90/60/30 workflow
 
+The Revenue Sentinel monitors EspoCRM Renewal records and posts alerts
+to Slack at 90, 60, and 30 days before expiration.
+
 ### 90 days out (commercial) / 60 days out (personal)
 
-1. Pull the renewal list from EspoCRM (renewals due in 90 days).
+1. Pull the renewal list from EspoCRM (Renewal records due in 90 days).
 2. For each renewal, identify: client, line of business, current carrier,
    current premium, expiration date.
-3. Create an EspoCRM opportunity (if not already created):
+3. Create an EspoCRM Renewal record (if not already created):
+   - Link to Account, Contact, Policy
+   - stage = Identified
+   - expiration_date, current_premium, line_of_business, carrier
+4. Create an EspoCRM Opportunity (if not already created):
    `[Client Name] - [LOB] Renewal - [Year]`
-4. Set stage to Identified.
 5. Create a task: "Review renewal for [Client]" due in 7 days.
 
 ### 60 days out
 
 1. Check if the renewal offer has arrived from the carrier.
-2. If yes: compare current premium to renewal premium. Calculate the
-   increase percentage.
+2. If yes: compare current premium to renewal premium. Calculate
+   the increase percentage.
 3. If no: follow up with the carrier.
 4. Create a task: "Request renewal offer from [Carrier]" if not received.
-5. If the increase is over 10%, flag for review.
-6. If the increase is over 20%, flag for remarketing consideration.
+5. If the increase is over 5%, flag for review.
+6. If the increase is over 15%, flag for remarketing (CRITICAL risk).
 
 ### 30 days out
 
 1. Review the renewal offer with the client.
-2. Recommend: renew as-is, review with adjustments, or remarket.
+2. Recommend: retain as-is, retain with negotiation, or remarket.
 3. Draft the client communication (see templates below).
-4. Update the opportunity stage: Outreach Sent.
+4. Update the Renewal stage: Outreach Sent.
 5. Create a task: "Confirm renewal decision with [Client]" due in 5 days.
 
 ### 14 days out
@@ -59,7 +65,33 @@ with the step-by-step workflow, templates, and scripts Gretchen uses.
 
 1. Final confirmation.
 2. If still no decision: escalate immediately.
-3. Update EspoCRM opportunity to Renewed-Won or Lost.
+3. Update Renewal stage to Renewed - Won or Lost.
+
+## Renewal stages (Project 85)
+
+Identified -> Outreach Sent -> Quote Requested -> Proposal Sent ->
+Negotiating -> Renewed - Won | Lost
+
+Never skip stages. Moving backwards requires producer approval.
+
+## Risk classification
+
+| risk_status | Trigger |
+|---|---|
+| SAFE | Increase < 5%, no loss activity, client unprompted |
+| AT_RISK | Increase 5-15%, OR client expressed shopping intent, OR last contact > 60d |
+| CRITICAL | Increase > 15%, OR loss runs adverse, OR client said "shopping it", OR < 30 days to x-date with no outreach |
+
+## Recommended actions
+
+| Action | When |
+|---|---|
+| RETAIN_AS_IS | Accept renewal, no remarket. Notify client. |
+| RETAIN_WITH_NEGOTIATION | Push carrier for credit/class change/payroll adjustment. Stay with current carrier. |
+| REMARKET_SAMPLE | Quote 1-2 alternates as comparison only. |
+| REMARKET_FULL | Full submission to 4+ markets via `proposal-builder`. |
+| ESCALATE_HUMAN | Non-deterministic situation; route to Slack #rsg-hermes-project85-renewals. |
+| MOVE_TO_AT_RISK_LIST | Client shopping aggressively; needs producer-led save play. |
 
 ## Renewal email templates
 
@@ -79,7 +111,7 @@ Thanks,
 Gretchen
 ```
 
-### Small increase (under 10%)
+### Small increase (under 5%)
 
 ```
 Hi [Client],
@@ -98,7 +130,7 @@ Thanks,
 Gretchen
 ```
 
-### Larger increase (10% or more)
+### Larger increase (5% or more)
 
 ```
 Hi [Client],
