@@ -149,3 +149,20 @@ require human approval — this is enforced in `~/.hermes/SOUL.md`.
 - **Undo tunnel:** `launchctl unload ~/Library/LaunchAgents/com.rsg.hermes-tunnel.plist` and `kill` the ssh process.
 - **Undo computer-use:** `hermes computer-use uninstall` (or remove `/Applications/CuaDriver.app`).
 - **Undo SOUL.md:** restore from the template comments in the original file.
+
+## Voice mode (optional)
+
+Voice extras are installed in the Hermes venv at `~/.hermes/hermes-agent/venv/`:
+
+```bash
+# Already installed:
+# ~/.hermes/hermes-agent/venv/bin/pip install "hermes-agent[voice]"
+# faster-whisper comes bundled with the voice extras
+```
+
+To use voice in the Hermes CLI:
+
+1. Start a chat session: `hermes chat`
+2. Enable voice input: type `/voice on`
+3. Press `Ctrl+B` to record — Hermes transcribes and replies
+4. Enable TTS (text-to-speech) if you want replies read aloud: `/voice tts`
