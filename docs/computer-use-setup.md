@@ -1,7 +1,8 @@
-# Hermes Computer-Use Setup — Mac + VPS over Tailscale
+# Hermes Setup — Mac Computer-Use + VPS over Tailscale
 
-This documents the private, Tailscale-only setup for running Hermes with
-computer-use on the Mac while the VPS stays unexposed to the public internet.
+Private setup: VPS services stay on the tailnet, no public HTTPS.
+Mac handles desktop control. Phone and other tailnet devices access
+the web UI and dashboard directly via Tailscale Serve.
 
 ## Architecture
 
@@ -9,131 +10,88 @@ computer-use on the Mac while the VPS stays unexposed to the public internet.
 Mac (lamars-mac-mini, 100.82.142.43)
 ├── Hermes local install (computer-use, browser control)
 ├── SOUL.md with RSG privacy rules
-├── SSH tunnel → VPS dashboard
-└── CuaDriver 0.6.7 (desktop control)
+├── CuaDriver 0.6.7 (desktop control)
+└── Voice extras (faster-whisper, /voice on + Ctrl+B)
 
 VPS (hermes-gretch, 100.75.67.72)
-├── Hermes dashboard (172.17.0.1:9119, private)
-├── Hermes gateway/agent (Slack, CRM, cron)
-├── No public HTTPS — Tailscale only
-└── No Caddy/NGINX needed
+├── Hermes dashboard — Tailscale Serve on :9119
+├── Hermes webui    — Tailscale Serve on :8787
+├── Hermes gateway  — Docker bridge only (172.17.0.1:8642, internal)
+├── Slack gateway, CRM orchestration, cron, dashboards
+└── No public exposure — Tailscale only, no Caddy/NGINX
 ```
+
+## Access URLs (from any tailnet device)
+
+| Service | URL | Status |
+|---------|-----|--------|
+| Dashboard | `http://hermes-gretch:9119` | 200 OK |
+| WebUI | `http://hermes-gretch:8787` | 302 → login |
+| Gateway (internal) | `172.17.0.1:8642` (VPS only) | not HTTP-served |
+
+Use the hostname `hermes-gretch` (or `hermes-gretch.tail1cbc83.ts.net`),
+not the raw IP — the webui checks the Host header and returns 404 for
+unknown hosts.
 
 ## What's already done
 
-1. **SSH tunnel** — Mac reaches VPS dashboard at `http://127.0.0.1:9119`
-   via `ssh -f -N -L 9119:172.17.0.1:9119 hermes`.
+1. **Tailscale Serve** — dashboard (:9119) and webui (:8787) proxied
+   from the Tailscale interface to the Docker bridge (172.17.0.1).
+   Configured on the VPS with `tailscale serve --bg --http <port>`.
 
-2. **Computer-use installed** — `hermes computer-use install` succeeded.
-   CuaDriver 0.6.7 at `/Applications/CuaDriver.app`, symlinked to
-   `~/.local/bin/cua-driver`.
+2. **Computer-use installed** — CuaDriver 0.6.7 at
+   `/Applications/CuaDriver.app`, symlinked to `~/.local/bin/cua-driver`.
 
-3. **Privacy rules** — `~/.hermes/SOUL.md` updated with RSG-specific persona
-   and privacy rules for the Mac-local Hermes.
+3. **Privacy rules** — `~/.hermes/SOUL.md` updated with RSG-specific
+   persona and privacy rules for the Mac-local Hermes.
+
+4. **Voice extras** — `hermes-agent[voice]` + `faster-whisper` installed
+   in the Hermes venv. Use `/voice on` + `Ctrl+B` in `hermes chat`.
+
+5. **SSH tunnel removed** — no longer needed; Tailscale Serve handles
+   access directly. The launchd plist was unloaded and deleted.
 
 ## Remaining manual steps
 
 ### 1. Grant macOS TCC permissions
 
-CuaDriver needs Accessibility and Screen Recording. Run the grant helper,
-then approve in System Settings:
-
 ```bash
 cua-driver permissions grant
 ```
 
-Or manually:
+Then approve in System Settings:
+- **Privacy & Security → Accessibility** — allow CuaDriver.app
+- **Privacy & Security → Screen Recording** — allow CuaDriver.app
 
-- **System Settings → Privacy & Security → Accessibility** — allow CuaDriver.app
-- **System Settings → Privacy & Security → Screen Recording** — allow CuaDriver.app
-
-Then verify:
-
+Verify:
 ```bash
 hermes computer-use doctor
 cua-driver check_permissions
 ```
 
-Both TCC checks should show green.
-
-### 2. Enable computer-use toolset in Hermes
+### 2. Enable computer-use toolset
 
 ```bash
 hermes tools
 ```
+Select **Computer Use**.
 
-Select **Computer Use** from the toolset list.
+### 3. Phone access
 
-### 3. Make the SSH tunnel persistent (optional but recommended)
-
-Create a launchd plist so the tunnel survives reboots:
-
-```bash
-cat > ~/Library/LaunchAgents/com.rsg.hermes-tunnel.plist << 'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.rsg.hermes-tunnel</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/bin/ssh</string>
-    <string>-N</string>
-    <string>-L</string>
-    <string>9119:172.17.0.1:9119</string>
-    <string>-o</string>
-    <string>ExitOnForwardFailure=yes</string>
-    <string>-o</string>
-    <string>ServerAliveInterval=30</string>
-    <string>-o</string>
-    <string>ServerAliveCountMax=3</string>
-    <string>hermes</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardErrorPath</key>
-  <string>/tmp/hermes-tunnel.err.log</string>
-</dict>
-</plist>
-PLIST
-launchctl load ~/Library/LaunchAgents/com.rsg.hermes-tunnel.plist
-```
-
-### 4. Connect Hermes Desktop to VPS (if using the Desktop app)
-
-In Hermes Desktop on the Mac:
-
-- **Settings → Gateway → Remote gateway**
-- URL: `http://127.0.0.1:9119` (via SSH tunnel)
-
-### 5. Tailscale ACLs (optional hardening)
-
-In the Tailscale admin console, restrict which devices can reach the Hermes
-VPS port 9119. Only Lamar's Mac should have access.
-
-### 6. Optional: VPS triggers Mac computer-use
-
-If you want the VPS to be able to kick off local computer-use sessions on the
-Mac over Tailscale:
-
-- **Mac:** System Settings → General → Sharing → Remote Login (restrict to
-  Lamar's user)
-- **From VPS:** `ssh lamar@100.82.142.43 'hermes -t computer_use chat'`
-
-Use this carefully — it gives the VPS click-around-your-Mac power.
+Install the Tailscale app on your phone (already done for lc-personal
+and lc-work). Open a browser and navigate to:
+- `http://hermes-gretch:8787` — Hermes web UI
+- `http://hermes-gretch:9119` — Dashboard
 
 ## Two-mode operating model
 
 | Mode | Location | Role |
 |------|----------|------|
-| VPS Hermes | hermes-gretch (always on) | CRM, Slack gateway, cron, dashboards, no computer-use |
+| VPS Hermes | hermes-gretch (always on) | CRM, Slack gateway, cron, dashboards, web UI |
 | Mac Hermes | lamars-mac-mini (local) | Browser/app control, carrier portals, PDF handling, proposals |
 
-The VPS coordinates; the Mac executes desktop actions. Sensitive actions
-require human approval — this is enforced in `~/.hermes/SOUL.md`.
+The VPS coordinates; the Mac executes desktop actions. Sensitive
+actions require human approval — enforced in `~/.hermes/SOUL.md`.
 
 ## Privacy rules (enforced via SOUL.md)
 
@@ -144,25 +102,31 @@ require human approval — this is enforced in `~/.hermes/SOUL.md`.
 - Honest, neutral, service-focused — no manipulative tactics.
 - Log material client-facing actions.
 
-## Rollback
-
-- **Undo tunnel:** `launchctl unload ~/Library/LaunchAgents/com.rsg.hermes-tunnel.plist` and `kill` the ssh process.
-- **Undo computer-use:** `hermes computer-use uninstall` (or remove `/Applications/CuaDriver.app`).
-- **Undo SOUL.md:** restore from the template comments in the original file.
-
-## Voice mode (optional)
-
-Voice extras are installed in the Hermes venv at `~/.hermes/hermes-agent/venv/`:
+## Tailscale Serve management (on VPS)
 
 ```bash
-# Already installed:
-# ~/.hermes/hermes-agent/venv/bin/pip install "hermes-agent[voice]"
-# faster-whisper comes bundled with the voice extras
+# View current config
+tailscale serve status
+
+# Add a service
+tailscale serve --bg --http <port> --yes http://172.17.0.1:<port>
+
+# Remove a service
+tailscale serve --http=<port> off
 ```
 
-To use voice in the Hermes CLI:
+## VPS docker-compose port bindings
 
-1. Start a chat session: `hermes chat`
-2. Enable voice input: type `/voice on`
-3. Press `Ctrl+B` to record — Hermes transcribes and replies
-4. Enable TTS (text-to-speech) if you want replies read aloud: `/voice tts`
+Services bind to `172.17.0.1` (Docker bridge, VPS-internal).
+Tailscale Serve proxies tailnet traffic to the bridge. This avoids
+conflicts with the DOCKER-USER iptables chain, which drops new
+connections to Docker ports not in its allowlist.
+
+## Rollback
+
+- **Undo Tailscale Serve:** `tailscale serve reset` on the VPS.
+- **Undo computer-use:** `hermes computer-use uninstall` or remove
+  `/Applications/CuaDriver.app`.
+- **Undo SOUL.md:** restore from the template comments in the original file.
+- **Restore docker-compose.yml:** backup at
+  `/opt/app/docker-compose.yml.bak-pre-tailscale-bind`.
