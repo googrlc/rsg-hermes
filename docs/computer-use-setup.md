@@ -130,3 +130,35 @@ connections to Docker ports not in its allowlist.
 - **Undo SOUL.md:** restore from the template comments in the original file.
 - **Restore docker-compose.yml:** backup at
   `/opt/app/docker-compose.yml.bak-pre-tailscale-bind`.
+
+## Voice (STT + TTS)
+
+Both Mac and VPS Hermes are configured for voice:
+
+- **STT (input):** Groq Whisper (`whisper-large-v3-turbo`) — fast, free tier
+- **TTS (output):** Microsoft Edge TTS (`en-US-AriaNeural`) — free, no API key
+
+### Config
+
+`.env` (both Mac `~/.hermes/.env` and VPS `/opt/app/hermes-home/.env`):
+```
+GROQ_API_KEY=gsk_...
+```
+
+`config.yaml`:
+```yaml
+stt:
+  enabled: true
+  provider: groq
+tts:
+  provider: edge
+  edge:
+    voice: en-US-AriaNeural
+```
+
+### Usage (in `hermes chat`)
+
+1. `/voice on` — enables voice input
+2. `Ctrl+B` — hold to record, release to transcribe (Groq processes it)
+3. `/voice tts` — Hermes reads replies aloud (Edge TTS)
+4. `auto_tts: true` is set — replies are spoken automatically when TTS is on
