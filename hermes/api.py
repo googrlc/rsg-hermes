@@ -562,6 +562,108 @@ async def sync_health():
 
 
 # ---------------------------------------------------------------------------
+# CRM change proposals — staged EspoCRM field edits awaiting in-chat approval.
+# Approve enqueues a crm_write_queue row; the hermes-crm-queue-worker commits to
+# EspoCRM. Nothing here writes to EspoCRM directly. See operations/crm_proposals.py.
+# ---------------------------------------------------------------------------
+
+
+class CRMProposalCreateRequest(BaseModel):
+    entity: str
+    after: dict[str, Any]
+    op: str = "upsert"
+    match_key: str | None = None
+    espocrm_id: str | None = None
+    before: dict[str, Any] | None = None
+    rationale: str | None = None
+    confidence: float | None = None
+    source: str | None = None
+    proposed_by: str = "agent"
+
+
+class CRMProposalApproveRequest(BaseModel):
+    reviewer: str = "lamar"
+
+
+class CRMProposalRejectRequest(BaseModel):
+    reviewer: str = "lamar"
+    reason: str | None = None
+
+
+@app.post("/api/crm/proposals")
+async def crm_proposals_create(req: CRMProposalCreateRequest):
+    """Stage a proposed EspoCRM field edit (status=pending) for later approval.
+
+    `after` must use EspoCRM field names (load the espocrm field-reference skill
+    first). For op=upsert/update, espocrm_id is required; for op=create it must be
+    absent. No EspoCRM write happens here.
+    """
+    from hermes.operations.crm_proposals import ProposalError, create_proposal
+    try:
+        return create_proposal(
+            _get_supa(),
+            entity=req.entity,
+            after=req.after,
+            op=req.op,
+            match_key=req.match_key,
+            espocrm_id=req.espocrm_id,
+            before=req.before,
+            rationale=req.rationale,
+            confidence=req.confidence,
+            source=req.source,
+            proposed_by=req.proposed_by,
+        )
+    except ProposalError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    except Exception as exc:
+        log.exception("crm_proposals_create failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/crm/proposals")
+async def crm_proposals_list(status: str | None = None, limit: int = 50):
+    """List proposals, optionally filtered by status. Pending first by default."""
+    from hermes.operations.crm_proposals import list_proposals
+    try:
+        rows = list_proposals(_get_supa(), status=status, limit=limit)
+        return {"proposals": rows, "count": len(rows)}
+    except Exception as exc:
+        log.exception("crm_proposals_list failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/crm/proposals/{proposal_id}/approve")
+async def crm_proposals_approve(proposal_id: str, req: CRMProposalApproveRequest):
+    """Approve a pending proposal: enqueue a crm_write_queue row.
+
+    The hermes-crm-queue-worker commits the enqueued row to EspoCRM asynchronously
+    (hooks/ACL/Stream fire through EspoClient). This endpoint is the in-chat
+    committer — it never bypasses staging or the review gate.
+    """
+    from hermes.operations.crm_proposals import ProposalError, approve_proposal
+    try:
+        return approve_proposal(_get_supa(), proposal_id, reviewer=req.reviewer)
+    except ProposalError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    except Exception as exc:
+        log.exception("crm_proposals_approve failed for %s", proposal_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/crm/proposals/{proposal_id}/reject")
+async def crm_proposals_reject(proposal_id: str, req: CRMProposalRejectRequest):
+    """Reject a pending (or not-yet-committed approved) proposal. No write occurs."""
+    from hermes.operations.crm_proposals import ProposalError, reject_proposal
+    try:
+        return reject_proposal(_get_supa(), proposal_id, reviewer=req.reviewer, reason=req.reason)
+    except ProposalError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    except Exception as exc:
+        log.exception("crm_proposals_reject failed for %s", proposal_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Document library — Agent OS reads these to render folders -> documents
 # ---------------------------------------------------------------------------
 
