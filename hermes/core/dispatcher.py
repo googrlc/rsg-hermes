@@ -985,6 +985,23 @@ class Dispatcher:
         self._init_supabase()
 
         self._routes: list[tuple[re.Pattern[str], Handler | str]] = [
+            # CRM change proposal approval — must precede research/intake/lookup.
+            (
+                re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+(?P<id>\S+)\s*$", re.I),
+                "change_proposals",
+            ),
+            (
+                re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+ALL\s*$", re.I),
+                "change_proposals",
+            ),
+            (
+                re.compile(r"^\s*(?:LIST|SHOW)\s+CHANGES?\s*$", re.I),
+                "change_proposals",
+            ),
+            (
+                re.compile(r"^\s*(?:REJECT|CANCEL)\s+CHANGE\s+(?P<id>\S+)", re.I),
+                "change_proposals",
+            ),
             (
                 re.compile(r"^\s*(research|enrich|investigate|look\s+up|web\s+research)\s+(business|account|company)?\b", re.I),
                 business_research.handle,
@@ -1112,6 +1129,9 @@ class Dispatcher:
         if handler == "agency_fact":
             from hermes.commands.fact_retriever import handle as fact_handle
             return fact_handle(client, text, supa=self.supa)
+        if handler == "change_proposals":
+            from hermes.commands.change_proposals import handle as cp_handle
+            return cp_handle(client, text, supa=self.supa)
         if (
             callable(handler)
             and getattr(handler, "__module__", "") == "hermes.commands.data_entry"
