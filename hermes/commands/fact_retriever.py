@@ -70,6 +70,8 @@ CRM_CANONICAL_FIELDS: dict[str, list[tuple[str, str]]] = {
     "NAICS": [("Account", "naics")],
     "Date of Birth": [("Contact", "dateOfBirth")],
     "Effective Date": [("Policy", "effective_date")],
+    # "Renewal Date" maps to expiration_date: in insurance, the renewal/x-date IS
+    # the policy expiration date (when the policy expires and renews).
     "Renewal Date": [("Policy", "expiration_date")],
 }
 

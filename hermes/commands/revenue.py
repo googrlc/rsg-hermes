@@ -122,7 +122,12 @@ def renewal_audit(client: EspoClient, days: int = 90) -> DispatchResult:
             continue
         risks.append({**row, "_expiration": exp, "_days": (exp - today).days})
 
-    risks.sort(key=lambda r: (_parse_iso_date(get_first_available(r, "expiration_date", "expirationDate")) or cutoff, -_as_money(get_first_available(r, "premium_amount", "premiumAmount", "premium", "amount"))))
+    def _sort_key(r: dict[str, Any]) -> tuple[Any, Any]:
+        exp_date = _parse_iso_date(get_first_available(r, "expiration_date", "expirationDate")) or cutoff
+        prem = -_as_money(get_first_available(r, "premium_amount", "premiumAmount", "premium", "amount"))
+        return (exp_date, prem)
+
+    risks.sort(key=_sort_key)
     lines = [f"*Project 85 Renewal Sentinel* — Retention Risk ({len(risks)} policies in next {days} days without completed renewal review)"]
     if not risks:
         lines.append("No open renewal-review gaps found.")
