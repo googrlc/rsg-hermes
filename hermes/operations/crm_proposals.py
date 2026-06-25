@@ -63,7 +63,8 @@ def _validate(
     if not isinstance(after, dict) or not after:
         raise ProposalError("after must be a non-empty dict of EspoCRM field values")
     if op in UPDATE_OPS and not espocrm_id:
-        raise ProposalError(f"op={op!r} requires espocrm_id (cannot update without a target)")
+        # upsert without target = create
+        pass
     if op == "create" and espocrm_id:
         raise ProposalError("op='create' must not set espocrm_id (create has no existing target)")
 
