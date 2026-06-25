@@ -111,7 +111,7 @@ def _build_espo_drafts(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     opp_name = f"{biz or data.get('lastName', 'Lead')} - {lob}" if lob else (biz or "New Lead")
     opportunity_payload: dict[str, Any] = {
         "name": opp_name,
-        "stage": "New",
+        "stage": "Prospecting",
         "description": f"[Hermes Intake] {desc}".strip(),
     }
     return {
