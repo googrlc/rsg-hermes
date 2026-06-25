@@ -61,13 +61,6 @@ Contract:
 
 ---
 
-## C. Operational notes
-
-- **OpenClaw / other agents** should read **`project_85_renewals`**, **`data_quality_issues`**, **`agency_snapshots`**, not ad-hoc mocks.
-- **402 / budget errors** on vendor-hosted OpenClaw do not block Supabase queue processing; treat as separate budget/provider issue.
-
----
-
 ## Related files
 
 | Area | Location |

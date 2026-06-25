@@ -124,30 +124,10 @@ class CRMWriteDispatchRequest(BaseModel):
     priority: int = 1
 
 
-OpenClawTaskType = Literal["appetite-analyzer", "retention-risk-scout", "crm-manager"]
-
-
-class OpenClawEnqueueRequest(BaseModel):
-    """Hermes → OpenClaw Manager contract (service-role inserts only from this API)."""
-
-    task_type: OpenClawTaskType
-    payload: dict[str, Any]
-    requested_by: str = "hermes"
-    priority: int = 5
-    notify_slack: bool = False
-
-
-class AIEnrichmentDispatchRequest(OpenClawEnqueueRequest):
-    """Alias for dashboard dispatch payloads that target openclaw_task_queue."""
-
-    pass
-
-
 class DispatchRequest(BaseModel):
     command: str | None = None
     confirm: bool = False
     crm_write: CRMWriteDispatchRequest | None = None
-    ai_enrichment: AIEnrichmentDispatchRequest | None = None
 
 
 class DispatchResponse(BaseModel):
@@ -278,35 +258,6 @@ class AgencyFactResponse(BaseModel):
     notes: str | None = None
 
 
-def _accept_openclaw_enqueue(body: OpenClawEnqueueRequest) -> JSONResponse:
-    """Queue one OpenClaw task; Hermes is a pure producer (insert + 202)."""
-    from hermes.integrations.openclaw_producer import enqueue_openclaw_task
-
-    try:
-        row = enqueue_openclaw_task(
-            _get_supa(),
-            task_type=body.task_type,
-            payload=body.payload,
-            requested_by=body.requested_by,
-            priority=body.priority,
-            notify_slack=body.notify_slack,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return JSONResponse(
-        status_code=202,
-        content=_model_dict(
-            AsyncAcceptedResponse(
-                ok=True,
-                message="Task queued for OpenClaw (openclaw_task_queue).",
-                task_id=str(row.get("id")),
-                queue_name="openclaw_task_queue",
-                status="PENDING",
-            )
-        ),
-    )
-
-
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "hermes"}
@@ -349,7 +300,6 @@ async def dashboard_dispatch(req: DispatchRequest):
     """Dashboard async dispatch entrypoint.
 
     - CRM mutations are queued into crm_write_queue and return HTTP 202.
-    - AI enrichment jobs are queued into openclaw_task_queue and return HTTP 202.
     """
     if req.crm_write is not None:
         from hermes.operations.crm_queue_worker import enqueue_crm_write
@@ -376,9 +326,6 @@ async def dashboard_dispatch(req: DispatchRequest):
             )),
         )
 
-    if req.ai_enrichment is not None:
-        return _accept_openclaw_enqueue(req.ai_enrichment)
-
     if req.command and req.command.strip():
         # Backward compatible command execution for clients that still send command-only payloads.
         result = await dispatch(req)
@@ -392,13 +339,7 @@ async def dashboard_dispatch(req: DispatchRequest):
                 status="ACCEPTED",
             )),
         )
-    raise HTTPException(status_code=400, detail="Provide either crm_write, ai_enrichment, or command.")
-
-
-@app.post("/api/hermes/openclaw/enqueue")
-async def openclaw_enqueue(req: OpenClawEnqueueRequest):
-    """Dedicated OpenClaw producer endpoint (same contract as ai_enrichment on /api/hermes/dispatch)."""
-    return _accept_openclaw_enqueue(req)
+    raise HTTPException(status_code=400, detail="Provide either crm_write or command.")
 
 
 @app.get("/api/command-center/renewals")
@@ -601,10 +542,6 @@ async def sync_health():
     crm_processing = supa.select("crm_write_queue", columns="id", params={"status": "eq.PROCESSING"}, limit=1000)
     crm_failed = supa.select("crm_write_queue", columns="id", params={"status": "eq.FAILED"}, limit=1000)
 
-    openclaw_pending = supa.select("openclaw_task_queue", columns="id", params={"status": "eq.PENDING"}, limit=1000)
-    openclaw_processing = supa.select("openclaw_task_queue", columns="id", params={"status": "eq.PROCESSING"}, limit=1000)
-    openclaw_failed = supa.select("openclaw_task_queue", columns="id", params={"status": "eq.FAILED"}, limit=1000)
-
     latest_run = supa.select("sync_runs", params={"order": "created_at.desc"}, limit=1)
     latest = latest_run[0] if latest_run else {}
 
@@ -614,11 +551,6 @@ async def sync_health():
             "pending": len(crm_pending),
             "processing": len(crm_processing),
             "failed": len(crm_failed),
-        },
-        "openclaw_task_queue": {
-            "pending": len(openclaw_pending),
-            "processing": len(openclaw_processing),
-            "failed": len(openclaw_failed),
         },
         "latest_sync_run": {
             "id": latest.get("id"),

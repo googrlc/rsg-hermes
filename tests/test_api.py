@@ -121,36 +121,6 @@ class TestDashboardDispatch:
         assert data["task_id"] == "crm-q-1"
 
     @patch("hermes.api._get_supa")
-    def test_dashboard_dispatch_queues_openclaw_task(self, mock_get_supa, client) -> None:
-        supa = MagicMock()
-        mock_get_supa.return_value = supa
-        supa.insert.return_value = {"id": "oc-q-1"}
-
-        resp = client.post(
-            "/api/hermes/dispatch",
-            json={
-                "ai_enrichment": {
-                    "task_type": "crm-manager",
-                    "payload": {
-                        "client_id": "test-client-003",
-                        "renewal_id": "test-renewal-003",
-                        "naics_code": "236220",
-                        "sic_code": "1542",
-                        "industry": "Commercial Construction",
-                        "state": "GA",
-                    },
-                    "requested_by": "dashboard",
-                    "priority": 2,
-                    "notify_slack": True,
-                }
-            },
-        )
-        assert resp.status_code == 202
-        data = resp.json()
-        assert data["queue_name"] == "openclaw_task_queue"
-        assert data["task_id"] == "oc-q-1"
-
-    @patch("hermes.api._get_supa")
     def test_sync_health_payload(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         mock_get_supa.return_value = supa
@@ -158,9 +128,6 @@ class TestDashboardDispatch:
             [{"id": "1"}],  # crm pending
             [],  # crm processing
             [{"id": "2"}, {"id": "3"}],  # crm failed
-            [],  # openclaw pending
-            [{"id": "4"}],  # openclaw processing
-            [],  # openclaw failed
             [{"id": "run-1", "status": "success", "workflow_name": "insured_to_account", "finished_at": "2026-01-01T00:00:00Z"}],
         ]
 
@@ -169,44 +136,7 @@ class TestDashboardDispatch:
         data = resp.json()
         assert data["crm_write_queue"]["pending"] == 1
         assert data["crm_write_queue"]["failed"] == 2
-        assert data["openclaw_task_queue"]["processing"] == 1
         assert data["latest_sync_run"]["id"] == "run-1"
-
-    @patch("hermes.api._get_supa")
-    def test_openclaw_enqueue_route(self, mock_get_supa, client) -> None:
-        supa = MagicMock()
-        mock_get_supa.return_value = supa
-        supa.insert.return_value = {"id": "oc-direct-1"}
-
-        resp = client.post(
-            "/api/hermes/openclaw/enqueue",
-            json={
-                "task_type": "appetite-analyzer",
-                "payload": {
-                    "naics_code": "236220",
-                    "sic_code": "1542",
-                    "industry": "Commercial Construction",
-                    "state": "GA",
-                },
-                "priority": 1,
-            },
-        )
-        assert resp.status_code == 202
-        assert resp.json()["task_id"] == "oc-direct-1"
-
-    @patch("hermes.api._get_supa")
-    def test_openclaw_enqueue_rejects_invalid_payload(self, mock_get_supa, client) -> None:
-        mock_get_supa.return_value = MagicMock()
-
-        resp = client.post(
-            "/api/hermes/openclaw/enqueue",
-            json={
-                "task_type": "crm-manager",
-                "payload": {},
-                "priority": 1,
-            },
-        )
-        assert resp.status_code == 400
 
 
 def test_requires_confirmation_for_write_like_commands() -> None:
@@ -233,7 +163,6 @@ def test_openapi_schema_advertises_command_endpoint() -> None:
     schema = openapi_schema()
     assert schema["openapi"].startswith("3.")
     assert "/command" in schema["paths"]
-    assert "/api/hermes/openclaw/enqueue" in schema["paths"]
     assert "/api/intake" in schema["paths"]
 
 
