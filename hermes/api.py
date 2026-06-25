@@ -642,7 +642,7 @@ async def crm_proposals_approve(proposal_id: str, req: CRMProposalApproveRequest
     """
     from hermes.operations.crm_proposals import ProposalError, approve_proposal
     try:
-        return approve_proposal(_get_supa(), proposal_id, reviewer=req.reviewer)
+        return approve_proposal(_get_supa(), proposal_id, reviewer=req.reviewer, espo=_get_espo())
     except ProposalError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except Exception as exc:

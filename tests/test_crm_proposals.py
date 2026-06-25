@@ -180,3 +180,120 @@ def test_openapi_advertises_proposal_endpoints():
     assert "/api/crm/proposals" in paths
     assert "/api/crm/proposals/{proposal_id}/approve" in paths
     assert "/api/crm/proposals/{proposal_id}/reject" in paths
+
+
+# ---------------------------------------------------------------------------
+# Driver / Vehicle approve path (scoped dedup + Lead create-then-link)
+# ---------------------------------------------------------------------------
+
+from hermes.operations.crm_proposals import approve_proposal as _approve, ProposalError
+
+
+def _mock_supa_with_proposal(proposal: dict):
+    """Supabase mock whose select() returns the proposal row and records update() calls."""
+    supa = MagicMock()
+    supa.select.return_value = [proposal]
+    return supa
+
+
+def _driver_proposal(after: dict, op: str = "create", espocrm_id: str | None = None) -> dict:
+    return {"id": "prop-d1", "status": "pending", "entity": "OpportunityDriver",
+            "op": op, "espocrm_id": espocrm_id, "after": after}
+
+
+def test_approve_driver_create_no_duplicate():
+    supa = _mock_supa_with_proposal(_driver_proposal(
+        {"driverName": "New Drv", "driverLicenseNumber": "DL-NEW", "opportunityId": "opp-1"}))
+    espo = MagicMock()
+    espo.get.return_value = {"list": []}              # scoped dedup: no match
+    espo.create.return_value = {"id": "drv-new-1"}
+
+    res = _approve(supa, "prop-d1", reviewer="lamar", espo=espo)
+
+    assert res["status"] == "committed" and res["action"] == "create" and res["espocrm_id"] == "drv-new-1"
+    espo.create.assert_called_once_with("OpportunityDriver",
+        {"driverName": "New Drv", "driverLicenseNumber": "DL-NEW", "opportunityId": "opp-1"})
+    espo.post.assert_not_called()                    # no lead link
+    upd = supa.update.call_args.args[2]
+    assert upd["status"] == "committed" and upd["result"]["action"] == "create"
+
+
+def test_approve_driver_lead_only_creates_then_links():
+    supa = _mock_supa_with_proposal(_driver_proposal(
+        {"driverName": "Lead Drv", "driverLicenseNumber": "DL-LEAD", "leadId": "lead-9"}))
+    espo = MagicMock()
+    espo.get.return_value = {"list": []}              # dedup scoped to lead: no match
+    espo.create.return_value = {"id": "drv-lead-1"}
+
+    res = _approve(supa, "prop-d1", reviewer="lamar", espo=espo)
+
+    assert res["action"] == "create+link" and res["espocrm_id"] == "drv-lead-1"
+    # create must NOT include leadId (inline leadId is ACL-blocked)
+    sent = espo.create.call_args.args[1]
+    assert "leadId" not in sent and sent["driverName"] == "Lead Drv"
+    espo.post.assert_called_once_with("Lead/lead-9/opportunityDrivers", {"id": "drv-lead-1"})
+
+
+def test_approve_driver_create_dedup_updates_existing_on_same_opportunity():
+    supa = _mock_supa_with_proposal(_driver_proposal(
+        {"driverName": "Dup Drv", "driverLicenseNumber": "DL-DUP", "opportunityId": "opp-1"}))
+    espo = MagicMock()
+    espo.get.return_value = {"list": [{"id": "drv-existing-1", "name": "Dup Drv"}]}  # scoped match
+
+    res = _approve(supa, "prop-d1", reviewer="lamar", espo=espo)
+
+    assert res["action"] == "update+dedup" and res["espocrm_id"] == "drv-existing-1"
+    espo.create.assert_not_called()                 # did not duplicate
+    espo.update.assert_called_once_with("OpportunityDriver", "drv-existing-1",
+        {"driverName": "Dup Drv", "driverLicenseNumber": "DL-DUP", "opportunityId": "opp-1"})
+    # dedup query was scoped to the same opportunity
+    where = espo.get.call_args.kwargs["params"]["where"]
+    assert {"type": "equals", "attribute": "opportunityId", "value": "opp-1"} in where
+
+
+def test_approve_vehicle_dedup_on_vin():
+    supa = _mock_supa_with_proposal({"id": "prop-v1", "status": "pending",
+        "entity": "OpportunityVehicle", "op": "create", "espocrm_id": None,
+        "after": {"vin": "VIN123", "make": "Honda", "accountId": "acct-1"}})
+    espo = MagicMock()
+    espo.get.return_value = {"list": [{"id": "veh-existing-1"}]}   # dup on same account
+
+    res = _approve(supa, "prop-v1", reviewer="lamar", espo=espo)
+
+    assert res["action"] == "update+dedup" and res["espocrm_id"] == "veh-existing-1"
+    espo.update.assert_called_once_with("OpportunityVehicle", "veh-existing-1",
+        {"vin": "VIN123", "make": "Honda", "accountId": "acct-1"})
+
+
+def test_approve_driver_update_uses_espocrm_id():
+    supa = _mock_supa_with_proposal(_driver_proposal(
+        {"driverName": "Fix", "driverLicenseNumber": "DL-X"}, op="update", espocrm_id="drv-77"))
+    espo = MagicMock()
+
+    res = _approve(supa, "prop-d1", reviewer="lamar", espo=espo)
+
+    assert res["action"] == "update" and res["espocrm_id"] == "drv-77"
+    espo.update.assert_called_once_with("OpportunityDriver", "drv-77",
+        {"driverName": "Fix", "driverLicenseNumber": "DL-X"})
+    espo.create.assert_not_called()
+
+
+def test_approve_driver_without_espo_is_503():
+    supa = _mock_supa_with_proposal(_driver_proposal({"driverName": "X", "opportunityId": "opp-1"}))
+    with pytest.raises(ProposalError) as exc:
+        _approve(supa, "prop-d1", reviewer="lamar", espo=None)
+    assert exc.value.status_code == 503
+
+
+def test_approve_driver_commit_failure_marks_failed():
+    supa = _mock_supa_with_proposal(_driver_proposal(
+        {"driverName": "Boom", "driverLicenseNumber": "DL-BOOM", "opportunityId": "opp-1"}))
+    espo = MagicMock()
+    espo.get.return_value = {"list": []}
+    espo.create.side_effect = RuntimeError("espo down")
+
+    with pytest.raises(ProposalError) as exc:
+        _approve(supa, "prop-d1", reviewer="lamar", espo=espo)
+    assert exc.value.status_code == 502
+    upd = supa.update.call_args.args[2]
+    assert upd["status"] == "failed" and "espo down" in upd["error"]
