@@ -68,18 +68,52 @@ def _search_contacts(client: "EspoClient", term: str) -> list[dict[str, Any]]:
     return []
 
 
-def _search_entity(client: "EspoClient", entity: str, term: str, extra_fields: str = "") -> list[dict[str, Any]]:
+def _search_entity(
+    client: "EspoClient",
+    entity: str,
+    term: str,
+    extra_fields: str = "",
+    *,
+    include_all_fields: bool = False,
+) -> list[dict[str, Any]]:
     select = "id,name"
     if extra_fields:
         select = f"{select},{extra_fields}"
+    params: dict[str, Any] = {
+        "maxSize": 5,
+        "where": [
+            {"type": "contains", "attribute": "name", "value": term},
+        ],
+    }
+    if not include_all_fields:
+        params["select"] = select
     try:
         body = client.get(
             entity,
+            params=params,
+        )
+    except Exception:
+        return []
+    if isinstance(body, dict) and isinstance(body.get("list"), list):
+        return [x for x in body["list"] if isinstance(x, dict)]
+    return []
+
+
+def _search_policies(client: "EspoClient", term: str) -> list[dict[str, Any]]:
+    try:
+        body = client.get(
+            "Policy",
             params={
                 "maxSize": 5,
-                "select": select,
                 "where": [
-                    {"type": "contains", "attribute": "name", "value": term},
+                    {
+                        "type": "or",
+                        "value": [
+                            {"type": "contains", "attribute": "name", "value": term},
+                            {"type": "contains", "attribute": "policyNumber", "value": term},
+                            {"type": "contains", "attribute": "policy_number", "value": term},
+                        ],
+                    }
                 ],
             },
         )
@@ -88,6 +122,14 @@ def _search_entity(client: "EspoClient", entity: str, term: str, extra_fields: s
     if isinstance(body, dict) and isinstance(body.get("list"), list):
         return [x for x in body["list"] if isinstance(x, dict)]
     return []
+
+
+def _pick(rec: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = rec.get(key)
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _resolve_field_name(raw: str) -> str:
@@ -204,7 +246,7 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
     acct_match = re.search(r"\baccount\s+(.+?)\s*\??$", text, re.I)
     if acct_match:
         term = acct_match.group(1).strip()
-        hits = _search_entity(client, "Account", term, extra_fields="phoneNumber,website,fein")
+        hits = _search_entity(client, "Account", term, include_all_fields=True)
         if not hits:
             return DispatchResult(True, f'No account matching "{term}".', {"accounts": []})
         lines = []
@@ -220,17 +262,19 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
     policy_match = re.search(r"\bpolicy\s+(.+?)\s*\??$", text, re.I)
     if policy_match:
         term = policy_match.group(1).strip()
-        hits = _search_entity(client, "Policy", term, extra_fields="policyNumber,carrier,effectiveDate,premium")
+        hits = _search_policies(client, term)
         if not hits:
             return DispatchResult(True, f'No policy matching "{term}".', {"policies": []})
         lines = []
         for p in hits:
             name = p.get("name", "?")
-            pnum = p.get("policyNumber") or "\u2014"
-            carrier = p.get("carrier") or "\u2014"
-            eff = p.get("effectiveDate") or "\u2014"
-            prem = p.get("premium") or "\u2014"
-            lines.append(f"*{name}* | #{pnum} | {carrier} | Eff: {eff} | ${prem}")
+            pnum = _pick(p, "policy_number", "policyNumber") or "\u2014"
+            carrier = _pick(p, "carrier") or "\u2014"
+            eff = _pick(p, "effective_date", "effectiveDate") or "\u2014"
+            exp = _pick(p, "expiration_date", "expirationDate") or "\u2014"
+            lob = _pick(p, "line_of_business", "lineOfBusiness") or "\u2014"
+            prem = _pick(p, "premium_amount", "premiumAmount", "premium", "amount") or "\u2014"
+            lines.append(f"*{name}* | #{pnum} | {carrier} | LOB: {lob} | Eff: {eff} | Exp: {exp} | ${prem}")
         return DispatchResult(True, "\n".join(lines), {"policies": hits})
 
     # Contact search (default)
