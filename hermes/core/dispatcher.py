@@ -980,6 +980,7 @@ class Dispatcher:
         self.use_openai = use_openai
         self.supa: SupabaseClient | None = None
         self._slack_ctx: dict[str, Any] = {}
+        self._pending_write: dict[str, Any] | None = None
 
         self._init_supabase()
 
@@ -1119,6 +1120,68 @@ class Dispatcher:
             return handler(client, text, **self._slack_ctx)
         return handler(client, text)
 
+    def _capture_write_intent(self, result: DispatchResult) -> None:
+        data = result.data if isinstance(result.data, dict) else {}
+        if not data:
+            return
+        write_intent = data.get("write_intent")
+        if isinstance(write_intent, dict):
+            self._pending_write = write_intent
+            return
+        if data.get("write_status") == "NOT_WRITTEN_AWAITING_CONFIRMATION":
+            self._pending_write = {
+                "kind": "intake_drafts",
+                "espo_drafts": data.get("espo_drafts") or {},
+                "supabase_drafts": data.get("supabase_drafts") or {},
+            }
+
+    def _handle_approval(self, client: "EspoClient", approval: Any) -> DispatchResult:
+        pending = self._pending_write
+        if not pending:
+            return DispatchResult(False, "No pending draft update found to approve.")
+        if approval.cancelled:
+            self._pending_write = None
+            return DispatchResult(True, "Pending draft cancelled. Nothing written.")
+        if approval.revise_requested:
+            return DispatchResult(True, "Revision requested. Send updated instructions and I will regenerate the draft.")
+
+        kind = pending.get("kind")
+        if kind == "intake_drafts":
+            from hermes.commands.intake import execute_approved_drafts
+
+            results = execute_approved_drafts(
+                client,
+                self.supa,
+                espo_drafts=pending.get("espo_drafts") or {},
+                supabase_drafts=pending.get("supabase_drafts") or {},
+                approve_crm=approval.approve_crm,
+                approve_supabase=approval.approve_supabase,
+            )
+            self._pending_write = None
+            return DispatchResult(True, "Approved updates were written successfully.", {"results": results})
+        if kind == "data_entry":
+            from hermes.commands.data_entry import execute_approved_data_entry
+
+            if not approval.approve_crm:
+                return DispatchResult(False, "This pending draft only has CRM operations. Use APPROVE CRM ONLY or APPROVE ALL.")
+            results = execute_approved_data_entry(client, pending.get("operations") or [])
+            self._pending_write = None
+            return DispatchResult(True, "Approved CRM updates were written successfully.", {"results": results})
+        if kind == "merge":
+            from hermes.commands.merge import execute_approved_merge
+
+            if not approval.approve_crm:
+                return DispatchResult(False, "This pending draft is a CRM merge. Use APPROVE CRM ONLY or APPROVE ALL.")
+            result = execute_approved_merge(
+                client,
+                entity_type=str(pending.get("entity_type") or ""),
+                source_id=str(pending.get("source_id") or ""),
+                target_id=str(pending.get("target_id") or ""),
+            )
+            self._pending_write = None
+            return DispatchResult(True, "Approved CRM merge was executed successfully.", {"result": result})
+        return DispatchResult(False, "Pending draft type is not executable yet.")
+
     def dispatch(
         self,
         client: "EspoClient",
@@ -1130,7 +1193,11 @@ class Dispatcher:
         text = line.strip()
         if not text:
             return DispatchResult(False, "Empty command.")
-        # Never route “data quality” through OpenAI intent as “kpi” — handle explicitly first.
+        # Process approval tokens before route matching.
+        approval = parse_approval_token(text)
+        if approval:
+            return self._handle_approval(client, approval)
+        # Never route "data quality" through OpenAI intent as "kpi" — handle explicitly first.
         if _looks_like_data_quality(text):
             return self._call_handler("data_quality", client, text)
         for pattern, handler in self._routes:
@@ -1144,6 +1211,7 @@ class Dispatcher:
                     intent_result = self._dispatch_from_intent(client, text)
                     if intent_result is not None:
                         return intent_result
+                self._capture_write_intent(result)
                 return result
         if self.use_openai and _allow_intent:
             from hermes.core.nl_agent import ask as nl_ask
