@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date, timedelta
 
 from hermes.commands.data_quality import AUDIT_RULES, handle
 from hermes.commands.reports import handle as reports_handle
@@ -110,6 +111,9 @@ class DataQualityTests(unittest.TestCase):
         self.assertNotIn("where", client.params)
 
     def test_renewal_sentinel_flags_90_day_policy_without_completed_review_task(self) -> None:
+        exp_flagged = (date.today() + timedelta(days=30)).isoformat()
+        exp_reviewed = (date.today() + timedelta(days=45)).isoformat()
+
         class Client:
             def get(self, entity: str, **kwargs):
                 if entity == "Policy":
@@ -123,7 +127,7 @@ class DataQualityTests(unittest.TestCase):
                                 "line_of_business": "Commercial Auto",
                                 "carrier": "Progressive",
                                 "premium_amount": "25000",
-                                "expiration_date": "2026-06-15",
+                                "expiration_date": exp_flagged,
                                 "status": "Active",
                             },
                             {
@@ -132,7 +136,7 @@ class DataQualityTests(unittest.TestCase):
                                 "accountId": "a2",
                                 "accountName": "Reviewed Co",
                                 "line_of_business": "Workers Comp",
-                                "expiration_date": "2026-06-20",
+                                "expiration_date": exp_reviewed,
                                 "status": "Active",
                             },
                         ],

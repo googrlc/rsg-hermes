@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 from hermes.core.dispatcher import DispatchResult
+from hermes.core.field_utils import get_first_available
 
 if TYPE_CHECKING:
     from hermes.core.client import EspoClient
@@ -101,10 +102,6 @@ def renewal_audit(client: EspoClient, days: int = 90) -> DispatchResult:
         "Policy",
         params={
             "maxSize": 200,
-            "select": (
-                "id,name,accountId,accountName,line_of_business,carrier,premium_amount,"
-                "expiration_date,status,last_contact_date"
-            ),
         },
     )
     rows = body.get("list", []) if isinstance(body, dict) else []
@@ -115,30 +112,30 @@ def renewal_audit(client: EspoClient, days: int = 90) -> DispatchResult:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        exp = _parse_iso_date(row.get("expiration_date"))
+        exp = _parse_iso_date(get_first_available(row, "expiration_date", "expirationDate"))
         if exp is None or exp < today or exp > cutoff:
             continue
         if row.get("status") in ignored_statuses:
             continue
-        account_id = str(row.get("accountId") or "")
+        account_id = str(get_first_available(row, "accountId") or "")
         if account_id and account_id in reviewed_accounts:
             continue
         risks.append({**row, "_expiration": exp, "_days": (exp - today).days})
 
-    risks.sort(key=lambda r: (_parse_iso_date(r.get("expiration_date")) or cutoff, -_as_money(r.get("premium_amount"))))
+    risks.sort(key=lambda r: (_parse_iso_date(get_first_available(r, "expiration_date", "expirationDate")) or cutoff, -_as_money(get_first_available(r, "premium_amount", "premiumAmount", "premium", "amount"))))
     lines = [f"*Project 85 Renewal Sentinel* — Retention Risk ({len(risks)} policies in next {days} days without completed renewal review)"]
     if not risks:
         lines.append("No open renewal-review gaps found.")
         return DispatchResult(True, "\n".join(lines), {"rows": []})
 
-    total_premium = sum((_as_money(r.get("premium_amount")) for r in risks), Decimal("0"))
+    total_premium = sum((_as_money(get_first_available(r, "premium_amount", "premiumAmount", "premium", "amount")) for r in risks), Decimal("0"))
     lines.append(f"Premium at risk: ${total_premium:,.0f}")
     for row in risks[:10]:
-        account = row.get("accountName") or "Unknown account"
-        lob = row.get("line_of_business") or "Unknown LOB"
-        carrier = row.get("carrier") or "Unknown carrier"
-        premium = _as_money(row.get("premium_amount"))
-        exp = row.get("expiration_date") or "?"
+        account = get_first_available(row, "accountName") or "Unknown account"
+        lob = get_first_available(row, "line_of_business", "lineOfBusiness") or "Unknown LOB"
+        carrier = get_first_available(row, "carrier") or "Unknown carrier"
+        premium = _as_money(get_first_available(row, "premium_amount", "premiumAmount", "premium", "amount"))
+        exp = get_first_available(row, "expiration_date", "expirationDate") or "?"
         days_left = row.get("_days", "?")
         lines.append(f"- {account} | {lob} | {carrier} | ${premium:,.0f} | expires {exp} ({days_left} days)")
     if len(risks) > 10:
@@ -167,6 +164,6 @@ def handle(client: EspoClient, text: str) -> DispatchResult:
         name = r.get("name", "?")
         amt = r.get("amount")
         stage = r.get("stage", "?")
-        close = r.get("closeDate", "?")
+        close = get_first_available(r, "closeDate", "close_date") or "?"
         lines.append(f"- {name} | {amt} | {stage} | close {close}")
     return DispatchResult(True, "\n".join(lines), {"rows": rows})

@@ -39,11 +39,11 @@ AUDIT_RULES: dict[str, list[dict[str, Any]]] = {
         {"field": "accountId", "label": "Linked Account", "severity": "high"},
     ],
     "Policy": [
-        {"field": "policy_number", "label": "Policy Number", "severity": "high"},
+        {"field": "policy_number", "label": "Policy Number", "severity": "high", "fallbacks": ["policyNumber"]},
         {"field": "accountId", "label": "Linked Account", "severity": "high"},
         {"field": "carrier", "label": "Carrier", "severity": "high"},
-        {"field": "effective_date", "label": "Effective Date", "severity": "high"},
-        {"field": "premium_amount", "label": "Premium", "severity": "medium"},
+        {"field": "effective_date", "label": "Effective Date", "severity": "high", "fallbacks": ["effectiveDate"]},
+        {"field": "premium_amount", "label": "Premium", "severity": "medium", "fallbacks": ["premiumAmount", "amount"]},
     ],
     "Lead": [
         {"field": "firstName", "label": "First Name", "severity": "medium"},
@@ -68,13 +68,18 @@ def _scan_missing_records(
     entity: str,
     field_name: str,
     *,
+    fallbacks: list[str] | None = None,
     max_scan: int = 200,
 ) -> list[dict[str, Any]]:
     """Fetch all records in safe pages and count missing values locally.
 
     We intentionally avoid field-specific `select` clauses because some Espo setups
     reject them for custom fields even when the fields are readable.
+
+    *fallbacks* lists alternate field names to check when *field_name* is absent
+    (handles the camelCase ↔ snake_case transition in EspoCRM).
     """
+    all_keys = [field_name] + (fallbacks or [])
     missing: list[dict[str, Any]] = []
     page_size = min(max_scan, 200)
     offset = 0
@@ -95,7 +100,7 @@ def _scan_missing_records(
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if _is_missing(row.get(field_name)):
+            if all(_is_missing(row.get(k)) for k in all_keys):
                 missing.append(row)
 
         if isinstance(body, dict) and total is None and body.get("total") is not None:
@@ -130,7 +135,11 @@ def _run_audit(client: "EspoClient") -> dict[str, Any]:
 
         for rule in rules:
             try:
-                violations = _scan_missing_records(client, entity, rule["field"], max_scan=200)
+                violations = _scan_missing_records(
+                    client, entity, rule["field"],
+                    fallbacks=rule.get("fallbacks"),
+                    max_scan=200,
+                )
                 count = len(violations)
             except EspoClientError:
                 count = -1

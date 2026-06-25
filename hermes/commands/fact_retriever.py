@@ -69,6 +69,17 @@ CRM_CANONICAL_FIELDS: dict[str, list[tuple[str, str]]] = {
     "Estimated Payroll": [("Account", "annual_payroll")],
     "NAICS": [("Account", "naics")],
     "Date of Birth": [("Contact", "dateOfBirth")],
+    "Effective Date": [("Policy", "effective_date")],
+    "Renewal Date": [("Policy", "expiration_date")],
+}
+
+# Alternate field name variants to check when the primary field is absent.
+# Handles the EspoCRM camelCase ↔ snake_case transition.
+_FIELD_FALLBACKS: dict[str, list[str]] = {
+    "annual_revenue": ["annualRevenue"],
+    "annual_payroll": ["annualPayroll"],
+    "effective_date": ["effectiveDate"],
+    "expiration_date": ["expirationDate"],
 }
 
 
@@ -194,21 +205,33 @@ def _try_crm_canonical(
 
     candidates: list[dict[str, Any]] = []
     for espo_entity, espo_field in targets:
+        fallbacks = _FIELD_FALLBACKS.get(espo_field, [])
+        all_fields = [espo_field] + fallbacks
+        # Include all casing variants in the select so none are silently dropped.
+        select_fields = ",".join(["id", "name"] + all_fields)
         # Use the wildcard-friendly search first for fuzzy matches by name.
         rows = client.search(
             espo_entity,
             entity_name,
             max_size=5,
-            select=f"id,name,{espo_field}",
+            select=select_fields,
             fields=["name"],
         )
         for row in rows:
-            value = row.get(espo_field)
+            # Accept the first non-empty value across all field name variants.
+            value = None
+            matched_field = espo_field
+            for fld in all_fields:
+                v = row.get(fld)
+                if v not in (None, ""):
+                    value = v
+                    matched_field = fld
+                    break
             candidates.append({
                 "espo_entity": espo_entity,
                 "id": row.get("id"),
                 "name": row.get("name"),
-                "field": espo_field,
+                "field": matched_field,
                 "value": value,
             })
             if value:
@@ -218,7 +241,7 @@ def _try_crm_canonical(
                         entity=row.get("name") or entity_name,
                         fact_label=fact_label,
                         fact_value=str(value),
-                        source=f"EspoCRM {espo_entity}.{espo_field}",
+                        source=f"EspoCRM {espo_entity}.{matched_field}",
                         confidence="high",
                         sensitivity=(
                             "restricted"
