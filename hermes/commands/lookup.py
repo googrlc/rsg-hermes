@@ -124,7 +124,7 @@ def _search_policies(client: "EspoClient", term: str) -> list[dict[str, Any]]:
     return []
 
 
-def _pick(rec: dict[str, Any], *keys: str) -> Any:
+def _get_first_available(rec: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         value = rec.get(key)
         if value not in (None, ""):
@@ -268,12 +268,12 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
         lines = []
         for p in hits:
             name = p.get("name", "?")
-            pnum = _pick(p, "policy_number", "policyNumber") or "\u2014"
-            carrier = _pick(p, "carrier") or "\u2014"
-            eff = _pick(p, "effective_date", "effectiveDate") or "\u2014"
-            exp = _pick(p, "expiration_date", "expirationDate") or "\u2014"
-            lob = _pick(p, "line_of_business", "lineOfBusiness") or "\u2014"
-            prem = _pick(p, "premium_amount", "premiumAmount", "premium", "amount") or "\u2014"
+            pnum = _get_first_available(p, "policy_number", "policyNumber") or "\u2014"
+            carrier = _get_first_available(p, "carrier") or "\u2014"
+            eff = _get_first_available(p, "effective_date", "effectiveDate") or "\u2014"
+            exp = _get_first_available(p, "expiration_date", "expirationDate") or "\u2014"
+            lob = _get_first_available(p, "line_of_business", "lineOfBusiness") or "\u2014"
+            prem = _get_first_available(p, "premium_amount", "premiumAmount", "premium", "amount") or "\u2014"
             lines.append(f"*{name}* | #{pnum} | {carrier} | LOB: {lob} | Eff: {eff} | Exp: {exp} | ${prem}")
         return DispatchResult(True, "\n".join(lines), {"policies": hits})
 
