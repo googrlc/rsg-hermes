@@ -16,6 +16,7 @@ Read-only. Mirrors the dataclass conventions used by
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -246,36 +247,50 @@ def build_carrier_breakdown(
     nowcerts_policies: list[dict[str, Any]],
     espo_policies: list[dict[str, Any]],
 ) -> list[CarrierBreakdown]:
-    """Per-carrier premium and count comparison."""
-    nc_by_carrier: dict[str, dict[str, float]] = {}
+    """Per-carrier comparison, keyed on the **normalized** carrier name.
+
+    NowCerts owns premium truth (Espo Policy.premium is empty in prod, per
+    2026-06-26 probe), so `espo_premium` will be 0.0. The meaningful signal
+    is policy-count drift per normalized carrier.
+    """
+    nc_by_carrier: dict[str, dict[str, Any]] = {}
     for p in nowcerts_policies:
         if not _is_active_nc(p):
             continue
-        carrier = _carrier_nc(p) or "(unknown)"
-        b = nc_by_carrier.setdefault(carrier, {"count": 0, "premium": 0.0})
+        raw = _carrier_nc(p) or "(unknown)"
+        key = normalize_carrier(raw) or "(unknown)"
+        b = nc_by_carrier.setdefault(key, {"count": 0, "premium": 0.0, "raw": set()})
         b["count"] += 1
         b["premium"] += float(p.get("premium") or p.get("totalPremium") or 0.0)
+        b["raw"].add(raw)
 
-    espo_by_carrier: dict[str, dict[str, float]] = {}
+    espo_by_carrier: dict[str, dict[str, Any]] = {}
     for p in espo_policies:
         if not _is_live_espo(p):
             continue
-        carrier = _carrier_espo(p) or "(unknown)"
-        b = espo_by_carrier.setdefault(carrier, {"count": 0, "premium": 0.0})
+        raw = _carrier_espo(p) or "(unknown)"
+        key = normalize_carrier(raw) or "(unknown)"
+        b = espo_by_carrier.setdefault(key, {"count": 0, "premium": 0.0, "raw": set()})
         b["count"] += 1
         b["premium"] += float(p.get("premium") or p.get("totalPremium") or 0.0)
+        b["raw"].add(raw)
 
-    carriers = sorted(set(nc_by_carrier) | set(espo_by_carrier))
+    keys = sorted(set(nc_by_carrier) | set(espo_by_carrier))
     out: list[CarrierBreakdown] = []
-    for carrier in carriers:
-        nc = nc_by_carrier.get(carrier, {"count": 0, "premium": 0.0})
-        es = espo_by_carrier.get(carrier, {"count": 0, "premium": 0.0})
+    for key in keys:
+        nc = nc_by_carrier.get(key, {"count": 0, "premium": 0.0, "raw": set()})
+        es = espo_by_carrier.get(key, {"count": 0, "premium": 0.0, "raw": set()})
         delta = float(nc["premium"]) - float(es["premium"])
         base = max(float(nc["premium"]), 1.0)
         pct = (delta / base) * 100.0
+        # Display label: prefer Espo's casing if present, else NC's.
+        raw_label = (
+            sorted(es["raw"])[0] if es["raw"] else
+            (sorted(nc["raw"])[0] if nc["raw"] else key)
+        )
         out.append(
             CarrierBreakdown(
-                carrier=carrier,
+                carrier=raw_label,
                 nowcerts_policy_count=int(nc["count"]),
                 espo_policy_count=int(es["count"]),
                 nowcerts_premium=round(float(nc["premium"]), 2),
@@ -295,14 +310,86 @@ def build_carrier_breakdown(
 # ---------------------------------------------------------------------------
 
 
+# Espo status values observed in production (probed 2026-06-26):
+# 'Active', 'Cancelled', 'Expired', 'Up for Renewal', 'Renewed',
+# 'Pending Cancel', 'Flat Cancel'.
+_LIVE_ESPO_STATUSES: set[str] = {
+    "active", "renewed", "up for renewal",
+    "in force", "in-force", "bound",
+}
+_DEAD_ESPO_STATUSES: set[str] = {
+    "cancelled", "canceled", "expired",
+    "pending cancel", "flat cancel",
+    "non-renewed", "nonrenewed", "lapsed",
+}
+
+_LIVE_NC_STATUSES: set[str] = {
+    "active", "renewed", "rewritten",
+    "in-force", "in force", "inforce", "bound",
+}
+
+# Carrier-name normalization — strip legal-entity suffixes / prefixes /
+# punctuation so 'GEICO CHOICE INS CO', 'x_Geico', and 'Geico' all map to
+# 'geico'. Keeps multi-word brand stems intact ('Geico Marine' stays separate
+# from 'Geico'). Calibrated against real NC/Espo data probed 2026-06-26.
+_CARRIER_SUFFIX_TOKENS: tuple[str, ...] = (
+    "insurance company", "insurance corporation", "insurance corp",
+    "insurance co", "insurance inc", "insurance",
+    "ins co inc", "ins co", "ins corp", "ins inc", "ins",
+    "speciality insurance", "specialty insurance",
+    "life insurance", "life ins", "life",
+    "mut", "mutual",
+    "co inc", "corp", "inc", "co", "llc", "ltd",
+    "choice", "preferred", "select", "premier",
+    "national", "natl",
+    "us", "usa", "america", "american",
+    "of america", "of amer", "of il", "of in", "of or", "of ga", "of fl",
+    "program",
+)
+_CARRIER_PREFIX_TOKENS: tuple[str, ...] = ("x_", "x ")
+
+
+def normalize_carrier(name: str | None) -> str:
+    """Reduce a carrier label to a canonical form for cross-system matching.
+
+    Returns a lowercase, alphanumeric+single-space string. Empty for blank input.
+    Examples:
+      'GEICO CHOICE INS CO'           -> 'geico'
+      'x_Geico'                        -> 'geico'
+      'Geico Marine'                   -> 'geico marine'
+      "Lloyd's of London"              -> 'lloyds of london'
+      'STATE AUTOMOBILE MUT INS CO'    -> 'state automobile'
+    """
+    if not name:
+        return ""
+    s = str(name).lower().strip()
+    for pre in _CARRIER_PREFIX_TOKENS:
+        if s.startswith(pre):
+            s = s[len(pre):]
+    s = re.sub(r"[^a-z0-9\s]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    for _ in range(5):
+        before = s
+        for suf in _CARRIER_SUFFIX_TOKENS:
+            if s.endswith(" " + suf):
+                s = s[: -(len(suf) + 1)].strip()
+            elif s == suf:
+                s = ""
+        if s == before:
+            break
+    return s
+
+
 def _is_active_nc(p: dict[str, Any]) -> bool:
-    status = str(p.get("policyStatus") or p.get("status") or "").lower()
-    return status in {"active", "renewed", "rewritten", "in-force", "inforce"}
+    status = str(p.get("policyStatus") or p.get("status") or "").strip().lower()
+    return status in _LIVE_NC_STATUSES
 
 
 def _is_live_espo(p: dict[str, Any]) -> bool:
-    status = str(p.get("status") or p.get("policyStatus") or "").lower()
-    return status in {"active", "renewed", "in_force", "in-force", "bound"}
+    status = str(p.get("status") or p.get("policyStatus") or "").strip().lower()
+    if status in _DEAD_ESPO_STATUSES:
+        return False
+    return status in _LIVE_ESPO_STATUSES
 
 
 def _carrier_nc(p: dict[str, Any]) -> str | None:
@@ -310,9 +397,9 @@ def _carrier_nc(p: dict[str, Any]) -> str | None:
 
 
 def _carrier_espo(p: dict[str, Any]) -> str | None:
-    # Espo Policy carrier lives under `writingCompany` / `carrier` / `carrierName`
-    # (see hermes/deliverables/acord25.py line 164 for the canonical lookup).
-    return p.get("carrierName") or p.get("carrier") or p.get("writingCompany") or p.get("companyName")
+    # In prod only `carrier` is populated; carrierName/writingCompany are None
+    # (probed 2026-06-26 against 200 Policy records).
+    return p.get("carrier") or p.get("carrierName") or p.get("writingCompany") or p.get("companyName")
 
 
 def _fetch_all_espo_policies(
