@@ -324,12 +324,13 @@ def find_carrier_name_mismatches(
     Returns (mismatches_capped_at_limit, metrics). Metrics include:
       joined_count, agree_count, mismatch_count, nc_only_count, espo_only_count.
     """
+    # NC raw policies use `number` as the policy number (probed 2026-06-26).
+    # Espo Policy uses `policyNumber`. Join is case-insensitive, whitespace-stripped.
     nc_by_polnum: dict[str, dict[str, Any]] = {}
     for p in nowcerts_policies:
         if not _is_active_nc(p):
             continue
-        # field_mapper.py:378 — NC policyNumber or `name` as fallback
-        polnum = str(p.get("policyNumber") or p.get("name") or "").strip()
+        polnum = _polnum_nc(p)
         if polnum:
             nc_by_polnum[polnum] = p
 
@@ -337,7 +338,7 @@ def find_carrier_name_mismatches(
     for p in espo_policies:
         if not _is_live_espo(p):
             continue
-        polnum = str(p.get("policyNumber") or p.get("name") or "").strip()
+        polnum = _polnum_espo(p)
         if polnum:
             espo_by_polnum[polnum] = p
 
@@ -462,6 +463,21 @@ def _is_live_espo(p: dict[str, Any]) -> bool:
 
 def _carrier_nc(p: dict[str, Any]) -> str | None:
     return p.get("carrierName") or p.get("carrier") or p.get("companyName")
+
+
+def _polnum_nc(p: dict[str, Any]) -> str:
+    """Canonical NC policy number for join. NC raw field is `number`
+    (probed 2026-06-26: '9300341695' on /policiesByListView/Json). Fall back to
+    legacy keys defensively for forward compatibility."""
+    raw = p.get("number") or p.get("policyNumber") or p.get("policyNo") or p.get("name") or ""
+    return str(raw).strip().upper()
+
+
+def _polnum_espo(p: dict[str, Any]) -> str:
+    """Canonical Espo Policy number for join. Espo field is `policyNumber`;
+    `number` and `name` are fallbacks."""
+    raw = p.get("policyNumber") or p.get("number") or p.get("name") or ""
+    return str(raw).strip().upper()
 
 
 def _carrier_espo(p: dict[str, Any]) -> str | None:
