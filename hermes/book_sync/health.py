@@ -52,11 +52,24 @@ class CarrierBreakdown:
 
 
 @dataclass
+class CarrierNameMismatch:
+    """A single policy where NC and Espo disagree on the carrier string.
+
+    Surfaced for reconciliation — we do NOT auto-merge. The NowCerts value is
+    treated as canonical; reconciliation will push it to Espo.
+    """
+    policy_number: str
+    nowcerts_carrier: str
+    espo_carrier: str
+
+
+@dataclass
 class BookSyncReport:
     generated_at: str
     ok: bool
     checks: list[DriftCheck] = field(default_factory=list)
     carrier_breakdown: list[CarrierBreakdown] = field(default_factory=list)
+    carrier_name_mismatches: list[CarrierNameMismatch] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
 
@@ -67,6 +80,7 @@ class BookSyncReport:
             "counts": self.counts,
             "checks": [asdict(c) for c in self.checks],
             "carrier_breakdown": [asdict(b) for b in self.carrier_breakdown],
+            "carrier_name_mismatches": [asdict(m) for m in self.carrier_name_mismatches],
             "errors": self.errors,
         }
 
@@ -247,50 +261,45 @@ def build_carrier_breakdown(
     nowcerts_policies: list[dict[str, Any]],
     espo_policies: list[dict[str, Any]],
 ) -> list[CarrierBreakdown]:
-    """Per-carrier comparison, keyed on the **normalized** carrier name.
+    """Per-carrier policy count, keyed on the **raw NowCerts carrier name**.
 
-    NowCerts owns premium truth (Espo Policy.premium is empty in prod, per
-    2026-06-26 probe), so `espo_premium` will be 0.0. The meaningful signal
-    is policy-count drift per normalized carrier.
+    Pass-through philosophy: NowCerts owns the carrier name. We do NOT merge
+    'PROGRESSIVE MOUNTAIN INS CO' with 'Progressive Insurance' — reconciliation
+    will surface those gaps as drift, and a future carrier-name sync will push
+    the NC name to Espo so they converge.
+
+    NC owns premium truth too (Espo Policy.premium is empty in prod per
+    2026-06-26 probe), so `espo_premium` will be 0.0 for now.
     """
     nc_by_carrier: dict[str, dict[str, Any]] = {}
     for p in nowcerts_policies:
         if not _is_active_nc(p):
             continue
-        raw = _carrier_nc(p) or "(unknown)"
-        key = normalize_carrier(raw) or "(unknown)"
-        b = nc_by_carrier.setdefault(key, {"count": 0, "premium": 0.0, "raw": set()})
+        carrier = (_carrier_nc(p) or "(unknown)").strip()
+        b = nc_by_carrier.setdefault(carrier, {"count": 0, "premium": 0.0})
         b["count"] += 1
         b["premium"] += float(p.get("premium") or p.get("totalPremium") or 0.0)
-        b["raw"].add(raw)
 
     espo_by_carrier: dict[str, dict[str, Any]] = {}
     for p in espo_policies:
         if not _is_live_espo(p):
             continue
-        raw = _carrier_espo(p) or "(unknown)"
-        key = normalize_carrier(raw) or "(unknown)"
-        b = espo_by_carrier.setdefault(key, {"count": 0, "premium": 0.0, "raw": set()})
+        carrier = (_carrier_espo(p) or "(unknown)").strip()
+        b = espo_by_carrier.setdefault(carrier, {"count": 0, "premium": 0.0})
         b["count"] += 1
         b["premium"] += float(p.get("premium") or p.get("totalPremium") or 0.0)
-        b["raw"].add(raw)
 
-    keys = sorted(set(nc_by_carrier) | set(espo_by_carrier))
+    carriers = sorted(set(nc_by_carrier) | set(espo_by_carrier))
     out: list[CarrierBreakdown] = []
-    for key in keys:
-        nc = nc_by_carrier.get(key, {"count": 0, "premium": 0.0, "raw": set()})
-        es = espo_by_carrier.get(key, {"count": 0, "premium": 0.0, "raw": set()})
+    for carrier in carriers:
+        nc = nc_by_carrier.get(carrier, {"count": 0, "premium": 0.0})
+        es = espo_by_carrier.get(carrier, {"count": 0, "premium": 0.0})
         delta = float(nc["premium"]) - float(es["premium"])
         base = max(float(nc["premium"]), 1.0)
         pct = (delta / base) * 100.0
-        # Display label: prefer Espo's casing if present, else NC's.
-        raw_label = (
-            sorted(es["raw"])[0] if es["raw"] else
-            (sorted(nc["raw"])[0] if nc["raw"] else key)
-        )
         out.append(
             CarrierBreakdown(
-                carrier=raw_label,
+                carrier=carrier,
                 nowcerts_policy_count=int(nc["count"]),
                 espo_policy_count=int(es["count"]),
                 nowcerts_premium=round(float(nc["premium"]), 2),
@@ -301,6 +310,65 @@ def build_carrier_breakdown(
             )
         )
     return out
+
+
+def find_carrier_name_mismatches(
+    *,
+    nowcerts_policies: list[dict[str, Any]],
+    espo_policies: list[dict[str, Any]],
+    limit: int = 50,
+) -> tuple[list[CarrierNameMismatch], dict[str, int]]:
+    """For policies present in BOTH systems (joined on policyNumber), surface
+    every per-policy carrier-name disagreement.
+
+    Returns (mismatches_capped_at_limit, metrics). Metrics include:
+      joined_count, agree_count, mismatch_count, nc_only_count, espo_only_count.
+    """
+    nc_by_polnum: dict[str, dict[str, Any]] = {}
+    for p in nowcerts_policies:
+        if not _is_active_nc(p):
+            continue
+        # field_mapper.py:378 — NC policyNumber or `name` as fallback
+        polnum = str(p.get("policyNumber") or p.get("name") or "").strip()
+        if polnum:
+            nc_by_polnum[polnum] = p
+
+    espo_by_polnum: dict[str, dict[str, Any]] = {}
+    for p in espo_policies:
+        if not _is_live_espo(p):
+            continue
+        polnum = str(p.get("policyNumber") or p.get("name") or "").strip()
+        if polnum:
+            espo_by_polnum[polnum] = p
+
+    joined_keys = set(nc_by_polnum) & set(espo_by_polnum)
+    nc_only = set(nc_by_polnum) - set(espo_by_polnum)
+    espo_only = set(espo_by_polnum) - set(nc_by_polnum)
+
+    mismatches: list[CarrierNameMismatch] = []
+    agree = 0
+    for polnum in sorted(joined_keys):
+        nc_carrier = (_carrier_nc(nc_by_polnum[polnum]) or "").strip()
+        es_carrier = (_carrier_espo(espo_by_polnum[polnum]) or "").strip()
+        if nc_carrier == es_carrier:
+            agree += 1
+        else:
+            mismatches.append(
+                CarrierNameMismatch(
+                    policy_number=polnum,
+                    nowcerts_carrier=nc_carrier,
+                    espo_carrier=es_carrier,
+                )
+            )
+
+    metrics = {
+        "joined_count": len(joined_keys),
+        "agree_count": agree,
+        "mismatch_count": len(mismatches),
+        "nc_only_count": len(nc_only),
+        "espo_only_count": len(espo_only),
+    }
+    return mismatches[:limit], metrics
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +571,34 @@ def run_book_sync_health(
         )
     except Exception as exc:  # pragma: no cover
         report.errors.append(f"carrier breakdown failed: {exc}")
+
+    # --- Per-policy carrier-name consistency (NC is canonical) ---
+    try:
+        mismatches, name_metrics = find_carrier_name_mismatches(
+            nowcerts_policies=nowcerts_policies,
+            espo_policies=espo_policies,
+        )
+        report.carrier_name_mismatches = mismatches
+        agree_pct = (
+            (name_metrics["agree_count"] / name_metrics["joined_count"] * 100.0)
+            if name_metrics["joined_count"] else 100.0
+        )
+        report.checks.append(
+            DriftCheck(
+                name="carrier_name_consistency",
+                ok=name_metrics["mismatch_count"] == 0,
+                detail=(
+                    f"{name_metrics['agree_count']}/{name_metrics['joined_count']} "
+                    f"joined policies agree on carrier name ({agree_pct:.1f}%); "
+                    f"{name_metrics['mismatch_count']} mismatches, "
+                    f"{name_metrics['nc_only_count']} NC-only, "
+                    f"{name_metrics['espo_only_count']} Espo-only"
+                ),
+                metrics=name_metrics,
+            )
+        )
+    except Exception as exc:  # pragma: no cover
+        report.errors.append(f"carrier name consistency failed: {exc}")
 
     report.ok = all(c.ok for c in report.checks) and not report.errors
     return report
