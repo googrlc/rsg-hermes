@@ -474,16 +474,25 @@ def _polnum_nc(p: dict[str, Any]) -> str:
 
 
 def _polnum_espo(p: dict[str, Any]) -> str:
-    """Canonical Espo Policy number for join. Espo field is `policyNumber`;
-    `number` and `name` are fallbacks."""
-    raw = p.get("policyNumber") or p.get("number") or p.get("name") or ""
+    """Canonical Espo Policy number for join. Espo stores it on the CUSTOM
+    snake_case field `policy_number` (probed 2026-06-26 against the live
+    Metadata + Policy API). The camelCase `policyNumber` is unused/null.
+    `name` is the human label (insured | LOB | number) and a poor fallback."""
+    raw = p.get("policy_number") or p.get("policyNumber") or ""
     return str(raw).strip().upper()
 
 
 def _carrier_espo(p: dict[str, Any]) -> str | None:
-    # In prod only `carrier` is populated; carrierName/writingCompany are None
-    # (probed 2026-06-26 against 200 Policy records).
-    return p.get("carrier") or p.get("carrierName") or p.get("writingCompany") or p.get("companyName")
+    # Espo Policy carrier lives on `carrier` (varchar). `carrier_raw` holds the
+    # last raw value pushed from upstream before normalization. CarrierName /
+    # writingCompany are not part of this Espo schema (probed 2026-06-26).
+    return (
+        p.get("carrier")
+        or p.get("carrier_raw")
+        or p.get("carrierName")
+        or p.get("writingCompany")
+        or p.get("companyName")
+    )
 
 
 def _fetch_all_espo_policies(
