@@ -310,7 +310,43 @@ def _carrier_nc(p: dict[str, Any]) -> str | None:
 
 
 def _carrier_espo(p: dict[str, Any]) -> str | None:
-    return p.get("carrierName") or p.get("carrier") or p.get("companyName")
+    # Espo Policy carrier lives under `writingCompany` / `carrier` / `carrierName`
+    # (see hermes/deliverables/acord25.py line 164 for the canonical lookup).
+    return p.get("carrierName") or p.get("carrier") or p.get("writingCompany") or p.get("companyName")
+
+
+def _fetch_all_espo_policies(
+    espo_client: Any,
+    *,
+    page_size: int = 200,
+    max_pages: int = 50,
+) -> list[dict[str, Any]]:
+    """Paginate `GET /Policy` with offset/maxSize.
+
+    Mirrors the pattern used in hermes/sync/bidirectional.py and
+    hermes/jobs/revenue_integrity.py — EspoClient.get() returns a dict with
+    'list' and 'total' keys.
+    """
+    out: list[dict[str, Any]] = []
+    offset = 0
+    for _ in range(max_pages):
+        body = espo_client.get(
+            "Policy",
+            params={
+                "maxSize": page_size,
+                "offset": offset,
+                "orderBy": "modifiedAt",
+                "order": "desc",
+            },
+        )
+        items = body.get("list") if isinstance(body, dict) else (body if isinstance(body, list) else [])
+        if not items:
+            break
+        out.extend(items)
+        if len(items) < page_size:
+            break
+        offset += page_size
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -346,15 +382,9 @@ def run_book_sync_health(
         report.errors.append(f"NowCerts fetch_policies failed: {exc}")
 
     try:
-        # EspoClient.search returns list; defensive about pagination wrapper.
-        result = espo_client.search(
-            entity="Policy",
-            params={"maxSize": 200, "where": []},
-        ) if hasattr(espo_client, "search") else espo_client.get("/api/v1/Policy")
-        if isinstance(result, dict):
-            espo_policies = result.get("list") or result.get("value") or []
-        elif isinstance(result, list):
-            espo_policies = result
+        espo_policies = _fetch_all_espo_policies(
+            espo_client, page_size=200, max_pages=max_pages,
+        )
     except Exception as exc:
         report.errors.append(f"EspoCRM Policy fetch failed: {exc}")
 
