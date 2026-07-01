@@ -86,6 +86,33 @@ except Exception:  # pragma: no cover - surfaced in logs, never fatal
 _espo = None
 _dispatcher = None
 _supa = None
+_nowcerts = None
+
+
+def _get_nowcerts():
+    """Lazy singleton for NowCertsClient. Reads NOWCERTS_USERNAME/PASSWORD from env."""
+    global _nowcerts
+    if _nowcerts is None:
+        from hermes.sync.nowcerts_client import NowCertsClient
+
+        _nowcerts = NowCertsClient()
+    return _nowcerts
+
+
+def _require_hermes_token(request: Request) -> None:
+    """Bearer-token gate for mutating / privileged endpoints.
+
+    Reads HERMES_API_TOKEN from env. If unset, the gate is disabled (dev mode);
+    log a warning so it's visible.
+    """
+    expected = os.environ.get("HERMES_API_TOKEN")
+    if not expected:
+        log.warning("HERMES_API_TOKEN not set; bearer gate disabled")
+        return
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
 
 def _get_espo():
@@ -559,6 +586,39 @@ async def sync_health():
             "finished_at": latest.get("finished_at"),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Book-sync health — compares actual book of business across NowCerts, EspoCRM
+# and Supabase. Read-only; complements /api/hermes/sync-health (queue depth).
+# See hermes/book_sync/health.py.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/hermes/book-sync")
+async def book_sync_health(request: Request, max_pages: int = 50):
+    """Drift report: policy counts, per-carrier premium, orphans, rate drift.
+
+    Gated by HERMES_API_TOKEN bearer (skipped if env var unset).
+
+    Query params:
+      max_pages: cap NowCerts pagination (default 50 → ~5000 policies).
+    """
+    _require_hermes_token(request)
+    from hermes.book_sync import run_book_sync_health
+
+    try:
+        report = run_book_sync_health(
+            nowcerts_client=_get_nowcerts(),
+            espo_client=_get_espo(),
+            supa=_get_supa(),
+            max_pages=max_pages,
+        )
+    except Exception as exc:  # pragma: no cover - defensive top-level
+        log.exception("book-sync health failed")
+        raise HTTPException(status_code=500, detail=f"book-sync failed: {exc}")
+
+    return report.to_dict()
 
 
 # ---------------------------------------------------------------------------
