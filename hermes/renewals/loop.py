@@ -430,7 +430,8 @@ def _update_writeback(supa: SupabaseClient, *, event_uuid: str, payload: dict[st
 def _failure_state(attempts: int, retryable: bool, now: datetime) -> tuple[str, str | None]:
     if not retryable:
         return "failed", None
-    delay = config.WRITEBACK_RETRY_DELAYS[attempts - 1] if attempts - 1 < len(config.WRITEBACK_RETRY_DELAYS) else None
+    index = attempts - 1
+    delay = config.WRITEBACK_RETRY_DELAYS[index] if index < len(config.WRITEBACK_RETRY_DELAYS) else None
     if delay is None:
         return "failed", None
     return "retrying", (now + timedelta(seconds=delay)).isoformat()

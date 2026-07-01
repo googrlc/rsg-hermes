@@ -201,7 +201,7 @@ def _ensure_worksheet(espo, renewal: dict) -> None:
 def _looks_like_worksheet(row: dict) -> bool:
     if row.get("lob_variant") is not None or row.get("completion_type") is not None:
         return True
-    return any(field in row for field in config.CHECKBOX_FIELDS) and "pipeline_stage" not in row
+    return bool(row.get("renewalId") or row.get("renewalName"))
 
 
 def build_renewal_card(renewal: dict, *, header: str, task_url: str | None,

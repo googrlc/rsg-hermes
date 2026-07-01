@@ -71,6 +71,16 @@ def test_momentum_client_parses_sse():
     assert result["noteId"] == "n9"
 
 
+def test_momentum_client_wraps_non_dict_result():
+    session = MagicMock()
+    session.post.return_value = FakeResponse(200, ["ok"])
+    client = MomentumMCPClient(base_url="https://mcp.example.com/mcp", api_key="abc", session=session)
+
+    result = client.manage_notes({"databaseId": "mc-1", "note": "hello"})
+
+    assert result == {"result": ["ok"]}
+
+
 def test_handle_disposition_webhook_logs_and_writes_back():
     supa = MagicMock()
     supa.upsert.side_effect = lambda table, payload, on_conflict="id": {"id": f"{table}-1", **payload}
@@ -139,3 +149,11 @@ def test_run_reconcile_processes_due_rows_and_alerts_failed():
     assert out["succeeded"] == 1
     notifier.post_message.assert_called_once()
     assert "writeback failures" in notifier.post_message.call_args.kwargs["text"].lower()
+
+
+def test_failed_digest_formats_missing_values():
+    text = loop._failed_digest([{"attempts": 2}, {"renewal_id": "r-2", "last_error": "boom"}])
+
+    assert "renewal_id: —" in text
+    assert "attempts: 0" in text
+    assert "renewal_id: r-2" in text

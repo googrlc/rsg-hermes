@@ -82,7 +82,7 @@ def _render_value(value: Any) -> str:
         return _yn(value)
     if value is None:
         return "—"
-    if isinstance(value, (int, float)) and any(token in str(value) for token in (".",)):
+    if isinstance(value, float):
         return str(value)
     text = str(value).strip()
     return text or "—"

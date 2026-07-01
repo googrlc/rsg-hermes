@@ -115,11 +115,6 @@ RENEWAL_TEMPLATE_DOC_ID = os.environ.get("RENEWAL_TEMPLATE_DOC_ID")
 MOMENTUM_MCP_URL = os.environ.get("MOMENTUM_MCP_URL", "https://mcp.momentumamp.com/mcp").rstrip("/")
 MOMENTUM_MCP_API_KEY = os.environ.get("MOMENTUM_MCP_API_KEY", "")
 MOMENTUM_MCP_TOOL_NOTES = "manage_notes"
-MOMENTUM_MCP_V11_PLANNED = (
-    "manage_opportunities",
-    "create_tasks",
-    "update_drivers",
-    "manage_vehicles",
-    "manage_policy_lifecycle_data",
-)
+# v1.1 planned (config/docs only, not called in v1): manage_opportunities,
+# create_tasks, update_drivers, manage_vehicles, manage_policy_lifecycle_data.
 WRITEBACK_RETRY_DELAYS = (30, 120, 600, 3600, 21600)
