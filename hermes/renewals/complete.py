@@ -130,19 +130,45 @@ def _pipeline_stage(renewal: dict) -> str | None:
 
 
 def _disposition(renewal: dict) -> str | None:
-    return renewal.get("disposition") or (
-        config.DISPOSITION_WON if renewal.get("stage") == config.STAGE_WON else
-        config.DISPOSITION_LOST if renewal.get("stage") == config.STAGE_LOST else None
-    )
+    """Return the v6 disposition value for this renewal.
+
+    Priority:
+    1. Explicit disposition field on the record (post-reshape).
+    2. Legacy synthesis: stage=Renewed - Won -> DISPOSITION_RENEWED.
+    3. Legacy synthesis: stage=Lost + lost_reason -> mapped v6 value via
+       config.LEGACY_LOST_REASON_TO_DISPOSITION. Unmapped -> DISPOSITION_DO_NOT_RENEW.
+    4. Otherwise None (non-terminal record).
+    """
+    explicit = renewal.get("disposition")
+    if explicit:
+        return explicit
+    stage = renewal.get("stage") or renewal.get("pipeline_stage")
+    if stage == config.LEGACY_PIPELINE_STAGE_WON:
+        return config.DISPOSITION_RENEWED
+    if stage == config.LEGACY_PIPELINE_STAGE_LOST:
+        legacy_reason = renewal.get("lost_reason")
+        if legacy_reason and legacy_reason in config.LEGACY_LOST_REASON_TO_DISPOSITION:
+            return config.LEGACY_LOST_REASON_TO_DISPOSITION[legacy_reason]
+        return config.DISPOSITION_DO_NOT_RENEW
+    return None
 
 
 def _loss_reason(renewal: dict, disposition: str | None = None) -> str:
-    value = renewal.get("lost_reason")
-    if value:
-        return str(value)
+    """Human-readable loss reason for card headers and Slack posts.
+
+    Prefers config.DISPOSITION_LABELS (v6). Strips the "Lost — " prefix when
+    the card header already says "lost". Falls back to the legacy lost_reason
+    free-text field on pre-reshape records.
+    """
     disposition = disposition or _disposition(renewal)
-    if disposition == config.DISPOSITION_DO_NOT_RENEW:
-        return "Do not renew"
+    if disposition and disposition in config.DISPOSITION_LABELS:
+        label = config.DISPOSITION_LABELS[disposition]
+        if label.startswith("Lost — "):
+            return label[len("Lost — "):]
+        return label
+    legacy = renewal.get("lost_reason")
+    if legacy:
+        return str(legacy)
     if disposition:
         return disposition.replace("_", " ").title()
     return "—"
@@ -308,7 +334,10 @@ def _on_won(renewal: dict, task_id: str | None = None, *, disposition: str | Non
         "pipeline_stage": _pipeline_stage(renewal),
         "disposition": disposition,
         "filed": bool(doc),
-        "action": config.DISPOSITION_REWRITTEN if disposition == config.DISPOSITION_REWRITTEN else "won",
+        "action": (
+            config.DISPOSITION_REWRITTEN if disposition == config.DISPOSITION_REWRITTEN
+            else config.DISPOSITION_RENEWED
+        ),
     }
 
 
