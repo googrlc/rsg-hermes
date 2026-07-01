@@ -139,6 +139,17 @@ def main() -> int:
         help="Preview renewal reclassification without writing",
     )
     parser.add_argument(
+        "--renewal-reconcile",
+        action="store_true",
+        help="Run Renewal Loop v6 reconcile (retry due Momentum notes writebacks + digest failures)",
+    )
+    parser.add_argument(
+        "--renewal-reconcile-limit",
+        type=int,
+        default=100,
+        help="Cap due writebacks processed by --renewal-reconcile",
+    )
+    parser.add_argument(
         "--commission-audit",
         action="store_true",
         help="Run Revenue Integrity commission blind-spot audit once",
@@ -801,6 +812,17 @@ def main() -> int:
         for status, stats in summary["by_risk"].items():
             print(f"  {status}: {stats}")
         return 0
+
+    if args.renewal_reconcile:
+        from hermes.renewals.loop import run_reconcile
+
+        summary = run_reconcile(limit=args.renewal_reconcile_limit)
+        print(
+            f"Renewal reconcile: attempted={summary['attempted']} "
+            f"succeeded={summary['succeeded']} retrying={summary['retrying']} "
+            f"failed={summary['failed']} alerted={summary['alerted']}"
+        )
+        return 0 if summary["ok"] else 1
 
     if args.revenue_sentinel_health:
         from hermes.jobs import revenue_sentinel

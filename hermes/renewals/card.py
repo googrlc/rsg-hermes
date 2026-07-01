@@ -21,6 +21,8 @@ def build_card(renewal: dict) -> str:
     carrier = renewal.get("carrier") or "—"
     lob = renewal.get("line_of_business") or "—"
     current = _money(renewal.get("current_premium"))
+    proposed = _money(renewal.get("renewal_proposed_premium"))
+    renewal_premium = _money(renewal.get("renewal_premium"))
     exp = renewal.get("expiration_date") or "—"
     urgency = renewal.get("urgency") or "—"
     std = f"{config.BAND_STANDARD_MAX:.0f}"
@@ -33,15 +35,16 @@ Why this matters: every renewal we touch early is a client we keep. This is rete
 
 **The facts you have**
 - Expiring premium: {current}
-- Renewal premium: _enter it below once the carrier issues the renewal_
+- Carrier renewal proposal: {proposed}
+- Renewal premium: {renewal_premium if renewal_premium != '—' else '_enter the agent quote once the market is worked_'}
 - Line of business: {lob}
 
 **Do these in order**
 1. Pull the renewal declaration from the carrier portal
-2. Confirm the account details still match
-3. Enter the **Renewal Premium** on this record — the % change calculates automatically
+2. Confirm the account details still match and complete the Renewal Worksheet
+3. Enter the **Renewal Premium** agent quote on this record — the retained/remarket % change still calculates from that quote
 4. Read the % change, then follow the guide below
-5. Set **Stage** to match what you did, add notes, then mark this task **Completed**
+5. Set **Pipeline Stage** / **Disposition** to match what you did, add notes, then mark this task **Completed**
 
 **Decision guide — once Renewal Premium is in, what does the % change say?**
 
@@ -52,10 +55,10 @@ Why this matters: every renewal we touch early is a client we keep. This is rete
 | {std}-{rev}% | Hold the email. Flag Lamar in #the-boss. Shop it. | Quote Requested |
 | {rev}%+ | Flag Lamar URGENT. Pull 2 remarket quotes first. | Quote Requested |
 
-**If they're shopping or leaving:** set **Lost Reason**, and put what they actually said in
+**If they're shopping or leaving:** set the renewal **Disposition**, and put what they actually said in
 **Renewal Notes** ("client states..."). That note is how we learn why we lose people — never skip it.
 
-**Done when:** stage set, renewal premium entered, email sent (or Lamar flagged),
+**Done when:** pipeline stage/disposition set, renewal premium entered, email sent (or Lamar flagged),
 AMS updated in NowCerts, and this task marked Completed. Won/lost auto-files the
 worksheet to the client folder.
 """

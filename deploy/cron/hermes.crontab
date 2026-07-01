@@ -19,6 +19,8 @@ CRON_TZ=America/New_York
 */30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
 # Dashboard KPI history — daily 6:00am ET (Supabase dashboard_kpis, no Slack)
 0 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --snapshot-kpis >> /root/hermes-cron.log 2>&1
+# Renewal Loop v6 reconcile — daily 6:15am ET (#systems-check on failed writebacks)
+15 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-reconcile >> /root/hermes-cron.log 2>&1
 # Renewal risk reclassify — daily 7:30am ET (project_85_renewals, no Slack)
 30 7 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-classify >> /root/hermes-cron.log 2>&1
 # Revenue sentinel — Project 85 daily briefing -> #the-boss, weekdays 8:00am ET

@@ -17,10 +17,13 @@ def _sample_renewal():
         "carrier": "Progressive Commercial",
         "line_of_business": "Commercial Auto",
         "current_premium": 8420,
+        "renewal_proposed_premium": 8895,
         "renewal_premium": 9140,
         "premium_change": 8.5,
         "expiration_date": "2026-07-14",
         "urgency": "High",
+        "pipeline_stage": "Quote Requested",
+        "disposition": None,
         "lost_reason": None,
         "renewal_notes": None,
     }
@@ -112,7 +115,8 @@ def _patch_espo(monkeypatch, renewal):
 
 def test_handle_won_files_and_posts_win(monkeypatch, captured):
     r = _sample_renewal()
-    r["stage"] = rconfig.STAGE_WON
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_WON
+    r["disposition"] = rconfig.DISPOSITION_WON
     _patch_espo(monkeypatch, r)
     result = complete.handle(_payload())
     assert result["action"] == "won"
@@ -123,7 +127,8 @@ def test_handle_won_files_and_posts_win(monkeypatch, captured):
 
 def test_handle_lost_files_and_posts_loss(monkeypatch, captured):
     r = _sample_renewal()
-    r["stage"] = rconfig.STAGE_LOST
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_LOST
+    r["disposition"] = rconfig.DISPOSITION_LOST
     r["lost_reason"] = "Price"
     r["renewal_notes"] = "client states a competitor came in 20% lower"
     _patch_espo(monkeypatch, r)
@@ -136,7 +141,8 @@ def test_handle_lost_files_and_posts_loss(monkeypatch, captured):
 
 def test_won_card_is_compact_with_buttons(monkeypatch, captured):
     r = _sample_renewal()
-    r["stage"] = rconfig.STAGE_WON
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_WON
+    r["disposition"] = rconfig.DISPOSITION_WON
     _patch_espo(monkeypatch, r)
     complete.handle({"eventType": "service.task_completed",
                      "task": {"parentType": "Renewal", "parentId": "r1",
@@ -213,12 +219,38 @@ def test_acknowledge_is_idempotent():
 
 def test_handle_in_flight_does_not_file(monkeypatch, captured):
     r = _sample_renewal()
-    r["stage"] = rconfig.STAGE_QUOTE_REQUESTED
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_QUOTE_REQUESTED
     _patch_espo(monkeypatch, r)
     result = complete.handle(_payload())
     assert result["action"] == "in_flight"
     assert captured["saved"] == []
     assert captured["slack"] == []
+
+
+def test_handle_rewritten_routes_to_wins(monkeypatch, captured):
+    r = _sample_renewal()
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_WON
+    r["disposition"] = rconfig.DISPOSITION_REWRITTEN
+    _patch_espo(monkeypatch, r)
+    result = complete.handle(_payload())
+    assert result["action"] == rconfig.DISPOSITION_REWRITTEN
+    assert captured["slack"][0]["channel"] == rconfig.SLACK_RSG_WINS
+
+
+def test_build_worksheet_content_uses_nested_worksheet_fields():
+    renewal = _sample_renewal()
+    renewal["renewalWorksheet"] = {
+        "lob_variant": "commercial_auto",
+        "vehicle_count": 7,
+        "garaging_zip": "30303",
+        "completion_type": "full_review",
+        "notes": "All units confirmed",
+    }
+    doc = worksheet.build_worksheet_content(renewal)
+    assert "LOB variant: commercial_auto" in doc
+    assert "Vehicle count: 7" in doc
+    assert "Garaging zip: 30303" in doc
+    assert "completion_type" not in doc
 
 
 def test_handle_ignores_non_renewal_parent(captured):
