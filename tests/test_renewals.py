@@ -115,11 +115,11 @@ def _patch_espo(monkeypatch, renewal):
 
 def test_handle_won_files_and_posts_win(monkeypatch, captured):
     r = _sample_renewal()
-    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_WON
-    r["disposition"] = rconfig.DISPOSITION_WON
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_CLOSED
+    r["disposition"] = rconfig.DISPOSITION_RENEWED
     _patch_espo(monkeypatch, r)
     result = complete.handle(_payload())
-    assert result["action"] == "won"
+    assert result["action"] == rconfig.DISPOSITION_RENEWED
     assert result["filed"] is True
     assert len(captured["saved"]) == 1
     assert captured["slack"][0]["channel"] == rconfig.SLACK_RSG_WINS
@@ -127,9 +127,8 @@ def test_handle_won_files_and_posts_win(monkeypatch, captured):
 
 def test_handle_lost_files_and_posts_loss(monkeypatch, captured):
     r = _sample_renewal()
-    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_LOST
-    r["disposition"] = rconfig.DISPOSITION_LOST
-    r["lost_reason"] = "Price"
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_CLOSED
+    r["disposition"] = rconfig.DISPOSITION_LOST_PRICE
     r["renewal_notes"] = "client states a competitor came in 20% lower"
     _patch_espo(monkeypatch, r)
     result = complete.handle(_payload())
@@ -141,8 +140,8 @@ def test_handle_lost_files_and_posts_loss(monkeypatch, captured):
 
 def test_won_card_is_compact_with_buttons(monkeypatch, captured):
     r = _sample_renewal()
-    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_WON
-    r["disposition"] = rconfig.DISPOSITION_WON
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_CLOSED
+    r["disposition"] = rconfig.DISPOSITION_RENEWED
     _patch_espo(monkeypatch, r)
     complete.handle({"eventType": "service.task_completed",
                      "task": {"parentType": "Renewal", "parentId": "r1",
@@ -229,7 +228,7 @@ def test_handle_in_flight_does_not_file(monkeypatch, captured):
 
 def test_handle_rewritten_routes_to_wins(monkeypatch, captured):
     r = _sample_renewal()
-    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_WON
+    r["pipeline_stage"] = rconfig.PIPELINE_STAGE_CLOSED
     r["disposition"] = rconfig.DISPOSITION_REWRITTEN
     _patch_espo(monkeypatch, r)
     result = complete.handle(_payload())
