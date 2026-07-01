@@ -62,9 +62,10 @@ def _validate(
         raise ProposalError(f"op must be one of {sorted(ALLOWED_OPS)}, got {op!r}")
     if not isinstance(after, dict) or not after:
         raise ProposalError("after must be a non-empty dict of EspoCRM field values")
-    if op in UPDATE_OPS and not espocrm_id:
-        # upsert without target = create
-        pass
+    if op == "update" and not espocrm_id:
+        raise ProposalError("op='update' requires espocrm_id (cannot update without a target)")
+    # op='upsert' without espocrm_id is allowed — the worker treats it as a
+    # create (same entity_id=None path as op='create').
     if op == "create" and espocrm_id:
         raise ProposalError("op='create' must not set espocrm_id (create has no existing target)")
 
