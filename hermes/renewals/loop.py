@@ -115,9 +115,16 @@ def run_reconcile(
         elif result["state"] == "retrying":
             retrying += 1
 
+    # v6 §6.1: only alert on failures older than the configured threshold, so
+    # freshly-exhausted retries within the same reconcile run don't generate noise.
+    age_cutoff = (now - timedelta(hours=config.RECONCILE_FAILED_ALERT_MIN_AGE_HOURS)).isoformat()
     failed_rows = supa.select(
         "ams_writeback_log",
-        params={"state": "eq.failed", "order": "updated_at.desc"},
+        params={
+            "state": "eq.failed",
+            "updated_at": f"lt.{age_cutoff}",
+            "order": "updated_at.desc",
+        },
         limit=25,
     )
     alerted = False
