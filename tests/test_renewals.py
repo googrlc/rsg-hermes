@@ -236,6 +236,76 @@ def test_handle_rewritten_routes_to_wins(monkeypatch, captured):
     assert captured["slack"][0]["channel"] == rconfig.SLACK_RSG_WINS
 
 
+
+# ---------------------------------------------------- legacy back-compat synthesis
+# Pre-reshape records carry `stage` (Renewed - Won / Lost) + `lost_reason`
+# instead of the v6 `pipeline_stage` + `disposition`. _disposition() must
+# synthesize a v6 value so those records still file + post correctly.
+
+def _legacy_renewal(stage, lost_reason=None):
+    r = _sample_renewal()
+    r["pipeline_stage"] = None      # legacy record has no v6 field
+    r["stage"] = stage
+    r["disposition"] = None
+    r["lost_reason"] = lost_reason
+    return r
+
+
+def test_legacy_won_stage_synthesizes_renewed_and_routes_to_wins(monkeypatch, captured):
+    r = _legacy_renewal(rconfig.LEGACY_PIPELINE_STAGE_WON)
+    _patch_espo(monkeypatch, r)
+    result = complete.handle(_payload())
+    assert result["disposition"] == rconfig.DISPOSITION_RENEWED
+    assert result["action"] == rconfig.DISPOSITION_RENEWED
+    assert result["filed"] is True
+    assert captured["slack"][0]["channel"] == rconfig.SLACK_RSG_WINS
+
+
+def test_legacy_lost_with_price_reason_synthesizes_lost_price(monkeypatch, captured):
+    r = _legacy_renewal(rconfig.LEGACY_PIPELINE_STAGE_LOST, lost_reason="Price")
+    _patch_espo(monkeypatch, r)
+    result = complete.handle(_payload())
+    assert result["disposition"] == rconfig.DISPOSITION_LOST_PRICE
+    assert result["action"] == "lost"
+    assert captured["slack"][0]["channel"] == rconfig.SLACK_THE_BOSS
+    assert "Price" in captured["slack"][0]["text"]
+
+
+def test_legacy_lost_with_unresponsive_synthesizes_lost_no_response(monkeypatch, captured):
+    r = _legacy_renewal(rconfig.LEGACY_PIPELINE_STAGE_LOST, lost_reason="Unresponsive")
+    _patch_espo(monkeypatch, r)
+    result = complete.handle(_payload())
+    assert result["disposition"] == rconfig.DISPOSITION_LOST_NO_RESPONSE
+    assert result["action"] == "lost"
+
+
+def test_legacy_lost_unmapped_reason_defaults_to_do_not_renew(monkeypatch, captured):
+    r = _legacy_renewal(rconfig.LEGACY_PIPELINE_STAGE_LOST, lost_reason="Something unmapped")
+    _patch_espo(monkeypatch, r)
+    result = complete.handle(_payload())
+    assert result["disposition"] == rconfig.DISPOSITION_DO_NOT_RENEW
+    assert result["action"] == "lost"
+    assert captured["slack"][0]["channel"] == rconfig.SLACK_THE_BOSS
+
+
+def test_legacy_lost_no_reason_defaults_to_do_not_renew(monkeypatch, captured):
+    r = _legacy_renewal(rconfig.LEGACY_PIPELINE_STAGE_LOST, lost_reason=None)
+    _patch_espo(monkeypatch, r)
+    result = complete.handle(_payload())
+    assert result["disposition"] == rconfig.DISPOSITION_DO_NOT_RENEW
+
+
+def test_explicit_disposition_takes_priority_over_legacy_stage(monkeypatch, captured):
+    # stage says Won but an explicit v6 disposition is set -> explicit wins
+    r = _legacy_renewal(rconfig.LEGACY_PIPELINE_STAGE_WON)
+    r["disposition"] = rconfig.DISPOSITION_REWRITTEN
+    _patch_espo(monkeypatch, r)
+    result = complete.handle(_payload())
+    assert result["disposition"] == rconfig.DISPOSITION_REWRITTEN
+    assert result["action"] == rconfig.DISPOSITION_REWRITTEN
+    assert captured["slack"][0]["channel"] == rconfig.SLACK_RSG_WINS
+
+
 def test_build_worksheet_content_uses_nested_worksheet_fields():
     renewal = _sample_renewal()
     renewal["renewalWorksheet"] = {
