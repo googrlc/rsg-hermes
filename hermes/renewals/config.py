@@ -1,4 +1,9 @@
-"""Configuration for the renewals module."""
+"""Configuration for the renewals module.
+
+Renewal Loop v6 canonical spec: pipeline_stage separates *where in the pipeline*
+from *how it ended* (disposition). Terminal outcomes collapse to
+PIPELINE_STAGE_CLOSED; the six disposition values carry the outcome detail.
+"""
 import os
 
 # --- Entities ---
@@ -6,38 +11,84 @@ RENEWAL_ENTITY = "Renewal"
 RENEWAL_WORKSHEET_ENTITY = "RenewalWorksheet"
 TASK_ENTITY = "Task"
 
-# --- Renewal.pipeline_stage enum ---
+# --- Renewal.pipeline_stage enum (v6 spec §1.2) ---
 PIPELINE_STAGE_IDENTIFIED = "Identified"
 PIPELINE_STAGE_OUTREACH_SENT = "Outreach Sent"
 PIPELINE_STAGE_QUOTE_REQUESTED = "Quote Requested"
 PIPELINE_STAGE_PROPOSAL_SENT = "Proposal Sent"
 PIPELINE_STAGE_NEGOTIATING = "Negotiating"
-PIPELINE_STAGE_WON = "Renewed - Won"
-PIPELINE_STAGE_LOST = "Lost"
+PIPELINE_STAGE_CLOSED = "Closed"
 
-# Back-compat aliases while the reshape rolls out.
+# Legacy stage values seen on records back-filled from the pre-v6 schema.
+# Readers should treat these as equivalent to PIPELINE_STAGE_CLOSED and rely
+# on the `disposition` field for the actual outcome.
+LEGACY_PIPELINE_STAGE_WON = "Renewed - Won"
+LEGACY_PIPELINE_STAGE_LOST = "Lost"
+
+IN_FLIGHT_STAGES = {
+    PIPELINE_STAGE_OUTREACH_SENT,
+    PIPELINE_STAGE_QUOTE_REQUESTED,
+    PIPELINE_STAGE_PROPOSAL_SENT,
+    PIPELINE_STAGE_NEGOTIATING,
+}
+TERMINAL_STAGES = {
+    PIPELINE_STAGE_CLOSED,
+    LEGACY_PIPELINE_STAGE_WON,
+    LEGACY_PIPELINE_STAGE_LOST,
+}
+
+# --- Back-compat aliases (deprecated; readers should migrate to *_CLOSED + disposition) ---
 STAGE_IDENTIFIED = PIPELINE_STAGE_IDENTIFIED
 STAGE_OUTREACH_SENT = PIPELINE_STAGE_OUTREACH_SENT
 STAGE_QUOTE_REQUESTED = PIPELINE_STAGE_QUOTE_REQUESTED
 STAGE_PROPOSAL_SENT = PIPELINE_STAGE_PROPOSAL_SENT
 STAGE_NEGOTIATING = PIPELINE_STAGE_NEGOTIATING
-STAGE_WON = PIPELINE_STAGE_WON
-STAGE_LOST = PIPELINE_STAGE_LOST
+# STAGE_WON / STAGE_LOST point at the legacy string values so any lingering
+# caller reading them still sees the same on-disk representation.
+STAGE_WON = LEGACY_PIPELINE_STAGE_WON
+STAGE_LOST = LEGACY_PIPELINE_STAGE_LOST
 
-IN_FLIGHT_STAGES = {
-    PIPELINE_STAGE_QUOTE_REQUESTED,
-    PIPELINE_STAGE_PROPOSAL_SENT,
-    PIPELINE_STAGE_NEGOTIATING,
-}
-TERMINAL_STAGES = {PIPELINE_STAGE_WON, PIPELINE_STAGE_LOST}
-
-# --- Renewal.disposition enum (v6 support; unknown future values still pass through) ---
-DISPOSITION_WON = "won"
+# --- Renewal.disposition enum (v6 spec §1.2, six values) ---
+DISPOSITION_RENEWED = "renewed"
 DISPOSITION_REWRITTEN = "rewritten"
-DISPOSITION_LOST = "lost"
+DISPOSITION_LOST_PRICE = "lost_price"
+DISPOSITION_LOST_COVERAGE = "lost_coverage"
+DISPOSITION_LOST_NO_RESPONSE = "lost_no_response"
 DISPOSITION_DO_NOT_RENEW = "do_not_renew"
-WIN_DISPOSITIONS = {DISPOSITION_WON, DISPOSITION_REWRITTEN}
-LOSS_DISPOSITIONS = {DISPOSITION_LOST, DISPOSITION_DO_NOT_RENEW}
+
+WIN_DISPOSITIONS = {DISPOSITION_RENEWED, DISPOSITION_REWRITTEN}
+LOSS_DISPOSITIONS = {
+    DISPOSITION_LOST_PRICE,
+    DISPOSITION_LOST_COVERAGE,
+    DISPOSITION_LOST_NO_RESPONSE,
+    DISPOSITION_DO_NOT_RENEW,
+}
+TERMINAL_DISPOSITIONS = WIN_DISPOSITIONS | LOSS_DISPOSITIONS
+
+# Human-readable labels used in Notes, cards, and Slack posts.
+DISPOSITION_LABELS = {
+    DISPOSITION_RENEWED: "Renewed",
+    DISPOSITION_REWRITTEN: "Rewritten",
+    DISPOSITION_LOST_PRICE: "Lost — Price",
+    DISPOSITION_LOST_COVERAGE: "Lost — Coverage",
+    DISPOSITION_LOST_NO_RESPONSE: "Lost — No response",
+    DISPOSITION_DO_NOT_RENEW: "Do not renew",
+}
+
+# Deprecated alias: DISPOSITION_WON is retained as an alias for RENEWED because
+# some existing callers used "won" as a generic terminal-win sentinel. New code
+# should use DISPOSITION_RENEWED or WIN_DISPOSITIONS.
+DISPOSITION_WON = DISPOSITION_RENEWED
+
+# Legacy Renewal.lost_reason values → v6 disposition mapping. Used during
+# back-fill and by _disposition() to synthesize a v6 value from a legacy record.
+LEGACY_LOST_REASON_TO_DISPOSITION = {
+    "Price": DISPOSITION_LOST_PRICE,
+    "Coverage": DISPOSITION_LOST_COVERAGE,
+    "Unresponsive": DISPOSITION_LOST_NO_RESPONSE,
+    "Moved carrier": DISPOSITION_REWRITTEN,
+    "Other": DISPOSITION_DO_NOT_RENEW,
+}
 
 # --- Task field values (confirmed Task.json) ---
 TASK_STATUS_INBOX = "Inbox"
@@ -47,9 +98,6 @@ TASK_SOURCE_ACCOUNT = "Account"
 TASK_SYNC_SOURCE = "Hermes"  # NOTE: must be added to Task.syncSource enum first (see README)
 
 # --- Document store (confirmed hermes/documents/store.py VALID_DOC_TYPES) ---
-# save_document only accepts: proposal, note, renewal, comparison, appetite,
-# reference, other. The won/lost outcome is carried in the title + source, NOT
-# the doc_type.
 DOC_TYPE_RENEWAL = "renewal"
 
 # --- Slack channels (RSG) — override via env if they change ---
@@ -59,27 +107,28 @@ SLACK_RSG_WINS = os.environ.get("SLACK_RSG_WINS", "C0ANFKMDRUH")              # 
 SLACK_SYSTEMS_CHECK = os.environ.get("HERMES_SYSTEMS_CHECK_CHANNEL", "C0ANSEP6SSD")
 
 # --- Task assignee (Gretchen) ---
-# Resolved live by userName unless an explicit id is provided.
 GRETCHEN_USERNAME = os.environ.get("HERMES_RENEWALS_GRETCHEN_USERNAME", "gretchcoates")
-GRETCHEN_USER_ID = os.environ.get("HERMES_RENEWALS_GRETCHEN_USER_ID")  # optional override
+GRETCHEN_USER_ID = os.environ.get("HERMES_RENEWALS_GRETCHEN_USER_ID")
 
-# --- Premium-change decision bands (percent), used in the card's guide ---
-# premiumChange on the Renewal is an auto % delta = ((renewal - current) / current) * 100
-BAND_STANDARD_MAX = 10.0   # <10%  -> standard renewal email
-BAND_REVIEW_MAX = 25.0     # 10-24% -> hold + flag Lamar; >=25% -> urgent remarket
+# --- Premium-change decision bands (percent) — v6 §1.3, sacred retention logic ---
+# premium_change on Renewal is the AGENT delta:
+#   ((renewal_premium - current_premium) / current_premium) * 100
+# carrier_premium_change is info-only and does not drive banding.
+BAND_STANDARD_MAX = 10.0
+BAND_REVIEW_MAX = 25.0
 
-# --- Webhook auth (matches EspoCRM config: serviceWebhookSecret) ---
+# --- Webhook auth ---
 SERVICE_WEBHOOK_SECRET = os.environ.get("SERVICE_WEBHOOK_SECRET", "")
 
-# --- EspoCRM base URL (for Slack deep-links to the Task / Renewal worksheet) ---
+# --- EspoCRM base URL ---
 ESPO_BASE_URL = os.environ.get("ESPO_URL", "").rstrip("/")
 
-# --- Worksheet checkbox fields ---
+# --- Worksheet checkbox fields (legacy Renewal-side booleans; deprecated in v6) ---
 CHECKBOX_FIELDS = [
-    "renewal_reviewed",    # Renewal declaration pulled & reviewed
-    "account_confirmed",   # Account details confirmed (units / drivers)
-    "renewal_email_sent",  # Renewal email sent to client
-    "ams_updated",         # AMS (NowCerts) updated
+    "renewal_reviewed",
+    "account_confirmed",
+    "renewal_email_sent",
+    "ams_updated",
 ]
 
 WORKSHEET_LOOKUP_KEYS = (
@@ -107,14 +156,15 @@ WORKSHEET_HIDDEN_FIELDS = {
     "completion_type",
 }
 
-# Optional branded Google Docs template (worksheet.fill_template). Unset => the
-# generated worksheet doc is filed (v1 path).
 RENEWAL_TEMPLATE_DOC_ID = os.environ.get("RENEWAL_TEMPLATE_DOC_ID")
 
 # --- Renewal Loop v6 writeback (Momentum MCP, notes-only in v1) ---
 MOMENTUM_MCP_URL = os.environ.get("MOMENTUM_MCP_URL", "https://mcp.momentumamp.com/mcp").rstrip("/")
 MOMENTUM_MCP_API_KEY = os.environ.get("MOMENTUM_MCP_API_KEY", "")
 MOMENTUM_MCP_TOOL_NOTES = "manage_notes"
-# v1.1 planned (config/docs only, not called in v1): manage_opportunities,
-# create_tasks, update_drivers, manage_vehicles, manage_policy_lifecycle_data.
 WRITEBACK_RETRY_DELAYS = (30, 120, 600, 3600, 21600)
+
+# --- Reconcile alert threshold (v6 §6.1) ---
+# Daily reconcile posts to #systems-check ONLY when failures are older than
+# this many hours, to avoid noise on freshly-exhausted retries.
+RECONCILE_FAILED_ALERT_MIN_AGE_HOURS = 24
