@@ -1149,6 +1149,15 @@ async def nowcerts_enrich_webhook(request: Request):
 def main() -> int:
     load_dotenv()
     logging.basicConfig(level=os.environ.get("HERMES_API_LOG_LEVEL", "INFO"))
+
+    if not os.environ.get("SERVICE_WEBHOOK_SECRET", "").strip():
+        log.warning(
+            "SERVICE_WEBHOOK_SECRET is not set — all /renewals/complete and "
+            "service webhook requests will be rejected (401). "
+            "Set it in .env and recreate the container with "
+            "`docker compose up -d hermes-api` (restart does not reload env_file)."
+        )
+
     parser = argparse.ArgumentParser(description="Hermes private HTTP API")
     parser.add_argument("--host", default=os.environ.get("HERMES_API_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("HERMES_API_PORT", "8484")))

@@ -57,6 +57,34 @@ cp deploy/hermes-gretch/.env.hermes-gretch.example .env.hermes-gretch
 
 `.env.hermes-gretch` is gitignored — it never gets committed.
 
+### 2a. Set SERVICE_WEBHOOK_SECRET (required for /renewals/complete)
+
+The `SERVICE_WEBHOOK_SECRET` must be set and must match the value in EspoCRM
+**Administration → Integration → serviceWebhookSecret** exactly. If it is missing
+or blank, every incoming service webhook (renewal task completions, etc.) will be
+silently rejected with 401 — no worksheet filed, no Slack win/loss post.
+
+```bash
+# 1. Generate a strong secret (do this once; store the result in 1Password).
+openssl rand -hex 32
+
+# 2. Paste the output into .env (the main shared env, loaded by hermes-api):
+#    SERVICE_WEBHOOK_SECRET=<the hex string>
+
+# 3. Set the same value in EspoCRM:
+#    Administration → Integration → serviceWebhookSecret
+
+# 4. Recreate hermes-api so the new env is loaded
+#    (docker compose restart does NOT reload env_file — use up -d):
+docker compose up -d hermes-api
+```
+
+> **Verify it is live:**
+> ```bash
+> docker exec rsg-hermes-api printenv SERVICE_WEBHOOK_SECRET
+> # must print a non-empty hex string
+> ```
+
 ## 3. Build & start the container
 
 ```bash
