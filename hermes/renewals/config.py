@@ -1,27 +1,43 @@
-"""Configuration for the renewals module.
-
-All EspoCRM values below were confirmed against the live entityDefs
-(Renewal.json / Task.json) and the n8n WF1 create node. Field names use the
-EspoCRM API (camelCase) form, matching what WF1 POSTs to /api/v1/Renewal.
-"""
+"""Configuration for the renewals module."""
 import os
 
 # --- Entities ---
 RENEWAL_ENTITY = "Renewal"
+RENEWAL_WORKSHEET_ENTITY = "RenewalWorksheet"
 TASK_ENTITY = "Task"
 
-# --- Renewal.stage enum (confirmed Renewal.json) ---
-STAGE_IDENTIFIED = "Identified"
-STAGE_OUTREACH_SENT = "Outreach Sent"
-STAGE_QUOTE_REQUESTED = "Quote Requested"
-STAGE_PROPOSAL_SENT = "Proposal Sent"
-STAGE_NEGOTIATING = "Negotiating"
-STAGE_WON = "Renewed - Won"
-STAGE_LOST = "Lost"
+# --- Renewal.pipeline_stage enum ---
+PIPELINE_STAGE_IDENTIFIED = "Identified"
+PIPELINE_STAGE_OUTREACH_SENT = "Outreach Sent"
+PIPELINE_STAGE_QUOTE_REQUESTED = "Quote Requested"
+PIPELINE_STAGE_PROPOSAL_SENT = "Proposal Sent"
+PIPELINE_STAGE_NEGOTIATING = "Negotiating"
+PIPELINE_STAGE_WON = "Renewed - Won"
+PIPELINE_STAGE_LOST = "Lost"
 
-# Stages that mean "still being shopped / in flight" (task done, no outcome yet)
-IN_FLIGHT_STAGES = {STAGE_QUOTE_REQUESTED, STAGE_PROPOSAL_SENT, STAGE_NEGOTIATING}
-TERMINAL_STAGES = {STAGE_WON, STAGE_LOST}
+# Back-compat aliases while the reshape rolls out.
+STAGE_IDENTIFIED = PIPELINE_STAGE_IDENTIFIED
+STAGE_OUTREACH_SENT = PIPELINE_STAGE_OUTREACH_SENT
+STAGE_QUOTE_REQUESTED = PIPELINE_STAGE_QUOTE_REQUESTED
+STAGE_PROPOSAL_SENT = PIPELINE_STAGE_PROPOSAL_SENT
+STAGE_NEGOTIATING = PIPELINE_STAGE_NEGOTIATING
+STAGE_WON = PIPELINE_STAGE_WON
+STAGE_LOST = PIPELINE_STAGE_LOST
+
+IN_FLIGHT_STAGES = {
+    PIPELINE_STAGE_QUOTE_REQUESTED,
+    PIPELINE_STAGE_PROPOSAL_SENT,
+    PIPELINE_STAGE_NEGOTIATING,
+}
+TERMINAL_STAGES = {PIPELINE_STAGE_WON, PIPELINE_STAGE_LOST}
+
+# --- Renewal.disposition enum (v6 support; unknown future values still pass through) ---
+DISPOSITION_WON = "won"
+DISPOSITION_REWRITTEN = "rewritten"
+DISPOSITION_LOST = "lost"
+DISPOSITION_DO_NOT_RENEW = "do_not_renew"
+WIN_DISPOSITIONS = {DISPOSITION_WON, DISPOSITION_REWRITTEN}
+LOSS_DISPOSITIONS = {DISPOSITION_LOST, DISPOSITION_DO_NOT_RENEW}
 
 # --- Task field values (confirmed Task.json) ---
 TASK_STATUS_INBOX = "Inbox"
@@ -40,6 +56,7 @@ DOC_TYPE_RENEWAL = "renewal"
 SLACK_GRETCHEN_TASKS = os.environ.get("SLACK_GRETCHEN_TASKS", "C0AUP125PRU")  # #gretchen-tasks
 SLACK_THE_BOSS = os.environ.get("SLACK_THE_BOSS", "C0ANQUENX4P")              # #the-boss
 SLACK_RSG_WINS = os.environ.get("SLACK_RSG_WINS", "C0ANFKMDRUH")              # #rsg-wins
+SLACK_SYSTEMS_CHECK = os.environ.get("HERMES_SYSTEMS_CHECK_CHANNEL", "C0ANSEP6SSD")
 
 # --- Task assignee (Gretchen) ---
 # Resolved live by userName unless an explicit id is provided.
@@ -57,11 +74,7 @@ SERVICE_WEBHOOK_SECRET = os.environ.get("SERVICE_WEBHOOK_SECRET", "")
 # --- EspoCRM base URL (for Slack deep-links to the Task / Renewal worksheet) ---
 ESPO_BASE_URL = os.environ.get("ESPO_URL", "").rstrip("/")
 
-# --- Worksheet checkbox fields (bool fields on the Renewal record) ---
-# snake_case API names, matching the entity's existing field convention
-# (the live API exposes custom Renewal fields snake_case, e.g. renewal_premium).
-# These MUST match the bool field keys created in rsg-espocrm Renewal.json and
-# referenced by the Dynamic Logic required-on-stage rules.
+# --- Worksheet checkbox fields ---
 CHECKBOX_FIELDS = [
     "renewal_reviewed",    # Renewal declaration pulled & reviewed
     "account_confirmed",   # Account details confirmed (units / drivers)
@@ -69,6 +82,39 @@ CHECKBOX_FIELDS = [
     "ams_updated",         # AMS (NowCerts) updated
 ]
 
+WORKSHEET_LOOKUP_KEYS = (
+    "renewalWorksheet",
+    "renewal_worksheet",
+    "worksheet",
+    "renewalWorksheetData",
+)
+WORKSHEET_ID_KEYS = ("renewalWorksheetId", "renewal_worksheet_id", "worksheetId")
+WORKSHEET_HIDDEN_FIELDS = {
+    "id",
+    "name",
+    "createdAt",
+    "modifiedAt",
+    "assignedUserId",
+    "assignedUserName",
+    "createdById",
+    "createdByName",
+    "modifiedById",
+    "modifiedByName",
+    "renewalId",
+    "renewalName",
+    "accountId",
+    "accountName",
+    "completion_type",
+}
+
 # Optional branded Google Docs template (worksheet.fill_template). Unset => the
 # generated worksheet doc is filed (v1 path).
 RENEWAL_TEMPLATE_DOC_ID = os.environ.get("RENEWAL_TEMPLATE_DOC_ID")
+
+# --- Renewal Loop v6 writeback (Momentum MCP, notes-only in v1) ---
+MOMENTUM_MCP_URL = os.environ.get("MOMENTUM_MCP_URL", "https://mcp.momentumamp.com/mcp").rstrip("/")
+MOMENTUM_MCP_API_KEY = os.environ.get("MOMENTUM_MCP_API_KEY", "")
+MOMENTUM_MCP_TOOL_NOTES = "manage_notes"
+# v1.1 planned (config/docs only, not called in v1): manage_opportunities,
+# create_tasks, update_drivers, manage_vehicles, manage_policy_lifecycle_data.
+WRITEBACK_RETRY_DELAYS = (30, 120, 600, 3600, 21600)

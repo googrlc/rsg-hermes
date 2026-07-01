@@ -1109,6 +1109,26 @@ async def renewals_complete_webhook(request: Request):
     return renewals_complete.handle(await request.json())
 
 
+@app.post("/webhooks/espo/disposition")
+async def renewals_disposition_webhook(request: Request):
+    from hermes.renewals import complete as renewals_complete
+    from hermes.renewals.loop import handle_disposition_webhook
+
+    if not renewals_complete.verify_secret(request.headers.get("X-Service-Webhook-Secret")):
+        raise HTTPException(status_code=401, detail="bad webhook secret")
+    return handle_disposition_webhook(await request.json())
+
+
+@app.post("/webhooks/espo/worksheet")
+async def renewals_worksheet_webhook(request: Request):
+    from hermes.renewals import complete as renewals_complete
+    from hermes.renewals.loop import handle_worksheet_webhook
+
+    if not renewals_complete.verify_secret(request.headers.get("X-Service-Webhook-Secret")):
+        raise HTTPException(status_code=401, detail="bad webhook secret")
+    return handle_worksheet_webhook(await request.json())
+
+
 @app.post("/api/hermes/nowcerts-enrich")
 async def nowcerts_enrich_webhook(request: Request):
     """EspoCRM webhook: enrich the linked NowCerts insured from an ACTIVE account.

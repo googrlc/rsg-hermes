@@ -1,9 +1,9 @@
 """Renewal sweep: turn freshly-created Renewal records into tasks for Gretchen.
 
-n8n WF1 already creates the Renewal record (stage=Identified) at the LOB-specific
-expiry threshold and pre-fills the expiring premium. This sweep attaches the task
-+ card and routes it to Gretchen. It does NOT touch stage — that stays Gretchen's
-signal of real progress.
+n8n WF1 already creates the Renewal record (pipeline_stage=Identified) at the
+LOB-specific expiry threshold and pre-fills the expiring premium. This sweep
+attaches the task + card and routes it to Gretchen. It does NOT touch the
+pipeline stage — that stays Gretchen's signal of real progress.
 
 Run from cron, e.g.:  0 6 * * 1-5  hermes --renewal-sweep
 Safe first run (one task only):
@@ -24,7 +24,9 @@ log = logging.getLogger(__name__)
 # current_premium, expiration_date, line_of_business — NOT camelCase).
 _SELECT = (
     "id,name,accountId,accountName,contactId,carrier,line_of_business,"
-    "current_premium,expiration_date,renewal_effective_date,urgency"
+    "current_premium,renewal_proposed_premium,renewal_premium,"
+    "expiration_date,renewal_effective_date,urgency,pipeline_stage,disposition,"
+    "renewalWorksheetId"
 )
 
 # Hard ceiling so a misconfigured run can never task the entire backlog unobserved.
@@ -46,7 +48,7 @@ def run(limit: int | None = None) -> dict:
         "orderBy": "expiration_date",
         "order": "asc",
         "where": [
-            {"type": "equals", "attribute": "stage", "value": config.STAGE_IDENTIFIED},
+            {"type": "equals", "attribute": "pipeline_stage", "value": config.PIPELINE_STAGE_IDENTIFIED},
         ],
     })
     renewals = _rows(body)

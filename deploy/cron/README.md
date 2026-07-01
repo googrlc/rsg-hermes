@@ -29,6 +29,7 @@ revenue briefing. This artifact makes it repeatable.
 |---|---|---|
 | `--email-triage` (ms365) | every 30 min | actionable Outlook mail → intake queue |
 | `--snapshot-kpis` | daily 6:00am | Supabase `dashboard_kpis` (no Slack) |
+| `--renewal-reconcile` | daily 6:15am | retry due Renewal Loop v6 AMS writebacks, alert `#systems-check` on failures |
 | `--renewal-classify` | daily 7:30am | reclassify `project_85_renewals` risk |
 | `--revenue-sentinel` | weekdays 8:00am | Project-85 briefing → #the-boss |
 | `--renewal-sweep` | weekdays 8:15am | renewal prep Tasks for Gretchen |

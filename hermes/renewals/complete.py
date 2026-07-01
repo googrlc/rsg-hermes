@@ -1,13 +1,4 @@
-"""Handle EspoCRM `service.task_completed` webhooks for Renewal tasks.
-
-Wired to POST /renewals/complete (see README for the api.py snippet). EspoCRM's
-ServiceWebhookDispatcher fires this when a task's status changes to Completed,
-with an X-Service-Webhook-Secret header. On a renewal task completion we read the
-Renewal's stage and branch:
-  Renewed - Won -> file worksheet + post to #rsg-wins
-  Lost          -> file worksheet + post loss reason to #the-boss
-  in-flight     -> prep done, still shopping; no filing
-"""
+"""Handle EspoCRM `service.task_completed` webhooks for Renewal tasks."""
 from __future__ import annotations
 
 import hmac
@@ -49,19 +40,21 @@ def handle(payload: dict) -> dict:
     if not isinstance(renewal, dict):
         return {"skipped": "renewal not found"}
     _ensure_display_fields(espo, renewal)
-    stage = renewal.get("stage")
+    _ensure_worksheet(espo, renewal)
+    pipeline_stage = _pipeline_stage(renewal)
+    disposition = _disposition(renewal)
 
-    if stage == config.STAGE_WON:
-        return _on_won(renewal, task_id)
-    if stage == config.STAGE_LOST:
-        return _on_lost(renewal, task_id)
-    if stage in config.IN_FLIGHT_STAGES:
-        log.info("Renewal %s in-flight at '%s' — no filing.", renewal_id, stage)
-        return {"stage": stage, "action": "in_flight"}
+    if disposition in config.WIN_DISPOSITIONS:
+        return _on_won(renewal, task_id, disposition=disposition)
+    if disposition in config.LOSS_DISPOSITIONS:
+        return _on_lost(renewal, task_id, disposition=disposition)
+    if pipeline_stage in config.IN_FLIGHT_STAGES:
+        log.info("Renewal %s in-flight at '%s' — no filing.", renewal_id, pipeline_stage)
+        return {"pipeline_stage": pipeline_stage, "disposition": disposition, "action": "in_flight"}
 
     log.info("Renewal %s task completed at non-terminal stage '%s' — no filing.",
-             renewal_id, stage)
-    return {"stage": stage, "action": "none"}
+             renewal_id, pipeline_stage)
+    return {"pipeline_stage": pipeline_stage, "disposition": disposition, "action": "none"}
 
 
 def _worksheet_doc(renewal: dict) -> str:
@@ -132,6 +125,29 @@ def _renewal_date(renewal: dict) -> str:
     return renewal.get("renewal_effective_date") or renewal.get("expiration_date") or "—"
 
 
+def _pipeline_stage(renewal: dict) -> str | None:
+    return renewal.get("pipeline_stage") or renewal.get("stage")
+
+
+def _disposition(renewal: dict) -> str | None:
+    return renewal.get("disposition") or (
+        config.DISPOSITION_WON if renewal.get("stage") == config.STAGE_WON else
+        config.DISPOSITION_LOST if renewal.get("stage") == config.STAGE_LOST else None
+    )
+
+
+def _loss_reason(renewal: dict, disposition: str | None = None) -> str:
+    value = renewal.get("lost_reason")
+    if value:
+        return str(value)
+    disposition = disposition or _disposition(renewal)
+    if disposition == config.DISPOSITION_DO_NOT_RENEW:
+        return "Do not renew"
+    if disposition:
+        return disposition.replace("_", " ").title()
+    return "—"
+
+
 def _ensure_display_fields(espo, renewal: dict) -> None:
     """Backfill the card's display fields if a single-record fetch didn't carry
     them. A full Renewal GET normally returns accountName + line_of_business, but
@@ -148,6 +164,44 @@ def _ensure_display_fields(espo, renewal: dict) -> None:
             renewal["accountName"] = acct["name"]
     except Exception as e:  # display nicety only — never fail the webhook over it
         log.debug("Account name backfill failed for %s: %s", acct_id, e)
+
+
+def _ensure_worksheet(espo, renewal: dict) -> None:
+    if worksheet.worksheet_record(renewal):
+        return
+
+    for key in config.WORKSHEET_ID_KEYS:
+        worksheet_id = renewal.get(key)
+        if not worksheet_id:
+            continue
+        try:
+            row = espo.get(f"{config.RENEWAL_WORKSHEET_ENTITY}/{worksheet_id}")
+            if isinstance(row, dict) and _looks_like_worksheet(row):
+                renewal["renewalWorksheet"] = row
+                return
+        except Exception as e:
+            log.debug("Worksheet lookup failed for %s: %s", worksheet_id, e)
+
+    renewal_id = renewal.get("id")
+    if not renewal_id:
+        return
+    for link_name in ("renewalWorksheet", "worksheet"):
+        try:
+            row = espo.get(f"{config.RENEWAL_ENTITY}/{renewal_id}/{link_name}")
+            if isinstance(row, dict) and _looks_like_worksheet(row):
+                renewal["renewalWorksheet"] = row
+                return
+            if isinstance(row, list) and row and isinstance(row[0], dict) and _looks_like_worksheet(row[0]):
+                renewal["renewalWorksheet"] = row[0]
+                return
+        except Exception as e:
+            log.debug("Worksheet link lookup failed for %s/%s: %s", renewal_id, link_name, e)
+
+
+def _looks_like_worksheet(row: dict) -> bool:
+    if row.get("lob_variant") is not None or row.get("completion_type") is not None:
+        return True
+    return bool(row.get("renewalId") or row.get("renewalName"))
 
 
 def build_renewal_card(renewal: dict, *, header: str, task_url: str | None,
@@ -232,29 +286,37 @@ def _worksheet_url(renewal: dict, doc: dict | None) -> str | None:
     return (doc or {}).get("drive_url") or _renewal_url(renewal.get("id"))
 
 
-def _on_won(renewal: dict, task_id: str | None = None) -> dict:
+def _on_won(renewal: dict, task_id: str | None = None, *, disposition: str | None = None) -> dict:
     doc = _file_worksheet(renewal, "won")
     client = _client_name(renewal)
+    disposition = disposition or _disposition(renewal)
+    retained_label = "rewritten" if disposition == config.DISPOSITION_REWRITTEN else "retained"
     blocks = build_renewal_card(
         renewal,
-        header=f"✅ *Renewal retained — {client}*",
+        header=f"✅ *Renewal {retained_label} — {client}*",
         task_url=_task_url(task_id),
         worksheet_url=_worksheet_url(renewal, doc),
     )
     try:
         SlackNotifier(channel=config.SLACK_RSG_WINS).post_message(
-            text=f"Renewal retained — {client} ({renewal.get('line_of_business', '')})",
+            text=f"Renewal {retained_label} — {client} ({renewal.get('line_of_business', '')})",
             blocks=blocks,
         )
     except Exception as e:
         log.warning("Win notify failed: %s", e)
-    return {"stage": config.STAGE_WON, "filed": bool(doc), "action": "won"}
+    return {
+        "pipeline_stage": _pipeline_stage(renewal),
+        "disposition": disposition,
+        "filed": bool(doc),
+        "action": config.DISPOSITION_REWRITTEN if disposition == config.DISPOSITION_REWRITTEN else "won",
+    }
 
 
-def _on_lost(renewal: dict, task_id: str | None = None) -> dict:
+def _on_lost(renewal: dict, task_id: str | None = None, *, disposition: str | None = None) -> dict:
     doc = _file_worksheet(renewal, "lost")
     client = _client_name(renewal)
-    reason = renewal.get("lost_reason") or "—"
+    disposition = disposition or _disposition(renewal)
+    reason = _loss_reason(renewal, disposition)
     blocks = build_renewal_card(
         renewal,
         header=f"❌ *Renewal lost — {client}*\nReason: *{reason}*",
@@ -268,4 +330,9 @@ def _on_lost(renewal: dict, task_id: str | None = None) -> dict:
         )
     except Exception as e:
         log.warning("Loss notify failed: %s", e)
-    return {"stage": config.STAGE_LOST, "filed": bool(doc), "action": "lost"}
+    return {
+        "pipeline_stage": _pipeline_stage(renewal),
+        "disposition": disposition,
+        "filed": bool(doc),
+        "action": "lost",
+    }
