@@ -6,6 +6,12 @@ entities the RSG agents need, plus a generic write surface (gated behind dry-run
 blast-radius enforcement, enabled per shared standard 3.2/3.3 when agents promote
 past read-only).
 
+OData notes (verified against the live tenant):
+- Entity sets use the ``*List`` naming, e.g. ``InsuredDetailList``, ``PolicyDetailList``.
+- Every list request requires ``$top`` + ``$skip`` + ``$orderby`` together.
+- ``$count=true`` on the collection returns ``@odata.count`` (the ``/$count`` segment
+  is rejected without Top/Skip/OrderBy, so we read the count from the collection).
+
 Env (via token manager): MOMENTUM_API_URL, MOMENTUM_USERNAME, MOMENTUM_PASSWORD.
 """
 from __future__ import annotations
@@ -22,6 +28,22 @@ from hermes.integrations.momentum_token import MomentumTokenManager
 log = logging.getLogger(__name__)
 
 DEFAULT_API_URL = "https://api.momentumamp.com"
+DEFAULT_ORDERBY = "databaseId"
+
+# Friendly name -> OData entity set. Verified ones first; unverified fall back to "{name}List".
+ENTITY_SET: dict[str, str] = {
+    "Insured": "InsuredDetailList",
+    "Policy": "PolicyDetailList",
+    "DeletedInsured": "DeletedInsuredList",
+    "CertificateHolder": "CertificateHolderList",
+    "Claim": "ClaimList",
+    "Driver": "DriverList",
+    "Vehicle": "VehicleList",
+    "Property": "PropertyList",
+    "Note": "NoteList",
+    "Opportunity": "OpportunityList",
+    "TasksWork": "TasksWorkList",
+}
 
 
 class MomentumRESTError(Exception):
@@ -42,6 +64,10 @@ class MomentumRESTClient:
         self.timeout = timeout
         self.page_size = page_size
         self.pause = pause
+
+    @staticmethod
+    def _entity_set(entity: str) -> str:
+        return ENTITY_SET.get(entity, f"{entity}List")
 
     # -- transport -----------------------------------------------------------
     def _headers(self) -> dict[str, str]:
@@ -79,10 +105,11 @@ class MomentumRESTClient:
 
     # -- OData reads ---------------------------------------------------------
     def count(self, entity: str, filter_: str | None = None) -> int:
-        params: dict[str, Any] = {"$count": "true", "$top": 0}
+        """Total record count for an entity (optionally filtered)."""
+        params: dict[str, Any] = {"$top": 0, "$skip": 0, "$orderby": DEFAULT_ORDERBY, "$count": "true"}
         if filter_:
             params["$filter"] = filter_
-        data = self._request("GET", f"/api/{entity}", params=params)
+        data = self._request("GET", f"/api/{self._entity_set(entity)}", params=params)
         if isinstance(data, dict):
             return int(data.get("@odata.count", data.get("count", 0)) or 0)
         return 0
@@ -97,14 +124,17 @@ class MomentumRESTClient:
         filter_: str | None = None,
         order_by: str | None = None,
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"$top": top or self.page_size, "$skip": skip, "$count": "true"}
+        params: dict[str, Any] = {
+            "$top": top or self.page_size,
+            "$skip": skip,
+            "$orderby": order_by or DEFAULT_ORDERBY,
+            "$count": "true",
+        }
         if select:
             params["$select"] = select
         if filter_:
             params["$filter"] = filter_
-        if order_by:
-            params["$orderby"] = order_by
-        return self._request("GET", f"/api/{entity}", params=params)
+        return self._request("GET", f"/api/{self._entity_set(entity)}", params=params)
 
     def enumerate_all(
         self,
@@ -131,7 +161,7 @@ class MomentumRESTClient:
         return out[:max_records] if max_records else out
 
     def get(self, entity: str, entity_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/api/{entity}/{entity_id}")
+        return self._request("GET", f"/api/{self._entity_set(entity)}({entity_id})")
 
     @staticmethod
     def _rows(page: Any) -> list[dict[str, Any]]:
@@ -150,7 +180,10 @@ class MomentumRESTClient:
         return 0
 
     # -- writes (gated; enable when agents promote past read-only) -----------
-    # def insert(self, entity, payload, *, dry_run=True): ...
-    # def update(self, entity, entity_id, payload, *, dry_run=True): ...
-    # Blast-radius (50/run, 1 write/sec), Supabase agent_writes mirror, and
-    # dry_run gating enforced here per shared standard 3.2/3.3 when enabled.
+    # apply_insured_tag_tool / insert_note_tool / insert_opportunity_tool /
+    # insert_task_tool / apply_policy_tag_tool + blast-radius caps (50/run,
+    # 1 write/sec), Supabase agent_writes mirror, and dry_run gating land here
+    # when Agent 01 promotes dry_run -> shadow. Per shared standard 3.2/3.3.
+
+    def close(self) -> None:
+        self.token_manager.close() if hasattr(self.token_manager, "close") else None
