@@ -213,7 +213,41 @@ class NowCertsClient:
         log.info("NowCerts: total policies fetched = %d", len(all_records))
         return all_records
 
-    # ── Write methods ─────────────────────────────────────────────────────
+    def search_insured(
+        self,
+        *,
+        name: str | None = None,
+        email: str | None = None,
+        fein: str | None = None,
+        limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        """Search for existing insureds by name, email, or FEIN (OData filter).
+
+        Search-before-insert gate: callers MUST run this before
+        ``create_insured`` to avoid the blind-insert duplicate class of bug.
+        Returns candidate insured rows; the caller applies a fuzzy
+        confidence gate (hermes.sync.dedup) before linking or inserting.
+        """
+        clauses: list[str] = []
+        if name:
+            clauses.append(f"contains(commercialName,'{name}') or contains(firstName,'{name}') or contains(lastName,'{name}')")
+        if email:
+            clauses.append(f"eMail eq '{email}'")
+        if fein:
+            clauses.append(f"fein eq '{fein}'")
+        if not clauses:
+            return []
+        params = {
+            "$top": str(limit),
+            "$orderby": "changeDate desc",
+            "$count": "true",
+            "$filter": " or ".join(clauses),
+        }
+        body = self._get("/api/InsuredDetailList", params=params)
+        records = body if isinstance(body, list) else body.get("value", body.get("items", []))
+        return records if isinstance(records, list) else []
+
+    # ── Write methods ─────────────────────────────────────────────────────────────
 
     def _post(self, path: str, payload: dict[str, Any]) -> Any:
         """POST with auto-retry on 401 (token expired)."""

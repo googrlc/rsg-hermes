@@ -200,7 +200,30 @@ def run_hub_to_nowcerts(
                     log.warning("Skipping account %s: no name", account.get("espocrm_id"))
                     continue
 
+                # ── Search-before-insert gate (prevents the blind-insert
+                #    duplicate class of bug). momentumClientId / nowcerts_id
+                #    must be resolved before any push. If a strong match is
+                #    found in NowCerts, LINK it instead of inserting. Only
+                #    insert when no existing insured matches. ──────────────
                 if not dry_run:
+                    nc_id = _search_before_insert(nc, nc_payload)
+                    if nc_id:
+                        # Existing insured found — link, do NOT insert.
+                        _link_nowcerts_id(supa, account["espocrm_id"], str(nc_id))
+                        result.accounts_pushed += 1
+                        _audit(
+                            supa, result.run_id,
+                            workflow_name="hub_to_nowcerts",
+                            source_system="supabase", destination_system="nowcerts",
+                            object_type="Insured",
+                            object_id=str(account.get("espocrm_id", "")),
+                            action="push", status="success", dry_run=dry_run,
+                        )
+                        continue
+
+                    # No match — safe to insert. Require a populated momentum
+                    # client id (nowcerts_id) on the golden record going
+                    # forward by linking immediately after insert.
                     resp = nc.create_insured(nc_payload)
                     # NowCerts /api/Insured/Insert returns the id under "insuredDatabaseId".
                     # Other keys kept as defensive fallbacks.
@@ -503,6 +526,62 @@ def _fetch_unpushed_commissions(supa: SupabaseClient) -> list[dict[str, Any]]:
         params={"nowcerts_id": "is.null", "source_system": "eq.espocrm"},
         limit=200,
     )
+
+
+def _search_before_insert(nc: NowCertsClient, payload: dict[str, Any]) -> str | None:
+    """Search NowCerts for an existing insured before any insert.
+
+    Returns a NowCerts DatabaseId to LINK (no insert) when a high-confidence
+    match is found, else None (caller may insert). Uses OData search +
+    rapidfuzz confidence gate so a near-miss never triggers a duplicate.
+    """
+    from hermes.sync.dedup import best_name_match
+
+    name = (payload.get("CommercialName") or "").strip()
+    if not name:
+        first = (payload.get("FirstName") or "").strip()
+        last = (payload.get("LastName") or "").strip()
+        name = f"{first} {last}".strip()
+    if not name:
+        return None
+
+    email = (payload.get("EMail") or payload.get("Email") or "").strip() or None
+    fein = (payload.get("FEIN") or payload.get("Fein") or "").strip() or None
+
+    threshold = 0.92 if payload.get("CommercialName") else 0.90
+    # Let NowCertsClientError propagate: the caller's except block records the
+    # account as failed and NEVER inserts — the safe outcome when the safety
+    # search itself is unavailable.
+    candidates = nc.search_insured(name=name, email=email, fein=fein, limit=25)
+
+    if not candidates:
+        return None
+
+    # Exact DatabaseId match (upsert key) wins instantly.
+    payload_dbid = payload.get("DatabaseId")
+    for cand in candidates:
+        if payload_dbid and str(cand.get("DatabaseId")) == str(payload_dbid):
+            return str(cand["DatabaseId"])
+        # Strong email/FEIN exact match wins.
+        if email and (cand.get("EMail") or "").lower() == email.lower():
+            return str(cand.get("DatabaseId") or "")
+        if fein and str(cand.get("FEIN") or "") == str(fein):
+            return str(cand.get("DatabaseId") or "")
+
+    match = best_name_match(
+        name, candidates,
+        name_key="commercialName",
+        threshold=threshold,
+    )
+    if match is None:
+        # Try personal-name field on candidates for non-commercial insureds.
+        for cand in candidates:
+            cand_name = f"{cand.get('firstName','')} {cand.get('lastName','')}".strip()
+            from hermes.sync.dedup import name_score
+            if name_score(name, cand_name) >= threshold:
+                return str(cand.get("DatabaseId") or "")
+        return None
+    return str(match.record.get("DatabaseId") or "")
 
 
 def _link_nowcerts_id(supa: SupabaseClient, espo_id: str, nowcerts_id: str) -> None:

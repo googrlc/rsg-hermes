@@ -1,0 +1,152 @@
+# RSG Agent System — model selection config.
+# Companion to 00b_model_selection_guide.md. This is the single source of truth
+# for which model handles which task class; the router (hermes/core/llm.py)
+# reads it at startup. Edit this file (not code) to swap vendors.
+#
+# Providers all expose an OpenAI-compatible /chat/completions endpoint, so the
+# existing `openai` SDK drives every call by swapping base_url + api_key.
+# `pii_safe: true` means US/EU-hosted; safe for insured names/addresses/DOB.
+# DeepSeek + GLM route through non-US infra -> never send PII (§6 of the guide).
+
+providers:
+  openai:
+    base_url: "https://api.openai.com/v1"
+    api_key_env: "OPENAI_API_KEY"
+    pii_safe: true
+  anthropic:
+    base_url: "https://api.anthropic.com/v1"
+    api_key_env: "ANTHROPIC_API_KEY"
+    pii_safe: true
+  google:
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+    api_key_env: "GOOGLE_API_KEY"
+    pii_safe: true
+  deepseek:
+    base_url: "https://api.deepseek.com/v1"
+    api_key_env: "DEEPSEEK_API_KEY"
+    pii_safe: false
+  glm:
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    api_key_env: "GLM_API_KEY"
+    pii_safe: false
+  ollama:
+    base_url: "http://localhost:11434/v1"
+    api_key_env: "OLLAMA_API_KEY"
+    pii_safe: true
+    api_key_value: "ollama"   # Ollama ignores the key; set so the SDK sends one.
+
+models:
+  claude-sonnet-5:
+    provider: anthropic
+    cost_in: 3.0
+    cost_out: 15.0
+    context_window: 200000
+    pii_safe: true
+  claude-opus-4-8:
+    provider: anthropic
+    cost_in: 15.0
+    cost_out: 75.0
+    context_window: 200000
+    pii_safe: true
+  gpt-5-5:
+    provider: openai
+    cost_in: 2.0
+    cost_out: 8.0
+    context_window: 200000
+    pii_safe: true
+  gemini-3-1-pro:
+    provider: google
+    cost_in: 1.25
+    cost_out: 5.0
+    context_window: 1000000
+    pii_safe: true
+  deepseek-v4-flash:
+    provider: deepseek
+    cost_in: 0.14
+    cost_out: 0.28
+    context_window: 128000
+    pii_safe: false
+  deepseek-v4-pro:
+    provider: deepseek
+    cost_in: 0.435
+    cost_out: 0.87
+    context_window: 128000
+    pii_safe: false
+  glm-5-2:
+    provider: glm
+    cost_in: 0.14
+    cost_out: 0.28
+    context_window: 128000
+    pii_safe: false
+  gemma-4:
+    provider: ollama
+    cost_in: 0.0
+    cost_out: 0.0
+    context_window: 128000
+    pii_safe: true
+
+# Task class -> routing. `default` is the primary model, `fallback` is the
+# different-provider backup engaged on primary failure/timeout. `escalation`
+# is the judgment model used when default confidence < threshold.
+task_classes:
+  high_volume_classification:
+    default: deepseek-v4-flash
+    fallback: glm-5-2
+    confidence_threshold: 0.80
+    max_tokens: 800
+    temperature: 0.2
+  data_extraction:
+    default: deepseek-v4-flash
+    fallback: glm-5-2
+    confidence_threshold: 0.80
+    max_tokens: 2000
+    temperature: 0.1
+  standard_drafting:
+    default: claude-sonnet-5
+    fallback: gemini-3-1-pro
+    confidence_threshold: 0.75
+    max_tokens: 1500
+    temperature: 0.4
+  complex_reasoning:
+    default: claude-sonnet-5
+    fallback: gemini-3-1-pro
+    escalation: claude-opus-4-8
+    confidence_threshold: 0.75
+    max_tokens: 2000
+    temperature: 0.3
+  long_context_ingestion:
+    default: gemini-3-1-pro
+    fallback: deepseek-v4-pro
+    confidence_threshold: 0.70
+    max_tokens: 4000
+    temperature: 0.1
+  coding_tool_use:
+    default: claude-sonnet-5
+    fallback: deepseek-v4-pro
+    confidence_threshold: 0.75
+    max_tokens: 2000
+    temperature: 0.2
+  fabrication_sensitive_research:
+    default: claude-sonnet-5
+    fallback: gemini-3-1-pro
+    confidence_threshold: 0.80
+    max_tokens: 2000
+    temperature: 0.2
+  pii_summarization:
+    default: gemma-4
+    fallback: claude-sonnet-5
+    confidence_threshold: 0.75
+    max_tokens: 1500
+    temperature: 0.3
+    pii: true
+
+# Monthly cost ceiling per agent (§7). The router refuses calls once an
+# agent hits its cap until Lamar approves an overage.
+agent_budgets:
+  book-hygiene-auditor: 20.0
+  renewal-sentinel: 60.0
+  service-deflector: 40.0
+  won-opportunity-onboarder: 15.0
+  commission-reconciler: 10.0
+  prospect-enricher: 30.0
+  _system_total: 175.0

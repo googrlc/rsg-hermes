@@ -285,6 +285,7 @@ def _mock_nc():
     nc = MagicMock()
     nc.create_insured.return_value = {"DatabaseId": "new-nc-id"}
     nc.insert_policy.return_value = {}
+    nc.search_insured.return_value = []  # search-before-insert: no match by default
     return nc
 
 
@@ -361,6 +362,43 @@ class HubToNowCertsTests(unittest.TestCase):
         result = run_hub_to_nowcerts(nc, supa, dry_run=True)
         self.assertTrue(result.ok)
         self.assertEqual(result.accounts_pushed, 0)
+
+    def test_live_inserts_when_no_existing_match(self):
+        """Search-before-insert: no existing insured -> create_insured called."""
+        from hermes.sync.bidirectional import run_hub_to_nowcerts
+
+        nc = _mock_nc()  # search_insured returns [] (no match)
+        supa = _mock_supa()
+        supa.select.side_effect = lambda table, **kw: (
+            [{"espocrm_id": "acc-1", "name": "New Corp",
+              "raw_espo_payload": {"name": "New Corp", "primaryLastName": "Owner"}}]
+            if table == "crm_accounts" else []
+        )
+
+        result = run_hub_to_nowcerts(nc, supa, dry_run=False)
+        self.assertEqual(result.accounts_pushed, 1)
+        nc.search_insured.assert_called_once()
+        nc.create_insured.assert_called_once()  # no match -> safe to insert
+        supa.update_where.assert_called()  # _link_nowcerts_id ran
+
+    def test_live_links_instead_of_inserting_when_match_found(self):
+        """Search-before-insert: existing insured found -> LINK, no insert."""
+        from hermes.sync.bidirectional import run_hub_to_nowcerts
+
+        nc = _mock_nc()
+        nc.search_insured.return_value = [{"DatabaseId": "existing-42", "commercialName": "New Corp"}]
+        supa = _mock_supa()
+        supa.select.side_effect = lambda table, **kw: (
+            [{"espocrm_id": "acc-1", "name": "New Corp",
+              "raw_espo_payload": {"name": "New Corp", "primaryLastName": "Owner"}}]
+            if table == "crm_accounts" else []
+        )
+
+        result = run_hub_to_nowcerts(nc, supa, dry_run=False)
+        self.assertEqual(result.accounts_pushed, 1)
+        nc.search_insured.assert_called_once()
+        nc.create_insured.assert_not_called()  # matched -> link only, no insert
+        supa.update_where.assert_called()  # linked the existing id
 
 
 class BidirectionalOrchestratorTests(unittest.TestCase):

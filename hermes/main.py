@@ -84,6 +84,20 @@ def main() -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
+
+    # ── Agent framework subcommands (hermes agent … / hermes rollback …) ──
+    # Dispatched before the flat flag parser so `agent`/`rollback` read as
+    # positional subcommands without disturbing the legacy flag surface.
+    _argv = sys.argv[1:]
+    if _argv and _argv[0] == "agent":
+        from hermes.commands.agent import run_agent_cli
+
+        return run_agent_cli(_argv[1:])
+    if _argv and _argv[0] == "rollback":
+        from hermes.commands.agent import run_rollback_cli
+
+        return run_rollback_cli(_argv[1:])
+
     parser = argparse.ArgumentParser(description="Hermes — EspoCRM coordinator")
     parser.add_argument("command", nargs="*", help="One-shot command (omit for REPL)")
     parser.add_argument("--commands", action="store_true", help="Print Open WebUI command catalog and exit")

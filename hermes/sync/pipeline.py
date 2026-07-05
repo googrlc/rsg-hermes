@@ -353,24 +353,30 @@ def _resolve_mapping(
                 confidence=0.90,
             )
 
-    # 5. Name match (lower confidence)
+    # 5. Fuzzy name match (replaces the exact-name fallback that caused
+    #    blind-insert duplicates). Fetch name-similar Espo accounts and apply
+    #    a rapidfuzz confidence gate before linking.
     insured_type = nc_record.get("insuredType", "")
     if insured_type == "Commercial":
         name = nc_record.get("commercialName", "")
+        method = "fuzzy_name_commercial"
+        threshold = 0.90
     else:
         first = nc_record.get("firstName", "")
         last = nc_record.get("lastName", "")
         name = f"{first} {last}".strip()
+        method = "fuzzy_name_personal"
+        threshold = 0.88
 
     if name:
-        espo_match = _find_espo_account(espo, "name", name)
-        if espo_match:
+        match = _fuzzy_find_espo_account(espo, name, threshold=threshold)
+        if match is not None:
             return _upsert_mapping(
                 supa,
                 source_id=source_id,
-                espo_id=espo_match["id"],
-                method="name_match",
-                confidence=0.70,
+                espo_id=match["id"],
+                method=method,
+                confidence=round(match["_score"], 3),
             )
 
     # 6. No match — will create new Account
@@ -392,6 +398,41 @@ def _find_espo_account(
     except EspoClientError:
         log.warning("EspoCRM lookup failed: Account.%s = %s", field, value)
         return None
+
+
+def _fuzzy_find_espo_account(
+    espo: EspoClient, name: str, *, threshold: float = 0.90,
+) -> dict[str, Any] | None:
+    """Fuzzy-match an EspoCRM Account by name with a confidence gate.
+
+    Replaces the exact ``equals`` name lookup: fetches name-similar
+    candidates (Espo ``like``) and scores them with rapidfuzz (stdlib
+    ``difflib`` fallback). Returns the best match above ``threshold`` with
+    its score under ``_score``, or None to fall through to a new Account.
+    """
+    from hermes.sync.dedup import best_name_match
+
+    try:
+        body = espo.get(
+            "Account",
+            params={
+                "maxSize": 25,
+                "select": "id,name",
+                "where": [{"type": "like", "attribute": "name", "value": f"%{name}%"}],
+            },
+        )
+    except EspoClientError as exc:
+        log.warning("EspoCRM fuzzy lookup failed: name~%s: %s", name, exc)
+        return None
+    items = body.get("list") if isinstance(body, dict) else None
+    if not isinstance(items, list) or not items:
+        return None
+    match = best_name_match(name, items, name_key="name", threshold=threshold)
+    if match is None:
+        return None
+    out = dict(match.record)
+    out["_score"] = match.score
+    return out
 
 
 def _upsert_mapping(
