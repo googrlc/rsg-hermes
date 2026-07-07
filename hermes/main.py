@@ -225,6 +225,28 @@ def main() -> int:
         default=None,
         help="Only sync records changed since this ISO datetime (e.g. 2026-05-01T00:00:00)",
     )
+    # --- Commission ingest (NowCerts policies → Supabase commission_ledger) ---
+    parser.add_argument(
+        "--commission-sync",
+        action="store_true",
+        help="Nightly: pull NowCerts policies, compute expected commission, upsert to commission_ledger",
+    )
+    parser.add_argument(
+        "--commission-sync-dry-run",
+        action="store_true",
+        help="Preview commission ingest without writing to Supabase or Slack",
+    )
+    parser.add_argument(
+        "--commission-sync-since",
+        type=str,
+        default=None,
+        help="Only ingest policies changed since this ISO datetime (overrides the watermark)",
+    )
+    parser.add_argument(
+        "--commission-backfill",
+        action="store_true",
+        help="One-time full-book backfill (ignores the watermark). Same code path as nightly.",
+    )
     parser.add_argument(
         "--enrich-nowcerts",
         type=str,
@@ -446,6 +468,37 @@ def main() -> int:
             for err in sync_result.errors:
                 print(f"- {err}")
         return 0 if sync_result.ok else 1
+
+    # --- Commission ingest: NowCerts policies → commission_ledger ---
+    if args.commission_sync or args.commission_sync_dry_run or args.commission_backfill:
+        from hermes.commissions.sweep import run as run_commission_sync
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            nc = NowCertsClient()
+        except NowCertsClientError as e:
+            print(f"NowCerts connection failed: {e}", file=sys.stderr)
+            return 2
+
+        comm_result = run_commission_sync(
+            nc,
+            supa,
+            since=args.commission_sync_since,
+            full=args.commission_backfill,
+            dry_run=args.commission_sync_dry_run,
+        )
+        print(comm_result.message)
+        if comm_result.errors:
+            print("Errors:")
+            for err in comm_result.errors:
+                print(f"- {err}")
+        return 0 if comm_result.ok else 1
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
     if args.enrich_nowcerts:

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Nightly commission ingest (NowCerts -> commission_ledger), 02:00 local.
+
+  ****************************  HARD GATE  ****************************
+  DO NOT `launchctl load` this until the ~4,000 duplicate NowCerts policies
+  are purged and Lamar confirms. Until then this file is staged only.
+  ******************************************************************
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rsg.hermes.commission-sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/lamarcoates/Documents/GitHub/rsg-hermes/deploy/launchd/run-commission-sync.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Do not run the moment it is loaded — wait for the scheduled time. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/lamarcoates/Library/Logs/hermes-commission-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/lamarcoates/Library/Logs/hermes-commission-sync.err</string>
+</dict>
+</plist>
