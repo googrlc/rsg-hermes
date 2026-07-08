@@ -204,6 +204,27 @@ async def _process_queue_async(
                 )
             except EspoClientError as exc:
                 msg = str(exc)
+                # 409 conflict on create: a duplicate account already exists.
+                # Extract the existing account ID and link the sync_mapping so
+                # the next sync run UPDATEs instead of re-creating.
+                if "409" in msg and not entity_id:
+                    import json as _json
+                    try:
+                        body_start = msg.find("Body: ")
+                        if body_start >= 0:
+                            body_str = msg[body_start + 6:]
+                            body_data = _json.loads(body_str)
+                            if isinstance(body_data, list) and body_data:
+                                existing_id = body_data[0].get("id")
+                                context_409 = payload.get("context") if isinstance(payload.get("context"), dict) else payload
+                                nc_id_409 = context_409.get("momentumClientId") or context_409.get("momentum_client_id") if isinstance(context_409, dict) else None
+                                if existing_id and nc_id_409:
+                                    _writeback_sync_mapping(supa, nc_id=str(nc_id_409), espo_id=str(existing_id))
+                                    log.info("409 resolved: linked NC %s -> existing Espo %s", str(nc_id_409)[:8], existing_id)
+                                    _update_status(supa, queue_id, "SUCCESS", attempt_count)
+                                    return True, None
+                    except Exception:
+                        pass  # fall through to normal error handling
                 # 4xx (validation) errors won't get better on retry — bump attempt_count
                 # to MAX_ATTEMPTS so the row drops out of the dequeue filter immediately.
                 if _is_non_retryable_espo_error(msg):
@@ -252,12 +273,14 @@ async def _process_queue_async(
 
             # Writeback: after a successful CREATE, link the sync_mapping to
             # the new EspoCRM record so future runs UPDATE instead of re-creating.
+            # Also push the account stub back to the AMS (NowCerts) as an insured.
             if not entity_id and isinstance(crm_response, dict):
                 new_espo_id = crm_response.get("id")
                 context = payload.get("context") if isinstance(payload.get("context"), dict) else payload
                 nc_id = context.get("momentumClientId") or context.get("momentum_client_id") if isinstance(context, dict) else None
                 if new_espo_id and nc_id:
                     _writeback_sync_mapping(supa, nc_id=str(nc_id), espo_id=str(new_espo_id))
+                    _writeback_to_ams(crm_response, str(nc_id))
 
             _update_status(supa, queue_id, "SUCCESS", attempt_count)
             return True, None
@@ -464,6 +487,60 @@ def _writeback_sync_mapping(supa: SupabaseClient, *, nc_id: str, espo_id: str) -
             log.debug("sync_mapping writeback: no mapping found for NC %s", nc_id[:8])
     except SupabaseClientError:
         log.warning("sync_mapping writeback failed for NC %s -> Espo %s", nc_id[:8], espo_id)
+
+
+
+
+# Lazy-cached NowCerts client for AMS writeback on account creates
+_nc_client_cache: NowCertsClient | None = None
+
+def _get_nc_client() -> "NowCertsClient | None":
+    """Get or create a cached NowCertsClient. Returns None if creds missing."""
+    global _nc_client_cache
+    if _nc_client_cache is not None:
+        return _nc_client_cache
+    try:
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        _nc_client_cache = NowCertsClient()
+        return _nc_client_cache
+    except Exception:
+        log.debug("NowCerts client not available for AMS writeback (NOWCERTS_* env vars may be unset)")
+        return None
+
+
+def _writeback_to_ams(crm_response: dict[str, Any], nc_id: str) -> None:
+    """Push account stub back to NowCerts AMS after a successful EspoCRM create.
+
+    Ensures the AMS has the insured record linked to the new EspoCRM account.
+    Uses create_insured (POST /api/Insured/Insert) which upserts on DatabaseId,
+    so if the insured already exists it updates rather than duplicating.
+    """
+    from hermes.sync.field_mapper import map_account_to_insured
+
+    nc = _get_nc_client()
+    if not nc:
+        return
+
+    try:
+        # Map the EspoCRM account (from CRM response) to NowCerts insured format
+        nc_payload = map_account_to_insured(crm_response, nowcerts_database_id=nc_id)
+        if not nc_payload.get("CommercialName") and not nc_payload.get("LastName"):
+            log.debug("AMS writeback skipped: no name in mapped payload for NC %s", nc_id[:8])
+            return
+
+        resp = nc.create_insured(nc_payload)
+        resp_id = (
+            resp.get("insuredDatabaseId")
+            or resp.get("DatabaseId")
+            or resp.get("databaseId")
+            or resp.get("id")
+        )
+        if resp_id:
+            log.info("AMS writeback: account stub pushed to NowCerts for NC %s (resp id=%s)", nc_id[:8], str(resp_id)[:12])
+        else:
+            log.warning("AMS writeback: create_insured returned no id for NC %s", nc_id[:8])
+    except Exception as exc:
+        log.warning("AMS writeback failed for NC %s: %s", nc_id[:8], exc)
 
 
 def _extract_transaction_id(
