@@ -15,6 +15,8 @@ from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations.guardrails import log_guardrail_event
 
+from datetime import datetime, timezone
+
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
@@ -247,7 +249,16 @@ async def _process_queue_async(
                 )
             except SupabaseClientError:
                 log.exception("Failed to write CRM receipt for queue_id=%s", queue_id)
-            
+
+            # Writeback: after a successful CREATE, link the sync_mapping to
+            # the new EspoCRM record so future runs UPDATE instead of re-creating.
+            if not entity_id and isinstance(crm_response, dict):
+                new_espo_id = crm_response.get("id")
+                context = payload.get("context") if isinstance(payload.get("context"), dict) else payload
+                nc_id = context.get("momentumClientId") or context.get("momentum_client_id") if isinstance(context, dict) else None
+                if new_espo_id and nc_id:
+                    _writeback_sync_mapping(supa, nc_id=str(nc_id), espo_id=str(new_espo_id))
+
             _update_status(supa, queue_id, "SUCCESS", attempt_count)
             return True, None
     
@@ -423,6 +434,36 @@ def _update_status(
         )
     except SupabaseClientError:
         log.exception("Failed to update queue status for %s", queue_id)
+
+
+
+
+def _writeback_sync_mapping(supa: SupabaseClient, *, nc_id: str, espo_id: str) -> None:
+    """Update sync_mappings.espocrm_id after a successful EspoCRM create.
+
+    Prevents 409 duplicate conflicts on subsequent sync runs by ensuring the
+    mapping knows about the newly created account.
+    """
+    try:
+        existing = supa.select(
+            "sync_mappings",
+            params={
+                "nowcerts_entity_type": "eq.Insured",
+                "nowcerts_id": f"eq.{nc_id}",
+            },
+            limit=1,
+        )
+        if existing:
+            supa.update("sync_mappings", existing[0]["id"], {
+                "espocrm_id": espo_id,
+                "active": True,
+                "last_synced_at": datetime.now(timezone.utc).isoformat(),
+            })
+            log.info("sync_mapping writeback: NC %s -> Espo %s", nc_id[:8], espo_id)
+        else:
+            log.debug("sync_mapping writeback: no mapping found for NC %s", nc_id[:8])
+    except SupabaseClientError:
+        log.warning("sync_mapping writeback failed for NC %s -> Espo %s", nc_id[:8], espo_id)
 
 
 def _extract_transaction_id(

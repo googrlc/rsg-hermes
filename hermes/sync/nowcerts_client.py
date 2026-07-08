@@ -178,8 +178,19 @@ class NowCertsClient:
         page_size: int = 100,
         since: str | None = None,
         max_pages: int = 1000,
+        active_only: bool = True,
+        bound_only: bool = True,
     ) -> list[dict[str, Any]]:
         """Fetch all Policy records with OData pagination.
+
+        Args:
+            page_size: records per page ($top).
+            since: ISO datetime filter — only records with changeDate >= since.
+            max_pages: safety cap on number of pages fetched.
+            active_only: When True (default), only fetch active policies
+                (active eq true). Excludes cancelled/expired/rewritten.
+            bound_only: When True (default), exclude quotes (isQuote eq false).
+                Only bound policies are synced to the CRM.
 
         Defaults are sized for a full first load (page_size * max_pages =
         100k); pagination stops early on the first partial page, so a `since`
@@ -187,6 +198,14 @@ class NowCertsClient:
         """
         all_records: list[dict[str, Any]] = []
         skip = 0
+
+        # Build $filter: active eq true [and isQuote eq false] [and changeDate ge {ts}]
+        filter_parts: list[str] = []
+        if active_only:
+            filter_parts.append("active eq true")
+        if bound_only:
+            filter_parts.append("isQuote eq false")
+
         for page in range(max_pages):
             params: dict[str, str] = {
                 "$count": "true",
@@ -194,9 +213,12 @@ class NowCertsClient:
                 "$skip": str(skip),
                 "$top": str(page_size),
             }
+            filter_clause = list(filter_parts)
             if since:
                 ts = since if (since.endswith("Z") or _TZ_OFFSET_RE.search(since)) else f"{since}Z"
-                params["$filter"] = f"changeDate ge {ts}"
+                filter_clause.append(f"changeDate ge {ts}")
+            if filter_clause:
+                params["$filter"] = " and ".join(filter_clause)
 
             body = self._get("/api/PolicyDetailList", params=params)
             records = body if isinstance(body, list) else body.get("value", body.get("items", []))
