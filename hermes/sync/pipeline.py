@@ -133,17 +133,6 @@ def run_insured_to_account_sync(
                 except EspoClientError:
                     log.warning("Could not fetch existing Account %s for conflict check", espo_id)
 
-            # If the EspoCRM account is closed/inactive, write back to the AMS
-            # so the insured is marked inactive and the next run skips it
-            # (prevents duplicate account creation on future runs).
-            if existing_espo and str(existing_espo.get("account_status", "")).strip().lower() in ("inactive", "closed"):
-                log.info("Account %s is %s in EspoCRM - writing back inactive status to AMS for NC insured %s",
-                         espo_id, existing_espo.get("account_status"), source_id)
-                _writeback_inactive_to_ams(nc, source_id, run_id=run_id, supa=supa, mapping=mapping)
-                result.records_skipped += 1
-                _update_staging_status(supa, run_id, source_id, "skipped")
-                continue
-
             # ── D. Build outbound payload ────────────────────────────────
             espo_payload = map_insured_to_account(
                 record,
@@ -534,46 +523,6 @@ def _enqueue_outbound(
             "attempt_count": 0,
         },
     )
-
-
-
-def _writeback_inactive_to_ams(
-    nc: NowCertsClient,
-    nc_id: str,
-    *,
-    run_id: str,
-    supa: SupabaseClient,
-    mapping: dict[str, Any] | None,
-) -> None:
-    """Mark a NowCerts insured as inactive when the EspoCRM account is closed.
-
-    Writes Active=false back to the AMS via create_insured (upsert on DatabaseId),
-    and deactivates the sync_mapping so the next run skips this insured.
-    """
-    # Deactivate the mapping
-    if mapping and mapping.get("id"):
-        try:
-            supa.update("sync_mappings", mapping["id"], {"active": False})
-        except SupabaseClientError:
-            log.warning("Failed to deactivate sync_mapping for NC insured %s", nc_id[:8])
-
-    # Write back to NowCerts
-    try:
-        nc.create_insured({"DatabaseId": nc_id, "Active": False})
-        log.info("AMS writeback: marked NC insured %s as inactive (account closed in CRM)", nc_id[:8])
-        _log_audit(
-            supa,
-            workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
-            run_id=run_id,
-            object_type="Account",
-            source_id=nc_id,
-            dest_id=mapping.get("espocrm_id") if mapping else None,
-            action="skip",
-            status="success",
-            message="account closed in CRM, insured marked inactive in AMS",
-        )
-    except NowCertsClientError:
-        log.warning("AMS writeback failed: could not mark NC insured %s as inactive", nc_id[:8])
 
 
 def _process_outbound_queue(

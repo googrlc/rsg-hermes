@@ -511,12 +511,23 @@ def _hub_push_account_limit() -> int:
 
 
 def _fetch_unlinked_accounts(supa: SupabaseClient) -> list[dict[str, Any]]:
-    """Fetch golden accounts that have no NowCerts link."""
-    return supa.select(
+    """Fetch golden accounts that have no NowCerts link.
+
+    Only accounts that have been converted from Prospect to a real client
+    type (Commercial, Personal Lines, etc.) are pushed to the AMS. Prospects
+    stay in the CRM only -- they become insureds in NowCerts only once the
+    account type changes away from Prospect.
+    """
+    rows = supa.select(
         "crm_accounts",
         params={"nowcerts_id": "is.null", "source_system": "eq.espocrm"},
         limit=_hub_push_account_limit(),
     )
+    # Filter out prospects -- only push accounts with a real client type
+    return [
+        r for r in rows
+        if r.get("account_type") and str(r["account_type"]).strip().lower() != "prospect"
+    ]
 
 
 def _fetch_unpushed_commissions(supa: SupabaseClient) -> list[dict[str, Any]]:
