@@ -611,6 +611,7 @@ def _link_nowcerts_id(supa: SupabaseClient, espo_id: str, nowcerts_id: str) -> N
                 "nowcerts_id": nowcerts_id,
                 "espocrm_entity_type": "Account",
                 "espocrm_id": espo_id,
+                "object_type": "Account",
                 "match_method": "manual",
                 "match_confidence": 1.0,
                 "active": True,
