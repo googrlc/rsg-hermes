@@ -157,16 +157,35 @@ def run_insured_to_account_sync(
             p_hash = payload_hash(espo_payload)
 
             if use_outbound_queue and not dry_run:
-                _enqueue_outbound(
-                    supa,
-                    run_id=run_id,
-                    mapping_id=mapping.get("id") if mapping else None,
-                    object_type="Account",
-                    object_id=espo_id,
-                    action=action,
-                    payload=espo_payload,
-                )
-                _update_staging_status(supa, run_id, source_id, "queued")
+                try:
+                    _enqueue_outbound(
+                        supa,
+                        run_id=run_id,
+                        mapping_id=mapping.get("id") if mapping else None,
+                        object_type="Account",
+                        object_id=espo_id,
+                        action=action,
+                        payload=espo_payload,
+                    )
+                    _update_staging_status(supa, run_id, source_id, "queued")
+                except SupabaseClientError as exc:
+                    # One bad record must never kill the whole nightly run.
+                    log.warning(
+                        "Outbound enqueue failed for NC insured %s (%s): %s",
+                        source_id, espo_payload.get("name", "?"), exc,
+                    )
+                    result.records_failed += 1
+                    result.errors.append(f"{source_id}: {exc}")
+                    _update_staging_status(supa, run_id, source_id, "error")
+                    _log_error(
+                        supa,
+                        run_id=run_id,
+                        object_type="Account",
+                        source_id=source_id,
+                        error_message=f"enqueue_outbound failed: {exc}",
+                        error_code="enqueue_outbound",
+                    )
+                    continue
             elif dry_run:
                 log.info(
                     "DRY RUN: would %s Account for NC insured %s → %s",
@@ -513,17 +532,31 @@ def _process_outbound_queue(
     run_id: str,
     result: SyncRunResult,
 ) -> None:
-    """Dequeue outbound items and route all EspoCRM writes via crm_write_queue."""
+    """Dequeue outbound items and route all EspoCRM writes via crm_write_queue.
+
+    Drains ALL queued items agency-wide, not just the current run's, so
+    orphaned items from crashed/failed runs are automatically recovered.
+    Stale 'processing' items (left behind by a crashed run) are requeued first.
+    """
+    # Requeue items stuck in "processing" from a previous crashed run
+    try:
+        supa.update_where(
+            "outbound_sync_queue",
+            {"status": "queued"},
+            filters={"status": "eq.processing"},
+        )
+    except SupabaseClientError:
+        log.warning("Failed to requeue stale processing items, continuing")
+
     queued = supa.select(
         "outbound_sync_queue",
         params={
-            "run_id": f"eq.{run_id}",
             "status": "eq.queued",
             "order": "created_at.asc",
         },
         limit=500,
     )
-    log.info("Processing %d outbound queue items for run %s", len(queued), run_id)
+    log.info("Processing %d outbound queue items (run %s)", len(queued), run_id)
 
     if not queued:
         return
