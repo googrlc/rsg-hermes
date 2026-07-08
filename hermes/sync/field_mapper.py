@@ -270,7 +270,7 @@ ACCOUNT_TO_INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "billingAddressPostalCode", "dst": "ZipCode", "transform": "direct"},
     {"src": "emailAddress", "dst": "EMail", "transform": "direct"},
     {"src": "phoneNumber", "dst": "Phone", "transform": "direct"},
-    {"src": "account_type", "dst": "Type", "transform": "enum_map", "map": ACCOUNT_TYPE_REVERSE_MAP},
+    {"src": "account_type", "dst": "InsuredType", "transform": "enum_map", "map": ACCOUNT_TYPE_REVERSE_MAP},
     {"src": "businessEntity", "dst": "TypeOfBusiness", "transform": "direct"},
     {"src": "cYearBusinessEst", "dst": "YearBusinessStarted", "transform": "direct"},
     {"src": "website", "dst": "Website", "transform": "direct"},
@@ -325,7 +325,8 @@ def map_account_to_insured(
             if mapped:
                 result[dst_key] = mapped
 
-    # Ensure Active flag
+    # Ensure required NowCerts fields: Type (Insured/Prospect) and Active
+    result.setdefault("Type", "Insured")
     result.setdefault("Active", True)
 
     return result
