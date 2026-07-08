@@ -178,31 +178,26 @@ class NowCertsClient:
         page_size: int = 100,
         since: str | None = None,
         max_pages: int = 1000,
-        active_only: bool = True,
         bound_only: bool = True,
     ) -> list[dict[str, Any]]:
         """Fetch all Policy records with OData pagination.
 
+        All policy statuses come over (active, cancelled, expired, rewritten)
+        -- the CRM needs the full policy history. Quotes are excluded because
+        they already live in the CRM.
+
         Args:
             page_size: records per page ($top).
-            since: ISO datetime filter — only records with changeDate >= since.
+            since: ISO datetime filter -- only records with changeDate >= since.
             max_pages: safety cap on number of pages fetched.
-            active_only: When True (default), only fetch active policies
-                (active eq true). Excludes cancelled/expired/rewritten.
             bound_only: When True (default), exclude quotes (isQuote eq false).
-                Only bound policies are synced to the CRM.
-
-        Defaults are sized for a full first load (page_size * max_pages =
-        100k); pagination stops early on the first partial page, so a `since`
-        incremental stops after a page or two.
+                Quotes already exist in the CRM and should not come from the AMS.
         """
         all_records: list[dict[str, Any]] = []
         skip = 0
 
-        # Build $filter: active eq true [and isQuote eq false] [and changeDate ge {ts}]
+        # Build $filter: isQuote eq false [and changeDate ge {ts}]
         filter_parts: list[str] = []
-        if active_only:
-            filter_parts.append("active eq true")
         if bound_only:
             filter_parts.append("isQuote eq false")
 
