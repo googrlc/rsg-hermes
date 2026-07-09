@@ -23,6 +23,18 @@ INSURED_TYPE_MAP: dict[str, str] = {
     "Benefits": "Group Benefits",
 }
 
+
+
+# Valid EspoCRM businessEntity enum values (field is validated on write)
+VALID_BUSINESS_ENTITIES: set[str] = {
+    "LLC", "Corporation", "S-Corporation", "Sole Proprietorship",
+    "Partnership", "Non-Profit", "Other",
+}
+
+# Basic email validation regex
+import re as _re
+_EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "id", "dst": "momentum_client_id", "transform": "direct"},
     {"src": "commercialName", "dst": "name", "transform": "conditional_name"},
@@ -33,7 +45,7 @@ INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "coInsured_LastName", "dst": "spouseLastName", "transform": "direct"},
     {"src": "coInsured_DateOfBirth", "dst": "spouseDob", "transform": "date_only"},
     {"src": "insuredType", "dst": "account_type", "transform": "enum_map", "map": INSURED_TYPE_MAP},
-    {"src": "typeOfBusiness", "dst": "businessEntity", "transform": "direct"},
+    {"src": "typeOfBusiness", "dst": "businessEntity", "transform": "business_entity"},
     {"src": "yearBusinessStarted", "dst": "cYearBusinessEst", "transform": "direct"},
     {"src": "yearsInBusiness", "dst": "years_in_business", "transform": "direct"},
     {"src": "naics", "dst": "intel_naics", "transform": "direct"},
@@ -50,7 +62,7 @@ INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "city", "dst": "billingAddressCity", "transform": "direct"},
     {"src": "state", "dst": "billingAddressState", "transform": "direct"},
     {"src": "zipCode", "dst": "billingAddressPostalCode", "transform": "direct"},
-    {"src": "eMail", "dst": "emailAddress", "transform": "direct"},
+    {"src": "eMail", "dst": "emailAddress", "transform": "email_valid"},
     {"src": "cellPhone", "dst": "phoneNumber", "transform": "phone_e164"},
 ]
 
@@ -198,6 +210,20 @@ def map_insured_to_account(
                 else:
                     result[dst_key] = new_val
 
+        elif transform == "business_entity":
+            # Only send if the value is a valid EspoCRM enum — otherwise
+            # omit the field entirely (EspoCRM rejects invalid enum values).
+            val = str(raw_val).strip() if raw_val else ""
+            if val in VALID_BUSINESS_ENTITIES:
+                result[dst_key] = val
+
+        elif transform == "email_valid":
+            # Only send if the email passes basic format validation —
+            # EspoCRM rejects malformed email addresses.
+            val = str(raw_val).strip() if raw_val else ""
+            if val and _EMAIL_RE.match(val):
+                result[dst_key] = val
+
     # Only include client_since on first sync
     if not is_first_sync:
         result.pop("client_since", None)
@@ -259,7 +285,19 @@ ACCOUNT_TYPE_REVERSE_MAP: dict[str, str] = {
     "Group Benefits": "Benefits",
 }
 
-ACCOUNT_TO_INSURED_FIELD_MAP: list[dict[str, Any]] = [
+ACCOUNT_TO_
+
+# Valid EspoCRM businessEntity enum values (field is validated on write)
+VALID_BUSINESS_ENTITIES: set[str] = {
+    "LLC", "Corporation", "S-Corporation", "Sole Proprietorship",
+    "Partnership", "Non-Profit", "Other",
+}
+
+# Basic email validation regex
+import re as _re
+_EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+INSURED_FIELD_MAP: list[dict[str, Any]] = [
     {"src": "name", "dst": "CommercialName", "transform": "direct"},
     {"src": "primaryFirstName", "dst": "FirstName", "transform": "direct"},
     {"src": "primaryLastName", "dst": "LastName", "transform": "direct"},
