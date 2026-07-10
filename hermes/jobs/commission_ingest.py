@@ -337,7 +337,7 @@ def run_ingest(
                 try:
                     from hermes.core.client import EspoClient
                     espo = EspoClient()
-                    espo.patch("Opportunity", espo_id, {"commissionLogged": True})
+                    espo.patch(f"Opportunity/{espo_id}", json={"commissionLogged": True})
                     log.debug("write-back: Opportunity %s commissionLogged=True", espo_id)
                 except Exception as exc:
                     log.warning("write-back failed for %s: %s", espo_id, exc)
