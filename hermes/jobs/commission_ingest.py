@@ -274,13 +274,21 @@ def run_ingest(
                 source = "ams_ingest"
                 notes = ""
 
+            # statement_date is NOT NULL in commission_ledger — fall back to
+            # expiration_date or last_synced_at if effective_date is missing.
+            eff_date = policy.get("effective_date") or policy.get("expiration_date")
+            if not eff_date:
+                # Skip policies with no date at all — can't ledger them.
+                result.skipped_no_premium += 1
+                continue
+
             row = {
                 "policy_number": pn,
                 "carrier_name": carrier,
                 "lob": lob,
                 "client_name": client_name,
-                "statement_date": policy.get("effective_date"),
-                "policy_effective_date": policy.get("effective_date"),
+                "statement_date": eff_date,
+                "policy_effective_date": policy.get("effective_date") or eff_date,
                 "policy_expiration_date": policy.get("expiration_date"),
                 "is_renewal": is_renewal,
                 "gross_premium": float(premium),
