@@ -62,8 +62,8 @@ Request SOP artifact.)
    of business, request type, summary, action taken, missing info, next
    step.
 6. Create an EspoCRM Task if follow-up is needed.
-7. Store any documents in Google Drive (Hermes Docs / [Client] / [Year] /
-   [LOB]).
+7. Store any documents in Nextcloud (the client's folder under the
+   Personal/Commercial lane / [Year] / [LOB]).
 8. Escalate to Lamar if: coverage question beyond service, complaint,
    retention risk, or anything requiring producer judgment.
 
@@ -133,8 +133,8 @@ Request SOP artifact.)
 ## F. Policy copy
 
 1. Identify the client and policy (use lookup).
-2. Check if a digital copy is in the client Google Drive folder
-   (Hermes Docs / [Client]).
+2. Check if a digital copy is in the client Nextcloud folder (under the
+   Personal/Commercial lane).
 3. If not, request from the carrier portal or email the carrier.
 4. Deliver to the client by email or portal.
 5. Create EspoCRM note: policy copy requested and delivered.

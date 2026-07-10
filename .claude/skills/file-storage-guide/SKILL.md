@@ -1,6 +1,6 @@
 ---
 name: file-storage-guide
-description: File storage index for RSG — where client documents, internal SOPs, templates, COIs, CRM records, and automation configs live across Google Drive, NowCerts, EspoCRM, and Supabase. Use when Gretchen asks "where do I put this?" or "where is that file?" or when recommending a file storage location.
+description: File storage index for RSG — where client documents, internal SOPs, templates, COIs, CRM records, and automation configs live across Nextcloud, NowCerts, EspoCRM, and Supabase. Use when Gretchen asks "where do I put this?" or "where is that file?" or when recommending a file storage location.
 ---
 
 # File Storage Guide
@@ -20,9 +20,9 @@ do I put this?" and "where is that file?"
 
 | What | Where |
 |---|---|
-| Client documents (policies, apps, quotes) | Google Drive (root folder: "Hermes Docs") |
-| Internal SOPs | Google Drive / Hermes Docs |
-| Templates (emails, forms, checklists) | Google Drive / Hermes Docs |
+| Client documents (policies, apps, quotes) | Nextcloud (the agency's file source of truth) — the client's folder under the Personal/Commercial lane |
+| Internal SOPs | Nextcloud |
+| Templates (emails, forms, checklists) | Nextcloud |
 | Certificates of Insurance | NowCerts |
 | CRM records (accounts, contacts, opportunities, tasks, notes) | EspoCRM |
 | Bound policy data (insureds, premiums, policy details) | NowCerts (synced to EspoCRM Policy entity) |
@@ -35,26 +35,27 @@ do I put this?" and "where is that file?"
 ## Client folder structure
 
 ```
-Hermes Docs /
-  [Client Name] /
-    [Year] /
-      [Line of Business] /
+RSG /
+  🏠 Personal (Gretchen)  or  🏢 Commercial (Lamar) /
+    [Client Name] /
+      [Year] /
+        [Line of Business] /
 ```
 
 Examples:
 ```
-Hermes Docs / Johnson Family / 2026 / Personal Auto /
-Hermes Docs / Johnson Family / 2026 / Home /
-Hermes Docs / ABC Plumbing LLC / 2026 / Commercial Auto /
-Hermes Docs / ABC Plumbing LLC / 2026 / COI /
+RSG / 🏠 Personal (Gretchen) / Johnson Family / 2026 / Personal Auto /
+RSG / 🏠 Personal (Gretchen) / Johnson Family / 2026 / Home /
+RSG / 🏢 Commercial (Lamar) / ABC Plumbing LLC / 2026 / Commercial Auto /
 ```
 
 ## Rules
 
-1. Every client should have a folder in Google Drive under "Hermes Docs".
-2. Hermes mirrors Drive files automatically when HERMES_DRIVE_MIRROR is
-   enabled.
-3. COIs stay in NowCerts — do not duplicate to Google Drive unless the
+1. Every client should have a folder in Nextcloud (the agency's file
+   source of truth) under the Personal or Commercial lane.
+2. File placement in Nextcloud is manual (via WebDAV) — there is no
+   automatic mirror.
+3. COIs stay in NowCerts — do not duplicate to Nextcloud unless the
    client specifically requests a copy.
 4. CRM records (notes, tasks, opportunities) live in EspoCRM — do not
    create separate documents for them.
@@ -71,6 +72,6 @@ Hermes Docs / ABC Plumbing LLC / 2026 / COI /
 
 If a file cannot be found:
 1. Check the EspoCRM Account for file references in notes.
-2. Check Google Drive (Hermes Docs) by client name.
+2. Check Nextcloud by client name.
 3. Check NowCerts for COIs and policy documents.
 4. If still not found, ask Gretchen or Lamar where it was saved.

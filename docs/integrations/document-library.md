@@ -1,18 +1,23 @@
-# Hermes document library ("Holographic Memory")
+# Hermes document library
 
-A library for documents Hermes creates — proposals, intake notes, renewal
-reviews, carrier comparison/appetite packets — plus a freeform space for
-internal references. Agent OS renders it as **folders → documents**.
+An index of the documents **Hermes creates** — proposals, intake notes, renewal
+reviews, carrier comparison/appetite packets — plus a freeform space for internal
+references. It renders as **folders → documents**.
 
-## Where documents live (three stores, one write)
+> **This is not the file store.** Client files (policies, applications, quotes,
+> signed docs, COIs' source material) live in **Nextcloud**, the agency's file
+> source of truth. This library only holds the write-ups Hermes authors, so they
+> are searchable and recallable by the agent. There is **no Google Drive** in this
+> pipeline (the former Drive mirror was removed 2026-07-10).
 
-`hermes.documents.store.save_document()` writes to all three:
+## Where documents live (two stores, one write)
+
+`hermes.documents.store.save_document()` writes to both:
 
 | Store | Role |
 |---|---|
-| **Supermemory** | Source of truth + the agent's searchable "Holographic Memory". Content stored with container tags that encode the folder. |
-| **Google Drive** | Human-browsable mirror, per-client folders. *(Mirror is guarded — enabled once the Drive scope is granted; until then docs still save to the other two.)* |
-| **`hermes_documents`** (Supabase) | Fast index Agent OS reads to build the folder tree. |
+| **Supermemory** | Searchable content + the agent's recall. Content stored with container tags that encode the folder. |
+| **`hermes_documents`** (Supabase) | Fast index the document-library API reads to build the folder tree. |
 
 ## Folder model
 
@@ -63,9 +68,8 @@ cat proposal.md | hermes --doc-add --doc-title "Acme GL Proposal" \
 ## Config
 
 ```bash
-SUPERMEMORY_API_KEY=...                 # same workspace Agent OS uses
+SUPERMEMORY_API_KEY=...                 # the Supermemory workspace
 SUPERMEMORY_BASE_URL=https://api.supermemory.ai
-HERMES_DRIVE_ROOT_FOLDER=Hermes Docs    # Drive mirror root (when enabled)
 ```
 
 ## Saving via the API
@@ -75,21 +79,14 @@ POST /api/documents/save
 { "title": "...", "content": "...", "account_name": "Acme Co",
   "doc_type": "proposal", "source": "proposal-builder" }
 ```
-Read side (Agent OS): `GET /api/documents/folders`, `GET /api/documents?space=&name=`.
+Read side: `GET /api/documents/folders`, `GET /api/documents?space=&name=`.
 
 ## Status
 
 - ✅ Supermemory + Supabase index + CLI + `save_document`.
-- ✅ **Drive mirror** — uploads each doc as a Google Doc into per-client folders
-  under `HERMES_DRIVE_ROOT_FOLDER` (auto-enabled; `HERMES_DRIVE_MIRROR=false`
-  to disable). Owner set by `HERMES_DRIVE_SUBJECT`.
 - ✅ **Producers** — proposal-builder, crm-note-structurer, renewal-review, and
   carrier-appetite each carry a "Save to the document library" step.
-- ✅ **Agent OS panel** — Documents view (folders → documents, preview + Drive
-  link) in Mission Control.
-
-### Server deployment note
-
-The Drive mirror needs the service-account JSON readable inside the container
-(`GMAIL_SA_KEY_PATH`) and `HERMES_DRIVE_SUBJECT` set to the Drive-owning
-Workspace user (the `.com` Google user, NOT the `.net` 365 mailbox).
+- ❌ **Google Drive mirror** — **removed 2026-07-10.** Client files live in
+  Nextcloud (file source of truth); this library indexes Hermes-authored write-ups
+  only. `hermes/integrations/gdrive_client.py` and the `HERMES_DRIVE_*` config were
+  deleted.

@@ -93,7 +93,7 @@ tool routes to:
 |---|---|
 | "Create an onboarding checklist for this new client." | Full checklist by line of business. |
 | "Create separate EspoCRM opportunities for each line of business." | One opportunity per LOB. |
-| "Create the file folder structure for this client." | Google Drive folder plan. |
+| "Create the file folder structure for this client." | Nextcloud folder plan. |
 | "Draft the welcome email." | Warm welcome message for the new client. |
 
 ## COI commands

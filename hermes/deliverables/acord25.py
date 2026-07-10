@@ -1,15 +1,15 @@
 """ACORD 25 — Certificate of Insurance generator.
 
 "COI for <client>" → a *draft* ACORD 25 PDF, filled from EspoCRM policy data,
-dropped in the client's Drive folder and posted to #gretchen-tasks for review.
-**Never auto-sent** — Gretchen reviews and sends.
+saved for filing in the client's Nextcloud folder and posted to #gretchen-tasks
+for review. **Never auto-sent** — Gretchen reviews and sends.
 
 Design (so the testable core has no I/O):
 
   EspoCRM policy/account  --from_espo_policy-->  Coi (logical model)
   Coi                     --build_field_map-->   {pdf_field_name: value}
   {pdf_field_name: value} --fill_pdf----------->  filled PDF bytes
-  filled PDF              --draft_coi---------->   Drive + Slack + Supabase log
+  filled PDF              --draft_coi---------->   Nextcloud + Slack + Supabase log
 
 `from_espo_policy` and `build_field_map` are pure and unit-tested. `fill_pdf`
 needs RSG's **licensed** ACORD 25 template (ACORD forms are copyrighted — pull
@@ -308,7 +308,7 @@ def supabase_logger(supa) -> Callable[[dict[str, Any]], None]:
             "account": summary.get("account", ""),
             "holder": summary.get("holder", ""),
             "output_path": summary.get("output_path"),
-            "drive_url": summary.get("drive_url"),
+            "file_url": summary.get("file_url"),
             "placed_fields": summary.get("placed_fields", []),
             "skipped_fields": summary.get("skipped_fields", []),
             "auto_sent": False,
@@ -324,32 +324,33 @@ def draft_coi(
     output_path: str,
     account_name: str,
     holder_name: str,
-    drive_upload: Optional[Callable[[str], str]] = None,
+    file_upload: Optional[Callable[[str], str]] = None,
     slack_post: Optional[Callable[[str], None]] = None,
     supa_log: Optional[Callable[[dict[str, Any]], None]] = None,
     field_names: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
-    """Fill → (Drive) → (#gretchen-tasks) → (Supabase log). Returns a summary.
+    """Fill → (Nextcloud) → (#gretchen-tasks) → (Supabase log). Returns a summary.
 
     Each side effect is optional/injected: pass real callables in production, omit
-    them (or pass fakes) in tests. The PDF fill always runs.
+    them (or pass fakes) in tests. The PDF fill always runs. ``file_upload`` is a
+    generic uploader (e.g. Nextcloud) returning a URL; there is no Google Drive.
     """
     overrides = {**_load_field_name_overrides(), **(field_names or {})}
     values = build_field_map(coi, overrides)
     fill_result = fill_pdf(template_path, values, output_path)
 
-    drive_url = drive_upload(output_path) if drive_upload else None
+    file_url = file_upload(output_path) if file_upload else None
     if slack_post:
         msg = pre_send_checklist(coi)
-        if drive_url:
-            msg += f"\nDraft: {drive_url}"
+        if file_url:
+            msg += f"\nDraft: {file_url}"
         slack_post(msg)
 
     summary = {
         "account": account_name,
         "holder": holder_name,
         "output_path": output_path,
-        "drive_url": drive_url,
+        "file_url": file_url,
         "placed_fields": fill_result["placed"],
         "skipped_fields": fill_result["skipped"],
         "auto_sent": False,

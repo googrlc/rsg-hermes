@@ -78,7 +78,7 @@ def _notify(created: list) -> None:
     Same compact card the won/lost webhook posts (Client / LOB / Renewal date +
     📄 Renewal Worksheet · 📋 Open Task · ✅ Acknowledge), so every renewal looks
     the same end-to-end. The worksheet button deep-links the Renewal record (no
-    Google Doc is filed until completion); the task button opens the new task.
+    worksheet file is filed until completion); the task button opens the new task.
     """
     if not created:
         return

@@ -860,7 +860,7 @@ async def documents_in_folder(space: str, name: str):
 
 @app.get("/api/documents/{doc_id}")
 async def document_detail(doc_id: str):
-    """One document index row (title, preview, drive_url, supermemory_id, …)."""
+    """One document index row (title, preview, supermemory_id, …)."""
     from hermes.documents.store import get_document
 
     row = get_document(doc_id, _get_supa())
