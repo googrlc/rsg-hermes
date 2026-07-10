@@ -54,16 +54,18 @@ Negotiation -> Closed Won | Closed Lost
 
 ### 4. File folder structure
 
-Create in Google Drive under "Hermes Docs":
+Create in Nextcloud (the agency's file source of truth) under the client's
+lane (🏠 Personal or 🏢 Commercial):
 
 ```
-Hermes Docs /
-  [Client Name] /
-    2026 /
-      Personal Auto /
-      Home /
-      Umbrella /
-      Commercial Auto /
+RSG /
+  🏠 Personal (Gretchen)  or  🏢 Commercial (Lamar) /
+    [Client Name] /
+      2026 /
+        Personal Auto /
+        Home /
+        Umbrella /
+        Commercial Auto /
 ```
 
 ### 5. Welcome email

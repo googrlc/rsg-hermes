@@ -2,18 +2,13 @@
 
 The worksheet Gretchen completes lives on the Renewal record (required fields +
 checkbox booleans, enforced by Dynamic Logic). On completion the finished
-worksheet is rendered to a Google Doc and filed to the client's Drive folder.
+worksheet is rendered to text via build_worksheet_content() and persisted with
+save_document(); client files themselves live in Nextcloud (the file source of
+truth).
 
 Field reads use the EspoCRM API names, which for the custom Renewal fields are
 snake_case (current_premium, renewal_premium, line_of_business, the bool
-checkboxes, ...) — NOT camelCase. The {{token}} names exposed for the Drive
-template stay camelCase (that's just what goes in the template document).
-
-Two render paths:
-  build_worksheet_content(renewal) -> text  (works today via save_document)
-  fill_template(renewal, ...)      -> copies a Drive template and merges the
-                                      {{tokens}} below (enable once the template's
-                                      placeholders + Docs scope are confirmed)
+checkboxes, ...) — NOT camelCase.
 """
 from __future__ import annotations
 
@@ -102,7 +97,7 @@ def worksheet_lines(renewal: dict[str, Any]) -> list[str]:
 
 
 def merge_fields(renewal: dict) -> dict:
-    """Placeholder token -> string value for a {{token}} Google Docs template.
+    """Placeholder token -> string value for the renewal worksheet fields.
 
     Put these exact tokens in the template doc (double braces), e.g. {{account}}.
     Reads snake_case EspoCRM field names; the four checkbox reads correspond 1:1
@@ -169,27 +164,3 @@ def build_worksheet_content(renewal: dict) -> str:
 """
 
 
-def fill_template(renewal: dict, *, drive, template_doc_id: str,
-                  dest_folder_id: str | None = None) -> dict:
-    """Copy the Drive template, replace {{tokens}}, return the new file metadata.
-
-    `drive` is an authed client exposing Drive copy + Docs batchUpdate. In Hermes,
-    reuse hermes/integrations/gdrive_client.py (verify the accessor names + that
-    the Docs scope https://www.googleapis.com/auth/documents is granted). Kept as
-    an opt-in path; the generated-doc route (build_worksheet_content) ships v1.
-    """
-    account = renewal.get("accountName") or renewal.get("name") or "Client"
-    new_title = f"{account} - Renewal Worksheet"
-
-    copied = drive.copy_file(template_doc_id, name=new_title, parent=dest_folder_id)
-    new_id = copied["id"]
-
-    requests = [
-        {"replaceAllText": {
-            "containsText": {"text": "{{" + token + "}}", "matchCase": True},
-            "replaceText": value,
-        }}
-        for token, value in merge_fields(renewal).items()
-    ]
-    drive.docs_batch_update(new_id, requests)
-    return copied

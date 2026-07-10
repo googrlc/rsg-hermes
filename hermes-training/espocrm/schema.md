@@ -12,6 +12,7 @@
 | **Renewal** | Upcoming policy renewal tracked by Project 85 | `stage`, `expiration_date`, `current_premium`, `urgency`, `line_of_business`, `carrier` | belongs to Account, Contact, Policy; optional newPolicy; has many Commissions, Tasks |
 | **Commission** | Revenue tracking per policy/opportunity | `commissionType`, `commissionRate`, `estimatedCommission`, `effectiveDate`, `carrier` | belongs to Account, Contact, Opportunity, Policy, Renewal |
 | **Task** | Action items and follow-ups | `name`, `status`, `dateStart`, `dateEnd`, `taskType`, `urgency`, `assignedUserName` | parent link (polymorphic to Account, Contact, Lead, Opportunity, etc.) |
+| **Case** | Client service request / service-desk ticket (COI, endorsement, vehicle change, etc.) | `name`, `status` (New/In Progress/Pending/Closed/Cancelled), `type` (14 service-request types), `priority`, `momentumTaskId` | belongs to Account (client) + Contact(s); written back to the NowCerts task ledger daily 7pm ET via `--espo-writeback` |
 | **ActivityLog** | Interaction history (calls, emails, changes) | `activityType`, `dateTime`, `direction`, `changeSummary`, `changeType`, `classification` | belongs to Account, Contact, Policy |
 | **Quote** | Premium quote linked to Opportunity | `name` | belongs to Opportunity |
 

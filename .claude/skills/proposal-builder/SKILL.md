@@ -244,7 +244,7 @@ The proposal builder can emit:
 
 When the proposal/comparison packet is final, persist it so it appears in
 **Agent OS → Documents** (under the client's folder) and the agent's
-Holographic Memory (Supermemory + Google Drive mirror):
+Holographic Memory (Supermemory):
 
 ```bash
 hermes --doc-add \

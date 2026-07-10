@@ -50,30 +50,6 @@ services:
       - .:/app
     restart: unless-stopped
     command: ["hermes", "--run-intake-worker", "--intake-poll-seconds", "5"]
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: rsg-n8n
-    restart: unless-stopped
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PATH=/n8n/
-      - WEBHOOK_URL=https://hermes-j21v6-u69864.vm.elestio.app/n8n/
-      - GENERIC_TIMEZONE=America/New_York
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
-      - N8N_COMMUNITY_PACKAGES_ENABLED=true
-    volumes:
-      - n8n_data:/home/node/.n8n
-    networks:
-      - hermes-shared
-
-volumes:
-  n8n_data:
 
 networks:
   hermes-shared:

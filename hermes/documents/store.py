@@ -1,11 +1,13 @@
 """Document store — one entry point to persist a Hermes-created document.
 
-``save_document`` writes to all stores that make up the library:
-  1. Supermemory  — the "Holographic Memory": searchable content + agent recall
-  2. Google Drive — human-browsable mirror (optional; enabled once the Drive
-     scope is granted — guarded so the rest works without it)
-  3. ``hermes_documents`` (Supabase) — the fast index Agent OS renders as
+``save_document`` writes to the stores that make up the library:
+  1. Supermemory  — searchable content + agent recall
+  2. ``hermes_documents`` (Supabase) — the fast index rendered as
      folders -> documents
+
+Client file storage itself lives in **Nextcloud** (the agency's file source of
+truth); this store is Hermes' searchable index of documents it authors, not the
+file store. (A former Google Drive mirror was removed 2026-07-10.)
 
 Folder model:
   - client space:   one folder per EspoCRM account (``account_name``)
@@ -15,7 +17,6 @@ Folder model:
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from hermes.integrations.supabase_client import SupabaseClient
@@ -39,25 +40,6 @@ class DocumentStoreError(Exception):
     """Raised when a document cannot be persisted."""
 
 
-def _default_drive() -> Any | None:
-    """Build a Drive client from env, or None when the mirror is off/unconfigured.
-
-    The mirror is best-effort: any failure here just means the document still
-    saves to Supermemory + the index, without a Drive copy.
-    """
-    if os.environ.get("HERMES_DRIVE_MIRROR", "true").strip().lower() in ("0", "false", "no"):
-        return None
-    if not os.environ.get("GMAIL_SA_KEY_PATH"):
-        return None
-    try:
-        from hermes.integrations.gdrive_client import GDriveClient
-
-        return GDriveClient()
-    except Exception as exc:  # noqa: BLE001 — Drive is optional
-        log.warning("doc-store: Drive mirror unavailable: %s", exc)
-        return None
-
-
 def save_document(
     *,
     title: str,
@@ -71,7 +53,6 @@ def save_document(
     created_by: str | None = None,
     supa: SupabaseClient | None = None,
     sm: SupermemoryClient | None = None,
-    drive: Any | None = None,
 ) -> dict[str, Any]:
     """Persist one document. Returns the inserted ``hermes_documents`` row.
 
@@ -94,8 +75,6 @@ def save_document(
 
     supa = supa or SupabaseClient()
     sm = sm or SupermemoryClient()
-    if drive is None:
-        drive = _default_drive()
 
     metadata = {
         "doc_type": doc_type,
@@ -112,19 +91,7 @@ def save_document(
     log.info("doc-store: supermemory id=%s status=%s (%s)",
              supermemory_id, sm_result.get("status"), title)
 
-    # 2) Google Drive mirror (optional — skipped until a drive client is wired)
-    drive_file_id = drive_url = None
-    if drive is not None:
-        try:
-            mirror = drive.upload_document(
-                space=space, account_name=account_name, folder=folder,
-                title=title, doc_type=doc_type, content=content,
-            )
-            drive_file_id, drive_url = mirror.get("id"), mirror.get("webViewLink")
-        except Exception as exc:  # noqa: BLE001 — mirror failure must not lose the doc
-            log.warning("doc-store: Drive mirror failed for %r: %s", title, exc)
-
-    # 3) Index row (what Agent OS reads)
+    # 2) Index row (the folder tree is rendered from this)
     row = supa.insert(TABLE, {
         "space": space,
         "account_name": account_name,
@@ -136,8 +103,6 @@ def save_document(
         "content_preview": content[:PREVIEW_CHARS],
         "supermemory_id": supermemory_id,
         "supermemory_tags": tags,
-        "drive_file_id": drive_file_id,
-        "drive_url": drive_url,
         "source": source,
         "created_by": created_by,
     })

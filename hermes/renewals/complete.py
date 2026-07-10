@@ -60,8 +60,8 @@ def handle(payload: dict) -> dict:
 def _worksheet_doc(renewal: dict) -> str:
     # Worksheet body (facts / premium / checklist / outcome) + CRM links.
     body = worksheet.build_worksheet_content(renewal)
-    # Links back into the CRM. Full URLs (not markdown) so Google Docs
-    # auto-linkifies them into clickable links.
+    # Links back into the CRM. Full URLs (not markdown) so plain-text/Slack
+    # surfaces auto-linkify them into clickable links.
     links = ["\n## Links"]
     acct_url = _account_url(renewal.get("accountId"))
     ren_url = _renewal_url(renewal.get("id"))
@@ -308,8 +308,8 @@ def apply_acknowledgement(blocks: list[dict], user_id: str) -> list[dict] | None
 
 
 def _worksheet_url(renewal: dict, doc: dict | None) -> str | None:
-    # Prefer the freshly-filed Google Doc; fall back to the live Renewal record.
-    return (doc or {}).get("drive_url") or _renewal_url(renewal.get("id"))
+    # Link back to the live Renewal record (files themselves live in Nextcloud).
+    return _renewal_url(renewal.get("id"))
 
 
 def _on_won(renewal: dict, task_id: str | None = None, *, disposition: str | None = None) -> dict:

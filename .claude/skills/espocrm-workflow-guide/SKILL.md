@@ -197,11 +197,12 @@ NowCerts, not direct CRM edits.
 
 ## Linking Files
 
-1. Upload or create the file in Google Drive (root folder: "Hermes Docs").
+1. Place the file in Nextcloud (the agency's file source of truth) — the
+   client's folder under the Personal/Commercial lane.
 2. Copy the file or folder link.
 3. Reference the file location in the activity note.
-4. Hermes mirrors Drive files automatically when `HERMES_DRIVE_MIRROR`
-   is enabled.
+4. File placement in Nextcloud is manual (via WebDAV) — there is no
+   automatic mirror.
 
 ## Required fields by line of business
 

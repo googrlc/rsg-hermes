@@ -44,17 +44,15 @@ No conversational text. Only JSON."""
 
 
 def _extract_lead(text: str) -> dict[str, Any] | None:
-    """Call OpenAI to parse casual text into structured lead fields."""
-    api_key = os.environ.get("HERMES_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        return None
+    """Call the LLM (via LiteLLM) to parse casual text into structured lead fields."""
+    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+
     try:
-        from openai import OpenAI
-    except ImportError:
+        client = get_client()
+    except (LLMConfigError, ImportError):
         return None
 
-    model = os.environ.get("HERMES_OPENAI_MODEL", "gpt-4.1-mini")
-    client = OpenAI(api_key=api_key)
+    model = resolve_model(None)
     try:
         response = client.responses.create(
             model=model,

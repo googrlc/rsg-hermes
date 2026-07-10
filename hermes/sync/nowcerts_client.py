@@ -330,3 +330,88 @@ class NowCertsClient:
         """
         log.info("NowCerts: updating policy: %s", payload.get("DatabaseId", "?"))
         return self._patch("/api/Policy/PartialUpdate", payload)
+
+    def insert_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create or update a NowCerts Task — the AMS activity-ledger entry.
+
+        POST /api/Zapier/InsertTask ("Insert/update task"). Task writes live
+        under the Zapier namespace; there is no /api/Task/* controller. The
+        request body is **snake_case** (unlike the camelCase TasksList read):
+        required ``title``, ``status``, ``priority``, ``due_date``; link a client
+        via ``insured_database_id`` (the insured GUID) and optionally a policy
+        via ``policy_number`` / ``policy_database_id``; ``category_name`` /
+        ``stage_name`` carry the service-request type; pass ``database_id`` to
+        update an existing task instead of creating one.
+
+        Returns:
+            API response dict (carries the task's database_id for idempotency).
+        """
+        log.info(
+            "NowCerts: upserting task %r for insured %s",
+            payload.get("title", "?"),
+            payload.get("insured_database_id", "?"),
+        )
+        return self._post("/api/Zapier/InsertTask", payload)
+
+    def update_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Update an existing NowCerts Task (e.g. flip status to Closed).
+
+        POST /api/Zapier/UpdateTask — requires ``database_id``. InsertTask also
+        upserts by ``database_id``, but this is the explicit update route.
+        """
+        log.info("NowCerts: updating task %s", payload.get("database_id", "?"))
+        return self._post("/api/Zapier/UpdateTask", payload)
+
+    def find_insured_id(
+        self,
+        *,
+        email: str | None = None,
+        commercial_name: str | None = None,
+        fein: str | None = None,
+    ) -> str | None:
+        """Return an existing insured's DatabaseId GUID by email, name, or FEIN.
+
+        Dedup helper for the new-client stub — checks the AMS before creating an
+        insured so we don't spawn duplicates. Tries the most reliable keys first
+        (email, then FEIN, then commercial name). GET /api/InsuredList supports
+        ``$filter`` on these fields (the ``id`` GUID field is not filterable).
+        Returns None if nothing matches.
+        """
+        def _q(val: str) -> str:
+            return val.replace("'", "''")  # OData single-quote escape
+
+        filters: list[str] = []
+        if email:
+            filters.append(f"eMail eq '{_q(email)}'")
+        if fein:
+            filters.append(f"fein eq '{_q(fein)}'")
+        if commercial_name:
+            filters.append(f"commercialName eq '{_q(commercial_name)}'")
+        for flt in filters:
+            try:
+                body = self._get("/api/InsuredList", params={"$filter": flt})
+            except NowCertsClientError:
+                continue
+            rows = body if isinstance(body, list) else body.get("value", [])
+            if rows and isinstance(rows[0], dict) and rows[0].get("id"):
+                return str(rows[0]["id"])
+        return None
+
+    def insert_insured_no_override(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create/enrich an insured WITHOUT clobbering existing AMS fields.
+
+        POST /api/Insured/InsertNoOverride — preserves fields that are not sent
+        (verified: sending ``{DatabaseId, Active}`` leaves name/email/phone
+        intact). Use this for the new-client stub (on Opportunity Closed Won)
+        and for fill-blank corrections so Espo can never overwrite the AMS
+        source of truth. Dedupe against the AMS first to avoid duplicate
+        insureds. Body is PascalCase like ``create_insured``.
+
+        Returns:
+            API response dict (carries the insured's DatabaseId GUID).
+        """
+        log.info(
+            "NowCerts: no-override upsert insured: %s",
+            payload.get("CommercialName", payload.get("DatabaseId", "?")),
+        )
+        return self._post("/api/Insured/InsertNoOverride", payload)

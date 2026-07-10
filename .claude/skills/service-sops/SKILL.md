@@ -23,6 +23,33 @@ write queue. Hermes will draft the record, ask Gretchen for an approval
 token (APPROVE ALL, APPROVE CRM ONLY, APPROVE TASKS ONLY), and only then
 execute the write. Never skip this step.
 
+## Service requests are Cases (standard workflow, live 2026-07-10)
+
+Service requests — COI, add/remove vehicle, add driver, endorsement, cert
+holder add, mortgagee change, lienholder update, auto ID card, billing/payment,
+cancellation, renewal review, claim/FNOL — are logged as **Cases** in EspoCRM,
+one Case per request, tied to the client's Account.
+
+- **Service Request Type** (the Case `type` field): pick the matching one of the
+  14 options; use `Other` only when nothing fits.
+- **Status flow:** New → In Progress → Pending (waiting on client/carrier) →
+  Closed (or Cancelled). Keep it current — status is how anyone sees where the
+  request stands.
+- **Do NOT double-enter into NowCerts.** Every Case (and every client-linked
+  Task) is written back to the NowCerts task ledger automatically each evening
+  (7:00pm ET) by the Hermes `--espo-writeback` job. It's idempotent and additive
+  — creates the AMS task once, then updates it in place; it never overwrites or
+  deletes AMS data.
+- **Case vs Task:** a **Case** = a formal service request (typed, above). A
+  **Task** = any other client ask or internal to-do. Both reach the AMS only
+  when tied to a client (Account / insured GUID `momentum_client_id`). Internal
+  auto-generated tasks (syncSource=Hermes) are NOT written back.
+
+Governance: **NowCerts (the AMS) is the system of record.** EspoCRM is where the
+work happens; data flows UP to NowCerts through narrow additive channels only.
+(Full detail: the `rsg-ams-source-of-truth-governance` memory + the Service
+Request SOP artifact.)
+
 ## A. Customer service (general)
 
 1. Identify the client and pull their account in EspoCRM (use find_account
@@ -35,8 +62,8 @@ execute the write. Never skip this step.
    of business, request type, summary, action taken, missing info, next
    step.
 6. Create an EspoCRM Task if follow-up is needed.
-7. Store any documents in Google Drive (Hermes Docs / [Client] / [Year] /
-   [LOB]).
+7. Store any documents in Nextcloud (the client's folder under the
+   Personal/Commercial lane / [Year] / [LOB]).
 8. Escalate to Lamar if: coverage question beyond service, complaint,
    retention risk, or anything requiring producer judgment.
 
@@ -106,8 +133,8 @@ execute the write. Never skip this step.
 ## F. Policy copy
 
 1. Identify the client and policy (use lookup).
-2. Check if a digital copy is in the client Google Drive folder
-   (Hermes Docs / [Client]).
+2. Check if a digital copy is in the client Nextcloud folder (under the
+   Personal/Commercial lane).
 3. If not, request from the carrier portal or email the carrier.
 4. Deliver to the client by email or portal.
 5. Create EspoCRM note: policy copy requested and delivered.

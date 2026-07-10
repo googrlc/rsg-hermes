@@ -10,7 +10,9 @@ from typing import Any
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-DEFAULT_SENTINEL_CHANNEL = "D0B2PJYLGQG"
+# #systems-check — error/health notifications. The old default (a DM id) was
+# dead (channel_not_found), silently dropping every queue-worker failure alert.
+DEFAULT_SENTINEL_CHANNEL = "C0B6MPN1U3U"
 
 
 class SlackNotifierError(Exception):

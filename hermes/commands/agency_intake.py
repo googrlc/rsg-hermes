@@ -170,19 +170,19 @@ class AgencyIntakeError(Exception):
 
 
 def _extract_payload(raw_text: str) -> dict[str, Any]:
-    """Call the configured LLM to produce the unified intake JSON."""
-    api_key = os.environ.get("HERMES_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        raise AgencyIntakeError(
-            "No OpenAI key configured (HERMES_OPENAI_API_KEY or OPENAI_API_KEY)."
-        )
+    """Call the configured LLM (via LiteLLM) to produce the unified intake JSON."""
+    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+
     try:
-        from openai import OpenAI
+        client = get_client()
+    except LLMConfigError as exc:
+        raise AgencyIntakeError(
+            "No LLM API key configured (LITELLM_API_KEY or HERMES_OPENAI_API_KEY)."
+        ) from exc
     except ImportError as exc:
         raise AgencyIntakeError("openai package not installed") from exc
 
-    model = os.environ.get("HERMES_OPENAI_MODEL", "gpt-4.1-mini")
-    client = OpenAI(api_key=api_key)
+    model = resolve_model(None)
     response = client.responses.create(
         model=model,
         input=[

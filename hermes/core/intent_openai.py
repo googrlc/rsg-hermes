@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-import os
-
-
-def _api_key() -> str:
-    return os.environ.get("HERMES_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
 
 
 def command_from_intent(text: str) -> str | None:
-    """Return one Hermes command line, or None when OpenAI is unavailable."""
-    api_key = _api_key()
-    if not api_key:
-        return None
+    """Return one Hermes command line, or None when the LLM is unavailable."""
     try:
-        from openai import OpenAI
+        client = get_client()
+    except LLMConfigError:
+        return None
     except Exception:
         return None
 
-    model = os.environ.get("HERMES_OPENAI_MODEL", "gpt-4.1-mini")
-    client = OpenAI(api_key=api_key)
+    model = resolve_model(None)
     prompt = (
         "Convert the user request into one Hermes command line. "
         "Use only these command shapes:\n"

@@ -636,6 +636,77 @@ async def book_sync_health(request: Request, max_pages: int = 50):
 
 
 # ---------------------------------------------------------------------------
+# AMS insured search — the search-before-insert gate used by the bridge's
+# `ams_search_insured` tool (GET /api/ams/search-insured?name=&email=&fein=).
+# Read-only proxy to NowCerts InsuredList. See sync/nowcerts_client.py.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/ams/search-insured")
+async def ams_search_insured(
+    request: Request,
+    name: str | None = None,
+    email: str | None = None,
+    fein: str | None = None,
+):
+    """Search the Momentum AMS for existing insureds by name, email, or FEIN.
+
+    At least one of name/email/fein is required. Returns matching insureds so
+    callers can dedup before creating one. Read-only.
+    """
+    _require_hermes_token(request)
+
+    if not any([name, email, fein]):
+        raise HTTPException(status_code=400, detail="Provide at least one of: name, email, fein")
+
+    from hermes.sync.nowcerts_client import NowCertsClientError
+
+    def _q(val: str) -> str:
+        return val.replace("'", "''")  # OData single-quote escape
+
+    filters: list[str] = []
+    if email:
+        filters.append(f"eMail eq '{_q(email)}'")
+    if fein:
+        filters.append(f"fein eq '{_q(fein)}'")
+    if name:
+        filters.append(f"commercialName eq '{_q(name)}'")
+
+    nc = _get_nowcerts()
+    matches: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    try:
+        for flt in filters:
+            body = nc._get("/api/InsuredList", params={"$filter": flt})
+            rows = body if isinstance(body, list) else body.get("value", [])
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                gid = str(r.get("id") or "")
+                if not gid or gid in seen:
+                    continue
+                seen.add(gid)
+                matches.append({
+                    "id": gid,
+                    "commercialName": r.get("commercialName"),
+                    "firstName": r.get("firstName"),
+                    "lastName": r.get("lastName"),
+                    "email": r.get("eMail"),
+                    "fein": r.get("fein"),
+                    "phone": r.get("phone"),
+                })
+    except NowCertsClientError as exc:
+        log.exception("ams search-insured failed")
+        raise HTTPException(status_code=502, detail=f"AMS search failed: {exc}")
+
+    return {
+        "query": {"name": name, "email": email, "fein": fein},
+        "count": len(matches),
+        "matches": matches,
+    }
+
+
+# ---------------------------------------------------------------------------
 # CRM change proposals — staged EspoCRM field edits awaiting in-chat approval.
 # Approve enqueues a crm_write_queue row; the hermes-crm-queue-worker commits to
 # EspoCRM. Nothing here writes to EspoCRM directly. See operations/crm_proposals.py.
@@ -803,7 +874,7 @@ async def documents_in_folder(space: str, name: str):
 
 @app.get("/api/documents/{doc_id}")
 async def document_detail(doc_id: str):
-    """One document index row (title, preview, drive_url, supermemory_id, …)."""
+    """One document index row (title, preview, supermemory_id, …)."""
     from hermes.documents.store import get_document
 
     row = get_document(doc_id, _get_supa())
@@ -1238,6 +1309,108 @@ async def nowcerts_enrich_webhook(request: Request):
     nc = NowCertsClient()
     results = [enrich_insured_from_account(espo, nc, i, dry_run=dry) for i in ids]
     return {"count": len(results), "dry_run": dry, "results": results}
+
+
+
+# ---------------------------------------------------------------------------
+# Voice output — TTS endpoint for Slack voice clips.
+# ---------------------------------------------------------------------------
+
+class TTSRequest(BaseModel):
+    """Text-to-speech request. Posts an audio clip to a Slack channel or DM."""
+    text: str = Field(..., min_length=1, max_length=4000)
+    channel: str = Field(
+        default="",
+        description="Slack channel ID or user ID. Defaults to HERMES_SENTINEL_SLACK_CHANNEL.",
+    )
+    voice: str = Field(
+        default="",
+        description="TTS voice name. Defaults to en-US-AriaNeural (Edge TTS, free).",
+    )
+
+
+async def _generate_tts_audio(text: str, voice: str) -> bytes | None:
+    """Generate audio bytes from text. Uses edge-tts (free) if available,
+    falls back to LiteLLM/OpenAI TTS API if configured.
+
+    Returns MP3 bytes, or None on failure.
+    """
+    # Try edge-tts first (free, no API key).
+    try:
+        import edge_tts
+
+        communicate = edge_tts.Communicate(text, voice or "en-US-AriaNeural")
+        chunks: list[bytes] = []
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                chunks.append(chunk["data"])
+        return b"".join(chunks)
+    except ImportError:
+        pass
+    except Exception:
+        log.exception("edge-tts generation failed; trying API fallback")
+
+    # Fallback: TTS via LiteLLM (use the voice_output model group).
+    try:
+        from hermes.core.llm_client import get_client
+
+        client = get_client()
+        response = client.audio.speech.create(
+            model=os.environ.get("HERMES_TTS_MODEL", "voice_output"),
+            voice=voice or "alloy",
+            input=text,
+        )
+        return response.content
+    except Exception:
+        log.exception("TTS API fallback also failed")
+        return None
+
+
+@app.post("/api/hermes/tts")
+async def hermes_tts(req: TTSRequest, request: Request):
+    """Generate a voice clip from text and post it to Slack.
+
+    Uses Edge TTS (en-US-AriaNeural) by default — free, no API key.
+    Falls back to the LiteLLM/OpenAI TTS API if edge-tts isn't installed.
+
+    Auth: bearer token (HERMES_API_TOKEN) when configured.
+    """
+    _require_hermes_token(request)
+
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    channel = req.channel.strip() or os.environ.get("HERMES_SENTINEL_SLACK_CHANNEL", "")
+    if not channel:
+        raise HTTPException(status_code=400, detail="no Slack channel configured")
+
+    audio = await _generate_tts_audio(text, req.voice)
+    if not audio:
+        raise HTTPException(status_code=502, detail="TTS generation failed (no provider available)")
+
+    # Post audio to Slack as a file upload.
+    try:
+        import io
+        client = _get_slack_web_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Slack web client not configured (SLACK_BOT_TOKEN missing)")
+
+        client.files_upload_v2(
+            channel=channel,
+            file=io.BytesIO(audio),
+            filename="hermes_voice.mp3",
+            title="Hermes",
+            initial_comment=text[:500],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("Slack voice post failed")
+        raise HTTPException(status_code=502, detail=f"Slack post failed: {exc}")
+
+    return {"ok": True, "channel": channel, "chars": len(text)}
+
 
 
 def main() -> int:

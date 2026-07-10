@@ -165,6 +165,32 @@ def main() -> int:
         help="Bypass daily idempotency guard for commission audit",
     )
     parser.add_argument(
+        "--commission-ingest",
+        action="store_true",
+        help="Ingest commissionable policies from crm_commissions into commission_ledger",
+    )
+    parser.add_argument(
+        "--commission-ingest-dry-run",
+        action="store_true",
+        help="Preview commission ingest without writing to commission_ledger",
+    )
+    parser.add_argument(
+        "--espo-writeback",
+        action="store_true",
+        help="Write EspoCRM service Cases back to the NowCerts task ledger (AMS)",
+    )
+    parser.add_argument(
+        "--espo-writeback-dry-run",
+        action="store_true",
+        help="Preview Cases->NowCerts write-back without writing to NowCerts/Espo",
+    )
+    parser.add_argument(
+        "--espo-writeback-hours",
+        type=int,
+        default=24,
+        help="Look-back window (hours) for modified Cases in --espo-writeback",
+    )
+    parser.add_argument(
         "--eom-scorecard",
         action="store_true",
         help="Post end-of-month revenue scorecard for previous month",
@@ -847,6 +873,34 @@ def main() -> int:
             for warning in result.warnings:
                 print(f"- {warning}")
         return 0 if result.ok else 1
+
+    if args.commission_ingest or args.commission_ingest_dry_run:
+        from hermes.jobs.commission_ingest import run_ingest
+
+        result = run_ingest(dry_run=args.commission_ingest_dry_run)
+        print(result.message)
+        if result.errors:
+            print("Errors:")
+            for err in result.errors[:10]:
+                print(f"- {err}")
+        return 0 if result.ok else 1
+
+    if args.espo_writeback or args.espo_writeback_dry_run:
+        from hermes.jobs.espo_to_nowcerts_writeback import run_writeback
+        from hermes.jobs.espo_account_writeback import run_account_writeback
+
+        dry = args.espo_writeback_dry_run
+        hours = args.espo_writeback_hours
+        r_tasks = run_writeback(dry_run=dry, since_hours=hours)
+        r_accts = run_account_writeback(dry_run=dry, since_hours=hours)
+        print(r_tasks.message)
+        print(r_accts.message)
+        errors = r_tasks.errors + r_accts.errors
+        if errors:
+            print("Errors:")
+            for err in errors[:10]:
+                print(f"- {err}")
+        return 0 if (r_tasks.ok and r_accts.ok) else 1
 
     if args.eom_scorecard or args.eom_scorecard_dry_run:
         from hermes.jobs import revenue_integrity

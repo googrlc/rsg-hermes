@@ -76,16 +76,14 @@ def _extract_json(raw: str) -> dict[str, Any] | None:
 
 
 def _research_business(query: str) -> dict[str, Any] | None:
-    api_key = os.environ.get("HERMES_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        return None
+    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+
     try:
-        from openai import OpenAI
-    except ImportError:
+        client = get_client()
+    except (LLMConfigError, ImportError):
         return None
 
-    model = os.environ.get("HERMES_RESEARCH_MODEL") or os.environ.get("HERMES_OPENAI_MODEL", "gpt-4.1-mini")
-    client = OpenAI(api_key=api_key)
+    model = resolve_model(os.environ.get("HERMES_RESEARCH_MODEL"))
     spine = _classification_spine(query)
     user_prompt = query
     if spine:
