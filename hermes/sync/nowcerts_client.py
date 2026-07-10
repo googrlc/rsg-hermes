@@ -106,6 +106,7 @@ class NowCertsClient:
         page_size: int = 100,
         since: str | None = None,
         max_pages: int = 1000,
+        active_only: bool = True,
     ) -> list[dict[str, Any]]:
         """Fetch all Insured records with OData pagination.
 
@@ -117,12 +118,23 @@ class NowCertsClient:
                 runaway full backfill. Defaults are sized for a full first load
                 (page_size * max_pages = 100k); a `since` incremental stops
                 after a page or two.
+            active_only: When True (default), only fetch active insureds
+                (active eq true). Set False to include inactive/archived records.
 
         Returns:
             List of raw insured dicts from the NowCerts API.
         """
         all_records: list[dict[str, Any]] = []
         skip = 0
+
+        # Build $filter: active eq true [and changeDate ge {ts}]
+        filter_parts: list[str] = []
+        if active_only:
+            filter_parts.append("active eq true")
+        if since:
+            ts = since if (since.endswith("Z") or _TZ_OFFSET_RE.search(since)) else f"{since}Z"
+            filter_parts.append(f"changeDate ge {ts}")
+
         for page in range(max_pages):
             params: dict[str, str] = {
                 "$count": "true",
@@ -130,9 +142,8 @@ class NowCertsClient:
                 "$skip": str(skip),
                 "$top": str(page_size),
             }
-            if since:
-                ts = since if (since.endswith("Z") or _TZ_OFFSET_RE.search(since)) else f"{since}Z"
-                params["$filter"] = f"changeDate ge {ts}"
+            if filter_parts:
+                params["$filter"] = " and ".join(filter_parts)
 
             body = self._get("/api/InsuredDetailList", params=params)
 
@@ -167,15 +178,29 @@ class NowCertsClient:
         page_size: int = 100,
         since: str | None = None,
         max_pages: int = 1000,
+        bound_only: bool = True,
     ) -> list[dict[str, Any]]:
         """Fetch all Policy records with OData pagination.
 
-        Defaults are sized for a full first load (page_size * max_pages =
-        100k); pagination stops early on the first partial page, so a `since`
-        incremental stops after a page or two.
+        All policy statuses come over (active, cancelled, expired, rewritten)
+        -- the CRM needs the full policy history. Quotes are excluded because
+        they already live in the CRM.
+
+        Args:
+            page_size: records per page ($top).
+            since: ISO datetime filter -- only records with changeDate >= since.
+            max_pages: safety cap on number of pages fetched.
+            bound_only: When True (default), exclude quotes (isQuote eq false).
+                Quotes already exist in the CRM and should not come from the AMS.
         """
         all_records: list[dict[str, Any]] = []
         skip = 0
+
+        # Build $filter: isQuote eq false [and changeDate ge {ts}]
+        filter_parts: list[str] = []
+        if bound_only:
+            filter_parts.append("isQuote eq false")
+
         for page in range(max_pages):
             params: dict[str, str] = {
                 "$count": "true",
@@ -183,9 +208,12 @@ class NowCertsClient:
                 "$skip": str(skip),
                 "$top": str(page_size),
             }
+            filter_clause = list(filter_parts)
             if since:
                 ts = since if (since.endswith("Z") or _TZ_OFFSET_RE.search(since)) else f"{since}Z"
-                params["$filter"] = f"changeDate ge {ts}"
+                filter_clause.append(f"changeDate ge {ts}")
+            if filter_clause:
+                params["$filter"] = " and ".join(filter_clause)
 
             body = self._get("/api/PolicyDetailList", params=params)
             records = body if isinstance(body, list) else body.get("value", body.get("items", []))

@@ -41,3 +41,13 @@ DEFAULT_SINCE = os.environ.get(
 
 # --- Fetch tuning ---------------------------------------------------------
 PAGE_SIZE = int(os.environ.get("HERMES_COMMISSIONS_PAGE_SIZE", "100"))
+
+# --- Statement reconciliation (Phase 3) -----------------------------------
+RECON_TABLE = "commission_reconciliation"
+# |delta| must exceed this ($) to open a reconciliation row.
+DELTA_TOLERANCE = float(os.environ.get("HERMES_COMMISSIONS_DELTA_TOLERANCE", "1"))
+# Default owner for the discrepancy queue.
+RECON_ASSIGNEE = os.environ.get("HERMES_COMMISSIONS_RECON_ASSIGNEE", "Gretchen")
+# Priority buckets by absolute dollar delta.
+PRIORITY_HIGH_ABS = float(os.environ.get("HERMES_COMMISSIONS_PRIORITY_HIGH", "500"))
+PRIORITY_MED_ABS = float(os.environ.get("HERMES_COMMISSIONS_PRIORITY_MED", "100"))

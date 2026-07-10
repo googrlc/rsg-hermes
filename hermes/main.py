@@ -248,6 +248,24 @@ def main() -> int:
         help="One-time full-book backfill (ignores the watermark). Same code path as nightly.",
     )
     parser.add_argument(
+        "--commission-reconcile-ledger",
+        type=str,
+        default=None,
+        metavar="STATEMENT_PATH",
+        help="Reconcile a carrier statement (CSV/XLSX/PDF) against commission_ledger",
+    )
+    parser.add_argument(
+        "--commission-reconcile-ledger-dry-run",
+        action="store_true",
+        help="Preview ledger reconciliation without writing to Supabase or Slack",
+    )
+    parser.add_argument(
+        "--commission-reconcile-statement-date",
+        type=str,
+        default=None,
+        help="Statement date (YYYY-MM-DD) for reconciliation rows; defaults to today (UTC)",
+    )
+    parser.add_argument(
         "--enrich-nowcerts",
         type=str,
         default=None,
@@ -499,6 +517,36 @@ def main() -> int:
             for err in comm_result.errors:
                 print(f"- {err}")
         return 0 if comm_result.ok else 1
+
+    # --- Statement reconciliation against commission_ledger (Phase 3) ---
+    if args.commission_reconcile_ledger or args.commission_reconcile_ledger_dry_run:
+        from hermes.commissions.reconcile import run_reconciliation as run_ledger_reconcile
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+
+        statement = args.commission_reconcile_ledger
+        if not statement:
+            print("--commission-reconcile-ledger requires a statement path", file=sys.stderr)
+            return 2
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+
+        recon_result = run_ledger_reconcile(
+            supa,
+            statement,
+            dry_run=args.commission_reconcile_ledger_dry_run,
+            statement_date=args.commission_reconcile_statement_date,
+        )
+        print(recon_result.message)
+        for warning in recon_result.warnings:
+            print(f"- warning: {warning}")
+        if recon_result.errors:
+            print("Errors:")
+            for err in recon_result.errors:
+                print(f"- {err}")
+        return 0 if recon_result.ok else 1
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
     if args.enrich_nowcerts:
