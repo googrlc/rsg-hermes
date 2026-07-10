@@ -109,16 +109,25 @@ def _account_stub(acct: dict[str, Any]) -> dict[str, Any]:
     return stub
 
 
-def _read_insured_by_name(nowcerts: NowCertsClient, name: str) -> dict[str, Any] | None:
-    """Read a full insured row by exact commercial name (id GUID isn't filterable)."""
-    if not name:
+def _read_insured_by_guid(nowcerts: NowCertsClient, name: str, guid: str) -> dict[str, Any] | None:
+    """Read the full insured row for ``guid`` (the id GUID isn't directly
+    filterable, so filter by commercial name and pick the row whose id matches).
+
+    Duplicate insureds can share a commercial name, so selecting by id — rather
+    than taking rows[0] — is what makes fill-blank deterministic and safe: it
+    only ever acts on the exact insured this account is linked to.
+    """
+    if not name or not guid:
         return None
     try:
         body = nowcerts._get("/api/InsuredList", params={"$filter": f"commercialName eq '{name.replace(chr(39), chr(39)*2)}'"})
     except NowCertsClientError:
         return None
     rows = body if isinstance(body, list) else body.get("value", [])
-    return rows[0] if rows and isinstance(rows[0], dict) else None
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("id")) == str(guid):
+            return row
+    return None
 
 
 def _do_stub_channel(espo, nowcerts, cutoff, max_size, dry_run, result) -> None:
@@ -200,9 +209,11 @@ def _do_fill_blank(espo, nowcerts, cutoff, max_size, dry_run, result) -> None:
         guid = acct.get("momentum_client_id")
         account_id = acct.get("id")
         try:
-            insured = _read_insured_by_name(nowcerts, acct.get("name") or "")
-            # Safety: only proceed when we resolved the SAME insured this account links to.
-            if not insured or str(insured.get("id")) != str(guid):
+            # Resolves by name then selects the row whose id == the linked GUID,
+            # so we only ever act on the exact insured this account links to
+            # (returns None — safe skip — if that insured isn't among the matches).
+            insured = _read_insured_by_guid(nowcerts, acct.get("name") or "", guid)
+            if not insured:
                 continue
 
             to_fill: dict[str, Any] = {}
