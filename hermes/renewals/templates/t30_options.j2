@@ -1,0 +1,14 @@
+{# T-30 · commercial_mid + benefits + auto_6mo (full-review cycle) · options / decision
+   Vars: first_name, policy_type, carrier, expiration_date, premium (optional), sender
+   NOTE: the ‹recommendation› line is a fill-in — the producer edits it before sending. #}
+Subject: Your {{ policy_type }} renewal — where we landed
+
+Hi {{ first_name }},
+
+Your {{ policy_type }} renewal with {{ carrier }} is coming up on {{ expiration_date }}{% if premium %}, and the renewal premium is {{ premium }}{% endif %}. I've gone through it and here's where we are:
+
+‹recommendation — keep as-is / negotiated a credit / shopped it and here's the comparison›
+
+I want to land on whatever's best for you. Want me to move ahead as-is, or would you rather talk through the options first? Either way, let's get it settled before the deadline.
+
+{{ sender }}

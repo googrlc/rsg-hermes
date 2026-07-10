@@ -1,0 +1,11 @@
+{# auto_6mo (off-cycle) · light confirmation
+   Vars: first_name, policy_type, carrier, expiration_date, premium (optional), sender #}
+Subject: Your {{ policy_type }} renewed — quick confirmation
+
+Hi {{ first_name }},
+
+Quick note: your {{ policy_type }} policy with {{ carrier }} renewed on {{ expiration_date }}{% if premium %}, and your premium is {{ premium }}{% endif %}. No action needed on your end.
+
+If anything's changed — a new vehicle, a new driver, or a new address — just reply and I'll get it updated.
+
+{{ sender }}

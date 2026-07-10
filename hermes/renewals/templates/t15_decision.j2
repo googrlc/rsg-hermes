@@ -1,0 +1,11 @@
+{# T-15 · personal_12mo + commercial_small · decision / confirm
+   Vars: first_name, policy_type, carrier, expiration_date, premium (optional), sender #}
+Subject: Confirming your {{ policy_type }} renewal
+
+Hi {{ first_name }},
+
+Your {{ policy_type }} renewal with {{ carrier }} is set for {{ expiration_date }}{% if premium %} at {{ premium }}{% endif %}.
+
+If everything looks good, you don't need to do a thing — it'll renew on time. If you'd like to make a change or talk it over, just reply and we'll sort it out before the deadline.
+
+{{ sender }}
