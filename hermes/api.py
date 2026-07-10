@@ -1244,7 +1244,7 @@ class TTSRequest(BaseModel):
     )
 
 
-def _generate_tts_audio(text: str, voice: str) -> bytes | None:
+async def _generate_tts_audio(text: str, voice: str) -> bytes | None:
     """Generate audio bytes from text. Uses edge-tts (free) if available,
     falls back to LiteLLM/OpenAI TTS API if configured.
 
@@ -1252,30 +1252,26 @@ def _generate_tts_audio(text: str, voice: str) -> bytes | None:
     """
     # Try edge-tts first (free, no API key).
     try:
-        import asyncio as _aio
         import edge_tts
 
-        async def _speak() -> bytes:
-            communicate = edge_tts.Communicate(text, voice or "en-US-AriaNeural")
-            chunks: list[bytes] = []
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    chunks.append(chunk["data"])
-            return b"".join(chunks)
-
-        return _aio.run(_speak())
+        communicate = edge_tts.Communicate(text, voice or "en-US-AriaNeural")
+        chunks: list[bytes] = []
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                chunks.append(chunk["data"])
+        return b"".join(chunks)
     except ImportError:
         pass
     except Exception:
         log.exception("edge-tts generation failed; trying API fallback")
 
-    # Fallback: OpenAI-compatible TTS via LiteLLM.
+    # Fallback: TTS via LiteLLM (use the voice_output model group).
     try:
         from hermes.core.llm_client import get_client
 
         client = get_client()
         response = client.audio.speech.create(
-            model="tts-1",
+            model=os.environ.get("HERMES_TTS_MODEL", "voice_output"),
             voice=voice or "alloy",
             input=text,
         )
@@ -1304,7 +1300,7 @@ async def hermes_tts(req: TTSRequest, request: Request):
     if not channel:
         raise HTTPException(status_code=400, detail="no Slack channel configured")
 
-    audio = _generate_tts_audio(text, req.voice)
+    audio = await _generate_tts_audio(text, req.voice)
     if not audio:
         raise HTTPException(status_code=502, detail="TTS generation failed (no provider available)")
 
