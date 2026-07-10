@@ -18,6 +18,8 @@ dependencies = [
   "python-multipart>=0.0.6",
   # Renewal cadence email drafts (hermes/renewals/emails.py)
   "jinja2>=3.1",
+  # Voice output — free Edge TTS (no API key needed).
+  "edge-tts>=6.1",
 ]
 
 [project.optional-dependencies]

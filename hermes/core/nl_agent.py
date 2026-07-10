@@ -629,17 +629,16 @@ def ask(
     Returns:
         DispatchResult with the agent's response.
     """
-    api_key = os.environ.get("HERMES_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        return DispatchResult(False, "OpenAI API key not configured. Set OPENAI_API_KEY or HERMES_OPENAI_API_KEY.")
+    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
 
     try:
-        from openai import OpenAI
+        oai = get_client()
+    except LLMConfigError:
+        return DispatchResult(False, "LLM API key not configured. Set LITELLM_API_KEY or HERMES_OPENAI_API_KEY.")
     except ImportError:
         return DispatchResult(False, "OpenAI SDK not installed.")
 
-    model = os.environ.get("HERMES_OPENAI_MODEL", "gpt-4.1-mini")
-    oai = OpenAI(api_key=api_key)
+    model = resolve_model(None)
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": _compose_system_prompt()}]
     if conversation:

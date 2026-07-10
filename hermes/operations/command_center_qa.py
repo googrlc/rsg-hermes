@@ -115,14 +115,16 @@ def _retrieve(supa, prompt: str, today: date) -> str | None:
 
 def _llm_answer(prompt: str, context: str) -> str | None:
     """Phrase a warm, grounded answer with the LLM. None if unavailable."""
-    api_key = os.environ.get("HERMES_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return None
-    try:
-        from openai import OpenAI
+    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
 
-        model = os.environ.get("HERMES_OPENAI_MODEL", "gpt-4.1-mini")
-        resp = OpenAI(api_key=api_key).chat.completions.create(
+    try:
+        client = get_client()
+    except (LLMConfigError, ImportError):
+        return None
+
+    try:
+        model = resolve_model(None)
+        resp = client.chat.completions.create(
             model=model,
             temperature=0.4,
             messages=[

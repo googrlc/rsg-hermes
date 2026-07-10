@@ -83,19 +83,19 @@ _SYSTEM_PROMPT = (
 
 def _llm_classify(sender: str, subject: str, preview: str) -> Classification | None:
     """Ask the configured OpenAI model. Returns None if unavailable/errored."""
-    api_key = _openai_key()
-    if not api_key:
-        return None
+    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+
     try:
-        from openai import OpenAI
+        client = get_client()
+    except LLMConfigError:
+        return None
     except ImportError:
         log.warning("email_classifier: openai package not installed; skipping LLM stage")
         return None
 
-    model = os.environ.get("HERMES_OPENAI_MODEL", "gpt-4.1-mini")
+    model = resolve_model(None)
     user = f"FROM: {sender}\nSUBJECT: {subject}\n\nPREVIEW:\n{preview[:1500]}"
     try:
-        client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
             model=model,
             messages=[

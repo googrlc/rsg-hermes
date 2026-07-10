@@ -1226,6 +1226,112 @@ async def nowcerts_enrich_webhook(request: Request):
     return {"count": len(results), "dry_run": dry, "results": results}
 
 
+
+# ---------------------------------------------------------------------------
+# Voice output — TTS endpoint for Slack voice clips.
+# ---------------------------------------------------------------------------
+
+class TTSRequest(BaseModel):
+    """Text-to-speech request. Posts an audio clip to a Slack channel or DM."""
+    text: str = Field(..., min_length=1, max_length=4000)
+    channel: str = Field(
+        default="",
+        description="Slack channel ID or user ID. Defaults to HERMES_SENTINEL_SLACK_CHANNEL.",
+    )
+    voice: str = Field(
+        default="",
+        description="TTS voice name. Defaults to en-US-AriaNeural (Edge TTS, free).",
+    )
+
+
+def _generate_tts_audio(text: str, voice: str) -> bytes | None:
+    """Generate audio bytes from text. Uses edge-tts (free) if available,
+    falls back to LiteLLM/OpenAI TTS API if configured.
+
+    Returns MP3 bytes, or None on failure.
+    """
+    # Try edge-tts first (free, no API key).
+    try:
+        import asyncio as _aio
+        import edge_tts
+
+        async def _speak() -> bytes:
+            communicate = edge_tts.Communicate(text, voice or "en-US-AriaNeural")
+            chunks: list[bytes] = []
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    chunks.append(chunk["data"])
+            return b"".join(chunks)
+
+        return _aio.run(_speak())
+    except ImportError:
+        pass
+    except Exception:
+        log.exception("edge-tts generation failed; trying API fallback")
+
+    # Fallback: OpenAI-compatible TTS via LiteLLM.
+    try:
+        from hermes.core.llm_client import get_client
+
+        client = get_client()
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice=voice or "alloy",
+            input=text,
+        )
+        return response.content
+    except Exception:
+        log.exception("TTS API fallback also failed")
+        return None
+
+
+@app.post("/api/hermes/tts")
+async def hermes_tts(req: TTSRequest, request: Request):
+    """Generate a voice clip from text and post it to Slack.
+
+    Uses Edge TTS (en-US-AriaNeural) by default — free, no API key.
+    Falls back to the LiteLLM/OpenAI TTS API if edge-tts isn't installed.
+
+    Auth: bearer token (HERMES_API_TOKEN) when configured.
+    """
+    _require_hermes_token(request)
+
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    channel = req.channel.strip() or os.environ.get("HERMES_SENTINEL_SLACK_CHANNEL", "")
+    if not channel:
+        raise HTTPException(status_code=400, detail="no Slack channel configured")
+
+    audio = _generate_tts_audio(text, req.voice)
+    if not audio:
+        raise HTTPException(status_code=502, detail="TTS generation failed (no provider available)")
+
+    # Post audio to Slack as a file upload.
+    try:
+        import io
+        client = _get_slack_web_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Slack web client not configured (SLACK_BOT_TOKEN missing)")
+
+        client.files_upload_v2(
+            channel=channel,
+            file=io.BytesIO(audio),
+            filename="hermes_voice.mp3",
+            title="Hermes",
+            initial_comment=text[:500],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("Slack voice post failed")
+        raise HTTPException(status_code=502, detail=f"Slack post failed: {exc}")
+
+    return {"ok": True, "channel": channel, "chars": len(text)}
+
+
+
 def main() -> int:
     load_dotenv()
     logging.basicConfig(level=os.environ.get("HERMES_API_LOG_LEVEL", "INFO"))
