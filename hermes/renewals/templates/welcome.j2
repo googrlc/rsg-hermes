@@ -1,0 +1,12 @@
+{# on bound · all segments · welcome / confirmation
+   Vars: first_name, policy_type, carrier, premium (optional), sender
+   (expiration_date intentionally unused — post-bind the old x-date is misleading) #}
+Subject: You're all set — {{ policy_type }} confirmed
+
+Hi {{ first_name }},
+
+Your {{ policy_type }} coverage with {{ carrier }} is confirmed and in place for the new term{% if premium %}. Your premium is {{ premium }}{% endif %}.
+
+If you ever need a certificate, an ID card, or anything else, just reply — that's what we're here for. Thanks for trusting us with it.
+
+{{ sender }}
