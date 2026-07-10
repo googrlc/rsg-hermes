@@ -1,20 +1,20 @@
-"""Espo → NowCerts write-back — mirror EspoCRM service Cases into the NowCerts
-task ledger (the AMS is the historic system of record).
+"""Espo -> NowCerts write-back — mirror EspoCRM service Cases and client-linked
+Tasks into the NowCerts task ledger (the AMS is the historic system of record).
 
 Governance ([[rsg-ams-source-of-truth-governance]]): NowCerts is the source of
-truth; EspoCRM writes UP only through narrow, additive channels. This job is the
-**Cases** channel: every service-request Case that belongs to a client with a
-NowCerts insured GUID is written back as a NowCerts Task via
-``/api/Zapier/InsertTask`` (create) or ``/api/Zapier/UpdateTask`` (update).
+truth; EspoCRM writes UP only through narrow, additive channels. This job covers
+two of them:
 
-Mapping: the Case service-request ``type`` rides along as the task
-``category_name``; the linked Account's ``momentum_client_id`` is the
-``insured_database_id``. Idempotency: the NowCerts task database_id is stored on
-``Case.momentumTaskId`` so daily re-runs UPDATE instead of duplicating.
+* **Cases** — every service-request Case becomes a NowCerts Task. The Case
+  service-request ``type`` rides along as ``category_name``.
+* **Tasks** — client-linked Tasks become NowCerts Tasks (``taskType`` ->
+  ``category_name``), EXCEPT internal auto-generated ones (``syncSource`` in
+  ``_TASK_SKIP_SOURCES``) which are workflow prompts, not client-service records.
 
-Client-linked only: a Case whose Account has no ``momentum_client_id`` GUID is
-skipped — there is no client in the AMS to attach the ledger entry to. This job
-never deletes and never overwrites AMS fields.
+For both: the linked Account's ``momentum_client_id`` is the
+``insured_database_id``; idempotency via ``<entity>.momentumTaskId`` (create then
+update). Client-linked only — no GUID means no client in the AMS, so skip. Never
+deletes, never overwrites an AMS field.
 """
 
 from __future__ import annotations
@@ -22,22 +22,31 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from hermes.core.client import EspoClient, EspoClientError
 from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
 
 log = logging.getLogger(__name__)
 
-# Espo Case.status -> NowCerts task ledger state.
-_CLOSED_STATUSES = frozenset({"Closed", "Cancelled"})
-# Espo Case.priority -> NowCerts task priority.
+# Entity status -> NowCerts task ledger state (Open unless in the closed set).
+_CASE_CLOSED = frozenset({"Closed", "Cancelled"})
+_TASK_CLOSED = frozenset({"Completed", "Cancelled"})
+# Priority/urgency -> NowCerts task priority.
 _PRIORITY_MAP = {"Low": "Low", "Normal": "Medium", "High": "High", "Urgent": "High"}
+# Auto-generated internal Task sources that should NOT reach the AMS ledger.
+_TASK_SKIP_SOURCES = frozenset({"Hermes"})
 
 _CASE_SELECT = ",".join([
     "id", "name", "number", "status", "type", "description", "priority",
     "accountId", "accountName", "assignedUserName",
     "createdAt", "modifiedAt", "momentumTaskId", "momentumLastSynced",
+])
+_TASK_SELECT = ",".join([
+    "id", "name", "status", "taskType", "urgency", "priority", "description",
+    "accountId", "accountName", "parentId", "parentType", "assignedUserName",
+    "policyNumber", "dateEnd", "createdAt", "modifiedAt", "syncSource",
+    "momentumTaskId", "momentumLastSynced",
 ])
 
 
@@ -47,6 +56,7 @@ class WritebackResult:
     created: int = 0
     updated: int = 0
     skipped_no_client: int = 0
+    skipped_internal: int = 0
     failed: int = 0
     errors: list[str] = field(default_factory=list)
     dry_run: bool = False
@@ -59,20 +69,23 @@ class WritebackResult:
     def message(self) -> str:
         prefix = "[DRY RUN] " if self.dry_run else ""
         return (
-            f"{prefix}Cases->NowCerts write-back: {self.total} scanned, "
+            f"{prefix}Espo->NowCerts write-back: {self.total} scanned, "
             f"{self.created} created, {self.updated} updated, "
             f"{self.skipped_no_client} skipped (no client GUID), "
-            f"{self.failed} failed."
+            f"{self.skipped_internal} internal skipped, {self.failed} failed."
         )
 
 
 def _cutoff(since_hours: int) -> str:
-    dt = datetime.now(timezone.utc) - timedelta(hours=since_hours)
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return (datetime.now(timezone.utc) - timedelta(hours=since_hours)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _now_espo() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 def _extract_task_id(resp: Any) -> str | None:
@@ -80,7 +93,6 @@ def _extract_task_id(resp: Any) -> str | None:
 
     NowCerts wraps the created task under ``data``:
     ``{"status": 1, "data": {"database_id": "...", ...}, "message": "..."}``.
-    We check the nested ``data`` object first, then the top level defensively.
     """
     if not isinstance(resp, dict):
         return None
@@ -96,38 +108,79 @@ def _extract_task_id(resp: Any) -> str | None:
     return None
 
 
-def _nc_status(case_status: str) -> str:
-    return "Closed" if case_status in _CLOSED_STATUSES else "Open"
+# ── per-entity client-account resolvers ───────────────────────────────────
+
+def _case_account(case: dict[str, Any]) -> str | None:
+    return case.get("accountId")
 
 
-def _build_task_payload(case: dict[str, Any], insured_guid: str) -> dict[str, Any]:
-    """Map an Espo Case to a NowCerts InsertTask body (snake_case)."""
+def _task_account(task: dict[str, Any]) -> str | None:
+    if task.get("accountId"):
+        return str(task["accountId"])
+    if task.get("parentType") == "Account" and task.get("parentId"):
+        return str(task["parentId"])
+    return None
+
+
+# ── per-entity NowCerts payload builders (snake_case bodies) ───────────────
+
+def _case_payload(case: dict[str, Any], insured_guid: str) -> dict[str, Any]:
     status = (case.get("status") or "New").strip()
     priority = _PRIORITY_MAP.get((case.get("priority") or "Normal").strip(), "Medium")
-    # Cases carry no due date — use the created date as the ledger date.
-    created = (case.get("createdAt") or "")[:10] or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    title = case.get("name") or f"Service Request {case.get('number', '')}".strip()
-
+    due = (case.get("createdAt") or "")[:10] or _today()
     payload: dict[str, Any] = {
-        "title": title,
+        "title": case.get("name") or f"Service Request {case.get('number', '')}".strip(),
         "description": case.get("description") or "",
-        "status": _nc_status(status),
+        "status": "Closed" if status in _CASE_CLOSED else "Open",
         "priority": priority,
-        "due_date": created,
+        "due_date": due,
         "category_name": case.get("type") or "Other",
         "insured_database_id": insured_guid,
     }
-    assigned = case.get("assignedUserName")
-    if assigned:
-        payload["assigned_to"] = [assigned]
-    existing = case.get("momentumTaskId")
-    if existing:
-        payload["database_id"] = existing
+    if case.get("assignedUserName"):
+        payload["assigned_to"] = [case["assignedUserName"]]
+    if case.get("momentumTaskId"):
+        payload["database_id"] = case["momentumTaskId"]
     return payload
 
 
+def _task_payload(task: dict[str, Any], insured_guid: str) -> dict[str, Any]:
+    status = (task.get("status") or "Inbox").strip()
+    raw_pri = (task.get("urgency") or task.get("priority") or "Normal").strip()
+    priority = _PRIORITY_MAP.get(raw_pri, "Medium")
+    due = (task.get("dateEnd") or task.get("createdAt") or "")[:10] or _today()
+    payload: dict[str, Any] = {
+        "title": task.get("name") or "Client task",
+        "description": task.get("description") or "",
+        "status": "Closed" if status in _TASK_CLOSED else "Open",
+        "priority": priority,
+        "due_date": due,
+        "category_name": task.get("taskType") or "Client Service",
+        "insured_database_id": insured_guid,
+    }
+    if task.get("policyNumber"):
+        payload["policy_number"] = task["policyNumber"]
+    if task.get("assignedUserName"):
+        payload["assigned_to"] = [task["assignedUserName"]]
+    if task.get("momentumTaskId"):
+        payload["database_id"] = task["momentumTaskId"]
+    return payload
+
+
+# ── Espo helpers ───────────────────────────────────────────────────────────
+
+def _fetch_modified(espo: EspoClient, entity: str, select: str, cutoff: str, max_size: int) -> list[dict[str, Any]]:
+    body = espo.get(entity, params={
+        "maxSize": max_size,
+        "select": select,
+        "where": [{"type": "after", "attribute": "modifiedAt", "value": cutoff}],
+        "orderBy": "modifiedAt",
+        "order": "desc",
+    })
+    return body.get("list", []) if isinstance(body, dict) else []
+
+
 def _account_guid(espo: EspoClient, account_id: str) -> str | None:
-    """Fetch an Account's NowCerts insured GUID (Account.momentum_client_id)."""
     rec = espo.get(f"Account/{account_id}", params={"select": "id,momentum_client_id"})
     if isinstance(rec, dict):
         guid = rec.get("momentum_client_id")
@@ -135,12 +188,65 @@ def _account_guid(espo: EspoClient, account_id: str) -> str | None:
     return None
 
 
-def _stamp_synced(espo: EspoClient, case_id: str, task_id: str) -> None:
-    """Record the NowCerts task id + sync timestamp back on the Espo Case."""
-    espo.patch(
-        f"Case/{case_id}",
-        json={"momentumTaskId": task_id, "momentumLastSynced": _now_espo()},
-    )
+def _stamp_synced(espo: EspoClient, entity: str, rec_id: str, task_id: str) -> None:
+    espo.patch(f"{entity}/{rec_id}", json={"momentumTaskId": task_id, "momentumLastSynced": _now_espo()})
+
+
+def _process(
+    espo: EspoClient,
+    nowcerts: NowCertsClient,
+    entity: str,
+    records: list[dict[str, Any]],
+    account_fn: Callable[[dict[str, Any]], str | None],
+    payload_fn: Callable[[dict[str, Any], str], dict[str, Any]],
+    guid_cache: dict[str, str | None],
+    dry_run: bool,
+    result: WritebackResult,
+) -> None:
+    for rec in records:
+        rid = rec.get("id")
+        try:
+            account_id = account_fn(rec)
+            if not account_id:
+                result.skipped_no_client += 1
+                continue
+            if account_id not in guid_cache:
+                guid_cache[account_id] = _account_guid(espo, account_id)
+            guid = guid_cache[account_id]
+            if not guid:
+                result.skipped_no_client += 1
+                continue
+
+            payload = payload_fn(rec, guid)
+            is_update = bool(rec.get("momentumTaskId"))
+
+            if dry_run:
+                log.info("[DRY RUN] would %s NowCerts task for %s %s (%s) type=%s",
+                         "update" if is_update else "create", entity, rid,
+                         rec.get("name"), payload["category_name"])
+                result.updated += is_update
+                result.created += not is_update
+                continue
+
+            if is_update:
+                nowcerts.update_task(payload)
+                _stamp_synced(espo, entity, rid, rec["momentumTaskId"])
+                result.updated += 1
+            else:
+                resp = nowcerts.insert_task(payload)
+                task_id = _extract_task_id(resp)
+                if not task_id:
+                    result.failed += 1
+                    result.errors.append(f"{entity} {rid}: InsertTask returned no database_id ({resp!r})")
+                    log.warning("%s %s: InsertTask returned no task id (%r)", entity, rid, resp)
+                    continue
+                _stamp_synced(espo, entity, rid, task_id)
+                result.created += 1
+
+        except (EspoClientError, NowCertsClientError) as exc:
+            result.failed += 1
+            result.errors.append(f"{entity} {rid}: {exc}")
+            log.warning("%s %s write-back failed: %s", entity, rid, exc)
 
 
 def run_writeback(
@@ -150,85 +256,30 @@ def run_writeback(
     dry_run: bool = False,
     since_hours: int = 24,
     max_size: int = 200,
+    include_tasks: bool = True,
 ) -> WritebackResult:
-    """Write EspoCRM service Cases back to the NowCerts task ledger.
-
-    Scans Cases modified in the last ``since_hours`` and, for each Case whose
-    Account carries a NowCerts insured GUID, upserts a NowCerts Task (create if
-    new, update if already linked via ``momentumTaskId``). Additive only.
-    """
+    """Write EspoCRM service Cases (and client-linked Tasks) to the NowCerts ledger."""
     espo = espo or EspoClient()
     nowcerts = nowcerts or NowCertsClient()
     result = WritebackResult(dry_run=dry_run)
-
     cutoff = _cutoff(since_hours)
-    body = espo.get(
-        "Case",
-        params={
-            "maxSize": max_size,
-            "select": _CASE_SELECT,
-            "where": [{"type": "after", "attribute": "modifiedAt", "value": cutoff}],
-            "orderBy": "modifiedAt",
-            "order": "desc",
-        },
-    )
-    cases = body.get("list", []) if isinstance(body, dict) else []
-    result.total = len(cases)
-    log.info("Cases->NowCerts: %d case(s) modified since %s", result.total, cutoff)
-
     guid_cache: dict[str, str | None] = {}
 
-    for case in cases:
-        cid = case.get("id")
-        try:
-            account_id = case.get("accountId")
-            if not account_id:
-                result.skipped_no_client += 1
-                log.debug("Case %s has no account link — skipped", cid)
-                continue
+    # Cases channel.
+    cases = _fetch_modified(espo, "Case", _CASE_SELECT, cutoff, max_size)
+    result.total += len(cases)
+    log.info("Cases->NowCerts: %d case(s) modified since %s", len(cases), cutoff)
+    _process(espo, nowcerts, "Case", cases, _case_account, _case_payload, guid_cache, dry_run, result)
 
-            if account_id not in guid_cache:
-                guid_cache[account_id] = _account_guid(espo, account_id)
-            insured_guid = guid_cache[account_id]
-            if not insured_guid:
-                result.skipped_no_client += 1
-                log.debug("Case %s account %s lacks momentum_client_id — skipped", cid, account_id)
-                continue
-
-            payload = _build_task_payload(case, insured_guid)
-            is_update = bool(case.get("momentumTaskId"))
-
-            if dry_run:
-                log.info(
-                    "[DRY RUN] would %s NowCerts task for Case %s (%s) type=%s status=%s",
-                    "update" if is_update else "create",
-                    cid, case.get("name"), payload["category_name"], payload["status"],
-                )
-                result.updated += is_update
-                result.created += not is_update
-                continue
-
-            if is_update:
-                nowcerts.update_task(payload)
-                _stamp_synced(espo, cid, case["momentumTaskId"])
-                result.updated += 1
-            else:
-                resp = nowcerts.insert_task(payload)
-                task_id = _extract_task_id(resp)
-                if not task_id:
-                    # Without the returned id we can't dedup on re-run — fail
-                    # loudly rather than silently duplicate the ledger entry.
-                    result.failed += 1
-                    result.errors.append(f"{cid}: InsertTask returned no database_id ({resp!r})")
-                    log.warning("Case %s: InsertTask returned no task id (%r)", cid, resp)
-                    continue
-                _stamp_synced(espo, cid, task_id)
-                result.created += 1
-
-        except (EspoClientError, NowCertsClientError) as exc:
-            result.failed += 1
-            result.errors.append(f"{case.get('id', '?')}: {exc}")
-            log.warning("Case %s write-back failed: %s", cid, exc)
+    # Tasks channel (client-linked, excluding internal auto-generated).
+    if include_tasks:
+        tasks = _fetch_modified(espo, "Task", _TASK_SELECT, cutoff, max_size)
+        kept = [t for t in tasks if (t.get("syncSource") or "") not in _TASK_SKIP_SOURCES]
+        result.skipped_internal += len(tasks) - len(kept)
+        result.total += len(kept)
+        log.info("Tasks->NowCerts: %d client task(s) since %s (%d internal skipped)",
+                 len(kept), cutoff, len(tasks) - len(kept))
+        _process(espo, nowcerts, "Task", kept, _task_account, _task_payload, guid_cache, dry_run, result)
 
     log.info(result.message)
     return result
