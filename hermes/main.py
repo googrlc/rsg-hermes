@@ -887,17 +887,20 @@ def main() -> int:
 
     if args.espo_writeback or args.espo_writeback_dry_run:
         from hermes.jobs.espo_to_nowcerts_writeback import run_writeback
+        from hermes.jobs.espo_account_writeback import run_account_writeback
 
-        result = run_writeback(
-            dry_run=args.espo_writeback_dry_run,
-            since_hours=args.espo_writeback_hours,
-        )
-        print(result.message)
-        if result.errors:
+        dry = args.espo_writeback_dry_run
+        hours = args.espo_writeback_hours
+        r_tasks = run_writeback(dry_run=dry, since_hours=hours)
+        r_accts = run_account_writeback(dry_run=dry, since_hours=hours)
+        print(r_tasks.message)
+        print(r_accts.message)
+        errors = r_tasks.errors + r_accts.errors
+        if errors:
             print("Errors:")
-            for err in result.errors[:10]:
+            for err in errors[:10]:
                 print(f"- {err}")
-        return 0 if result.ok else 1
+        return 0 if (r_tasks.ok and r_accts.ok) else 1
 
     if args.eom_scorecard or args.eom_scorecard_dry_run:
         from hermes.jobs import revenue_integrity
