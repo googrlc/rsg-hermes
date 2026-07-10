@@ -33,4 +33,6 @@ CRON_TZ=America/New_York
 0 7 1 * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --eom-scorecard >> /root/hermes-cron.log 2>&1
 # Nightly CRM changelog -> #the-boss — 8:00pm ET
 0 20 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --changelog >> /root/hermes-cron.log 2>&1
+# Cases -> NowCerts task ledger write-back — daily 7:00pm ET (AMS = source of truth; additive, idempotent via Case.momentumTaskId)
+0 19 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --espo-writeback >> /root/hermes-cron.log 2>&1
 # <<< hermes automations <<<

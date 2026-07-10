@@ -175,6 +175,22 @@ def main() -> int:
         help="Preview commission ingest without writing to commission_ledger",
     )
     parser.add_argument(
+        "--espo-writeback",
+        action="store_true",
+        help="Write EspoCRM service Cases back to the NowCerts task ledger (AMS)",
+    )
+    parser.add_argument(
+        "--espo-writeback-dry-run",
+        action="store_true",
+        help="Preview Cases->NowCerts write-back without writing to NowCerts/Espo",
+    )
+    parser.add_argument(
+        "--espo-writeback-hours",
+        type=int,
+        default=24,
+        help="Look-back window (hours) for modified Cases in --espo-writeback",
+    )
+    parser.add_argument(
         "--eom-scorecard",
         action="store_true",
         help="Post end-of-month revenue scorecard for previous month",
@@ -862,6 +878,20 @@ def main() -> int:
         from hermes.jobs.commission_ingest import run_ingest
 
         result = run_ingest(dry_run=args.commission_ingest_dry_run)
+        print(result.message)
+        if result.errors:
+            print("Errors:")
+            for err in result.errors[:10]:
+                print(f"- {err}")
+        return 0 if result.ok else 1
+
+    if args.espo_writeback or args.espo_writeback_dry_run:
+        from hermes.jobs.espo_to_nowcerts_writeback import run_writeback
+
+        result = run_writeback(
+            dry_run=args.espo_writeback_dry_run,
+            since_hours=args.espo_writeback_hours,
+        )
         print(result.message)
         if result.errors:
             print("Errors:")
