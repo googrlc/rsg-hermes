@@ -298,7 +298,7 @@ def run_ingest(
                 "reconciliation_status": recon_status,
                 "statement_source": source,
                 "espocrm_policy_id": policy.get("espocrm_id"),
-                "nowcerts_policy_id": policy.get("nowcerts_id"),
+                "nowcerts_policy_id": None,  # crm_commissions.nowcerts_id is account-level, not policy-level
                 "notes": notes,
             }
 
