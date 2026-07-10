@@ -125,7 +125,6 @@ def _search_policies(client: "EspoClient", term: str) -> list[dict[str, Any]]:
     return []
 
 
-
 def _resolve_field_name(raw: str) -> str:
     """Map a natural-language field hint to an actual CRM field name."""
     key = raw.lower().strip()
