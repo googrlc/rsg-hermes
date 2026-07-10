@@ -328,19 +328,31 @@ def run_ingest(
                 result.inserted += 1
                 existing.add(pn)
 
-            # ── Write-back: flag the EspoCRM Opportunity as ledger-synced ──
+            # ── Write-back: flag the EspoCRM Policy as ledger-synced ──
             # Belt-and-suspenders: the ledger has espocrm_policy_id, and the
-            # EspoCRM Opportunity gets commissionLogged=True so you can see at
+            # EspoCRM Policy gets commissionLedgerSynced=True so you can see at
             # a glance which policies have been synced to the commission ledger.
             espo_id = policy.get("espocrm_id")
             if espo_id and not dry_run:
                 try:
                     from hermes.core.client import EspoClient
                     espo = EspoClient()
-                    espo.patch(f"Opportunity/{espo_id}", json={"commissionLogged": True})
-                    log.debug("write-back: Opportunity %s commissionLogged=True", espo_id)
+                    espo.patch(f"Policy/{espo_id}", json={"commissionLedgerSynced": True})
+                    log.debug("write-back: Policy %s commissionLedgerSynced=True", espo_id)
                 except Exception as exc:
                     log.warning("write-back failed for %s: %s", espo_id, exc)
+
+            # ── Write-back: record ledger sync timestamp in crm_commissions ──
+            if not dry_run:
+                try:
+                    now = datetime.now(timezone.utc).isoformat()
+                    supa.update_where(
+                        "crm_commissions",
+                        {"last_synced_at": now, "updated_at": now},
+                        filters={"espocrm_id": f"eq.{espo_id}"},
+                    )
+                except Exception:
+                    pass  # non-fatal — the ledger upsert already succeeded
 
         except SupabaseClientError as exc:
             result.failed += 1
