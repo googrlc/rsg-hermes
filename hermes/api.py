@@ -622,6 +622,77 @@ async def book_sync_health(request: Request, max_pages: int = 50):
 
 
 # ---------------------------------------------------------------------------
+# AMS insured search — the search-before-insert gate used by the bridge's
+# `ams_search_insured` tool (GET /api/ams/search-insured?name=&email=&fein=).
+# Read-only proxy to NowCerts InsuredList. See sync/nowcerts_client.py.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/ams/search-insured")
+async def ams_search_insured(
+    request: Request,
+    name: str | None = None,
+    email: str | None = None,
+    fein: str | None = None,
+):
+    """Search the Momentum AMS for existing insureds by name, email, or FEIN.
+
+    At least one of name/email/fein is required. Returns matching insureds so
+    callers can dedup before creating one. Read-only.
+    """
+    _require_hermes_token(request)
+
+    if not any([name, email, fein]):
+        raise HTTPException(status_code=400, detail="Provide at least one of: name, email, fein")
+
+    from hermes.sync.nowcerts_client import NowCertsClientError
+
+    def _q(val: str) -> str:
+        return val.replace("'", "''")  # OData single-quote escape
+
+    filters: list[str] = []
+    if email:
+        filters.append(f"eMail eq '{_q(email)}'")
+    if fein:
+        filters.append(f"fein eq '{_q(fein)}'")
+    if name:
+        filters.append(f"commercialName eq '{_q(name)}'")
+
+    nc = _get_nowcerts()
+    matches: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    try:
+        for flt in filters:
+            body = nc._get("/api/InsuredList", params={"$filter": flt})
+            rows = body if isinstance(body, list) else body.get("value", [])
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                gid = str(r.get("id") or "")
+                if not gid or gid in seen:
+                    continue
+                seen.add(gid)
+                matches.append({
+                    "id": gid,
+                    "commercialName": r.get("commercialName"),
+                    "firstName": r.get("firstName"),
+                    "lastName": r.get("lastName"),
+                    "email": r.get("eMail"),
+                    "fein": r.get("fein"),
+                    "phone": r.get("phone"),
+                })
+    except NowCertsClientError as exc:
+        log.exception("ams search-insured failed")
+        raise HTTPException(status_code=502, detail=f"AMS search failed: {exc}")
+
+    return {
+        "query": {"name": name, "email": email, "fein": fein},
+        "count": len(matches),
+        "matches": matches,
+    }
+
+
+# ---------------------------------------------------------------------------
 # CRM change proposals — staged EspoCRM field edits awaiting in-chat approval.
 # Approve enqueues a crm_write_queue row; the hermes-crm-queue-worker commits to
 # EspoCRM. Nothing here writes to EspoCRM directly. See operations/crm_proposals.py.
