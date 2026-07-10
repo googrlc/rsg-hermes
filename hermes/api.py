@@ -51,12 +51,26 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS: restrict to an explicit allowlist read from HERMES_CORS_ALLOW_ORIGINS
+# (comma-separated). Only browsers enforce CORS, so server-to-server callers
+# (n8n, EspoCRM webhooks, Slack) are unaffected, and the same-origin
+# /command-center UI needs no cross-origin grant. Defaults to no cross-origin
+# access (fail closed). Never pair a wildcard origin with credentials: modern
+# Starlette reflects the request Origin instead of sending "*", which would let
+# any site read token/cookie-authenticated endpoints.
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get("HERMES_CORS_ALLOW_ORIGINS", "").split(",")
+    if o.strip()
+]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Agency Command Center static UI (served at /command-center/).
 # Lives under hermes/webui/ and is bind-mounted in the container, so edits go
