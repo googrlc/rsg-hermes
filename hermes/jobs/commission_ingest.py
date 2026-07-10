@@ -35,6 +35,13 @@ RENEWAL_STATUSES = frozenset({
     "Renewed", "Up for Renewal", "Renewing",
 })
 
+# Policies cancelled or expired on/after this date are ingested as
+# chargeback candidates so Lamar can reconcile carrier clawbacks.
+CHARGEBACK_STATUSES = frozenset({
+    "Cancelled", "Expired", "Flat Cancel", "Pending Cancel",
+})
+CHARGEBACK_START_DATE = "2026-07-01"
+
 # Minimum fuzzy match score (0-100) to accept a carrier rule match.
 FUZZY_THRESHOLD = 85
 
@@ -173,6 +180,22 @@ def _is_renewal(policy: dict[str, Any]) -> bool:
     return status in RENEWAL_STATUSES
 
 
+def _is_chargeback(policy: dict[str, Any]) -> bool:
+    """True when a cancelled/expired policy qualifies for chargeback ingest.
+
+    Only policies with an expiration or effective date on/after
+    CHARGEBACK_START_DATE are included — earlier cancellations are
+    historical and already reconciled (or not worth chasing).
+    """
+    status = (policy.get("policy_status") or "").strip()
+    if status not in CHARGEBACK_STATUSES:
+        return False
+    date_str = (policy.get("expiration_date") or policy.get("effective_date") or "").strip()
+    if not date_str:
+        return False
+    return date_str >= CHARGEBACK_START_DATE
+
+
 def run_ingest(
     supa: SupabaseClient | None = None,
     *,
@@ -199,9 +222,17 @@ def run_ingest(
 
     # 4. Load commissionable policies from crm_commissions.
     policies = supa.select("crm_commissions", columns="*", limit=2000)
-    commissionable = [p for p in policies if (p.get("policy_status") or "").strip() in COMMISSIONABLE_STATUSES]
+    commissionable = [
+        p for p in policies
+        if (p.get("policy_status") or "").strip() in COMMISSIONABLE_STATUSES
+        or _is_chargeback(p)
+    ]
     result.total = len(commissionable)
-    log.info("crm_commissions: %d total, %d commissionable", len(policies), result.total)
+    chargeback_count = sum(1 for p in commissionable if _is_chargeback(p))
+    log.info(
+        "crm_commissions: %d total, %d commissionable (%d chargeback candidates)",
+        len(policies), result.total, chargeback_count,
+    )
 
     for policy in commissionable:
         try:
@@ -225,9 +256,23 @@ def run_ingest(
                 continue
 
             is_renewal = _is_renewal(policy)
+            is_cb = _is_chargeback(policy)
             expected = _compute_expected_commission(float(premium), rule, is_renewal)
 
             client_name = accounts.get(policy.get("account_id")) or ""
+
+            if is_cb:
+                # Chargeback: negative expected commission signals a clawback.
+                # The actual chargeback amount comes from the carrier statement;
+                # this entry flags the policy so Lamar can reconcile it.
+                expected = -abs(expected) if expected else None
+                recon_status = "chargeback"
+                source = "ams_ingest_chargeback"
+                notes = f"Policy {policy.get('policy_status')} — potential carrier clawback"
+            else:
+                recon_status = "pending"
+                source = "ams_ingest"
+                notes = ""
 
             row = {
                 "policy_number": pn,
@@ -242,11 +287,11 @@ def run_ingest(
                 "expected_commission": expected,
                 "commission_rule_id": rule.get("id"),
                 "commission_basis": rule.get("commission_basis"),
-                "reconciliation_status": "pending",
-                "statement_source": "ams_ingest",
+                "reconciliation_status": recon_status,
+                "statement_source": source,
                 "espocrm_policy_id": policy.get("espocrm_id"),
                 "nowcerts_policy_id": policy.get("nowcerts_id"),
-                "notes": "",
+                "notes": notes,
             }
 
             if dry_run:

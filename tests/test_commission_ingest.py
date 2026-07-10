@@ -120,3 +120,20 @@ def test_commissionable_statuses():
     assert "Expired" not in COMMISSIONABLE_STATUSES
     assert "Cancelled" not in COMMISSIONABLE_STATUSES
     assert "Flat Cancel" not in COMMISSIONABLE_STATUSES
+
+
+def test_is_chargeback():
+    from hermes.jobs.commission_ingest import _is_chargeback
+    # Cancelled after 7/1 with expiration date
+    assert _is_chargeback({"policy_status": "Cancelled", "expiration_date": "2026-07-15"}) is True
+    assert _is_chargeback({"policy_status": "Expired", "expiration_date": "2026-08-01"}) is True
+    assert _is_chargeback({"policy_status": "Flat Cancel", "expiration_date": "2026-07-01"}) is True
+    # Cancelled before 7/1 — not included
+    assert _is_chargeback({"policy_status": "Cancelled", "expiration_date": "2026-06-30"}) is False
+    # Active — not a chargeback
+    assert _is_chargeback({"policy_status": "Active", "expiration_date": "2026-07-15"}) is False
+    # No date — not included
+    assert _is_chargeback({"policy_status": "Cancelled", "expiration_date": ""}) is False
+    assert _is_chargeback({"policy_status": "Cancelled"}) is False
+    # Falls back to effective_date if no expiration
+    assert _is_chargeback({"policy_status": "Expired", "effective_date": "2026-07-10"}) is True
