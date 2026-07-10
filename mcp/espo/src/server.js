@@ -28,8 +28,21 @@ function normalizeBaseUrl(raw) {
   return value.endsWith("/api/v1") ? value : `${value}/api/v1`;
 }
 
-function jsonParam(value) {
-  return typeof value === "string" ? value : JSON.stringify(value);
+// Espo v8 IGNORES a JSON-encoded `where` query param and returns every record.
+// Filters (where, orderBy groups, etc.) must be bracket-encoded PHP-style:
+//   where[0][type]=contains&where[0][attribute]=name&where[0][value]=Acme
+// Recurse so nested OR/AND groups (where[0][value][0][type]=...) encode too.
+function appendBracketParam(searchParams, key, value) {
+  if (value === undefined || value === null) return;
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => appendBracketParam(searchParams, `${key}[${i}]`, item));
+  } else if (typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      appendBracketParam(searchParams, `${key}[${k}]`, v);
+    }
+  } else {
+    searchParams.append(key, String(value));
+  }
 }
 
 function clampLimit(limit) {
@@ -48,8 +61,11 @@ function ensureAuthorized(req, res, next) {
 async function espoRequest(path, { params = {}, method = "GET", body: reqBody } = {}) {
   const url = new URL(`${ESPO_URL}/${path.replace(/^\/+/, "")}`);
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") {
-      url.searchParams.set(key, Array.isArray(value) || typeof value === "object" ? jsonParam(value) : String(value));
+    if (value === undefined || value === null || value === "") continue;
+    if (Array.isArray(value) || typeof value === "object") {
+      appendBracketParam(url.searchParams, key, value);  // where/filters -> bracket-encoded
+    } else {
+      url.searchParams.set(key, String(value));
     }
   }
   const fetchOptions = {
@@ -325,6 +341,140 @@ function createServer() {
     }
   );
 
+  // --- Renewal write tools (additive channels: Tasks + Opportunities) ---
+  // Governance: Account=snake_case, but Task/Opportunity=camelCase (used below).
+  // status/priority are intentionally free strings with NO default — this Espo
+  // install customizes Task statuses (e.g. "Inbox", "Cancelled"); forcing a
+  // standard enum value would be silently dropped. Dedup before creating.
+
+  server.registerTool(
+    "create_task",
+    {
+      title: "Create Task",
+      description:
+        "Create an EspoCRM Task (additive write). Espo Tasks sync to NowCerts as one 'Tasks' entity. This install REQUIRES an assignee: pass assignedUserId (Gretchen for personal-lines renewals, or Lamar), or set ESPO_DEFAULT_TASK_ASSIGNEE_ID in the env as the fallback owner — otherwise Espo rejects the create. Never the API user (assignment guardrail). Dedup with list_open_tasks before creating a renewal task.",
+      inputSchema: {
+        name: z.string().min(1).describe("Task title, e.g. 'Renewal: Smith — send quote'"),
+        assignedUserId: z
+          .string()
+          .optional()
+          .describe("EspoCRM User id — Gretchen or Lamar. REQUIRED by this install unless ESPO_DEFAULT_TASK_ASSIGNEE_ID is set."),
+        status: z.string().optional().describe("Task status. Omit to use the install default. e.g. 'Inbox', 'Started', 'Completed'"),
+        priority: z.string().optional().describe("e.g. 'Low', 'Normal', 'High', 'Urgent'"),
+        dateStart: z.string().optional().describe("ISO datetime or date"),
+        dateEnd: z.string().optional().describe("Due date — ISO datetime or date"),
+        description: z.string().optional(),
+        parentType: z.enum(["Account", "Contact", "Lead", "Opportunity"]).optional(),
+        parentId: z.string().optional().describe("Linked record id (usually the Account)")
+      }
+    },
+    async ({ name, assignedUserId, status, priority, dateStart, dateEnd, description, parentType, parentId }) => {
+      const body = { name };
+      const owner = assignedUserId || process.env.ESPO_DEFAULT_TASK_ASSIGNEE_ID;
+      if (owner) body.assignedUserId = owner;
+      if (status) body.status = status;
+      if (priority) body.priority = priority;
+      if (dateStart) body.dateStart = dateStart;
+      if (dateEnd) body.dateEnd = dateEnd;
+      if (description) body.description = description;
+      if (parentType && parentId) {
+        body.parentType = parentType;
+        body.parentId = parentId;
+      }
+      const task = await espoRequest("Task", { method: "POST", body });
+      return result({
+        created: true,
+        taskId: task.id,
+        name: task.name,
+        status: task.status ?? null,
+        assignedUserName: task.assignedUserName ?? null
+      });
+    }
+  );
+
+  server.registerTool(
+    "update_task",
+    {
+      title: "Update Task",
+      description:
+        "Update an EspoCRM Task by id (e.g. mark a renewal task Completed, reassign, change due date). Only the fields you pass are changed; never overwrites unrelated fields.",
+      inputSchema: {
+        id: z.string().min(1),
+        status: z.string().optional().describe("e.g. 'Completed', 'Started'"),
+        priority: z.string().optional(),
+        dateEnd: z.string().optional(),
+        assignedUserId: z.string().optional(),
+        description: z.string().optional()
+      }
+    },
+    async ({ id, ...fields }) => {
+      const body = Object.fromEntries(
+        Object.entries(fields).filter(([, v]) => v !== undefined && v !== "")
+      );
+      if (Object.keys(body).length === 0) {
+        throw new Error("update_task: no fields provided to update");
+      }
+      const task = await espoRequest(`Task/${encodeURIComponent(id)}`, { method: "PUT", body });
+      return result({ updated: true, taskId: task.id, status: task.status ?? null });
+    }
+  );
+
+  server.registerTool(
+    "create_opportunity",
+    {
+      title: "Create Opportunity",
+      description:
+        "Create an EspoCRM Opportunity for a renewal (additive write). Dedup with get_opportunities before creating a renewal opp for an account. Fields are camelCase. Owner is Gretchen for personal lines.",
+      inputSchema: {
+        name: z.string().min(1).describe("e.g. 'Renewal — Smith Auto 2026'"),
+        accountId: z.string().optional().describe("Linked Account id"),
+        stage: z.string().optional().describe("Pipeline stage, e.g. 'Identified'. Omit to use the install default."),
+        amount: z.number().optional().describe("Premium / opportunity amount"),
+        closeDate: z.string().optional().describe("Expected close / renewal date (ISO date)"),
+        assignedUserId: z.string().optional().describe("Owner — Gretchen for personal lines, never the API user"),
+        description: z.string().optional()
+      }
+    },
+    async ({ name, accountId, stage, amount, closeDate, assignedUserId, description }) => {
+      const body = { name };
+      if (accountId) body.accountId = accountId;
+      if (stage) body.stage = stage;
+      if (amount !== undefined) body.amount = amount;
+      if (closeDate) body.closeDate = closeDate;
+      if (assignedUserId) body.assignedUserId = assignedUserId;
+      if (description) body.description = description;
+      const opp = await espoRequest("Opportunity", { method: "POST", body });
+      return result({ created: true, opportunityId: opp.id, name: opp.name, stage: opp.stage ?? null });
+    }
+  );
+
+  server.registerTool(
+    "update_opportunity",
+    {
+      title: "Update Opportunity",
+      description:
+        "Update an EspoCRM Opportunity by id — advance the stage, set amount/closeDate, or close it as renewed (Closed Won) / lost (Closed Lost). Only the fields you pass are changed.",
+      inputSchema: {
+        id: z.string().min(1),
+        stage: z.string().optional(),
+        amount: z.number().optional(),
+        closeDate: z.string().optional(),
+        assignedUserId: z.string().optional(),
+        description: z.string().optional()
+      }
+    },
+    async ({ id, ...fields }) => {
+      const body = Object.fromEntries(
+        Object.entries(fields).filter(([, v]) => v !== undefined && v !== "")
+      );
+      if (Object.keys(body).length === 0) {
+        throw new Error("update_opportunity: no fields provided to update");
+      }
+      const opp = await espoRequest(`Opportunity/${encodeURIComponent(id)}`, { method: "PUT", body });
+      return result({ updated: true, opportunityId: opp.id, stage: opp.stage ?? null });
+    }
+  );
+
   // --- Stream / activity ---
 
   server.registerTool(
@@ -413,7 +563,7 @@ function createServer() {
 
 const transports = new Map();
 
-const TOOL_COUNT = 11;
+const TOOL_COUNT = 15;
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "rsg-espo-mcp", tools: TOOL_COUNT });
