@@ -28,8 +28,21 @@ function normalizeBaseUrl(raw) {
   return value.endsWith("/api/v1") ? value : `${value}/api/v1`;
 }
 
-function jsonParam(value) {
-  return typeof value === "string" ? value : JSON.stringify(value);
+// Espo v8 IGNORES a JSON-encoded `where` query param and returns every record.
+// Filters (where, orderBy groups, etc.) must be bracket-encoded PHP-style:
+//   where[0][type]=contains&where[0][attribute]=name&where[0][value]=Acme
+// Recurse so nested OR/AND groups (where[0][value][0][type]=...) encode too.
+function appendBracketParam(searchParams, key, value) {
+  if (value === undefined || value === null) return;
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => appendBracketParam(searchParams, `${key}[${i}]`, item));
+  } else if (typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      appendBracketParam(searchParams, `${key}[${k}]`, v);
+    }
+  } else {
+    searchParams.append(key, String(value));
+  }
 }
 
 function clampLimit(limit) {
@@ -48,8 +61,11 @@ function ensureAuthorized(req, res, next) {
 async function espoRequest(path, { params = {}, method = "GET", body: reqBody } = {}) {
   const url = new URL(`${ESPO_URL}/${path.replace(/^\/+/, "")}`);
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") {
-      url.searchParams.set(key, Array.isArray(value) || typeof value === "object" ? jsonParam(value) : String(value));
+    if (value === undefined || value === null || value === "") continue;
+    if (Array.isArray(value) || typeof value === "object") {
+      appendBracketParam(url.searchParams, key, value);  // where/filters -> bracket-encoded
+    } else {
+      url.searchParams.set(key, String(value));
     }
   }
   const fetchOptions = {
