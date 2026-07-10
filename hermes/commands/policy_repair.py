@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from hermes.core.dispatcher import DispatchResult
+from hermes.core.field_utils import get_first_available
 
 if TYPE_CHECKING:
     from hermes.core.client import EspoClient
@@ -148,7 +149,7 @@ def run_policy_account_repair(client: "EspoClient", *, dry_run: bool = True) -> 
     policies = _collection_rows(
         client,
         "Policy",
-        select="id,name,insuredMomentumId,accountId,accountName,policy_number",
+        select="id,name,insuredMomentumId,accountId,accountName,policy_number,policyNumber",
     )
 
     for policy in policies:
@@ -194,7 +195,7 @@ def run_policy_account_repair(client: "EspoClient", *, dry_run: bool = True) -> 
             insured_momentum_id=insured_momentum_id,
             account_id=account_id,
             account_name=account_name,
-            policy_number=str(policy.get("policy_number") or ""),
+            policy_number=str(get_first_available(policy, "policy_number", "policyNumber") or ""),
         )
         result.candidates.append(repair)
 
