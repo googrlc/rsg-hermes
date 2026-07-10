@@ -278,6 +278,27 @@
 
 ---
 
+## Case (service requests — live 2026-07-10)
+
+Service-request tickets (COI, endorsements, vehicle changes, etc.). One Case per
+request, tied to a client Account. Written back to the NowCerts task ledger daily
+(7pm ET) by `--espo-writeback`, idempotent via `momentumTaskId`.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `name` | varchar | Short description of the request |
+| `number` | autoincrement | Case number |
+| `status` | enum | `New`, `In Progress`, `Pending`, `Closed`, `Cancelled` (default `New`) |
+| `type` | enum | **Service Request Type** — 14 options: Certificate of Insurance (COI), Add Vehicle, Remove Vehicle / Delete Unit, Add Driver, Endorsement / Policy Change, Certificate Holder Add, Mortgagee Change, Lienholder Update, Auto ID Card, Billing / Payment, Cancellation Request, Renewal Review, Claim / FNOL, Other |
+| `priority` | enum | `Low`, `Normal`, `High`, `Urgent` |
+| `description` | text | Request detail |
+| `account` | link | The client (belongsTo Account) — the write-back client link |
+| `contacts` / `contact` | link | Related contact(s) |
+| `momentumTaskId` | varchar | NowCerts task database_id — Espo→AMS write-back dedup key (writable; set by Hermes) |
+| `momentumLastSynced` | datetime | Last write-back to the NowCerts ledger |
+
+---
+
 ## ActivityLog (27 fields)
 
 | Field | Type | Notes |
