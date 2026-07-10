@@ -232,7 +232,13 @@ def _do_fill_blank(espo, nowcerts, cutoff, max_size, dry_run, result) -> None:
                 result.fields_filled += len(to_fill)
                 continue
 
-            nowcerts.insert_insured_no_override({"DatabaseId": guid, **to_fill})
+            # CommercialName is REQUIRED by InsertNoOverride (missing it -> HTTP 500).
+            # We send the insured's CURRENT name (read above) so the required-field
+            # check passes without changing it — the endpoint overrides sent fields,
+            # and read-first guarantees to_fill holds only AMS-blank fields.
+            nowcerts.insert_insured_no_override(
+                {"DatabaseId": guid, "CommercialName": insured.get("commercialName") or "", **to_fill}
+            )
             result.filled += 1
             result.fields_filled += len(to_fill)
         except (EspoClientError, NowCertsClientError) as exc:
