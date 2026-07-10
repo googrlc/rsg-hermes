@@ -23,7 +23,7 @@ mcp_servers:
 | `ESPO_MCP_PORT` | no | Listening port (default `3000`) |
 | `ESPO_MCP_MAX_LIST_SIZE` | no | Max records per list query (default `200`) |
 
-## Tools (11)
+## Tools (15)
 
 ### Read-only
 
@@ -45,3 +45,13 @@ mcp_servers:
 | Tool | Description |
 |---|---|
 | `create_note` | Add a note (stream post) to a record |
+| `create_task` | Create a Task (renewal follow-up). Owner = Gretchen/Lamar; dedup first |
+| `update_task` | Update a Task by id (e.g. mark Completed). Only passed fields change |
+| `create_opportunity` | Create a renewal Opportunity (pipeline). Dedup first |
+| `update_opportunity` | Update an Opportunity — advance stage / close Won or Lost |
+
+**Governance:** `Task`/`Opportunity` fields are camelCase. `status`/`priority`
+are free strings (this install customizes them, e.g. `Inbox`/`Cancelled`) — omit
+to use the install default rather than risk a silently-dropped enum value. These
+are the sanctioned *additive* CRM→AMS channels; never overwrite a populated field
+and never create/edit a policy from here.
