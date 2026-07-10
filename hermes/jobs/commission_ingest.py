@@ -314,16 +314,33 @@ def run_ingest(
                     params={"policy_number": f"eq.{pn}"}, limit=1,
                 )
                 if ledger_rows:
-                    supa.update("commission_ledger", ledger_rows[0]["id"], row)
+                    ledger_id = ledger_rows[0]["id"]
+                    supa.update("commission_ledger", ledger_id, row)
                     result.updated += 1
                 else:
-                    supa.insert("commission_ledger", row)
+                    inserted = supa.insert("commission_ledger", row)
+                    ledger_id = inserted.get("id", "")
                     result.inserted += 1
                     existing.add(pn)
             else:
-                supa.insert("commission_ledger", row)
+                inserted = supa.insert("commission_ledger", row)
+                ledger_id = inserted.get("id", "")
                 result.inserted += 1
                 existing.add(pn)
+
+            # ── Write-back: flag the EspoCRM Opportunity as ledger-synced ──
+            # Belt-and-suspenders: the ledger has espocrm_policy_id, and the
+            # EspoCRM Opportunity gets commissionLogged=True so you can see at
+            # a glance which policies have been synced to the commission ledger.
+            espo_id = policy.get("espocrm_id")
+            if espo_id and not dry_run:
+                try:
+                    from hermes.core.client import EspoClient
+                    espo = EspoClient()
+                    espo.patch("Opportunity", espo_id, {"commissionLogged": True})
+                    log.debug("write-back: Opportunity %s commissionLogged=True", espo_id)
+                except Exception as exc:
+                    log.warning("write-back failed for %s: %s", espo_id, exc)
 
         except SupabaseClientError as exc:
             result.failed += 1
