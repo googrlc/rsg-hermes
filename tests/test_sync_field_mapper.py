@@ -7,6 +7,7 @@ import unittest
 from hermes.sync.field_mapper import (
     detect_conflicts,
     map_insured_to_account,
+    map_nowcerts_policy_to_espo_policy,
     map_policy_to_opportunity,
     payload_hash,
 )
@@ -247,6 +248,51 @@ class PayloadHashTests(unittest.TestCase):
             payload_hash({"b": 2, "a": 1}),
             payload_hash({"a": 1, "b": 2}),
         )
+
+
+class MapNowCertsPolicyToEspoPolicyTests(unittest.TestCase):
+    def _policy(self, **overrides) -> dict:
+        base = {
+            "number": "CPK-99887-01",
+            "lineOfBusinesses": [{"lineOfBusinessName": "Commercial Auto"}],
+            "effectiveDate": "2026-07-01T00:00:00",
+            "expirationDate": "2027-07-01T00:00:00",
+            "totalPremium": 8421.50,
+            "carrierName": "Progressive Commercial",
+            "businessType": "Renewal",
+            "status": "Active",
+            "insuredCommercialName": "Summit HVAC LLC",
+        }
+        base.update(overrides)
+        return base
+
+    def test_field_names_match_espo_policy_mixed_casing(self):
+        # Casing is the silent-drop trap: these names must match the live entity.
+        p = map_nowcerts_policy_to_espo_policy(self._policy(), account_id="ACC123")
+        self.assertEqual(p["policy_number"], "CPK-99887-01")
+        self.assertEqual(p["line_of_business"], "Commercial Auto")
+        self.assertEqual(p["effective_date"], "2026-07-01")
+        self.assertEqual(p["expiration_date"], "2027-07-01")
+        self.assertEqual(p["premium_amount"], 8421.50)
+        self.assertEqual(p["carrier"], "Progressive Commercial")
+        self.assertEqual(p["business_type"], "Renewal")
+        self.assertEqual(p["status"], "Active")
+        self.assertEqual(p["accountId"], "ACC123")  # camelCase link field
+
+    def test_no_policy_number_returns_none(self):
+        self.assertIsNone(map_nowcerts_policy_to_espo_policy({"lineOfBusinesses": []}))
+
+    def test_account_id_omitted_when_not_matched(self):
+        # No account → never emit accountId (we never create accounts).
+        self.assertNotIn("accountId", map_nowcerts_policy_to_espo_policy(self._policy()))
+
+    def test_scalar_lob_and_alt_premium_fields(self):
+        p = map_nowcerts_policy_to_espo_policy(
+            self._policy(lineOfBusinesses=None, LineOfBusinessName="Workers Comp",
+                         totalPremium=None, Premium=1200)
+        )
+        self.assertEqual(p["line_of_business"], "Workers Comp")
+        self.assertEqual(p["premium_amount"], 1200.0)
 
 
 if __name__ == "__main__":

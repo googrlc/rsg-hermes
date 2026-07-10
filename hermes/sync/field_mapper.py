@@ -633,3 +633,90 @@ def map_policy_to_opportunity(
         result["accountId"] = account_id
 
     return result
+
+
+# NowCerts Policy → EspoCRM Policy entity (policies-only sync)
+def map_nowcerts_policy_to_espo_policy(
+    nc_policy: dict[str, Any],
+    *,
+    account_id: str | None = None,
+    account_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Transform a NowCerts Policy (/api/PolicyDetailList) into an EspoCRM Policy
+    payload.
+
+    Field names match the live EspoCRM Policy entity's MIXED casing exactly —
+    ``policy_number`` / ``line_of_business`` / ``effective_date`` /
+    ``expiration_date`` / ``premium_amount`` / ``business_type`` are snake_case;
+    ``accountId`` is camelCase. Wrong casing is silently dropped by EspoCRM (the
+    #1 schema gotcha), so do not "normalize" these.
+
+    ``policy_number`` is the upsert key; returns None if the NowCerts record has
+    no usable number. Account linking is the caller's job — pass ``account_id``
+    only when an EXISTING EspoCRM account was matched (we never create accounts).
+    """
+    policy_number = str(
+        nc_policy.get("number")
+        or nc_policy.get("policyNumber")
+        or nc_policy.get("Number")
+        or ""
+    ).strip()
+    if not policy_number:
+        return None
+
+    lob_raw = ""
+    lob_list = nc_policy.get("lineOfBusinesses")
+    if isinstance(lob_list, list) and lob_list and isinstance(lob_list[0], dict):
+        lob_raw = lob_list[0].get("lineOfBusinessName", "") or ""
+    if not lob_raw:
+        lob_raw = (
+            nc_policy.get("lineOfBusinessName")
+            or nc_policy.get("lineOfBusiness")
+            or nc_policy.get("LineOfBusinessName")
+            or ""
+        )
+    lob = _NC_LOB_MAP.get(lob_raw.strip().lower(), lob_raw) if lob_raw else ""
+
+    eff = _strip_date(nc_policy.get("effectiveDate") or nc_policy.get("EffectiveDate"))
+    exp = _strip_date(nc_policy.get("expirationDate") or nc_policy.get("ExpirationDate"))
+
+    payload: dict[str, Any] = {
+        "name": policy_number,
+        "policy_number": policy_number,
+    }
+    if lob:
+        payload["line_of_business"] = lob
+        payload["line_of_business_raw"] = lob_raw
+    if eff:
+        payload["effective_date"] = eff
+    if exp:
+        payload["expiration_date"] = exp
+
+    premium = _first_non_none(nc_policy, "totalPremium", "premium", "Premium")
+    if premium is not None:
+        try:
+            payload["premium_amount"] = float(premium)
+        except (TypeError, ValueError):
+            pass
+
+    carrier = (
+        nc_policy.get("carrierName")
+        or nc_policy.get("CarrierName")
+        or nc_policy.get("carrier")
+        or ""
+    )
+    if carrier:
+        payload["carrier"] = carrier
+
+    btype = nc_policy.get("businessType") or nc_policy.get("BusinessType")
+    if btype:
+        payload["business_type"] = btype
+
+    status = nc_policy.get("status") or nc_policy.get("Status")
+    if status:
+        payload["status"] = status
+
+    if account_id:
+        payload["accountId"] = account_id
+
+    return payload
