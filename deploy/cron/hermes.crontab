@@ -27,10 +27,14 @@
 #
 # >>> hermes automations (managed by deploy/cron/install-cron.sh) >>>
 CRON_TZ=America/New_York
-# NowCerts -> EspoCRM inbound pull — daily 2:00am ET (Insureds->Accounts +
-# Policies->Opportunities; enqueues to outbound_sync_queue, hermes-outbound-drain
-# applies to EspoCRM every 15 min). Direction A — 12h apart from the writeback.
+# NowCerts -> EspoCRM inbound pull — daily 2:00am ET (Insureds->Accounts;
+# enqueues to outbound_sync_queue, hermes-outbound-drain applies to EspoCRM every
+# 15 min). Direction A — 12h apart from the writeback.
 0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
+# NowCerts -> EspoCRM policies — daily 2:10am ET, right after accounts exist.
+# Upserts the EspoCRM Policy entity AND mirrors each policy into the Commission
+# module (linked by policyId, deduped, idempotent). NowCerts owns Policies.
+10 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-policies >> /root/hermes-cron.log 2>&1
 # EspoCRM -> NowCerts writeback — daily 2:00pm ET. Direction B, narrow + additive:
 # fill-blank account fields, Closed-Won -> minimal account stub, Cases, and
 # account-linked Tasks. Never overwrites the AMS.

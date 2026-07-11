@@ -15,7 +15,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from hermes.sync.field_mapper import map_nowcerts_policy_to_espo_policy
+from hermes.sync.field_mapper import (
+    map_nowcerts_policy_to_espo_commission,
+    map_nowcerts_policy_to_espo_policy,
+)
+from hermes.sync.metadata import conform_payload_to_metadata
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +31,8 @@ class PolicySyncResult:
     updated: int = 0
     skipped_no_account: int = 0
     skipped_no_number: int = 0
+    commissions_created: int = 0
+    commissions_updated: int = 0
     errors: list[str] = field(default_factory=list)
     skipped_accounts: list[str] = field(default_factory=list)
 
@@ -39,8 +45,64 @@ class PolicySyncResult:
         return (
             f"policies processed={self.processed} created={self.created} "
             f"updated={self.updated} skipped_no_account={self.skipped_no_account} "
-            f"skipped_no_number={self.skipped_no_number} errors={len(self.errors)}"
+            f"skipped_no_number={self.skipped_no_number} "
+            f"commissions_created={self.commissions_created} "
+            f"commissions_updated={self.commissions_updated} errors={len(self.errors)}"
         )
+
+
+def _upsert_commission(
+    espo: Any,
+    nc_policy: dict[str, Any],
+    *,
+    policy_id: str,
+    account_id: str | None,
+    policy_number: str,
+    carrier: str,
+    dry_run: bool,
+    result: PolicySyncResult,
+) -> None:
+    """Mirror a synced Policy into the EspoCRM Commission module, idempotently.
+
+    Linked to the Policy (``policyId``) and Account (``accountId``); deduped on
+    ``policyId`` so re-syncing a policy updates its commission instead of
+    duplicating. The payload is conformed against live Commission metadata, so
+    fields the entity doesn't expose are dropped rather than failing the write.
+    A commission failure is recorded but never aborts the policy row.
+    """
+    payload = map_nowcerts_policy_to_espo_commission(
+        nc_policy,
+        policy_id=policy_id,
+        account_id=account_id,
+        policy_number=policy_number,
+        carrier=carrier,
+    )
+    payload = conform_payload_to_metadata(espo, "Commission", payload)
+    if not payload.get("policyId"):
+        # Metadata says the Commission entity has no policy link under this name;
+        # skip rather than create an orphaned commission.
+        log.warning(
+            "Commission for policy %s not written: no policyId link in live metadata",
+            policy_number,
+        )
+        return
+
+    existing = espo.find_one_by_field("Commission", "policyId", policy_id, select="id")
+    verb = "UPDATE" if (existing and existing.get("id")) else "CREATE"
+    if dry_run:
+        log.info("DRY %s Commission for policy %s (policyId=%s)", verb, policy_number, policy_id)
+        if verb == "UPDATE":
+            result.commissions_updated += 1
+        else:
+            result.commissions_created += 1
+        return
+
+    if existing and existing.get("id"):
+        espo.update("Commission", str(existing["id"]), payload)
+        result.commissions_updated += 1
+    else:
+        espo.create("Commission", payload)
+        result.commissions_created += 1
 
 
 def _nc_insured_name(p: dict[str, Any]) -> str:
@@ -133,14 +195,37 @@ def run_policy_sync(
                     result.updated += 1
                 else:
                     result.created += 1
+                _upsert_commission(
+                    espo, p,
+                    policy_id=str(existing["id"]) if (existing and existing.get("id")) else "DRY",
+                    account_id=account_id,
+                    policy_number=str(payload["policy_number"]),
+                    carrier=str(payload.get("carrier") or ""),
+                    dry_run=True,
+                    result=result,
+                )
                 continue
 
             if existing and existing.get("id"):
-                espo.update("Policy", str(existing["id"]), payload)
+                policy_id = str(existing["id"])
+                espo.update("Policy", policy_id, payload)
                 result.updated += 1
             else:
-                espo.create("Policy", payload)
+                created = espo.create("Policy", payload)
+                policy_id = str(created["id"]) if isinstance(created, dict) and created.get("id") else ""
                 result.created += 1
+
+            # Mirror the policy into the Commission module (idempotent, linked).
+            if policy_id:
+                _upsert_commission(
+                    espo, p,
+                    policy_id=policy_id,
+                    account_id=account_id,
+                    policy_number=str(payload["policy_number"]),
+                    carrier=str(payload.get("carrier") or ""),
+                    dry_run=False,
+                    result=result,
+                )
         except Exception as exc:  # noqa: BLE001 — one bad policy shouldn't abort the run
             result.errors.append(f"policy {ref}: {exc}")
             log.warning("policy sync error on %s: %s", ref, exc)
