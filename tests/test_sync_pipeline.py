@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
+from hermes.operations.crm_queue_worker import ItemResult, ProcessResult
 from hermes.sync.pipeline import (
     SyncRunResult,
     _derive_queue_action_type,
@@ -12,6 +13,20 @@ from hermes.sync.pipeline import (
     _stage_record,
     run_insured_to_account_sync,
 )
+
+
+def _process_result(*items: ItemResult) -> ProcessResult:
+    """Build a ProcessResult mirroring the worker's per-row contract."""
+    failed = sum(1 for it in items if not it.ok)
+    return ProcessResult(
+        total=len(items),
+        succeeded=len(items) - failed,
+        failed=failed,
+        blocked=0,
+        errors=[it.message for it in items if it.message],
+        dry_run=False,
+        items=list(items),
+    )
 
 
 def _mock_supa() -> MagicMock:
@@ -135,7 +150,9 @@ class QueuedPipelineTests(unittest.TestCase):
         espo = _mock_espo()
         supa = _mock_supa()
         enqueue_mock.return_value = {"id": "crm-q-1"}
-        process_mock.return_value = MagicMock(failed=0, errors=[])
+        process_mock.return_value = _process_result(
+            ItemResult(queue_id="crm-q-1", entity_type="Account", entity_id=None, ok=True)
+        )
 
         # select calls: mapping lookup returns empty, queue lookup returns our item
         queue_item = {
@@ -175,9 +192,17 @@ class QueuedPipelineTests(unittest.TestCase):
         espo = _mock_espo()
         supa = _mock_supa()
         enqueue_mock.return_value = {"id": "crm-q-1"}
-        process_mock.return_value = MagicMock(
-            failed=1,
-            errors=["crm-q-1: 422 rejected"],
+        process_mock.return_value = _process_result(
+            ItemResult(
+                queue_id="crm-q-1",
+                entity_type="Account",
+                entity_id=None,
+                ok=False,
+                error_type="validation_400",
+                status_code=422,
+                reason="422 rejected",
+                message="crm-q-1: 422 rejected",
+            )
         )
 
         queue_item = {
@@ -241,6 +266,214 @@ class ResolveMappingTests(unittest.TestCase):
             nc_record=_sample_insured(), run_id="run-1",
         )
         self.assertEqual(result["espocrm_id"], "espo-dedup-match")
+
+
+def _ctx(**overrides) -> dict:
+    base = {
+        "outbound_queue_id": "ob-1",
+        "run_id": "run-1",
+        "object_type": "Account",
+        "object_id": None,
+        "action": "create",
+        "payload": {"name": "Dup Co", "momentum_client_id": "NC-9"},
+        "mapping_id": "map-1",
+        "attempt": 1,
+    }
+    base.update(overrides)
+    return base
+
+
+class ReconcileConflict409Tests(unittest.TestCase):
+    def test_found_match_reenqueues_as_update(self) -> None:
+        from hermes.sync.pipeline import _reconcile_conflict_409
+
+        supa = _mock_supa()
+        espo = _mock_espo()
+        espo.search.return_value = [{"id": "acc-existing", "name": "Dup Co, LLC"}]
+        result = SyncRunResult()
+
+        _reconcile_conflict_409(
+            supa, espo, _ctx(),
+            ItemResult(queue_id="crm-1", entity_type="Account", entity_id=None,
+                       ok=False, error_type="conflict_409", status_code=409),
+            result=result,
+        )
+
+        self.assertEqual(result.records_failed, 0)
+        # Mapping repointed to the existing account and row re-queued as update.
+        mapping_update = next(
+            c for c in supa.update.call_args_list
+            if c.args[0] == "sync_mappings"
+        )
+        self.assertEqual(mapping_update.args[2]["espocrm_id"], "acc-existing")
+        queue_update = next(
+            c for c in supa.update.call_args_list
+            if c.args[0] == "outbound_sync_queue"
+        )
+        self.assertEqual(queue_update.args[2]["status"], "queued")
+        self.assertEqual(queue_update.args[2]["action"], "update")
+        self.assertEqual(queue_update.args[2]["object_id"], "acc-existing")
+        self.assertTrue(queue_update.args[2]["payload"]["__recon_409"])
+
+    def test_no_match_fails_row_without_blind_create(self) -> None:
+        from hermes.sync.pipeline import _reconcile_conflict_409
+
+        supa = _mock_supa()
+        espo = _mock_espo()
+        espo.search.return_value = []  # nothing matches
+        result = SyncRunResult()
+
+        _reconcile_conflict_409(
+            supa, espo, _ctx(),
+            ItemResult(queue_id="crm-1", entity_type="Account", entity_id=None,
+                       ok=False, error_type="conflict_409"),
+            result=result,
+        )
+
+        self.assertEqual(result.records_failed, 1)
+        espo.create.assert_not_called()
+        status_update = next(
+            c for c in supa.update.call_args_list
+            if c.args[0] == "outbound_sync_queue"
+        )
+        self.assertEqual(status_update.args[2]["status"], "failed")
+
+    def test_already_reconciled_does_not_loop(self) -> None:
+        from hermes.sync.pipeline import _reconcile_conflict_409
+
+        supa = _mock_supa()
+        espo = _mock_espo()
+        result = SyncRunResult()
+
+        _reconcile_conflict_409(
+            supa, espo, _ctx(payload={"name": "Dup Co", "__recon_409": True}),
+            ItemResult(queue_id="crm-1", entity_type="Account", entity_id=None,
+                       ok=False, error_type="conflict_409"),
+            result=result,
+        )
+
+        # Guard: no second normalized-name search, row just fails.
+        espo.search.assert_not_called()
+        self.assertEqual(result.records_failed, 1)
+
+
+class ReconcileMissing404Tests(unittest.TestCase):
+    def test_purged_target_marked_dead(self) -> None:
+        from hermes.sync.pipeline import _reconcile_missing_404
+
+        supa = _mock_supa()
+        espo = _mock_espo()
+        espo.search.return_value = []  # no live account by name
+        result = SyncRunResult()
+
+        _reconcile_missing_404(
+            supa, espo, _ctx(action="update", object_id="acc-gone"),
+            ItemResult(queue_id="crm-1", entity_type="Account", entity_id="acc-gone",
+                       ok=False, error_type="missing_404", status_code=404),
+            result=result,
+        )
+
+        # Stale mapping deactivated, row is terminal 'dead'.
+        supa.update_where.assert_called_once()
+        self.assertEqual(
+            supa.update_where.call_args.kwargs["filters"]["espocrm_id"], "eq.acc-gone",
+        )
+        status_update = next(
+            c for c in supa.update.call_args_list
+            if c.args[0] == "outbound_sync_queue"
+        )
+        self.assertEqual(status_update.args[2]["status"], "dead")
+        self.assertIn("target_purged", status_update.args[2]["last_error"])
+
+    def test_reresolved_target_reenqueued(self) -> None:
+        from hermes.sync.pipeline import _reconcile_missing_404
+
+        supa = _mock_supa()
+        espo = _mock_espo()
+        espo.search.return_value = [{"id": "acc-live", "name": "Dup Co"}]
+        result = SyncRunResult()
+
+        _reconcile_missing_404(
+            supa, espo, _ctx(action="update", object_id="acc-gone"),
+            ItemResult(queue_id="crm-1", entity_type="Account", entity_id="acc-gone",
+                       ok=False, error_type="missing_404"),
+            result=result,
+        )
+
+        self.assertEqual(result.records_failed, 0)
+        queue_update = next(
+            c for c in supa.update.call_args_list
+            if c.args[0] == "outbound_sync_queue"
+        )
+        self.assertEqual(queue_update.args[2]["object_id"], "acc-live")
+        self.assertEqual(queue_update.args[2]["status"], "queued")
+
+
+class IdempotentEnqueueTests(unittest.TestCase):
+    def test_skips_when_open_queued_row_exists(self) -> None:
+        from hermes.sync.pipeline import _enqueue_outbound
+
+        supa = _mock_supa()
+        supa.select.return_value = [{"id": "existing-ob"}]
+
+        row = _enqueue_outbound(
+            supa, run_id="run-1", mapping_id="m-1",
+            object_type="Account", object_id="acc-1", action="update",
+            payload={"name": "Acme"},
+        )
+
+        self.assertEqual(row, {"id": "existing-ob"})
+        supa.insert.assert_not_called()
+
+    def test_inserts_when_none_open(self) -> None:
+        from hermes.sync.pipeline import _enqueue_outbound
+
+        supa = _mock_supa()
+        supa.select.return_value = []
+        supa.insert.return_value = {"id": "new-ob"}
+
+        row = _enqueue_outbound(
+            supa, run_id="run-1", mapping_id="m-1",
+            object_type="Account", object_id="acc-1", action="update",
+            payload={"name": "Acme"},
+        )
+
+        self.assertEqual(row, {"id": "new-ob"})
+        supa.insert.assert_called_once()
+
+    def test_create_with_null_object_id_bypasses_precheck(self) -> None:
+        from hermes.sync.pipeline import _enqueue_outbound
+
+        supa = _mock_supa()
+        supa.insert.return_value = {"id": "new-ob"}
+
+        _enqueue_outbound(
+            supa, run_id="run-1", mapping_id="m-1",
+            object_type="Account", object_id=None, action="create",
+            payload={"name": "Acme"},
+        )
+
+        # No dedupe SELECT for NULL object_id; goes straight to insert.
+        supa.select.assert_not_called()
+        supa.insert.assert_called_once()
+
+    def test_swallows_unique_violation(self) -> None:
+        from hermes.sync.pipeline import _enqueue_outbound
+        from hermes.integrations.supabase_client import SupabaseClientError
+
+        supa = _mock_supa()
+        supa.select.return_value = []
+        supa.insert.side_effect = SupabaseClientError(
+            "409 INSERT outbound_sync_queue: duplicate key value violates unique "
+            "constraint \"uq_outbound_queue_open_work\" (23505)"
+        )
+
+        row = _enqueue_outbound(
+            supa, run_id="run-1", mapping_id="m-1",
+            object_type="Account", object_id="acc-1", action="update",
+            payload={"name": "Acme"},
+        )
+        self.assertIsNone(row)
 
 
 class QueueActionTypeDerivationTests(unittest.TestCase):

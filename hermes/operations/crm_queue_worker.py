@@ -8,9 +8,10 @@ import os
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
-from hermes.core.client import EspoClient, EspoClientError
+from hermes.core.client import EspoClient, EspoClientError, categorize_espo_status
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations.guardrails import log_guardrail_event
@@ -35,6 +36,27 @@ def _is_non_retryable_espo_error(message: str) -> bool:
     if _PERMANENT_HTTP_STATUS_PATTERN.match(message):
         return True
     return "validationFailure" in message
+
+
+@dataclass
+class ItemResult:
+    """Per-row outcome of a single crm_write_queue item.
+
+    The generic worker reports these verbatim and stays out of any
+    caller-specific reconciliation. Each result references only its own row and
+    its own EspoCRM target — no run-level blobs. ``error_type`` reuses the
+    EspoClient status taxonomy (validation_400 / missing_404 / conflict_409 /
+    other) so the sync layer can react to typed failures without re-parsing.
+    """
+
+    queue_id: str
+    entity_type: str
+    entity_id: str | None
+    ok: bool
+    error_type: str | None = None
+    status_code: int | None = None
+    reason: str | None = None
+    message: str | None = None
 ALLOWED_ACTION_TYPES = {
     "request_docs",
     "update_status",
@@ -153,7 +175,7 @@ async def _process_queue_async(
     blocked = 0
     errors: list[str] = []
     
-    async def _process_item(item: dict[str, Any]) -> tuple[bool, str | None]:
+    async def _process_item(item: dict[str, Any]) -> ItemResult:
         """Process a single queue item asynchronously."""
         async with semaphore:
             queue_id = item["id"]
@@ -162,7 +184,7 @@ async def _process_queue_async(
             payload = dict(item.get("payload") or {})
             attempt_count = (item.get("attempt_count") or 0) + 1
             role = item.get("created_by_role", "unknown")
-            
+
             # Check max attempts
             if attempt_count > MAX_ATTEMPTS:
                 _update_status(supa, queue_id, "FAILED", attempt_count)
@@ -183,16 +205,28 @@ async def _process_queue_async(
                     attempt_count=attempt_count,
                     error_message="max attempts exceeded before processing",
                 )
-                return False, f"{queue_id}: max attempts exceeded"
-            
+                return ItemResult(
+                    queue_id=queue_id,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    ok=False,
+                    error_type="other",
+                    message=f"{queue_id}: max attempts exceeded",
+                )
+
             # Dry run mode
             if dry_run:
                 log.info("DRY RUN: would process queue_id=%s entity=%s", queue_id, entity_type)
-                return True, None
-            
+                return ItemResult(
+                    queue_id=queue_id,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    ok=True,
+                )
+
             # Mark as processing
             _update_status(supa, queue_id, "PROCESSING", attempt_count)
-            
+
             try:
                 # Execute CRM operation in thread pool (EspoClient is sync)
                 loop = asyncio.get_event_loop()
@@ -232,8 +266,22 @@ async def _process_queue_async(
                         attempt_count=final_attempt,
                         error_message=msg,
                     )
-                return False, f"{queue_id}: {msg}"
-            
+                # error_type prefers the exception's own status; fall back to
+                # parsing the message prefix for non-EspoClient-shaped errors.
+                error_type = categorize_espo_status(exc.status_code)
+                if error_type == "other" and exc.status_code is None:
+                    error_type = _error_type_from_message(msg)
+                return ItemResult(
+                    queue_id=queue_id,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    ok=False,
+                    error_type=error_type,
+                    status_code=exc.status_code,
+                    reason=exc.reason,
+                    message=f"{queue_id}: {msg}",
+                )
+
             # Record receipt
             transaction_id = _extract_transaction_id(crm_response, queue_id)
             try:
@@ -247,10 +295,15 @@ async def _process_queue_async(
                 )
             except SupabaseClientError:
                 log.exception("Failed to write CRM receipt for queue_id=%s", queue_id)
-            
+
             _update_status(supa, queue_id, "SUCCESS", attempt_count)
-            return True, None
-    
+            return ItemResult(
+                queue_id=queue_id,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                ok=True,
+            )
+
     # Group items by priority so higher-priority items (lower number) finish
     # before dependents start.  This prevents the race where a Contact's
     # _resolve_parent_id fires before its parent Account has been created.
@@ -259,27 +312,28 @@ async def _process_queue_async(
         p = int(item.get("priority") or 99)
         priority_groups.setdefault(p, []).append(item)
 
-    results: list[tuple[bool, str | None] | Exception] = []
+    results: list[ItemResult | Exception] = []
     for _priority in sorted(priority_groups):
         group = priority_groups[_priority]
         tasks = [_process_item(item) for item in group]
         group_results = await asyncio.gather(*tasks, return_exceptions=True)
         results.extend(group_results)
 
-    # Aggregate results
+    # Aggregate results — per-row, never smeared across the batch.
+    items: list[ItemResult] = []
     for result in results:
         if isinstance(result, Exception):
             failed += 1
             errors.append(f"Unexpected error: {result}")
-        elif isinstance(result, tuple):
-            success, error_msg = result
-            if success:
+        elif isinstance(result, ItemResult):
+            items.append(result)
+            if result.ok:
                 succeeded += 1
             else:
                 failed += 1
-                if error_msg:
-                    errors.append(error_msg)
-    
+                if result.message:
+                    errors.append(result.message)
+
     return ProcessResult(
         total=len(pending),
         succeeded=succeeded,
@@ -287,6 +341,7 @@ async def _process_queue_async(
         blocked=blocked,
         errors=errors,
         dry_run=dry_run,
+        items=items,
     )
 
 
@@ -522,6 +577,18 @@ def run_worker_loop(
         time.sleep(interval)
 
 
+def _error_type_from_message(message: str) -> str:
+    """Derive the error_type taxonomy from a status-prefixed error message.
+
+    Fallback for errors that don't carry a structured ``status_code`` (older
+    raw EspoClientError strings, or non-Espo exceptions).
+    """
+    match = re.match(r"^(\d{3}) ", message or "")
+    if not match:
+        return "other"
+    return categorize_espo_status(int(match.group(1)))
+
+
 class ProcessResult:
     """Summary of a queue processing run."""
 
@@ -534,6 +601,7 @@ class ProcessResult:
         blocked: int,
         errors: list[str],
         dry_run: bool,
+        items: list[ItemResult] | None = None,
     ) -> None:
         self.total = total
         self.succeeded = succeeded
@@ -541,6 +609,9 @@ class ProcessResult:
         self.blocked = blocked
         self.errors = errors
         self.dry_run = dry_run
+        # Per-row outcomes, keyed by crm_write_queue id, for callers that need
+        # to reconcile typed failures (e.g. the outbound sync layer).
+        self.items = items or []
 
     @property
     def ok(self) -> bool:

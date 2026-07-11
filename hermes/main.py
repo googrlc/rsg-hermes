@@ -426,6 +426,17 @@ def main() -> int:
         help="Poll interval for --run-intake-worker (default: 5s)",
     )
     parser.add_argument(
+        "--run-outbound-drain-worker",
+        action="store_true",
+        help="Continuously drain outbound_sync_queue (Hermes's single scheduler; pg_cron stays disabled)",
+    )
+    parser.add_argument(
+        "--outbound-drain-poll-seconds",
+        type=float,
+        default=900.0,
+        help="Poll interval for --run-outbound-drain-worker (default: 900s = 15 min)",
+    )
+    parser.add_argument(
         "--snapshot-kpis",
         action="store_true",
         help="Record system health, finance, and renewal KPI snapshots",
@@ -1024,6 +1035,26 @@ def main() -> int:
             return 2
         print(f"Starting intake worker loop every {args.intake_poll_seconds}s...")
         run_intake_worker_loop(supa, poll_seconds=args.intake_poll_seconds)
+        return 0
+
+    if args.run_outbound_drain_worker:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.pipeline import run_outbound_drain_loop
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        print(
+            f"Starting outbound drain loop every {args.outbound_drain_poll_seconds}s "
+            "(pg_cron outbound path is retired)..."
+        )
+        run_outbound_drain_loop(
+            supa,
+            client,
+            poll_seconds=args.outbound_drain_poll_seconds,
+        )
         return 0
 
     if args.commission_reconcile_file:
