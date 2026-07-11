@@ -10,24 +10,31 @@
 #
 # SYNC DIRECTIONS ARE TIME-SEPARATED — never run `--sync-bidirectional` (it runs
 # both directions in one pass, which lets a value synced one way echo straight
-# back the other way). The inbound pull (NowCerts -> EspoCRM) and the writeback
-# (EspoCRM -> NowCerts) run on different clocks:
-#   * 02:00 ET  --sync-nowcerts   NowCerts -> EspoCRM (enqueues; hermes-outbound-drain applies)
-#   * 14:00 ET  --sync-writeback  EspoCRM -> NowCerts (crm_to_hub + hub_to_nowcerts)
-#   * 19:00 ET  --espo-writeback  Cases -> NowCerts task ledger (also a writeback lane)
+# back the other way). Source-of-truth governance:
+#   * NowCerts owns Insureds (= EspoCRM "Accounts") AND Policies -> they flow
+#     NowCerts -> EspoCRM (inbound).
+#   * EspoCRM -> NowCerts writeback is NARROW and additive ONLY: fill-blank
+#     account fields, Closed-Won -> minimal account STUB (no policy), Cases, and
+#     account-linked Tasks. Never overwrites the AMS. This is the existing
+#     `--espo-writeback` job, NOT the hub_to_nowcerts lane.
+# The two directions run on different clocks, 12h apart:
+#   * 02:00 ET  --sync-nowcerts    NowCerts -> EspoCRM (Insureds->Accounts +
+#                                  Policies->Opportunities; enqueues, drain applies)
+#   * 14:00 ET  --espo-writeback   EspoCRM -> NowCerts (fill-blank + Closed-Won
+#                                  stub + Cases + account Tasks)
 # (Supersedes the earlier "accounts sync deliberately excluded" note — per Lamar,
-# both directions run, staggered.) NOTE: the hub_to_nowcerts leg is still failing
-# and is being fixed separately; its 14:00 slot is reserved but won't succeed yet.
+# both directions run, staggered.)
 #
 # >>> hermes automations (managed by deploy/cron/install-cron.sh) >>>
 CRON_TZ=America/New_York
-# NowCerts -> EspoCRM inbound pull — daily 2:00am ET (enqueues to outbound_sync_queue;
-# hermes-outbound-drain applies to EspoCRM every 15 min). Direction A — kept 12h
-# apart from the writeback so the two never run together.
+# NowCerts -> EspoCRM inbound pull — daily 2:00am ET (Insureds->Accounts +
+# Policies->Opportunities; enqueues to outbound_sync_queue, hermes-outbound-drain
+# applies to EspoCRM every 15 min). Direction A — 12h apart from the writeback.
 0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
-# EspoCRM -> NowCerts writeback — daily 2:00pm ET (crm_to_hub + hub_to_nowcerts).
-# Direction B. NOTE: hub_to_nowcerts leg is being fixed separately.
-0 14 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-writeback >> /root/hermes-cron.log 2>&1
+# EspoCRM -> NowCerts writeback — daily 2:00pm ET. Direction B, narrow + additive:
+# fill-blank account fields, Closed-Won -> minimal account stub, Cases, and
+# account-linked Tasks. Never overwrites the AMS.
+0 14 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --espo-writeback >> /root/hermes-cron.log 2>&1
 # Outlook -> intake triage — every 30 min, 2h lookback (idempotent via Hermes Triaged category)
 */30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
 # Dashboard KPI history — daily 6:00am ET (Supabase dashboard_kpis, no Slack)
@@ -46,6 +53,6 @@ CRON_TZ=America/New_York
 0 7 1 * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --eom-scorecard >> /root/hermes-cron.log 2>&1
 # Nightly CRM changelog -> #the-boss — 8:00pm ET
 0 20 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --changelog >> /root/hermes-cron.log 2>&1
-# Cases -> NowCerts task ledger write-back — daily 7:00pm ET (AMS = source of truth; additive, idempotent via Case.momentumTaskId)
-0 19 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --espo-writeback >> /root/hermes-cron.log 2>&1
+# (EspoCRM -> NowCerts writeback --espo-writeback now runs at 2:00pm ET above,
+# staggered opposite the 2:00am inbound pull — no longer a separate 7:00pm job.)
 # <<< hermes automations <<<

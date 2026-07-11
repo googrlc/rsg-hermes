@@ -333,41 +333,12 @@ def run_bidirectional(
     return combined
 
 
-def run_writeback(
-    nc: NowCertsClient,
-    espo: EspoClient,
-    supa: SupabaseClient,
-    *,
-    dry_run: bool = False,
-    since_hours: int = 24,
-) -> BidiSyncResult:
-    """Run ONLY the EspoCRM → NowCerts writeback direction.
-
-    This is ``run_bidirectional`` minus the inbound NowCerts → EspoCRM leg, so
-    the two directions can be scheduled at different times and never run in the
-    same pass. Running both directions together lets a value synced one way
-    immediately echo back the other way; separating them removes that race.
-
-    1. EspoCRM → Supabase   (crm_to_hub — mirror CRM fields into the hub)
-    2. Supabase → NowCerts  (hub_to_nowcerts — push CRM fields to NowCerts)
-    """
-    combined = BidiSyncResult(direction="writeback", dry_run=dry_run)
-
-    crm_result = run_crm_to_hub(espo, supa, dry_run=dry_run, since_hours=since_hours)
-    combined.accounts_mirrored += crm_result.accounts_mirrored
-    combined.commissions_mirrored += crm_result.commissions_mirrored
-    combined.records_failed += crm_result.records_failed
-    combined.errors.extend(crm_result.errors)
-
-    push_result = run_hub_to_nowcerts(nc, supa, dry_run=dry_run)
-    combined.accounts_pushed += push_result.accounts_pushed
-    combined.commissions_pushed += push_result.commissions_pushed
-    combined.records_failed += push_result.records_failed
-    combined.errors.extend(push_result.errors)
-
-    combined.run_id = push_result.run_id or crm_result.run_id
-
-    return combined
+# NOTE: the governance-correct EspoCRM → NowCerts writeback is NOT this module's
+# hub_to_nowcerts lane. It is the narrow, additive `--espo-writeback` job
+# (hermes/jobs/espo_account_writeback.py + espo_to_nowcerts_writeback.py):
+# fill-blank account fields, Closed-Won → minimal account stub, Cases, and
+# account-linked Tasks — never overwriting NowCerts, which owns Insureds/Accounts
+# and Policies. That job is scheduled as the daily writeback direction.
 
 
 # ---------------------------------------------------------------------------
