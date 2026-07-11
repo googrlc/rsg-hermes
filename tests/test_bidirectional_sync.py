@@ -395,6 +395,33 @@ class BidirectionalOrchestratorTests(unittest.TestCase):
         self.assertEqual(result.accounts_pushed, 1)
 
 
+class WritebackDirectionTests(unittest.TestCase):
+    """The writeback entrypoint runs ONLY the EspoCRM→NowCerts direction."""
+
+    @patch("hermes.sync.bidirectional.run_hub_to_nowcerts")
+    @patch("hermes.sync.bidirectional.run_crm_to_hub")
+    @patch("hermes.sync.pipeline.run_insured_to_account_sync")
+    def test_writeback_skips_inbound_leg(self, mock_nc_sync, mock_crm_hub, mock_hub_nc):
+        from hermes.sync.bidirectional import BidiSyncResult, run_writeback
+
+        mock_crm_hub.return_value = BidiSyncResult(run_id="run-2", accounts_mirrored=4)
+        mock_hub_nc.return_value = BidiSyncResult(run_id="run-3", accounts_pushed=2)
+
+        nc = _mock_nc()
+        espo = _mock_espo()
+        supa = _mock_supa()
+
+        result = run_writeback(nc, espo, supa)
+
+        # Both writeback legs run; the inbound NowCerts→EspoCRM leg must NOT.
+        mock_crm_hub.assert_called_once()
+        mock_hub_nc.assert_called_once()
+        mock_nc_sync.assert_not_called()
+        self.assertEqual(result.direction, "writeback")
+        self.assertEqual(result.accounts_mirrored, 4)
+        self.assertEqual(result.accounts_pushed, 2)
+
+
 # ---------------------------------------------------------------------------
 # Sync command routing tests
 # ---------------------------------------------------------------------------

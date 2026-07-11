@@ -336,6 +336,16 @@ def main() -> int:
         help="Preview hub-to-NowCerts push without writing",
     )
     parser.add_argument(
+        "--sync-writeback",
+        action="store_true",
+        help="Run ONLY the EspoCRM→NowCerts writeback (crm_to_hub + hub_to_nowcerts); no inbound leg",
+    )
+    parser.add_argument(
+        "--sync-writeback-dry-run",
+        action="store_true",
+        help="Preview the EspoCRM→NowCerts writeback without writing",
+    )
+    parser.add_argument(
         "--sync-hours",
         type=int,
         default=24,
@@ -562,7 +572,8 @@ def main() -> int:
     _bidi = args.sync_bidirectional or args.sync_bidirectional_dry_run
     _crm_hub = args.sync_crm_to_hub or args.sync_crm_to_hub_dry_run
     _hub_nc = args.sync_hub_to_nowcerts or args.sync_hub_to_nowcerts_dry_run
-    if _bidi or _crm_hub or _hub_nc:
+    _writeback = args.sync_writeback or args.sync_writeback_dry_run
+    if _bidi or _crm_hub or _hub_nc or _writeback:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
         try:
@@ -576,7 +587,20 @@ def main() -> int:
             print(f"EspoCRM connection failed: {e}", file=sys.stderr)
             return 2
 
-        if _crm_hub:
+        if _writeback:
+            from hermes.sync.bidirectional import run_writeback
+            from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+            try:
+                nc = NowCertsClient()
+            except NowCertsClientError as e:
+                print(f"NowCerts connection failed: {e}", file=sys.stderr)
+                return 2
+            bidi_result = run_writeback(
+                nc, espo, supa,
+                dry_run=args.sync_writeback_dry_run,
+                since_hours=args.sync_hours,
+            )
+        elif _crm_hub:
             from hermes.sync.bidirectional import run_crm_to_hub
             bidi_result = run_crm_to_hub(
                 espo, supa,
