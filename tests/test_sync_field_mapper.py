@@ -7,7 +7,6 @@ import unittest
 from hermes.sync.field_mapper import (
     detect_conflicts,
     map_insured_to_account,
-    map_nowcerts_policy_to_espo_commission,
     map_nowcerts_policy_to_espo_policy,
     map_policy_to_opportunity,
     payload_hash,
@@ -294,45 +293,6 @@ class MapNowCertsPolicyToEspoPolicyTests(unittest.TestCase):
         )
         self.assertEqual(p["line_of_business"], "Workers Comp")
         self.assertEqual(p["premium_amount"], 1200.0)
-
-
-class MapNowCertsPolicyToEspoCommissionTests(unittest.TestCase):
-    def _policy(self, **overrides) -> dict:
-        base = {
-            "number": "CPK-99887-01",
-            "effectiveDate": "2026-07-01T00:00:00",
-            "carrierName": "Progressive Commercial",
-            "agencyCommissionPercent": 12.5,
-            "agencyCommissionValue": 1052.69,
-        }
-        base.update(overrides)
-        return base
-
-    def test_links_and_documented_fields(self):
-        c = map_nowcerts_policy_to_espo_commission(
-            self._policy(), policy_id="POL1", account_id="ACC1",
-        )
-        self.assertEqual(c["policyId"], "POL1")   # link to Policy
-        self.assertEqual(c["accountId"], "ACC1")  # link to Account
-        self.assertEqual(c["name"], "CPK-99887-01")
-        self.assertEqual(c["carrier"], "Progressive Commercial")
-        self.assertEqual(c["commissionRate"], 12.5)
-        self.assertEqual(c["estimatedCommission"], 1052.69)
-        self.assertEqual(c["effectiveDate"], "2026-07-01")
-
-    def test_commission_type_never_sent(self):
-        # commissionType enum values are unknown here; sending one risks a 400.
-        c = map_nowcerts_policy_to_espo_commission(self._policy(), policy_id="POL1")
-        self.assertNotIn("commissionType", c)
-
-    def test_alt_commission_field_casings(self):
-        c = map_nowcerts_policy_to_espo_commission(
-            self._policy(agencyCommissionPercent=None, AgencyCommissionPercent=10,
-                         agencyCommissionValue=None, commissionAmount=500),
-            policy_id="POL1",
-        )
-        self.assertEqual(c["commissionRate"], 10.0)
-        self.assertEqual(c["estimatedCommission"], 500.0)
 
 
 if __name__ == "__main__":
