@@ -99,12 +99,13 @@ class WalkerService:
     def _resolve_opportunity_id(self, record_id: str) -> str:
         """Resolve a record ID to an EspoCRM Opportunity ID.
 
-        Accepts either:
-        - An EspoCRM Opportunity ID (tried first via direct lookup)
-        - A Supabase project_85_renewals ID (looked up by account name)
-        Falls back to a contains-match on the Opportunity name.
+        Accepts:
+        - An EspoCRM Opportunity ID (direct lookup)
+        - A Supabase project_85_renewals UUID (lookup by id)
+        - A policy number (contains match on policy_number in Supabase)
+        Creates an Opportunity if none exists.
         """
-        # 1. Try direct EspoCRM Opportunity lookup first
+        # 1. Try direct EspoCRM Opportunity lookup
         try:
             opp = self.espo.get(f"Opportunity/{record_id}", params={"select": "id,name"})
             if isinstance(opp, dict) and opp.get("id"):
@@ -112,25 +113,48 @@ class WalkerService:
         except Exception:
             pass
 
-        # 2. Try Supabase renewal lookup -> find Opportunity by account name
+        # 2. Try Supabase lookup — by id (exact) then by policy_number (contains)
+        renewal_row = None
         try:
             rows = self.supa.select(
                 "project_85_renewals",
-                columns="id,client_name,policy_number",
+                columns="id,client_name,expiration_date,premium_current,policy_number",
                 params={"id": f"eq.{record_id}"},
                 limit=1,
             )
             if rows:
-                account_name = rows[0].get("client_name")
-                if account_name and account_name != "Unknown client":
-                    # 2a. Exact match
+                renewal_row = rows[0]
+        except Exception:
+            pass
+
+        if not renewal_row:
+            try:
+                rows = self.supa.select(
+                    "project_85_renewals",
+                    columns="id,client_name,expiration_date,premium_current,policy_number",
+                    params={"policy_number": f"ilike.%{record_id}%"},
+                    limit=1,
+                )
+                if rows:
+                    renewal_row = rows[0]
+            except Exception:
+                pass
+
+        if renewal_row:
+            account_name = renewal_row.get("client_name")
+            if account_name and account_name != "Unknown client":
+                # 3a. Exact match on Opportunity name
+                try:
                     opp = self.espo.find_one_by_field(
                         "Opportunity", "name", account_name,
                         select="id,name",
                     )
                     if opp and opp.get("id"):
                         return opp["id"]
-                    # 2b. Contains match (Opportunity name might have a suffix)
+                except Exception:
+                    pass
+                # 3b. Contains match on Opportunity name
+                try:
                     body = self.espo.get("Opportunity", params={
                         "maxSize": 1,
                         "select": "id,name",
@@ -140,34 +164,25 @@ class WalkerService:
                         items = body.get("list", []) if isinstance(body.get("list"), list) else []
                         if items and items[0].get("id"):
                             return items[0]["id"]
-        except Exception as exc:
-            log.warning("Walker resolver Supabase/EspoCRM lookup failed: %s", exc)
-
-        # 3. No Opportunity found — create one from the renewal data
-        try:
-            rows = self.supa.select(
-                "project_85_renewals",
-                columns="id,client_name,expiration_date,premium_current,policy_number",
-                params={"id": f"eq.{record_id}"},
-                limit=1,
-            )
-            if rows and rows[0].get("client_name") and rows[0]["client_name"] != "Unknown client":
-                account_name = rows[0]["client_name"]
-                opp = self.espo.create("Opportunity", {
-                    "name": account_name,
-                    "amount": _as_float(rows[0].get("premium_current")) or 0,
-                    "stage": "Renewal",
-                })
-                if isinstance(opp, dict) and opp.get("id"):
-                    log.info("Walker: created Opportunity %s for renewal %s (%s)",
-                             opp["id"], record_id, account_name)
-                    return opp["id"]
-        except Exception as exc:
-            log.warning("Walker: could not create Opportunity for %s: %s", record_id, exc)
+                except Exception:
+                    pass
+                # 3c. No Opportunity found — create one
+                try:
+                    opp = self.espo.create("Opportunity", {
+                        "name": account_name,
+                        "amount": _as_float(renewal_row.get("premium_current")) or 0,
+                        "stage": "Renewal",
+                    })
+                    if isinstance(opp, dict) and opp.get("id"):
+                        log.info("Walker: created Opportunity %s for '%s'",
+                                 opp["id"], account_name)
+                        return opp["id"]
+                except Exception as exc:
+                    log.warning("Walker: could not create Opportunity: %s", exc)
 
         raise ValueError(
             f"Could not resolve or create an Opportunity for record ID '{record_id}'. "
-            f"The renewal may have 'Unknown client' or no account name in the mirror."
+            f"The renewal may have 'Unknown client' or no matching record in the mirror."
         )
 
     # -- READS ------------------------------------------------------------
