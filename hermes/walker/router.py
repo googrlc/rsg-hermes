@@ -133,6 +133,8 @@ async def post_touch(request: Request, id: str, body: TouchRequest):
     _require_walker_token(request)
     try:
         return _get_walker().post_touch(id, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         log.exception("walker touch failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -183,6 +185,8 @@ async def post_outcome(request: Request, id: str, body: OutcomeRequest):
     _require_walker_token(request)
     try:
         return _get_walker().post_outcome(id, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         log.exception("walker outcome failed")
         raise HTTPException(status_code=500, detail=str(exc))

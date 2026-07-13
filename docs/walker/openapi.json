@@ -305,14 +305,15 @@
     },
     "/walker/touch/{id}": {
       "post": {
-        "summary": "Log a touch on the renewal Opportunity",
+        "summary": "Log a touch", "description": "Use the id from getQueue or searchRenewals results.",
         "operationId": "postTouch",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"}
+            "schema": {"type": "string"},
+            "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
         "requestBody": {
@@ -337,14 +338,15 @@
     },
     "/walker/worksheet/{id}": {
       "patch": {
-        "summary": "Update worksheet state on the Opportunity",
+        "summary": "Update worksheet", "description": "Use the id from getQueue or searchRenewals results.",
         "operationId": "patchWorksheet",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"}
+            "schema": {"type": "string"},
+            "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
         "requestBody": {
@@ -369,14 +371,15 @@
     },
     "/walker/flag/{id}": {
       "post": {
-        "summary": "Add a complexity flag to the Opportunity",
+        "summary": "Add a complexity flag", "description": "Use the id from getQueue or searchRenewals results.",
         "operationId": "postFlag",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"}
+            "schema": {"type": "string"},
+            "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
         "requestBody": {
@@ -401,14 +404,15 @@
     },
     "/walker/handoff/{id}": {
       "post": {
-        "summary": "Set handoff notes on the Opportunity",
+        "summary": "Set handoff notes", "description": "Use the id from getQueue or searchRenewals results.",
         "operationId": "postHandoff",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"}
+            "schema": {"type": "string"},
+            "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
         "requestBody": {
@@ -433,14 +437,15 @@
     },
     "/walker/outcome/{id}": {
       "post": {
-        "summary": "Set the renewal decision and pipeline stage",
+        "summary": "Set renewal decision", "description": "Use the id from getQueue or searchRenewals results.",
         "operationId": "postOutcome",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"}
+            "schema": {"type": "string"},
+            "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
         "requestBody": {
