@@ -102,8 +102,9 @@ class WalkerService:
         Accepts either:
         - An EspoCRM Opportunity ID (tried first via direct lookup)
         - A Supabase project_85_renewals ID (looked up by account name)
+        Falls back to a contains-match on the Opportunity name.
         """
-        # Try direct EspoCRM Opportunity lookup first
+        # 1. Try direct EspoCRM Opportunity lookup first
         try:
             opp = self.espo.get(f"Opportunity/{record_id}", params={"select": "id,name"})
             if isinstance(opp, dict) and opp.get("id"):
@@ -111,7 +112,7 @@ class WalkerService:
         except Exception:
             pass
 
-        # Try Supabase renewal lookup -> find Opportunity by account name
+        # 2. Try Supabase renewal lookup -> find Opportunity by account name
         try:
             rows = self.supa.select(
                 "project_85_renewals",
@@ -121,17 +122,53 @@ class WalkerService:
             )
             if rows:
                 account_name = rows[0].get("client_name")
-                if account_name:
+                if account_name and account_name != "Unknown client":
+                    # 2a. Exact match
                     opp = self.espo.find_one_by_field(
                         "Opportunity", "name", account_name,
                         select="id,name",
                     )
                     if opp and opp.get("id"):
                         return opp["id"]
-        except Exception:
-            pass
+                    # 2b. Contains match (Opportunity name might have a suffix)
+                    body = self.espo.get("Opportunity", params={
+                        "maxSize": 1,
+                        "select": "id,name",
+                        "where": [{"type": "contains", "attribute": "name", "value": account_name}],
+                    })
+                    if isinstance(body, dict):
+                        items = body.get("list", []) if isinstance(body.get("list"), list) else []
+                        if items and items[0].get("id"):
+                            return items[0]["id"]
+        except Exception as exc:
+            log.warning("Walker resolver Supabase/EspoCRM lookup failed: %s", exc)
 
-        raise ValueError(f"Could not resolve record ID '{record_id}' to an EspoCRM Opportunity")
+        # 3. No Opportunity found — create one from the renewal data
+        try:
+            rows = self.supa.select(
+                "project_85_renewals",
+                columns="id,client_name,expiration_date,premium_current,policy_number",
+                params={"id": f"eq.{record_id}"},
+                limit=1,
+            )
+            if rows and rows[0].get("client_name") and rows[0]["client_name"] != "Unknown client":
+                account_name = rows[0]["client_name"]
+                opp = self.espo.create("Opportunity", {
+                    "name": account_name,
+                    "amount": _as_float(rows[0].get("premium_current")) or 0,
+                    "stage": "Renewal",
+                })
+                if isinstance(opp, dict) and opp.get("id"):
+                    log.info("Walker: created Opportunity %s for renewal %s (%s)",
+                             opp["id"], record_id, account_name)
+                    return opp["id"]
+        except Exception as exc:
+            log.warning("Walker: could not create Opportunity for %s: %s", record_id, exc)
+
+        raise ValueError(
+            f"Could not resolve or create an Opportunity for record ID '{record_id}'. "
+            f"The renewal may have 'Unknown client' or no account name in the mirror."
+        )
 
     # -- READS ------------------------------------------------------------
 
@@ -209,10 +246,45 @@ class WalkerService:
         }
 
     def get_renewal_detail(self, renewal_id: str) -> dict[str, Any]:
-        """Single-client truth pulled LIVE from NowCerts through Hermes."""
-        renewal = self.espo.get(f"{renewal_config.RENEWAL_ENTITY}/{renewal_id}")
-        if not isinstance(renewal, dict):
-            raise ValueError(f"Renewal {renewal_id} not found")
+        """Single-client truth pulled LIVE from NowCerts through Hermes.
+
+        Accepts either an EspoCRM Renewal ID or a Supabase project_85_renewals ID.
+        """
+        renewal = {}
+        account_name = ""
+
+        # Try EspoCRM Renewal entity first
+        try:
+            renewal = self.espo.get(f"{renewal_config.RENEWAL_ENTITY}/{renewal_id}")
+            if not isinstance(renewal, dict):
+                renewal = {}
+        except Exception:
+            pass
+
+        # Fall back to Supabase renewal lookup
+        if not renewal:
+            try:
+                rows = self.supa.select(
+                    "project_85_renewals",
+                    columns="id,client_name,expiration_date,premium_current,policy_number,risk_status",
+                    params={"id": f"eq.{renewal_id}"},
+                    limit=1,
+                )
+                if rows:
+                    r = rows[0]
+                    renewal = {
+                        "id": r.get("id"),
+                        "name": r.get("client_name"),
+                        "accountName": r.get("client_name"),
+                        "expiration_date": r.get("expiration_date"),
+                        "current_premium": r.get("premium_current"),
+                        "policy_number": r.get("policy_number"),
+                    }
+            except Exception:
+                pass
+
+        if not renewal:
+            raise ValueError(f"Renewal {renewal_id} not found in EspoCRM or Supabase")
 
         account_name = renewal.get("accountName") or renewal.get("name") or ""
         nowcerts_data: dict[str, Any] = {}
