@@ -127,23 +127,23 @@ class OutcomeRequest(BaseModel):
     stage: str | None = None
 
 
-@router.post("/touch/{opportunity_id}")
-async def post_touch(request: Request, opportunity_id: str, body: TouchRequest):
+@router.post("/touch/{id}")
+async def post_touch(request: Request, id: str, body: TouchRequest):
     """Log a touch on the Opportunity."""
     _require_walker_token(request)
     try:
-        return _get_walker().post_touch(opportunity_id, body.model_dump())
+        return _get_walker().post_touch(id, body.model_dump())
     except Exception as exc:
         log.exception("walker touch failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.patch("/worksheet/{opportunity_id}")
-async def patch_worksheet(request: Request, opportunity_id: str, body: WorksheetRequest):
+@router.patch("/worksheet/{id}")
+async def patch_worksheet(request: Request, id: str, body: WorksheetRequest):
     """Update worksheet state on the Opportunity."""
     _require_walker_token(request)
     try:
-        return _get_walker().patch_worksheet(opportunity_id, body.model_dump())
+        return _get_walker().patch_worksheet(id, body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -151,12 +151,12 @@ async def patch_worksheet(request: Request, opportunity_id: str, body: Worksheet
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/flag/{opportunity_id}")
-async def post_flag(request: Request, opportunity_id: str, body: FlagRequest):
+@router.post("/flag/{id}")
+async def post_flag(request: Request, id: str, body: FlagRequest):
     """Add a complexity flag to the Opportunity."""
     _require_walker_token(request)
     try:
-        return _get_walker().post_flag(opportunity_id, body.model_dump())
+        return _get_walker().post_flag(id, body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -164,12 +164,12 @@ async def post_flag(request: Request, opportunity_id: str, body: FlagRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/handoff/{opportunity_id}")
-async def post_handoff(request: Request, opportunity_id: str, body: HandoffRequest):
+@router.post("/handoff/{id}")
+async def post_handoff(request: Request, id: str, body: HandoffRequest):
     """Set handoff notes on the Opportunity."""
     _require_walker_token(request)
     try:
-        return _get_walker().post_handoff(opportunity_id, body.model_dump())
+        return _get_walker().post_handoff(id, body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -177,12 +177,12 @@ async def post_handoff(request: Request, opportunity_id: str, body: HandoffReque
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/outcome/{opportunity_id}")
-async def post_outcome(request: Request, opportunity_id: str, body: OutcomeRequest):
+@router.post("/outcome/{id}")
+async def post_outcome(request: Request, id: str, body: OutcomeRequest):
     """Set the renewal decision + pipeline stage."""
     _require_walker_token(request)
     try:
-        return _get_walker().post_outcome(opportunity_id, body.model_dump())
+        return _get_walker().post_outcome(id, body.model_dump())
     except Exception as exc:
         log.exception("walker outcome failed")
         raise HTTPException(status_code=500, detail=str(exc))

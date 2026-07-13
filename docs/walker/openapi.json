@@ -159,7 +159,7 @@
         "type": "object",
         "properties": {
           "ok": {"type": "boolean"},
-          "opportunity_id": {"type": "string"},
+          "id": {"type": "string"},
           "touch_logged": {"type": "string"},
           "updated_fields": {"type": "array", "items": {"type": "string"}},
           "flags": {"type": "array", "items": {"type": "string"}},
@@ -303,13 +303,13 @@
         }
       }
     },
-    "/walker/touch/{opportunity_id}": {
+    "/walker/touch/{id}": {
       "post": {
         "summary": "Log a touch on the renewal Opportunity",
         "operationId": "postTouch",
         "parameters": [
           {
-            "name": "opportunity_id",
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {"type": "string"}
@@ -335,13 +335,13 @@
         }
       }
     },
-    "/walker/worksheet/{opportunity_id}": {
+    "/walker/worksheet/{id}": {
       "patch": {
         "summary": "Update worksheet state on the Opportunity",
         "operationId": "patchWorksheet",
         "parameters": [
           {
-            "name": "opportunity_id",
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {"type": "string"}
@@ -367,13 +367,13 @@
         }
       }
     },
-    "/walker/flag/{opportunity_id}": {
+    "/walker/flag/{id}": {
       "post": {
         "summary": "Add a complexity flag to the Opportunity",
         "operationId": "postFlag",
         "parameters": [
           {
-            "name": "opportunity_id",
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {"type": "string"}
@@ -399,13 +399,13 @@
         }
       }
     },
-    "/walker/handoff/{opportunity_id}": {
+    "/walker/handoff/{id}": {
       "post": {
         "summary": "Set handoff notes on the Opportunity",
         "operationId": "postHandoff",
         "parameters": [
           {
-            "name": "opportunity_id",
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {"type": "string"}
@@ -431,13 +431,13 @@
         }
       }
     },
-    "/walker/outcome/{opportunity_id}": {
+    "/walker/outcome/{id}": {
       "post": {
         "summary": "Set the renewal decision and pipeline stage",
         "operationId": "postOutcome",
         "parameters": [
           {
-            "name": "opportunity_id",
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {"type": "string"}

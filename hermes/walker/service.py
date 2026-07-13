@@ -95,6 +95,44 @@ class WalkerService:
             log.warning("Could not read freshness stamp: %s", exc)
         return "unknown"
 
+
+    def _resolve_opportunity_id(self, record_id: str) -> str:
+        """Resolve a record ID to an EspoCRM Opportunity ID.
+
+        Accepts either:
+        - An EspoCRM Opportunity ID (tried first via direct lookup)
+        - A Supabase project_85_renewals ID (looked up by account name)
+        """
+        # Try direct EspoCRM Opportunity lookup first
+        try:
+            opp = self.espo.get(f"Opportunity/{record_id}", params={"select": "id,name"})
+            if isinstance(opp, dict) and opp.get("id"):
+                return opp["id"]
+        except Exception:
+            pass
+
+        # Try Supabase renewal lookup -> find Opportunity by account name
+        try:
+            rows = self.supa.select(
+                "project_85_renewals",
+                columns="id,client_name,policy_number",
+                params={"id": f"eq.{record_id}"},
+                limit=1,
+            )
+            if rows:
+                account_name = rows[0].get("client_name")
+                if account_name:
+                    opp = self.espo.find_one_by_field(
+                        "Opportunity", "name", account_name,
+                        select="id,name",
+                    )
+                    if opp and opp.get("id"):
+                        return opp["id"]
+        except Exception:
+            pass
+
+        raise ValueError(f"Could not resolve record ID '{record_id}' to an EspoCRM Opportunity")
+
     # -- READS ------------------------------------------------------------
 
     def get_queue(self, days: int = 60) -> dict[str, Any]:
@@ -339,8 +377,9 @@ class WalkerService:
 
     # -- WRITES (all land on the EspoCRM Opportunity) ---------------------
 
-    def post_touch(self, opportunity_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Log a touch on the Opportunity."""
+    def post_touch(self, record_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Log a touch on the Opportunity. Accepts renewal ID or Opportunity ID."""
+        opportunity_id = self._resolve_opportunity_id(record_id)
         now = datetime.now(timezone.utc).isoformat()
         entry = {
             "timestamp": now,
@@ -364,8 +403,9 @@ class WalkerService:
         self.espo.update("Opportunity", opportunity_id, payload)
         return {"ok": True, "opportunity_id": opportunity_id, "touch_logged": now}
 
-    def patch_worksheet(self, opportunity_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Update worksheet state on the Opportunity."""
+    def patch_worksheet(self, record_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Update worksheet state. Accepts renewal ID or Opportunity ID."""
+        opportunity_id = self._resolve_opportunity_id(record_id)
         allowed = body.get("fields", {})
         safe = {
             k: v for k, v in allowed.items()
@@ -376,8 +416,9 @@ class WalkerService:
         self.espo.update("Opportunity", opportunity_id, safe)
         return {"ok": True, "opportunity_id": opportunity_id, "updated_fields": list(safe.keys())}
 
-    def post_flag(self, opportunity_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Add a complexity flag to cComplexityFlags."""
+    def post_flag(self, record_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Add a complexity flag. Accepts renewal ID or Opportunity ID."""
+        opportunity_id = self._resolve_opportunity_id(record_id)
         flag_text = body.get("flag", "")
         if not flag_text:
             raise ValueError("flag text required")
@@ -394,16 +435,18 @@ class WalkerService:
         self.espo.update("Opportunity", opportunity_id, {OPP_C_COMPLEXITY_FLAGS: "|".join(flags)})
         return {"ok": True, "opportunity_id": opportunity_id, "flags": flags}
 
-    def post_handoff(self, opportunity_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Set handoff notes on the Opportunity."""
+    def post_handoff(self, record_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Set handoff notes. Accepts renewal ID or Opportunity ID."""
+        opportunity_id = self._resolve_opportunity_id(record_id)
         note = body.get("note", "")
         if not note:
             raise ValueError("handoff note required")
         self.espo.update("Opportunity", opportunity_id, {OPP_C_HANDOFF_NOTES: note})
         return {"ok": True, "opportunity_id": opportunity_id}
 
-    def post_outcome(self, opportunity_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Set the renewal decision + pipeline stage."""
+    def post_outcome(self, record_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Set the renewal decision + pipeline stage. Accepts renewal ID or Opportunity ID."""
+        opportunity_id = self._resolve_opportunity_id(record_id)
         decision = body.get("decision", "")
         stage = body.get("stage")
         payload: dict[str, Any] = {OPP_C_RENEWAL_DECISION: decision}
