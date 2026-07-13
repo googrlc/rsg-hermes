@@ -83,6 +83,13 @@ try:
 except Exception:  # pragma: no cover - surfaced in logs, never fatal
     log.exception("command_center routes unavailable")
 
+# Walker on-demand renewal API (no scheduler, no timers).
+try:
+    from hermes.walker.router import router as _walker_router
+    app.include_router(_walker_router)
+except Exception:  # pragma: no cover - surfaced in logs, never fatal
+    log.exception("walker routes unavailable")
+
 _espo = None
 _dispatcher = None
 _supa = None

@@ -1,0 +1,351 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hermes Walker — RSG Renewal API",
+    "version": "1.0.0",
+    "description": "On-demand renewal data and CRM writes for the RSG custom GPT. No scheduler, no timers. Every call is request-driven."
+  },
+  "servers": [
+    {
+      "url": "https://hermes-gretch-u69864.vm.elestio.app:8484",
+      "description": "Hermes VPS (production)"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    { "bearerAuth": [] }
+  ],
+  "paths": {
+    "/walker/queue": {
+      "get": {
+        "summary": "Get renewal queue",
+        "description": "Renewals inside N days, classified at request time. Every response stamped with data_as_of freshness.",
+        "operationId": "getQueue",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "schema": { "type": "integer", "default": 60 },
+            "description": "Days-out window (default 60)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Queue with classified items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data_as_of": { "type": "string" },
+                    "days_window": { "type": "integer" },
+                    "count": { "type": "integer" },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "client": { "type": "string" },
+                          "policy_number": { "type": "string" },
+                          "line": { "type": "string", "nullable": true },
+                          "carrier": { "type": "string", "nullable": true },
+                          "premium": { "type": "number", "nullable": true },
+                          "days_out": { "type": "integer", "nullable": true },
+                          "segment": { "type": "string", "nullable": true },
+                          "risk": { "type": "string" },
+                          "owner": { "type": "string", "nullable": true },
+                          "flags": { "type": "array", "items": { "type": "string" } },
+                          "last_touch": { "type": "string", "nullable": true }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/walker/renewal/{renewal_id}": {
+      "get": {
+        "summary": "Get single renewal detail (live from NowCerts)",
+        "operationId": "getRenewalDetail",
+        "parameters": [
+          {
+            "name": "renewal_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Single-client truth: live NowCerts data + EspoCRM touch history + worksheet state",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          },
+          "404": { "description": "Renewal not found" }
+        }
+      }
+    },
+    "/walker/search": {
+      "get": {
+        "summary": "Search renewals by name or policy number",
+        "operationId": "searchRenewals",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Client name or policy number"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data_as_of": { "type": "string" },
+                    "query": { "type": "string" },
+                    "count": { "type": "integer" },
+                    "results": {
+                      "type": "array",
+                      "items": { "type": "object" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/walker/quiet-lapse": {
+      "get": {
+        "summary": "Expired terms with no successor — silent churn catcher",
+        "operationId": "getQuietLapse",
+        "responses": {
+          "200": {
+            "description": "Lapsed renewals with no successor term",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data_as_of": { "type": "string" },
+                    "count": { "type": "integer" },
+                    "items": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/walker/scoreboard": {
+      "get": {
+        "summary": "Retention scoreboard — retention %, renewed/lost premium",
+        "operationId": "getScoreboard",
+        "responses": {
+          "200": {
+            "description": "Retention metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data_as_of": { "type": "string" },
+                    "total_renewals": { "type": "integer" },
+                    "retention_pct": { "type": "number", "nullable": true },
+                    "renewed_premium": { "type": "number" },
+                    "lost_premium": { "type": "number" },
+                    "active_premium": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/walker/touch/{opportunity_id}": {
+      "post": {
+        "summary": "Log a touch on the renewal Opportunity",
+        "operationId": "postTouch",
+        "parameters": [
+          {
+            "name": "opportunity_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "actor": { "type": "string", "default": "lamar" },
+                  "channel": { "type": "string", "default": "manual" },
+                  "note": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Touch logged" }
+        }
+      }
+    },
+    "/walker/worksheet/{opportunity_id}": {
+      "patch": {
+        "summary": "Update worksheet state on the Opportunity",
+        "operationId": "patchWorksheet",
+        "parameters": [
+          {
+            "name": "opportunity_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fields": {
+                    "type": "object",
+                    "description": "Opportunity fields to update (c* custom fields, stage, amount, description)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Worksheet updated" }
+        }
+      }
+    },
+    "/walker/flag/{opportunity_id}": {
+      "post": {
+        "summary": "Add a complexity flag to the Opportunity",
+        "operationId": "postFlag",
+        "parameters": [
+          {
+            "name": "opportunity_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "flag": { "type": "string", "description": "Flag text, e.g. 'GL open since 2025-10-04'" }
+                },
+                "required": ["flag"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Flag added" }
+        }
+      }
+    },
+    "/walker/handoff/{opportunity_id}": {
+      "post": {
+        "summary": "Set handoff notes on the Opportunity",
+        "operationId": "postHandoff",
+        "parameters": [
+          {
+            "name": "opportunity_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": { "type": "string" }
+                },
+                "required": ["note"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Handoff note set" }
+        }
+      }
+    },
+    "/walker/outcome/{opportunity_id}": {
+      "post": {
+        "summary": "Set the renewal decision + pipeline stage",
+        "operationId": "postOutcome",
+        "parameters": [
+          {
+            "name": "opportunity_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": ["renewed", "rewritten", "lost_price", "lost_coverage", "lost_no_response", "do_not_renew"]
+                  },
+                  "stage": { "type": "string", "nullable": true }
+                },
+                "required": ["decision"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Outcome set" }
+        }
+      }
+    }
+  }
+}
