@@ -10,12 +10,19 @@ from hermes.core.client import EspoClient, EspoClientError
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, body: dict | list | None = None, text: str = "") -> None:
+    def __init__(
+        self,
+        status_code: int,
+        body: dict | list | None = None,
+        text: str = "",
+        headers: dict | None = None,
+    ) -> None:
         self.status_code = status_code
         self._body = body
         self.text = text or str(body or "")
         self.content = b"1" if body is not None else b""
         self.ok = 200 <= status_code < 300
+        self.headers = headers or {}
 
     def json(self) -> dict | list:
         if self._body is None:
@@ -173,6 +180,52 @@ class EspoClientReliabilityTests(unittest.TestCase):
 
         self.assertIn("403 GET Account", str(ctx.exception))
         self.assertIn("EspoCRM API user lacks permission", str(ctx.exception))
+
+
+class TypedErrorCaptureTests(unittest.TestCase):
+    def _client(self, response: FakeResponse) -> EspoClient:
+        return EspoClient(
+            base_url="https://crm.example",
+            api_key="key",
+            timeout=1,
+            session=FakeSession([response]),
+            retry_sleep=0,
+        )
+
+    def test_x_status_reason_surfaced_when_body_empty(self) -> None:
+        # The classic "Body: {}" case — real cause is only in the header.
+        client = self._client(
+            FakeResponse(
+                400, {},
+                headers={"X-Status-Reason": "field 'phoneNumber' is not valid"},
+            )
+        )
+        with self.assertRaises(EspoClientError) as ctx:
+            client.put("Account/abc", json={"phoneNumber": "bad"})
+        exc = ctx.exception
+        self.assertEqual(exc.status_code, 400)
+        self.assertEqual(exc.reason, "field 'phoneNumber' is not valid")
+        self.assertEqual(exc.category, "validation_400")
+        self.assertIn("Reason: field 'phoneNumber' is not valid", str(exc))
+
+    def test_409_categorized_as_conflict(self) -> None:
+        client = self._client(FakeResponse(409, [{"id": "dup"}]))
+        with self.assertRaises(EspoClientError) as ctx:
+            client.post("Account", json={"name": "Dup"})
+        self.assertEqual(ctx.exception.category, "conflict_409")
+
+    def test_404_categorized_as_missing(self) -> None:
+        client = self._client(FakeResponse(404, {}))
+        with self.assertRaises(EspoClientError) as ctx:
+            client.put("Account/gone", json={"name": "X"})
+        self.assertEqual(ctx.exception.category, "missing_404")
+
+    def test_message_keeps_status_prefix_for_matchers(self) -> None:
+        client = self._client(FakeResponse(400, {}))
+        with self.assertRaises(EspoClientError) as ctx:
+            client.put("Account/abc", json={})
+        # Downstream non-retryable matcher keys on the "<status> <METHOD>" prefix.
+        self.assertTrue(str(ctx.exception).startswith("400 PUT Account/abc"))
 
 
 if __name__ == "__main__":

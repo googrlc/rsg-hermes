@@ -15,8 +15,52 @@ from urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 
+def categorize_espo_status(status_code: int | None) -> str:
+    """Map an HTTP status to a stable, per-row error_type for triage.
+
+    Values mirror the outbound sync taxonomy so callers can persist them
+    directly to sync_errors.error_type without re-deriving from the message.
+    """
+    if status_code in (400, 422):
+        return "validation_400"
+    if status_code in (404, 410):
+        return "missing_404"
+    if status_code == 409:
+        return "conflict_409"
+    return "other"
+
+
 class EspoClientError(Exception):
-    """Raised when the API returns a non-success status or the response is invalid."""
+    """Raised when the API returns a non-success status or the response is invalid.
+
+    Carries the structured detail callers need for per-row error capture:
+    ``status_code``, ``reason`` (EspoCRM's ``X-Status-Reason`` response header —
+    the real cause behind an otherwise empty ``Body: {}``), ``body``, and a
+    stable ``category`` (validation_400 / missing_404 / conflict_409 / other).
+    The stringified message keeps the ``"<status> <METHOD> <path>"`` prefix so
+    existing status-prefix matchers keep working.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        reason: str | None = None,
+        body: Any = None,
+        method: str | None = None,
+        path: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.reason = reason
+        self.body = body
+        self.method = method
+        self.path = path
+
+    @property
+    def category(self) -> str:
+        return categorize_espo_status(self.status_code)
 
 
 class EspoClient:
@@ -213,7 +257,22 @@ class EspoClient:
         except ValueError as e:
             raise EspoClientError(f"Invalid JSON from {url}: {resp.text[:500]}") from e
         if not resp.ok:
-            raise EspoClientError(f"{resp.status_code} {method} {path}: {self._status_hint(resp.status_code)} Body: {body}")
+            # EspoCRM puts the real rejection cause in the X-Status-Reason
+            # response header (e.g. "field 'phoneNumber' is invalid"), not the
+            # body — the body is frequently `{}`. Surface it in the message and
+            # on the exception so per-row error capture records something useful.
+            headers = getattr(resp, "headers", None) or {}
+            reason = headers.get("X-Status-Reason") if hasattr(headers, "get") else None
+            reason_text = f" Reason: {reason}" if reason else ""
+            raise EspoClientError(
+                f"{resp.status_code} {method} {path}: {self._status_hint(resp.status_code)} "
+                f"Body: {body}{reason_text}",
+                status_code=resp.status_code,
+                reason=reason,
+                body=body,
+                method=method,
+                path=path,
+            )
         return body
 
     def get(self, path: str, **kwargs: Any) -> dict[str, Any] | list[Any]:

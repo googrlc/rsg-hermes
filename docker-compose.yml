@@ -50,6 +50,21 @@ services:
       - .:/app
     restart: unless-stopped
     command: ["hermes", "--run-intake-worker", "--intake-poll-seconds", "5"]
+  hermes-outbound-drain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rsg-hermes-outbound-drain
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    # Hermes's single outbound scheduler: drains outbound_sync_queue every 15
+    # min. Replaces the retired pg_cron rsg-sync outbound path (pg_cron stays
+    # disabled).
+    command: ["hermes", "--run-outbound-drain-worker", "--outbound-drain-poll-seconds", "900"]
 
 networks:
   hermes-shared:

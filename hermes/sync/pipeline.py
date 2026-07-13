@@ -9,6 +9,7 @@ sync_runs id.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -17,7 +18,6 @@ from hermes.core.client import EspoClient, EspoClientError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations.crm_queue_worker import enqueue_crm_write, process_queue
 from hermes.sync.field_mapper import (
-    INSURED_DEDUP_SOURCE,
     INSURED_DEDUP_TARGET,
     detect_conflicts,
     map_insured_to_account,
@@ -25,12 +25,29 @@ from hermes.sync.field_mapper import (
     map_policy_to_opportunity,
     payload_hash,
 )
+from hermes.sync.metadata import (
+    conform_payload_to_metadata,
+    normalize_name,
+    resolve_field_name,
+)
 from hermes.sync.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
 # Matches sync_runs.workflow_name for this pipeline (live sync_audit_log requires workflow_name).
 WORKFLOW_INSURED_TO_ACCOUNT = "insured_to_account"
+
+# outbound_sync_queue lifecycle. We keep the live vocabulary
+# (queued → processing → completed | failed) and add ONE terminal state,
+# 'dead', for rows that can never succeed (e.g. the Espo target was purged).
+# No renames on the live table.
+QUEUE_QUEUED = "queued"
+QUEUE_PROCESSING = "processing"
+QUEUE_COMPLETED = "completed"
+QUEUE_FAILED = "failed"
+QUEUE_DEAD = "dead"
+
+DESTINATION_ESPOCRM = "espocrm"
 
 
 @dataclass
@@ -139,6 +156,12 @@ def run_insured_to_account_sync(
                 existing_espo=existing_espo,
                 is_first_sync=is_first_sync,
             )
+            # Conform against live Espo metadata BEFORE enqueue: drop/remap
+            # fields Espo doesn't accept (account_type, years_in_business,
+            # momentum_client_id, momentum_last_synced, …) so the write can't
+            # 400 on an unknown field. Unknown fields are dropped + logged once,
+            # never fatal to the row.
+            espo_payload = conform_payload_to_metadata(espo, "Account", espo_payload)
 
             # Check for conflicts on updates
             if existing_espo:
@@ -353,7 +376,9 @@ def _resolve_mapping(
                 confidence=0.90,
             )
 
-    # 5. Name match (lower confidence)
+    # 5. Name match (exact, then normalized). Normalized matching prevents the
+    #    blind-create → 409 storm: "Shamira Douglas, LLC" resolves to an existing
+    #    "Shamira Douglas" instead of POSTing a duplicate.
     insured_type = nc_record.get("insuredType", "")
     if insured_type == "Commercial":
         name = nc_record.get("commercialName", "")
@@ -364,6 +389,8 @@ def _resolve_mapping(
 
     if name:
         espo_match = _find_espo_account(espo, "name", name)
+        if not espo_match:
+            espo_match = _find_espo_account_by_normalized_name(espo, name)
         if espo_match:
             return _upsert_mapping(
                 supa,
@@ -386,12 +413,45 @@ def _resolve_mapping(
 def _find_espo_account(
     espo: EspoClient, field: str, value: str,
 ) -> dict[str, Any] | None:
-    """Search EspoCRM for an Account by a specific field value."""
+    """Search EspoCRM for an Account by a specific field value.
+
+    The search attribute is resolved against live metadata first, so a dedup key
+    written as ``momentum_client_id`` is queried on Espo's actual field name
+    (``momentumClientId``) rather than silently matching nothing.
+    """
+    attr = resolve_field_name(espo, "Account", field) or field
     try:
-        return espo.find_one_by_field("Account", field, value)
+        return espo.find_one_by_field("Account", attr, value)
     except EspoClientError:
-        log.warning("EspoCRM lookup failed: Account.%s = %s", field, value)
+        log.warning("EspoCRM lookup failed: Account.%s = %s", attr, value)
         return None
+
+
+def _find_espo_account_by_normalized_name(
+    espo: EspoClient, name: str,
+) -> dict[str, Any] | None:
+    """Find an Account whose normalized name equals the normalized query.
+
+    Uses a ``contains`` search on the longest name token to keep the candidate
+    set small, then compares normalized names in Python. Returns the first
+    normalized-equal hit, or None.
+    """
+    target = normalize_name(name)
+    if not target:
+        return None
+    tokens = sorted(target.split(), key=len, reverse=True)
+    probe = tokens[0] if tokens else name
+    try:
+        candidates = espo.search("Account", probe, max_size=25, select="id,name")
+    except EspoClientError:
+        log.warning("EspoCRM normalized-name search failed for %r", name)
+        return None
+    if not isinstance(candidates, list):
+        return None
+    for cand in candidates:
+        if isinstance(cand, dict) and normalize_name(cand.get("name")) == target:
+            return cand
+    return None
 
 
 def _upsert_mapping(
@@ -448,21 +508,74 @@ def _enqueue_outbound(
     object_id: str | None,
     action: str,
     payload: dict[str, Any],
-) -> dict[str, Any]:
-    return supa.insert(
-        "outbound_sync_queue",
-        {
-            "run_id": run_id,
-            "mapping_id": mapping_id,
-            "object_type": object_type,
-            "object_id": object_id,
-            "destination_system": "espocrm",
-            "action": action,
-            "payload": payload,
-            "status": "queued",
-            "attempt_count": 0,
-        },
-    )
+) -> dict[str, Any] | None:
+    """Enqueue an outbound write idempotently, never crashing the run.
+
+    Idempotency (was: every daily run re-enqueued the same object as a NEW row,
+    growing the backlog without bound):
+      * If an open ``queued`` row already exists for the same
+        (object_type, object_id, destination_system, action), return it instead
+        of inserting a duplicate.
+      * A partial unique index (see migration) is the race-safe backstop — a
+        concurrent insert that trips it is swallowed, not raised.
+
+    NULL ``object_id`` rows (creates) cannot be equality-deduped and bypass this
+    check by design; the create path is dedup-protected upstream by mapping
+    resolution + normalized-name matching instead.
+
+    Wrapping (reimplements the 7/8 hotfix): any Supabase failure here is logged
+    and returns None so one bad enqueue can't abort the whole sync run.
+    """
+    row = {
+        "run_id": run_id,
+        "mapping_id": mapping_id,
+        "object_type": object_type,
+        "object_id": object_id,
+        "destination_system": DESTINATION_ESPOCRM,
+        "action": action,
+        "payload": payload,
+        "status": QUEUE_QUEUED,
+        "attempt_count": 0,
+    }
+    try:
+        if object_id:
+            existing = supa.select(
+                "outbound_sync_queue",
+                params={
+                    "object_type": f"eq.{object_type}",
+                    "object_id": f"eq.{object_id}",
+                    "destination_system": f"eq.{DESTINATION_ESPOCRM}",
+                    "action": f"eq.{action}",
+                    "status": f"eq.{QUEUE_QUEUED}",
+                },
+                limit=1,
+            )
+            if existing:
+                log.debug(
+                    "Skip duplicate enqueue: %s %s %s already queued",
+                    object_type, object_id, action,
+                )
+                return existing[0]
+        return supa.insert("outbound_sync_queue", row)
+    except SupabaseClientError as exc:
+        # Unique-index backstop (concurrent enqueue of the same pending write):
+        # treat as a benign no-op rather than failing the run.
+        if _is_unique_violation(exc):
+            log.debug(
+                "Duplicate enqueue race for %s %s %s — index backstop hit",
+                object_type, object_id, action,
+            )
+            return None
+        log.exception(
+            "Failed to enqueue outbound %s %s %s", object_type, object_id, action,
+        )
+        return None
+
+
+def _is_unique_violation(exc: Exception) -> bool:
+    """True when a SupabaseClientError reflects a Postgres unique violation."""
+    text = str(exc)
+    return "23505" in text or "duplicate key" in text.lower()
 
 
 def _process_outbound_queue(
@@ -472,18 +585,86 @@ def _process_outbound_queue(
     run_id: str,
     result: SyncRunResult,
 ) -> None:
-    """Dequeue outbound items and route all EspoCRM writes via crm_write_queue."""
+    """Dequeue this run's outbound items and apply them via crm_write_queue."""
     queued = supa.select(
         "outbound_sync_queue",
         params={
             "run_id": f"eq.{run_id}",
-            "status": "eq.queued",
+            "status": f"eq.{QUEUE_QUEUED}",
             "order": "created_at.asc",
         },
         limit=500,
     )
     log.info("Processing %d outbound queue items for run %s", len(queued), run_id)
+    _dispatch_outbound_batch(supa, espo, queued, result=result)
 
+
+def drain_outbound_queue(
+    supa: SupabaseClient,
+    espo: EspoClient,
+    *,
+    batch_size: int = 100,
+    result: SyncRunResult | None = None,
+) -> SyncRunResult:
+    """Drain due ``queued`` outbound rows regardless of run (single scheduler).
+
+    This is the run-agnostic entry point the Hermes scheduler calls every
+    15 minutes. It picks up rows re-enqueued by 409/404 reconciliation as well
+    as any that a run left behind, applying the same per-row typed handling.
+    """
+    result = result or SyncRunResult()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    queued = supa.select(
+        "outbound_sync_queue",
+        params={
+            "status": f"eq.{QUEUE_QUEUED}",
+            "scheduled_for": f"lte.{now_iso}",
+            "order": "created_at.asc",
+        },
+        limit=batch_size,
+    )
+    log.info("Draining %d due outbound queue items", len(queued))
+    _dispatch_outbound_batch(supa, espo, queued, result=result)
+    return result
+
+
+def run_outbound_drain_loop(
+    supa: SupabaseClient,
+    espo: EspoClient,
+    *,
+    poll_seconds: float = 900.0,
+    batch_size: int = 100,
+) -> None:
+    """Continuously drain the outbound queue (Hermes's single scheduler).
+
+    This replaces the retired pg_cron/edge-function outbound path: pg_cron jobs
+    stay disabled and Hermes owns draining. Default cadence is 15 minutes.
+    """
+    interval = poll_seconds if poll_seconds > 0 else 900.0
+    log.info("Starting outbound drain loop: interval=%ss batch_size=%s", interval, batch_size)
+    while True:
+        try:
+            result = drain_outbound_queue(supa, espo, batch_size=batch_size)
+            if result.records_processed or result.records_created or result.records_updated or result.records_failed:
+                log.info(result.message)
+        except Exception:  # noqa: BLE001 — never let one bad cycle kill the loop
+            log.exception("Outbound drain cycle failed")
+        time.sleep(interval)
+
+
+def _dispatch_outbound_batch(
+    supa: SupabaseClient,
+    espo: EspoClient,
+    queued: list[dict[str, Any]],
+    *,
+    result: SyncRunResult,
+) -> None:
+    """Route a batch of ``queued`` rows through crm_write_queue and reconcile.
+
+    Each row's outcome is recorded on its OWN row and its OWN target — no
+    run-level blobs. Typed failures (409/404) are reconciled in the sync layer;
+    the generic worker stays out of it.
+    """
     if not queued:
         return
 
@@ -494,18 +675,26 @@ def _process_outbound_queue(
         object_id = item.get("object_id")
         action = item["action"]
         payload = dict(item.get("payload") or {})
-        mapping_id = item.get("mapping_id")
         attempt = (item.get("attempt_count") or 0) + 1
+        ctx = {
+            "outbound_queue_id": queue_id,
+            "run_id": item.get("run_id") or "",
+            "object_type": object_type,
+            "object_id": object_id,
+            "action": action,
+            "payload": payload,
+            "mapping_id": item.get("mapping_id"),
+            "attempt": attempt,
+        }
 
-        # Mark processing
-        _update_queue_status(supa, queue_id, "processing", attempt_count=attempt)
+        _update_queue_status(supa, queue_id, QUEUE_PROCESSING, attempt_count=attempt)
+
+        if action not in {"update", "create"}:
+            result.records_skipped += 1
+            _update_queue_status(supa, queue_id, QUEUE_COMPLETED, attempt_count=attempt)
+            continue
 
         try:
-            if action not in {"update", "create"}:
-                result.records_skipped += 1
-                _update_queue_status(supa, queue_id, "completed", attempt_count=attempt)
-                continue
-
             crm_queue_row = enqueue_crm_write(
                 supa,
                 entity_type=object_type,
@@ -522,47 +711,15 @@ def _process_outbound_queue(
                 created_by_role="sync_pipeline",
                 priority=1,
             )
-            enqueued_items.append(
-                {
-                    "outbound_queue_id": queue_id,
-                    "crm_queue_id": crm_queue_row.get("id"),
-                    "object_type": object_type,
-                    "object_id": object_id,
-                    "action": action,
-                    "payload": payload,
-                    "mapping_id": mapping_id,
-                    "attempt": attempt,
-                }
-            )
-
-        except (EspoClientError, SupabaseClientError, ValueError) as exc:
-            log.warning("Outbound enqueue %s failed for queue %s: %s", action, queue_id, exc)
-            result.records_failed += 1
-            result.errors.append(f"{queue_id}: {exc}")
-            _update_queue_status(supa, queue_id, "failed", last_error=str(exc), attempt_count=attempt)
-
-            # Log error
-            _log_error(
-                supa,
-                run_id=run_id,
-                queue_id=queue_id,
-                object_type=object_type,
-                source_id=payload.get("momentum_client_id", ""),
-                error_message=str(exc),
-            )
-
-            # Audit failure
-            _log_audit(
-                supa,
-                workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
-                run_id=run_id,
-                object_type=object_type,
-                source_id=payload.get("momentum_client_id", ""),
-                dest_id=object_id,
-                action="error",
-                status="failed",
-                message=str(exc)[:500],
-                payload_hash=payload_hash(payload),
+            ctx["crm_queue_id"] = crm_queue_row.get("id")
+            enqueued_items.append(ctx)
+        except (SupabaseClientError, ValueError) as exc:
+            # Staging into crm_write_queue failed — own row, own error.
+            _write_row_error(
+                supa, ctx,
+                error_type="other",
+                message=str(exc),
+                result=result,
             )
 
     if not enqueued_items:
@@ -574,54 +731,253 @@ def _process_outbound_queue(
         batch_size=len(enqueued_items),
         dry_run=False,
     )
-    if process_result.failed:
-        result.records_failed += process_result.failed
-        result.errors.extend(process_result.errors)
-        for item in enqueued_items:
-            _update_queue_status(
-                supa,
-                item["outbound_queue_id"],
-                "failed",
-                last_error="; ".join(process_result.errors[:3]) if process_result.errors else "crm_write_queue failure",
-                attempt_count=item["attempt"],
-            )
-            _log_error(
-                supa,
-                run_id=run_id,
-                queue_id=item["outbound_queue_id"],
-                object_type=item["object_type"],
-                source_id=item["payload"].get("momentum_client_id", ""),
-                error_message="; ".join(process_result.errors[:3]) if process_result.errors else "crm_write_queue processing failed",
-            )
-        return
 
-    for item in enqueued_items:
-        if item["action"] == "create":
-            result.records_created += 1
+    by_crm_id = {it["crm_queue_id"]: it for it in enqueued_items if it.get("crm_queue_id")}
+    seen: set[str] = set()
+    for res in process_result.items:
+        ctx = by_crm_id.get(res.queue_id)
+        if ctx is None:
+            continue
+        seen.add(res.queue_id)
+        if res.ok:
+            _complete_outbound_row(supa, ctx, result=result)
+        elif res.error_type == "conflict_409":
+            _reconcile_conflict_409(supa, espo, ctx, res, result=result)
+        elif res.error_type == "missing_404":
+            _reconcile_missing_404(supa, espo, ctx, res, result=result)
         else:
-            result.records_updated += 1
-        _update_queue_status(
-            supa,
-            item["outbound_queue_id"],
-            "completed",
-            attempt_count=item["attempt"],
+            _write_row_error(
+                supa, ctx,
+                error_type=res.error_type or "other",
+                message=res.reason or res.message or "crm_write_queue failure",
+                status_code=res.status_code,
+                reason=res.reason,
+                dest_id=ctx["object_id"],
+                result=result,
+            )
+
+    # A row we staged but the worker didn't process this pass (the batch pulled
+    # other pending rows first) must not be stranded in 'processing' — revert it
+    # to 'queued' so the next drain retries it without burning an attempt.
+    for crm_id, ctx in by_crm_id.items():
+        if crm_id not in seen:
+            _update_queue_status(
+                supa, ctx["outbound_queue_id"], QUEUE_QUEUED,
+                attempt_count=max(ctx["attempt"] - 1, 0),
+            )
+
+
+def _complete_outbound_row(
+    supa: SupabaseClient, ctx: dict[str, Any], *, result: SyncRunResult,
+) -> None:
+    if ctx["action"] == "create":
+        result.records_created += 1
+    else:
+        result.records_updated += 1
+    _update_queue_status(
+        supa, ctx["outbound_queue_id"], QUEUE_COMPLETED, attempt_count=ctx["attempt"],
+    )
+    if ctx["mapping_id"]:
+        try:
+            supa.update(
+                "sync_mappings", ctx["mapping_id"],
+                {"last_synced_at": datetime.now(timezone.utc).isoformat()},
+            )
+        except SupabaseClientError:
+            pass
+    _log_audit(
+        supa,
+        workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
+        run_id=ctx["run_id"],
+        object_type=ctx["object_type"],
+        source_id=_source_id_of(ctx["payload"]),
+        dest_id=ctx["object_id"],
+        action=ctx["action"],
+        status="success",
+        payload_hash=payload_hash(ctx["payload"]),
+    )
+
+
+def _reconcile_conflict_409(
+    supa: SupabaseClient,
+    espo: EspoClient,
+    ctx: dict[str, Any],
+    res: Any,
+    *,
+    result: SyncRunResult,
+) -> None:
+    """409 on create: resolve to the existing Account, convert to update ONCE.
+
+    Never blind-creates. Searches Espo by normalized name; if found, refreshes
+    the mapping and re-enqueues the row as an update against the real id. If it
+    was already reconciled once (still conflicting) or no match is found, the
+    row fails with a readable, per-row error.
+    """
+    payload = ctx["payload"]
+    name = str(payload.get("name") or "")
+    already = bool(payload.get("__recon_409"))
+    match = _find_espo_account_by_normalized_name(espo, name) if name and not already else None
+    if match and match.get("id"):
+        _refresh_mapping_target(supa, ctx["mapping_id"], match["id"])
+        _reenqueue_as_update(supa, ctx, new_object_id=match["id"], marker="__recon_409")
+        log.info("Reconciled 409 for %r → existing Account %s (re-queued as update)", name, match["id"])
+        return
+    reason = res.reason or ("duplicate persists after reconciliation" if already else f"no normalized-name match for {name!r}")
+    _write_row_error(
+        supa, ctx,
+        error_type="conflict_409",
+        message=reason,
+        status_code=res.status_code,
+        reason=res.reason,
+        result=result,
+    )
+
+
+def _reconcile_missing_404(
+    supa: SupabaseClient,
+    espo: EspoClient,
+    ctx: dict[str, Any],
+    res: Any,
+    *,
+    result: SyncRunResult,
+) -> None:
+    """404 on update: invalidate the stale mapping, re-resolve, else mark dead.
+
+    Sets ``sync_mappings.active = false`` for the missing espocrm_id, then tries
+    to re-resolve by normalized name. A hit re-enqueues as an update against the
+    live id; otherwise the target was purged (Carrier/MGA/Vendor migrated to
+    Carrier Hub) → the row is terminal ``dead`` with reason ``target_purged``.
+    """
+    stale_id = ctx["object_id"]
+    if stale_id:
+        try:
+            supa.update_where(
+                "sync_mappings",
+                {"active": False},
+                filters={"espocrm_id": f"eq.{stale_id}"},
+            )
+        except SupabaseClientError:
+            log.exception("Failed to deactivate stale mapping for espocrm_id=%s", stale_id)
+
+    payload = ctx["payload"]
+    name = str(payload.get("name") or "")
+    already = bool(payload.get("__recon_404"))
+    match = _find_espo_account_by_normalized_name(espo, name) if name and not already else None
+    if match and match.get("id") and match["id"] != stale_id:
+        _refresh_mapping_target(supa, ctx["mapping_id"], match["id"])
+        _reenqueue_as_update(supa, ctx, new_object_id=match["id"], marker="__recon_404")
+        log.info("Reconciled 404 for %r → live Account %s (re-queued as update)", name, match["id"])
+        return
+    _write_row_error(
+        supa, ctx,
+        error_type="missing_404",
+        message="target_purged",
+        status_code=res.status_code,
+        reason=res.reason,
+        dest_id=stale_id,
+        terminal=True,
+        result=result,
+    )
+
+
+def _refresh_mapping_target(
+    supa: SupabaseClient, mapping_id: str | None, espocrm_id: str,
+) -> None:
+    if not mapping_id:
+        return
+    try:
+        supa.update(
+            "sync_mappings", mapping_id,
+            {"espocrm_id": espocrm_id, "active": True},
         )
-        if item["mapping_id"]:
-            try:
-                supa.update("sync_mappings", item["mapping_id"], {"last_synced_at": datetime.now(timezone.utc).isoformat()})
-            except SupabaseClientError:
-                pass
-        _log_audit(
-            supa,
-            workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
-            run_id=run_id,
-            object_type=item["object_type"],
-            source_id=item["payload"].get("momentum_client_id", ""),
-            dest_id=item["object_id"],
-            action=item["action"],
-            status="success",
-            payload_hash=payload_hash(item["payload"]),
+    except SupabaseClientError:
+        log.exception("Failed to refresh mapping %s → %s", mapping_id, espocrm_id)
+
+
+def _reenqueue_as_update(
+    supa: SupabaseClient, ctx: dict[str, Any], *, new_object_id: str, marker: str,
+) -> None:
+    """Convert an outbound row to an update against ``new_object_id``, once.
+
+    The ``marker`` payload flag makes reconciliation idempotent: a re-queued row
+    that fails again will not loop back through resolution.
+    """
+    new_payload = dict(ctx["payload"])
+    new_payload[marker] = True
+    try:
+        supa.update(
+            "outbound_sync_queue", ctx["outbound_queue_id"],
+            {
+                "status": QUEUE_QUEUED,
+                "action": "update",
+                "object_id": new_object_id,
+                "payload": new_payload,
+                "attempt_count": ctx["attempt"],
+                "last_error": None,
+                "scheduled_for": datetime.now(timezone.utc).isoformat(),
+            },
         )
+    except SupabaseClientError:
+        log.exception("Failed to re-enqueue outbound row %s as update", ctx["outbound_queue_id"])
+
+
+def _write_row_error(
+    supa: SupabaseClient,
+    ctx: dict[str, Any],
+    *,
+    error_type: str,
+    message: str,
+    status_code: int | None = None,
+    reason: str | None = None,
+    dest_id: str | None = None,
+    terminal: bool = False,
+    result: SyncRunResult,
+) -> None:
+    """Record a per-row failure: own row, own target, typed error, no blob."""
+    result.records_failed += 1
+    status = QUEUE_DEAD if terminal else QUEUE_FAILED
+    short = f"{error_type}: {message}"
+    # Per-row line (own queue id) — never a run-level blob smeared across rows.
+    result.errors.append(f"{ctx['outbound_queue_id']}: {short}")
+    _update_queue_status(
+        supa, ctx["outbound_queue_id"], status,
+        last_error=short, attempt_count=ctx["attempt"],
+    )
+    _log_error(
+        supa,
+        run_id=ctx["run_id"],
+        queue_id=ctx["outbound_queue_id"],
+        object_type=ctx["object_type"],
+        source_id=_source_id_of(ctx["payload"]),
+        error_message=(reason or message),
+        error_code=error_type,
+        error_detail={
+            "espocrm_id": dest_id or ctx.get("object_id"),
+            "status_code": status_code,
+            "x_status_reason": reason,
+        },
+    )
+    _log_audit(
+        supa,
+        workflow_name=WORKFLOW_INSURED_TO_ACCOUNT,
+        run_id=ctx["run_id"],
+        object_type=ctx["object_type"],
+        source_id=_source_id_of(ctx["payload"]),
+        dest_id=dest_id or ctx.get("object_id"),
+        action="error",
+        status="dead" if terminal else "failed",
+        message=short[:500],
+        payload_hash=payload_hash(ctx["payload"]),
+    )
+
+
+def _source_id_of(payload: dict[str, Any]) -> str:
+    """NowCerts source id from a payload, tolerant of camel/snake casing."""
+    return str(
+        payload.get("momentum_client_id")
+        or payload.get("momentumClientId")
+        or ""
+    )
 
 
 def _sync_contacts_for_insureds(

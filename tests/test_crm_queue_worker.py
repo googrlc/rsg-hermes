@@ -195,5 +195,63 @@ class NonRetryableErrorTests(unittest.TestCase):
         alert_mock.assert_called_once()
 
 
+class PerRowResultTests(unittest.TestCase):
+    """The worker reports per-row typed outcomes; it does not branch on them."""
+
+    @patch("hermes.operations.crm_queue_worker.log_guardrail_event")
+    @patch("hermes.operations.crm_queue_worker._alert_slack_on_terminal_failure")
+    def test_items_carry_typed_error(self, _alert: MagicMock, _guard: MagicMock) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [
+            {
+                "id": "q-409",
+                "entity_type": "Account",
+                "entity_id": None,
+                "payload": {"name": "Dup Co"},
+                "attempt_count": 0,
+                "created_by_role": "sync_pipeline",
+                "priority": 1,
+            }
+        ]
+        espo = MagicMock()
+        espo.create.side_effect = EspoClientError(
+            "409 POST Account: EspoCRM request failed. Body: [{'id': 'dup'}]",
+            status_code=409,
+            reason="Account already exists",
+        )
+
+        result = process_queue(supa, espo, batch_size=1, dry_run=False)
+
+        self.assertEqual(len(result.items), 1)
+        item = result.items[0]
+        self.assertEqual(item.queue_id, "q-409")
+        self.assertFalse(item.ok)
+        self.assertEqual(item.error_type, "conflict_409")
+        self.assertEqual(item.status_code, 409)
+        self.assertEqual(item.reason, "Account already exists")
+
+    def test_success_items_recorded(self) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [
+            {
+                "id": "q-ok",
+                "entity_type": "Account",
+                "entity_id": "acc-1",
+                "payload": {"action_type": "update_status", "context": {"status": "Active"}},
+                "attempt_count": 0,
+                "created_by_role": "sync_pipeline",
+                "priority": 1,
+            }
+        ]
+        espo = MagicMock()
+        espo.update.return_value = {"id": "acc-1"}
+
+        result = process_queue(supa, espo, batch_size=1, dry_run=False)
+
+        self.assertEqual(len(result.items), 1)
+        self.assertTrue(result.items[0].ok)
+        self.assertEqual(result.items[0].error_type, None)
+
+
 if __name__ == "__main__":
     unittest.main()

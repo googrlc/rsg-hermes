@@ -333,6 +333,14 @@ def run_bidirectional(
     return combined
 
 
+# NOTE: the governance-correct EspoCRM → NowCerts writeback is NOT this module's
+# hub_to_nowcerts lane. It is the narrow, additive `--espo-writeback` job
+# (hermes/jobs/espo_account_writeback.py + espo_to_nowcerts_writeback.py):
+# fill-blank account fields, Closed-Won → minimal account stub, Cases, and
+# account-linked Tasks — never overwriting NowCerts, which owns Insureds/Accounts
+# and Policies. That job is scheduled as the daily writeback direction.
+
+
 # ---------------------------------------------------------------------------
 # Inbound staging + renewal watchlist (CRM → hub contract)
 # ---------------------------------------------------------------------------
