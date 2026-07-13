@@ -92,6 +92,10 @@ def run_insured_to_account_sync(
     try:
         # ── B. Pull from NowCerts ────────────────────────────────────────
         raw_insureds = nc.fetch_insureds(since=since)
+        _fetched = len(raw_insureds)
+        raw_insureds = [r for r in raw_insureds if r.get('active') is True]
+        log.info('NowCerts active filter: %d active / %d fetched (%d dropped inactive)',
+                 len(raw_insureds), _fetched, _fetched - len(raw_insureds))
         result.records_processed = len(raw_insureds)
         _update_run(supa, run_id, {"records_processed": len(raw_insureds)})
 
