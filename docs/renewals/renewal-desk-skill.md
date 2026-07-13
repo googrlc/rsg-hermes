@@ -2,35 +2,58 @@
 name: renewal-desk
 description: >
   Hermes-side renewal EXECUTOR for RSG. This is the "one door" that performs the
-  actual AMS/CRM writes when Gretchen (working renewals in the Perplexity Space via
-  Perplexity Computer) tells Hermes to do something. Gretchen/Perplexity read and
-  draft; Hermes executes — sanctioned MCP path only, additive, queued, human-approved.
+  actual AMS/CRM writes for renewals. The RSG Renewal Walker GPT (ChatGPT Business)
+  is the workstation where Gretchen and Lamar work renewals — it reads and drafts;
+  Hermes executes. Every mutation goes through the sanctioned MCP path — additive,
+  queued, human-approved.
   Triggers on "renewal desk", "work the renewals", "work renewal requests",
   "execute renewal", "process renewal", "renew {client}", "Gretchen renewal request",
-  or a renewal action posted by Gretchen in #renewal-updates / her DM.
-  Revenue-critical (retention 54.92% → 75%). Complements retention-risk-scout
+  or a renewal action posted in #renewal-updates / her DM.
+  Revenue-critical (retention 54.92% → 80%). Complements retention-risk-scout
   (finds risk) and gretchen-daily-queue (tells Gretchen what to do) — this one DOES it.
 ---
 
 # Renewal Desk (Hermes = the executor)
 
+> Canonical spec: `docs/renewals/BRIEF-renewal-walker-runner-2026-07-13.md` (v3).
+> This skill is the **execution arm** — the sanctioned write door. It is live today.
+
 ## Purpose & role split
 
-Gretchen works renewals inside the **Perplexity Space**. That surface is **read +
-draft only** — it can view AMS/CRM data (via the Hermes MCP read tools, or the
-read-only web UI allowed by Amendment A‑1) and it can prep packets and draft
-outreach. **It never writes to NowCerts or EspoCRM.**
+One system, four roles (v3):
 
-When an actual change needs to happen, **Gretchen tells Hermes directly** (through
-Perplexity Computer). **Hermes — this skill — is the only thing that writes.** Every
-mutation goes through the sanctioned MCP path, additive-only, queued, human-approved.
+- **RSG Renewal Walker GPT (ChatGPT Business) = the workstation.** Gretchen and
+  Lamar work renewals there. It pulls the queue, walks one step at a time, renders
+  the worksheet, and posts outcomes back. It is **read + draft only** — it never
+  writes to NowCerts or EspoCRM, and it knows nothing except what Hermes returns.
+- **Hermes — this skill — is the only thing that writes.** Every mutation goes
+  through the sanctioned MCP path: additive-only, queued, human-approved. **Hermes
+  never talks to a client.**
+- **Gretchen = the only hands that touch clients.** The Walker drafts; she sends.
 
 ```
-Gretchen + Perplexity Computer   →   tells Hermes directly   →   Hermes (this skill)
-   READ  +  DRAFT  (no writes)          plain-language ask         EXECUTES the writes
+Renewal Walker GPT (ChatGPT)   →   asks Hermes   →   Hermes (this skill)
+   READ  +  DRAFT  (no writes)       plain ask        EXECUTES the writes (MCP path)
 ```
 
-This skill is the execution arm. It composes with:
+### Two front doors into this executor
+
+**1. The `/walker/*` API — Phase 1, DESIGNED, NOT BUILT.**
+The v3 target is the Walker GPT hitting Hermes over an Action wired to a
+`/walker/*` HTTPS API (scoped key, `GET /walker/queue`, `POST /walker/.../touch`,
+etc. — see the brief). **This does not exist yet.** Do not assume the endpoints,
+the scoped key, or the EspoCRM Opportunity field additions are live. Phase 1 does
+not start until Phase 0 is green AND Lamar explicitly says go.
+
+**2. The live path — what runs TODAY (and the permanent FALLBACK MODE).**
+Until the API ships, and forever after as the outage fallback, a renewal action
+reaches Hermes as a plain-language request in **#renewal-updates (`C09R2CG2KS6`)**,
+**Gretchen DM (`C0AMWAZBBJP`)**, or an interactive Hermes session. Hermes parses it
+and performs the additive MCP writes below. If OpenAI or the Action is ever down,
+this is the door the day runs through — data-bearing Slack cards + the reply
+grammar in the fallback section.
+
+This skill composes with:
 - **`retention-risk-scout`** — finds who's at risk and why (scoring model, buckets).
 - **`gretchen-daily-queue`** — surfaces the day's renewal actions to Gretchen.
 - **`nowcerts-skill`** — renewal buckets + policy facts from the AMS.
@@ -58,28 +81,30 @@ This skill is the execution arm. It composes with:
 7. **Field casing is per-entity:** `Account` = snake_case, `Contact` = camelCase,
    `Task`/`Opportunity` = camelCase, `Policy` = mixed. Wrong casing is dropped with
    NO error. Confirm casing before every write.
+8. **The workstation talks to Hermes only.** Never NowCerts direct, never EspoCRM
+   direct. One door, one owner of writes.
 
 ---
 
 ## How a request reaches Hermes
 
-Gretchen (via Perplexity Computer) tells Hermes directly. In practice a request
-lands as one of:
+A renewal action lands as one of:
 
 - A message in **#renewal-updates (`C09R2CG2KS6`)** or **Gretchen DM (`C0AMWAZBBJP`)**.
 - A direct instruction in an interactive Hermes session.
+- (Phase 1, once built) a `/walker/*` API call from the Renewal Walker GPT.
 
 Hermes is **not** an always-on listener (Max-plan boundary). Drain requests when:
 - invoked on demand ("work the renewal requests"), or
 - on a light schedule (e.g. a couple of sweeps per workday of #renewal-updates).
 
-### Request grammar (what Gretchen sends, what Hermes parses)
+### Request grammar (what a request looks like, what Hermes parses)
 
-Gretchen doesn't have to be formal — parse plain language. But the Perplexity
-playbook nudges her toward this shape, so honor it when present:
+Parse plain language — no formality required. When the request arrives in this
+shape, honor it:
 
 ```
-@Hermes RENEWAL ACTION
+RENEWAL ACTION
 Client: {name or policy #}
 Do:
   - {action 1}
@@ -122,6 +147,8 @@ default), then perform the additive writes. Report each write.
   ("Done — I set up the renewal for the Smiths and logged that you called them.
   Their auto policy renews May 3.").
 - To **#renewal-updates (`C09R2CG2KS6`)**: the action-list entry if it's part of a batch.
+- To **#lamar-alerts**: 🚨 escalations and 📋 handoffs (ID resolved by name at
+  startup; fail loud if it can't resolve).
 - To **#the-boss (`C0ANQUENX4P`)**: only material/financial outcomes, one line.
 
 ---
@@ -138,7 +165,7 @@ default), then perform the additive writes. Report each write.
 - Log an activity **Note** on the Account (`espocrm.create_note`) — e.g. "Called
   client, left voicemail" / "Sent renewal quote".
 - Open a **Case** for a renewal service issue — *not yet tooled.* The espocrm MCP has
-  no Case read/write tool (as of 2026-07-10). Until one is added, capture the issue as
+  no Case read/write tool (as of 2026-07-13). Until one is added, capture the issue as
   a **Task** instead, or flag to Lamar. Do NOT fall back to raw REST for a Case.
 
 **APPROVAL-REQUIRED (stage it, ask, wait for an explicit OK):**
@@ -170,6 +197,12 @@ Closed Won = renewed, Closed Lost = lost). **Opportunity fields = camelCase**
 renewal owner (Gretchen for personal lines) — never set yourself as `assignedUser`.
 Omit `stage` to accept the install default rather than risk a dropped enum value.
 
+> The v3 worksheet is **structured state on the renewal Opportunity**, not a file.
+> The proposed Opportunity field additions (`cRenewalSegment`, `cRenewalOwner`,
+> `cComplexityFlags`, `cTouchLog`, `cDay1SentAt`, `cNextTouchCode`, etc.) are in the
+> brief and are **Phase 1 — NOT yet added to live Espo.** Do not write fields that
+> don't exist yet; Espo silently drops unknown fields.
+
 ### Create / complete a renewal Task  →  AUTO
 Dedup with `espocrm.list_open_tasks` for the Account. If none open, `espocrm.create_task`;
 complete/reassign/re-date with `espocrm.update_task`. **Task fields = camelCase**
@@ -190,19 +223,36 @@ insured read, state the field + value, get OK, then `nowcerts.update_policy` /
 insured update. If the field is populated → **stop, flag the conflict.**
 
 ### New-client stub on Closed Won  →  APPROVAL
-`ams_search_insured` (dedup by name/email/FEIN) → if truly new,
+`nowcerts.search_insureds` (dedup by name/email/FEIN) → if truly new,
 `nowcerts.create_insured` with the minimal stub. Never a duplicate. This is the only
 sanctioned CRM-initiated AMS *creation*.
 
-> **Wiring note (capability, as of 2026-07-10):** the espocrm MCP now exposes the
+> **Wiring note (capability, as of 2026-07-13):** the espocrm MCP exposes the
 > renewal write tools directly — `create_note`, `create_task`, `update_task`,
-> `create_opportunity`, `update_opportunity` (15 tools total; `/health` reports the
-> count). The nowcerts MCP covers AMS writes — `create_insured`, `insert_policy`,
-> `update_policy` (fill-blank). If a needed write tool is ever *unavailable* (server
-> down, tool missing), **stage the request, tell Gretchen it's queued for Hermes/Lamar,
-> and do NOT fall back to raw REST, the DB, or the web UI** (fail-closed, per contract
-> §6). Espo server source: `rsg-hermes/mcp/espo/src/server.js` (LaunchAgent
-> `com.rsg.espo-mcp`, `launchctl kickstart -k` to reload after edits).
+> `create_opportunity`, `update_opportunity`. The nowcerts MCP covers AMS writes —
+> `create_insured`, `insert_policy`, `update_policy` (fill-blank). If a needed write
+> tool is ever *unavailable* (server down, tool missing), **stage the request, tell
+> Gretchen it's queued for Hermes/Lamar, and do NOT fall back to raw REST, the DB, or
+> the web UI** (fail-closed, per contract §6). Espo server source:
+> `rsg-hermes/mcp/espo/src/server.js` (LaunchAgent `com.rsg.espo-mcp`,
+> `launchctl kickstart -k` to reload after edits).
+
+---
+
+## Fallback Mode (Slack paste grammar — keep it implemented)
+
+When the `/walker/*` API is unavailable (not built yet, or OpenAI/Action down),
+Hermes works the day the v2 way: data-bearing Slack cards + a thread-reply grammar
+Gretchen can use in #renewal-updates / her DM. Behind a feature flag; the backup
+door is always present. The reply grammar:
+
+```
+done · log: <text> · flag: <reason> · handoff · renewed $<amt> · lost <reason> · pending
+```
+
+Each maps to an executor action here (`done` → advance/complete, `log:` → activity
+note, `flag:` → escalate to `#lamar-alerts`, `handoff` → 📋 to Lamar, `renewed $` /
+`lost` → close the Opportunity with premium/reason, `pending` → no-op ack).
 
 ---
 
@@ -214,7 +264,8 @@ sanctioned CRM-initiated AMS *creation*.
   Task for Gretchen and note it.
 - Optionally record the outcome to **Supabase** (KPI/snapshot tables) so
   retention movement is trackable week over week (`supabase.execute_sql`), compared
-  against the prior snapshot.
+  against the prior snapshot. Scoreboard = rolling 12-mo premium retention,
+  "Retention: XX.X% (baseline 54.9%)".
 
 ---
 
@@ -228,15 +279,16 @@ sanctioned CRM-initiated AMS *creation*.
 | AMS field already populated (would overwrite) | Do NOT write. Flag the conflict to a human. |
 | Duplicate account / insured found | Resolve to the master record before any write; if unsure, flag. |
 | Asked to change a policy from CRM | Refuse — out of scope. Explain it must be done in the AMS. |
+| Asked to write a Phase-1 field/endpoint not yet built | STOP. Say it's Phase 1, not live. Don't write unknown Espo fields (silent drop). |
 
 ---
 
 ## Notes
 - LLM: **Anthropic** (revenue-critical — tied to retention).
 - Gretchen-facing output: **plain English, zero jargon, zero field names** (mirror
-  `gretchen-daily-queue`).
+  `gretchen-daily-queue`). Her pings are **DMs, never channel posts**.
+- **Medicare excluded from all automated client touches** (T-65 watcher is internal
+  only, separate brief). Never age-reference a client in writing.
 - Hermes never impersonates a user; Tasks/Cases owned by Gretchen or Lamar.
 - Every write is logged/auditable through Hermes — don't take actions that dodge the
   audit trail.
-- Companion doc for the Perplexity side lives at
-  `renewal-desk/perplexity-space-playbook.md` — paste it into the Space.
