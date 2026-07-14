@@ -27,6 +27,8 @@ revenue briefing. This artifact makes it repeatable.
 
 | Job | Cadence | Output |
 |---|---|---|
+| `--sync-nowcerts` | daily 2:00am | Account Sync v2: NowCerts Insured → EspoCRM Account |
+| `--sync-policies` | daily 2:10am | Policy Sync v2: NowCerts Policy → EspoCRM Policy (policies only, no Account writes) |
 | `--email-triage` (ms365) | every 30 min | actionable Outlook mail → intake queue |
 | `--snapshot-kpis` | daily 6:00am | Supabase `dashboard_kpis` (no Slack) |
 | `--renewal-reconcile` | daily 6:15am | retry due Renewal Loop v6 AMS writebacks, alert `#systems-check` on failures |
@@ -39,11 +41,8 @@ revenue briefing. This artifact makes it repeatable.
 
 ## Deliberately NOT scheduled
 
-**NowCerts → EspoCRM insured/account sync** (`--sync-nowcerts`,
-`--sync-bidirectional`). EspoCRM owns Accounts / Contacts / Opportunities now,
-and the insured→account sync produces duplicate-account garbage. The *only* data
-that should flow NowCerts → EspoCRM is **policies**, via a dedicated policies-only
-job (to be built) — never these account-creating syncs.
+`--sync-bidirectional` — full round-trip bidirectional sync. Not scheduled; run on
+demand only while the account/insured dedup story is fully settled.
 
 ## Prerequisites
 
