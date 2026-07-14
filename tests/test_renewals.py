@@ -416,7 +416,7 @@ def _policy_row(
     *,
     account="Test Corp LLC",
     policy_number="TST-0001",
-    lob="Commercial Auto",
+    line_of_business="Commercial Auto",
     carrier="Test Carrier",
     status="Active",
     exp="2027-01-01",
@@ -425,11 +425,11 @@ def _policy_row(
 ):
     return {
         "id": policy_id,
-        "name": f"{account} - {lob} Renewal",
+        "name": f"{account} - {line_of_business} Renewal",
         "accountName": account,
         "accountId": acct_id,
         "policyNumber": policy_number,
-        "lineOfBusiness": lob,
+        "lineOfBusiness": line_of_business,
         "carrier": carrier,
         "status": status,
         "expirationDate": exp,
@@ -525,7 +525,8 @@ def test_renewal_audit_still_routes_to_revenue():
 # ---------------------------------------------------------------- exact policy match
 
 def test_exact_policy_match_returns_worksheet():
-    mock_client = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
     mock_client.get.return_value = {
         "list": [_policy_row(policy_number="TST-0001", account="Test Corp LLC")]
     }
@@ -592,8 +593,8 @@ def test_ambiguous_client_name_returns_candidates():
     mock_client = MagicMock()
     mock_client.get.return_value = {
         "list": [
-            _policy_row(policy_number="POL-001", policy_id="pol-a", lob="Commercial Auto"),
-            _policy_row(policy_number="POL-002", policy_id="pol-b", lob="General Liability"),
+            _policy_row(policy_number="POL-001", policy_id="pol-a", line_of_business="Commercial Auto"),
+            _policy_row(policy_number="POL-002", policy_id="pol-b", line_of_business="General Liability"),
         ]
     }
     result = rw_mod.handle(mock_client, "prepare renewal worksheet for Test Corp LLC")

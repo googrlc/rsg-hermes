@@ -43,12 +43,12 @@ _POLICY_NUMBER_RE = re.compile(
     r"\bpolic(?:y|ies)\s+(?:number\s+|#\s*|no\.?\s+)?([A-Z0-9][-A-Z0-9/ ]{2,})",
     re.I,
 )
-_FOR_CLIENT_RE = re.compile(r"\bfor\s+(.+)$", re.I)
+_FOR_CLIENT_RE = re.compile(r"\bfor\s+([A-Za-z0-9 &',.\-]{1,150})$", re.I)
 
 
 def _normalise_policy_number(raw: str) -> str:
     """Strip surrounding whitespace and fold to upper-case for exact comparison."""
-    return re.sub(r"\s+", " ", raw.strip()).upper()
+    return " ".join(raw.split()).upper()
 
 
 def parse_request(text: str) -> dict[str, str | None]:
@@ -70,7 +70,8 @@ def parse_request(text: str) -> dict[str, str | None]:
     if for_match:
         candidate = for_match.group(1).strip()
         # Strip trailing noise that might be left after policy extraction.
-        candidate = re.sub(r"\s+(policy|number|#|no\.?)\s*$", "", candidate, flags=re.I).strip()
+        # Use a fixed-length bounded pattern to avoid ReDoS.
+        candidate = re.sub(r"\s+(policy|number|#|no\.?)[ \t]*$", "", candidate, flags=re.I).strip()
         if candidate:
             client_name = candidate
 
@@ -81,7 +82,6 @@ def parse_request(text: str) -> dict[str, str | None]:
 # EspoCRM lookups
 # ---------------------------------------------------------------------------
 
-_ACTIVE_STATUSES = {"Active", "In Force", "Renewing", "Pending Renewal"}
 _INACTIVE_STATUSES = {"Expired", "Cancelled", "Flat Cancel", "Non-Renewed", "Lapsed"}
 
 
