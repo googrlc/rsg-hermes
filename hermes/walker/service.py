@@ -462,6 +462,133 @@ class WalkerService:
             "active_premium": round(active_premium, 2),
         }
 
+
+    def get_handoffs(self, owner: str | None = None) -> dict[str, Any]:
+        """Lamar's handoff queue — Opportunities with handoff notes, optionally filtered by owner."""
+        select_fields = ",".join([
+            "id", "name", "stage", "amount",
+            OPP_C_RENEWAL_OWNER, OPP_C_HANDOFF_NOTES,
+            OPP_C_RENEWAL_DECISION, OPP_C_COMPLEXITY_FLAGS,
+            OPP_C_LAST_CLIENT_CONTACT_DATE, OPP_C_DAY1_SENT_AT,
+        ])
+        where = [{"type": "isNotNull", "attribute": OPP_C_HANDOFF_NOTES}]
+        if owner:
+            where.append({"type": "equals", "attribute": OPP_C_RENEWAL_OWNER, "value": owner})
+
+        rows = []
+        try:
+            body = self.espo.get(
+                "Opportunity",
+                params={
+                    "maxSize": 100,
+                    "select": select_fields,
+                    "where": where,
+                    "orderBy": "name",
+                    "order": "asc",
+                },
+            )
+            if isinstance(body, dict) and isinstance(body.get("list"), list):
+                rows = [r for r in body["list"] if isinstance(r, dict)]
+        except Exception as exc:
+            log.warning("Walker handoffs query failed: %s", exc)
+
+        items = []
+        for r in rows:
+            notes = r.get(OPP_C_HANDOFF_NOTES) or ""
+            if not notes.strip():
+                continue
+            items.append({
+                "id": r.get("id"),
+                "client": r.get("name"),
+                "owner": r.get(OPP_C_RENEWAL_OWNER),
+                "stage": r.get("stage"),
+                "handoff_notes": notes,
+                "flags": [
+                    f.strip() for f in (r.get(OPP_C_COMPLEXITY_FLAGS) or "").split("|") if f.strip()
+                ],
+                "decision": r.get(OPP_C_RENEWAL_DECISION),
+                "last_contact": r.get(OPP_C_LAST_CLIENT_CONTACT_DATE),
+            })
+
+        return {
+            "data_as_of": self._last_refresh_stamp(),
+            "count": len(items),
+            "items": items,
+        }
+
+    def get_status(self, record_id: str) -> dict[str, Any]:
+        """Synthesized status + recommended next action for a single renewal."""
+        detail = self.get_renewal_detail(record_id)
+        opp = detail.get("opportunity") or {}
+        renewal = detail.get("renewal") or {}
+        nowcerts = detail.get("nowcerts") or {}
+
+        exp_str = renewal.get("expiration_date") or ""
+        exp_date = _parse_date(exp_str)
+        today = date.today()
+        days_out = (exp_date - today).days if exp_date else None
+
+        touch_log = _parse_touch_log(opp.get(OPP_C_TOUCH_LOG))
+        last_touch = touch_log[-1] if touch_log else None
+        last_contact = opp.get(OPP_C_LAST_CLIENT_CONTACT_DATE)
+
+        flags = [
+            f.strip() for f in (opp.get(OPP_C_COMPLEXITY_FLAGS) or "").split("|") if f.strip()
+        ]
+        handoff = (opp.get(OPP_C_HANDOFF_NOTES) or "").strip()
+        decision = opp.get(OPP_C_RENEWAL_DECISION) or ""
+        stage = opp.get("stage") or renewal.get("pipeline_stage") or ""
+        owner = opp.get(OPP_C_RENEWAL_OWNER)
+        day1_sent = opp.get(OPP_C_DAY1_SENT_AT)
+
+        # -- compute recommended next action --
+        next_action = "Day-1 renewal email not sent yet"
+        if day1_sent:
+            sent_date = _parse_date(day1_sent)
+            if sent_date:
+                elapsed = (today - sent_date).days
+                has_client_reply = any(
+                    t.get("actor", "").lower() in ("client", "gretchen")
+                    or "reply" in t.get("note", "").lower()
+                    or "response" in t.get("note", "").lower()
+                    for t in touch_log
+                )
+                if decision in ("renewed", "rewritten", "lost_price", "lost_coverage",
+                                 "lost_no_response", "do_not_renew"):
+                    next_action = f"Outcome set: {decision}. No further action needed."
+                elif handoff:
+                    next_action = f"Handoff pending — review notes: \"{handoff[:120]}...\""
+                elif has_client_reply:
+                    next_action = "Client replied — follow up and move to quote or close."
+                elif elapsed >= 14:
+                    next_action = "Silent-churn risk — recommend lost_no_response or escalate."
+                elif elapsed >= 7:
+                    next_action = "Day-7 call nudge overdue — call + voicemail."
+                elif elapsed >= 4:
+                    next_action = "Day-4 text nudge overdue."
+                else:
+                    next_action = f"Day {elapsed} since Day-1 send — waiting for client reply."
+        elif decision:
+            next_action = f"Outcome set: {decision}. No further action needed."
+
+        return {
+            "data_as_of": detail.get("data_as_of"),
+            "renewal_id": record_id,
+            "client": detail.get("client"),
+            "stage": stage,
+            "owner": owner,
+            "days_out": days_out,
+            "decision": decision,
+            "flags": flags,
+            "handoff_notes": handoff or None,
+            "last_touch": last_touch,
+            "last_contact_date": last_contact,
+            "day1_sent_at": day1_sent,
+            "touch_count": len(touch_log),
+            "nowcerts_policies": len(nowcerts.get("policies", [])) if isinstance(nowcerts, dict) else 0,
+            "next_action": next_action,
+        }
+
     # -- WRITES (all land on the EspoCRM Opportunity) ---------------------
 
     def post_touch(self, record_id: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -503,15 +630,24 @@ class WalkerService:
         self.espo.update("Opportunity", opportunity_id, safe)
         return {"ok": True, "opportunity_id": opportunity_id, "updated_fields": list(safe.keys())}
 
+    # Keywords that trigger an automatic owner change when flagging.
+    _FLAG_ESCALATE_LAMAR = ("escalate", "needs lamar", "lamar", "complex", "quote", "binding")
+    _FLAG_DELEGATE_GRETCHEN = ("gretchen", "service", "data", "clerical", "endorsement", "certificate")
+
     def post_flag(self, record_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        """Add a complexity flag. Accepts renewal ID or Opportunity ID."""
+        """Add a complexity flag. Accepts renewal ID or Opportunity ID.
+
+        If the flag text implies escalation (e.g. "needs Lamar", "escalate")
+        or delegation (e.g. "Gretchen can handle", "service item"), the
+        cRenewalOwner field is updated accordingly.
+        """
         opportunity_id = self._resolve_opportunity_id(record_id)
         flag_text = body.get("flag", "")
         if not flag_text:
             raise ValueError("flag text required")
         opp = self.espo.get(
             f"Opportunity/{opportunity_id}",
-            params={"select": f"id,{OPP_C_COMPLEXITY_FLAGS}"},
+            params={"select": f"id,{OPP_C_COMPLEXITY_FLAGS},{OPP_C_RENEWAL_OWNER}"},
         )
         current = (
             opp.get(OPP_C_COMPLEXITY_FLAGS) or "" if isinstance(opp, dict) else ""
@@ -519,8 +655,28 @@ class WalkerService:
         flags = [f.strip() for f in current.split("|") if f.strip()]
         if flag_text not in flags:
             flags.append(flag_text)
-        self.espo.update("Opportunity", opportunity_id, {OPP_C_COMPLEXITY_FLAGS: "|".join(flags)})
-        return {"ok": True, "opportunity_id": opportunity_id, "flags": flags}
+
+        payload: dict[str, Any] = {OPP_C_COMPLEXITY_FLAGS: "|".join(flags)}
+        owner_changed_to: str | None = None
+        flag_lower = flag_text.lower()
+
+        # Determine if the flag implies an owner change.
+        if any(kw in flag_lower for kw in self._FLAG_ESCALATE_LAMAR):
+            new_owner = "Lamar"
+            if (opp.get(OPP_C_RENEWAL_OWNER) or "") != new_owner:
+                payload[OPP_C_RENEWAL_OWNER] = new_owner
+                owner_changed_to = new_owner
+        elif any(kw in flag_lower for kw in self._FLAG_DELEGATE_GRETCHEN):
+            new_owner = "Gretchen"
+            if (opp.get(OPP_C_RENEWAL_OWNER) or "") != new_owner:
+                payload[OPP_C_RENEWAL_OWNER] = new_owner
+                owner_changed_to = new_owner
+
+        self.espo.update("Opportunity", opportunity_id, payload)
+        result: dict[str, Any] = {"ok": True, "opportunity_id": opportunity_id, "flags": flags}
+        if owner_changed_to:
+            result["owner_changed_to"] = owner_changed_to
+        return result
 
     def post_handoff(self, record_id: str, body: dict[str, Any]) -> dict[str, Any]:
         """Set handoff notes. Accepts renewal ID or Opportunity ID."""

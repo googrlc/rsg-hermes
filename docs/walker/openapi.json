@@ -22,161 +22,447 @@
       "QueueResponse": {
         "type": "object",
         "properties": {
-          "data_as_of": {"type": "string"},
-          "days_window": {"type": "integer"},
-          "count": {"type": "integer"},
+          "data_as_of": {
+            "type": "string"
+          },
+          "days_window": {
+            "type": "integer"
+          },
+          "count": {
+            "type": "integer"
+          },
           "items": {
             "type": "array",
-            "items": {"$ref": "#/components/schemas/QueueItem"}
+            "items": {
+              "$ref": "#/components/schemas/QueueItem"
+            }
           }
         }
       },
       "QueueItem": {
         "type": "object",
         "properties": {
-          "id": {"type": "string"},
-          "client": {"type": "string"},
-          "policy_number": {"type": "string"},
-          "line": {"type": "string", "nullable": true},
-          "carrier": {"type": "string", "nullable": true},
-          "premium": {"type": "number", "nullable": true},
-          "days_out": {"type": "integer", "nullable": true},
-          "segment": {"type": "string", "nullable": true},
-          "risk": {"type": "string"},
-          "owner": {"type": "string", "nullable": true},
-          "flags": {"type": "array", "items": {"type": "string"}},
-          "last_touch": {"type": "string", "nullable": true}
+          "id": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "policy_number": {
+            "type": "string"
+          },
+          "line": {
+            "type": "string",
+            "nullable": true
+          },
+          "carrier": {
+            "type": "string",
+            "nullable": true
+          },
+          "premium": {
+            "type": "number",
+            "nullable": true
+          },
+          "days_out": {
+            "type": "integer",
+            "nullable": true
+          },
+          "segment": {
+            "type": "string",
+            "nullable": true
+          },
+          "risk": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "nullable": true
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "last_touch": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "SearchResponse": {
         "type": "object",
         "properties": {
-          "data_as_of": {"type": "string"},
-          "query": {"type": "string"},
-          "count": {"type": "integer"},
+          "data_as_of": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
           "results": {
             "type": "array",
-            "items": {"$ref": "#/components/schemas/SearchResult"}
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            }
           }
         }
       },
       "SearchResult": {
         "type": "object",
         "properties": {
-          "id": {"type": "string"},
-          "client": {"type": "string"},
-          "policy_number": {"type": "string"},
-          "expiration_date": {"type": "string", "nullable": true},
-          "premium": {"type": "number", "nullable": true},
-          "risk_status": {"type": "string", "nullable": true}
+          "id": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "policy_number": {
+            "type": "string"
+          },
+          "expiration_date": {
+            "type": "string",
+            "nullable": true
+          },
+          "premium": {
+            "type": "number",
+            "nullable": true
+          },
+          "risk_status": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "QuietLapseResponse": {
         "type": "object",
         "properties": {
-          "data_as_of": {"type": "string"},
-          "count": {"type": "integer"},
+          "data_as_of": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
           "items": {
             "type": "array",
-            "items": {"$ref": "#/components/schemas/LapseItem"}
+            "items": {
+              "$ref": "#/components/schemas/LapseItem"
+            }
           }
         }
       },
       "LapseItem": {
         "type": "object",
         "properties": {
-          "id": {"type": "string"},
-          "client": {"type": "string"},
-          "policy_number": {"type": "string"},
-          "expired": {"type": "string", "nullable": true},
-          "premium": {"type": "number", "nullable": true},
-          "risk_status": {"type": "string", "nullable": true}
+          "id": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "policy_number": {
+            "type": "string"
+          },
+          "expired": {
+            "type": "string",
+            "nullable": true
+          },
+          "premium": {
+            "type": "number",
+            "nullable": true
+          },
+          "risk_status": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "ScoreboardResponse": {
         "type": "object",
         "properties": {
-          "data_as_of": {"type": "string"},
-          "total_renewals": {"type": "integer"},
-          "retention_pct": {"type": "number", "nullable": true},
-          "renewed_premium": {"type": "number"},
-          "lost_premium": {"type": "number"},
-          "active_premium": {"type": "number"}
+          "data_as_of": {
+            "type": "string"
+          },
+          "total_renewals": {
+            "type": "integer"
+          },
+          "retention_pct": {
+            "type": "number",
+            "nullable": true
+          },
+          "renewed_premium": {
+            "type": "number"
+          },
+          "lost_premium": {
+            "type": "number"
+          },
+          "active_premium": {
+            "type": "number"
+          }
         }
       },
       "RenewalDetailResponse": {
         "type": "object",
         "properties": {
-          "data_as_of": {"type": "string"},
-          "renewal_id": {"type": "string"},
-          "client": {"type": "string"},
-          "renewal": {"type": "object", "properties": {}},
-          "nowcerts": {"type": "object", "properties": {}},
-          "opportunity": {"type": "object", "properties": {}}
+          "data_as_of": {
+            "type": "string"
+          },
+          "renewal_id": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "renewal": {
+            "type": "object",
+            "properties": {}
+          },
+          "nowcerts": {
+            "type": "object",
+            "properties": {}
+          },
+          "opportunity": {
+            "type": "object",
+            "properties": {}
+          }
         }
       },
       "TouchRequest": {
         "type": "object",
         "properties": {
-          "actor": {"type": "string", "default": "lamar"},
-          "channel": {"type": "string", "default": "manual"},
-          "note": {"type": "string"}
+          "actor": {
+            "type": "string",
+            "default": "lamar"
+          },
+          "channel": {
+            "type": "string",
+            "default": "manual"
+          },
+          "note": {
+            "type": "string"
+          }
         }
       },
       "WorksheetRequest": {
         "type": "object",
         "properties": {
-          "fields": {"type": "object", "additionalProperties": true}
+          "fields": {
+            "type": "object",
+            "additionalProperties": true
+          }
         },
-        "required": ["fields"]
+        "required": [
+          "fields"
+        ]
       },
       "FlagRequest": {
         "type": "object",
         "properties": {
-          "flag": {"type": "string"}
+          "flag": {
+            "type": "string"
+          }
         },
-        "required": ["flag"]
+        "required": [
+          "flag"
+        ]
       },
       "HandoffRequest": {
         "type": "object",
         "properties": {
-          "note": {"type": "string"}
+          "note": {
+            "type": "string"
+          }
         },
-        "required": ["note"]
+        "required": [
+          "note"
+        ]
       },
       "OutcomeRequest": {
         "type": "object",
         "properties": {
           "decision": {
             "type": "string",
-            "enum": ["renewed", "rewritten", "lost_price", "lost_coverage", "lost_no_response", "do_not_renew"]
+            "enum": [
+              "renewed",
+              "rewritten",
+              "lost_price",
+              "lost_coverage",
+              "lost_no_response",
+              "do_not_renew"
+            ]
           },
-          "stage": {"type": "string", "nullable": true}
+          "stage": {
+            "type": "string",
+            "nullable": true
+          }
         },
-        "required": ["decision"]
+        "required": [
+          "decision"
+        ]
       },
       "WriteResponse": {
         "type": "object",
         "properties": {
-          "ok": {"type": "boolean"},
-          "id": {"type": "string"},
-          "touch_logged": {"type": "string"},
-          "updated_fields": {"type": "array", "items": {"type": "string"}},
-          "flags": {"type": "array", "items": {"type": "string"}},
-          "decision": {"type": "string"},
-          "stage": {"type": "string", "nullable": true}
+          "ok": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "touch_logged": {
+            "type": "string"
+          },
+          "updated_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "ErrorResponse": {
         "type": "object",
         "properties": {
-          "detail": {"type": "string"}
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "HandoffItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "nullable": true
+          },
+          "stage": {
+            "type": "string",
+            "nullable": true
+          },
+          "handoff_notes": {
+            "type": "string"
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_contact": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "HandoffsResponse": {
+        "type": "object",
+        "properties": {
+          "data_as_of": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandoffItem"
+            }
+          }
+        }
+      },
+      "StatusResponse": {
+        "type": "object",
+        "properties": {
+          "data_as_of": {
+            "type": "string"
+          },
+          "renewal_id": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string",
+            "nullable": true
+          },
+          "owner": {
+            "type": "string",
+            "nullable": true
+          },
+          "days_out": {
+            "type": "integer",
+            "nullable": true
+          },
+          "decision": {
+            "type": "string",
+            "nullable": true
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "handoff_notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_touch": {
+            "type": "object",
+            "nullable": true
+          },
+          "last_contact_date": {
+            "type": "string",
+            "nullable": true
+          },
+          "day1_sent_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "touch_count": {
+            "type": "integer"
+          },
+          "nowcerts_policies": {
+            "type": "integer"
+          },
+          "next_action": {
+            "type": "string"
+          }
         }
       }
     }
   },
   "security": [
-    {"bearerAuth": []}
+    {
+      "bearerAuth": []
+    }
   ],
   "paths": {
     "/walker/queue": {
@@ -188,7 +474,10 @@
           {
             "name": "days",
             "in": "query",
-            "schema": {"type": "integer", "default": 60},
+            "schema": {
+              "type": "integer",
+              "default": 60
+            },
             "description": "Days-out window (default 60)"
           }
         ],
@@ -197,7 +486,9 @@
             "description": "Queue with classified items",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/QueueResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponse"
+                }
               }
             }
           },
@@ -205,7 +496,9 @@
             "description": "Server error",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           }
@@ -222,7 +515,9 @@
             "name": "renewal_id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"}
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -230,7 +525,9 @@
             "description": "Single-client truth",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/RenewalDetailResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/RenewalDetailResponse"
+                }
               }
             }
           },
@@ -238,7 +535,9 @@
             "description": "Renewal not found",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           }
@@ -255,7 +554,9 @@
             "name": "q",
             "in": "query",
             "required": true,
-            "schema": {"type": "string"},
+            "schema": {
+              "type": "string"
+            },
             "description": "Client name or policy number"
           }
         ],
@@ -264,7 +565,9 @@
             "description": "Search results",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/SearchResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
               }
             }
           }
@@ -273,14 +576,16 @@
     },
     "/walker/quiet-lapse": {
       "get": {
-        "summary": "Expired terms with no successor — silent churn catcher",
+        "summary": "Expired terms with no successor \u2014 silent churn catcher",
         "operationId": "getQuietLapse",
         "responses": {
           "200": {
             "description": "Lapsed renewals with no successor term",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/QuietLapseResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/QuietLapseResponse"
+                }
               }
             }
           }
@@ -289,14 +594,16 @@
     },
     "/walker/scoreboard": {
       "get": {
-        "summary": "Retention scoreboard — retention pct, renewed/lost premium",
+        "summary": "Retention scoreboard \u2014 retention pct, renewed/lost premium",
         "operationId": "getScoreboard",
         "responses": {
           "200": {
             "description": "Retention metrics",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/ScoreboardResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreboardResponse"
+                }
               }
             }
           }
@@ -305,14 +612,17 @@
     },
     "/walker/touch/{id}": {
       "post": {
-        "summary": "Log a touch", "description": "Use the id from getQueue or searchRenewals results.",
+        "summary": "WRITE: Log a touch",
+        "description": "WRITE: Log a touch on the Opportunity. This modifies CRM data.",
         "operationId": "postTouch",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"},
+            "schema": {
+              "type": "string"
+            },
             "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
@@ -320,7 +630,9 @@
           "required": false,
           "content": {
             "application/json": {
-              "schema": {"$ref": "#/components/schemas/TouchRequest"}
+              "schema": {
+                "$ref": "#/components/schemas/TouchRequest"
+              }
             }
           }
         },
@@ -329,7 +641,9 @@
             "description": "Touch logged",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/WriteResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
               }
             }
           }
@@ -338,14 +652,17 @@
     },
     "/walker/worksheet/{id}": {
       "patch": {
-        "summary": "Update worksheet", "description": "Use the id from getQueue or searchRenewals results.",
+        "summary": "WRITE: Update worksheet",
+        "description": "WRITE: Update worksheet fields on the Opportunity. This modifies CRM data.",
         "operationId": "patchWorksheet",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"},
+            "schema": {
+              "type": "string"
+            },
             "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
@@ -353,7 +670,9 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": {"$ref": "#/components/schemas/WorksheetRequest"}
+              "schema": {
+                "$ref": "#/components/schemas/WorksheetRequest"
+              }
             }
           }
         },
@@ -362,7 +681,9 @@
             "description": "Worksheet updated",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/WriteResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
               }
             }
           }
@@ -371,14 +692,17 @@
     },
     "/walker/flag/{id}": {
       "post": {
-        "summary": "Add a complexity flag", "description": "Use the id from getQueue or searchRenewals results.",
+        "summary": "WRITE: Add a complexity flag",
+        "description": "WRITE: Add a complexity flag to the Opportunity. May change the renewal owner if the flag implies escalation or delegation. This modifies CRM data.",
         "operationId": "postFlag",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"},
+            "schema": {
+              "type": "string"
+            },
             "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
@@ -386,7 +710,9 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": {"$ref": "#/components/schemas/FlagRequest"}
+              "schema": {
+                "$ref": "#/components/schemas/FlagRequest"
+              }
             }
           }
         },
@@ -395,7 +721,9 @@
             "description": "Flag added",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/WriteResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
               }
             }
           }
@@ -404,14 +732,17 @@
     },
     "/walker/handoff/{id}": {
       "post": {
-        "summary": "Set handoff notes", "description": "Use the id from getQueue or searchRenewals results.",
+        "summary": "WRITE: Set handoff notes",
+        "description": "WRITE: Set handoff notes on the Opportunity for Lamar or Gretchen. This modifies CRM data.",
         "operationId": "postHandoff",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"},
+            "schema": {
+              "type": "string"
+            },
             "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
@@ -419,7 +750,9 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": {"$ref": "#/components/schemas/HandoffRequest"}
+              "schema": {
+                "$ref": "#/components/schemas/HandoffRequest"
+              }
             }
           }
         },
@@ -428,7 +761,9 @@
             "description": "Handoff note set",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/WriteResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
               }
             }
           }
@@ -437,14 +772,17 @@
     },
     "/walker/outcome/{id}": {
       "post": {
-        "summary": "Set renewal decision", "description": "Use the id from getQueue or searchRenewals results.",
+        "summary": "WRITE: Set renewal decision",
+        "description": "WRITE: Set the renewal decision and pipeline stage on the Opportunity. This modifies CRM data.",
         "operationId": "postOutcome",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {"type": "string"},
+            "schema": {
+              "type": "string"
+            },
             "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
           }
         ],
@@ -452,7 +790,9 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": {"$ref": "#/components/schemas/OutcomeRequest"}
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeRequest"
+              }
             }
           }
         },
@@ -461,7 +801,69 @@
             "description": "Outcome set",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/WriteResponse"}
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/walker/handoffs": {
+      "get": {
+        "summary": "Get handoff queue",
+        "description": "Returns Opportunities with handoff notes. Optionally filter by owner (e.g. owner=Lamar).",
+        "operationId": "getHandoffs",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by renewal owner (Lamar or Gretchen)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handoff queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoffsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/walker/status/{renewal_id}": {
+      "get": {
+        "summary": "Get renewal status and next action",
+        "description": "Synthesized status for a single renewal: current stage, days out, last touch, flags, handoff notes, and a recommended next action based on the follow-up ladder.",
+        "operationId": "getStatus",
+        "parameters": [
+          {
+            "name": "renewal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The id from getQueue or searchRenewals results (renewal ID or Opportunity ID)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Renewal status with next action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
               }
             }
           }

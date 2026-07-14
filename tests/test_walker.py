@@ -245,3 +245,96 @@ class TestServiceLogic:
         # Flag already exists -- list should not grow
         assert result["flags"] == ["GL open since 2025-10-04"]
         assert len(result["flags"]) == 1
+
+class TestHandoffsAndStatus:
+    def test_handoffs_endpoint(self, client, mock_walker):
+        mock_walker.get_handoffs.return_value = {
+            "data_as_of": "2026-07-14",
+            "count": 2,
+            "items": [
+                {"id": "opp-1", "client": "Richards Construction", "owner": "Lamar",
+                 "handoff_notes": "Needs quote review"},
+                {"id": "opp-2", "client": "Gray Trucking", "owner": "Gretchen",
+                 "handoff_notes": "Endorsement pending"},
+            ],
+        }
+        resp = client.get("/walker/handoffs")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 2
+        assert resp.json()["items"][0]["client"] == "Richards Construction"
+
+    def test_handoffs_filtered_by_owner(self, client, mock_walker):
+        mock_walker.get_handoffs.return_value = {"data_as_of": "x", "count": 1, "items": []}
+        client.get("/walker/handoffs?owner=Lamar")
+        mock_walker.get_handoffs.assert_called_once_with(owner="Lamar")
+
+    def test_status_endpoint(self, client, mock_walker):
+        mock_walker.get_status.return_value = {
+            "data_as_of": "2026-07-14T20:30:00Z (live)",
+            "renewal_id": "r-1",
+            "client": "Nubian Clean",
+            "stage": "Negotiation",
+            "owner": "Lamar",
+            "days_out": 12,
+            "decision": "",
+            "flags": [],
+            "handoff_notes": None,
+            "last_touch": None,
+            "last_contact_date": None,
+            "day1_sent_at": "2026-07-01",
+            "touch_count": 0,
+            "nowcerts_policies": 3,
+            "next_action": "Day-4 text nudge overdue.",
+        }
+        resp = client.get("/walker/status/r-1")
+        assert resp.status_code == 200
+        assert resp.json()["next_action"] == "Day-4 text nudge overdue."
+        assert resp.json()["days_out"] == 12
+
+    def test_status_404(self, client, mock_walker):
+        mock_walker.get_status.side_effect = ValueError("not found")
+        resp = client.get("/walker/status/bad-id")
+        assert resp.status_code == 404
+
+    def test_post_flag_escalates_to_lamar(self):
+        from hermes.walker.service import WalkerService
+        espo = MagicMock()
+        espo.get.return_value = {
+            "id": "opp-1",
+            "cComplexityFlags": "",
+            "cRenewalOwner": "Gretchen",
+        }
+        svc = WalkerService(espo=espo)
+        result = svc.post_flag("opp-1", {"flag": "Needs Lamar to quote"})
+        assert result["owner_changed_to"] == "Lamar"
+        call_args = espo.update.call_args[0][2]
+        assert call_args["cRenewalOwner"] == "Lamar"
+        assert "cComplexityFlags" in call_args
+
+    def test_post_flag_delegates_to_gretchen(self):
+        from hermes.walker.service import WalkerService
+        espo = MagicMock()
+        espo.get.return_value = {
+            "id": "opp-1",
+            "cComplexityFlags": "",
+            "cRenewalOwner": "Lamar",
+        }
+        svc = WalkerService(espo=espo)
+        result = svc.post_flag("opp-1", {"flag": "Gretchen can handle service item"})
+        assert result["owner_changed_to"] == "Gretchen"
+        call_args = espo.update.call_args[0][2]
+        assert call_args["cRenewalOwner"] == "Gretchen"
+
+    def test_post_flag_no_owner_change_for_neutral_flag(self):
+        from hermes.walker.service import WalkerService
+        espo = MagicMock()
+        espo.get.return_value = {
+            "id": "opp-1",
+            "cComplexityFlags": "",
+            "cRenewalOwner": "Lamar",
+        }
+        svc = WalkerService(espo=espo)
+        result = svc.post_flag("opp-1", {"flag": "GL open since 2025-10-04"})
+        assert "owner_changed_to" not in result
+        call_args = espo.update.call_args[0][2]
+        assert "cRenewalOwner" not in call_args

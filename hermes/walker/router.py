@@ -102,6 +102,31 @@ async def get_scoreboard(request: Request):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+
+@router.get("/handoffs")
+async def get_handoffs(request: Request, owner: str | None = None):
+    """Opportunities with handoff notes — Lamar's action queue."""
+    _require_walker_token(request)
+    try:
+        return _get_walker().get_handoffs(owner=owner)
+    except Exception as exc:
+        log.exception("walker handoffs failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/status/{renewal_id}")
+async def get_status(request: Request, renewal_id: str):
+    """Synthesized renewal status + recommended next action."""
+    _require_walker_token(request)
+    try:
+        return _get_walker().get_status(renewal_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        log.exception("walker status failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # -- WRITES (all land on the EspoCRM Opportunity) ---------------------------
 
 class TouchRequest(BaseModel):
