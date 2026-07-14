@@ -1055,7 +1055,7 @@ class Dispatcher:
             # "prepare a renewal worksheet for <client>" does not fall through to revenue.handle.
             (
                 re.compile(
-                    r"\b(prepare|create|build|generate)\b.{0,40}\brenewal\s+worksheet\b",
+                    r"\b(prepare|create|build|generate)\s+(a\s+)?renewal\s+worksheet\b",
                     re.I,
                 ),
                 "renewal_worksheet",

@@ -39,11 +39,17 @@ if TYPE_CHECKING:
 # Text parsing helpers
 # ---------------------------------------------------------------------------
 
+# A valid policy number must be at least 3 characters (1 lead + 2 body chars).
 _POLICY_NUMBER_RE = re.compile(
     r"\bpolic(?:y|ies)\s+(?:number\s+|#\s*|no\.?\s+)?([A-Z0-9][-A-Z0-9/ ]{2,})",
     re.I,
 )
-_FOR_CLIENT_RE = re.compile(r"\bfor\s+([A-Za-z0-9 &',.\-]{1,150})$", re.I)
+# Client name captured from "for <name>" — bounded to avoid runaway matches.
+_MAX_CLIENT_NAME_LEN = 150
+_FOR_CLIENT_RE = re.compile(
+    rf"\bfor\s+([A-Za-z0-9 &',.\-]{{1,{_MAX_CLIENT_NAME_LEN}}})$",
+    re.I,
+)
 
 
 def _normalise_policy_number(raw: str) -> str:
@@ -88,6 +94,13 @@ def parse_request(text: str) -> dict[str, str | None]:
 
 _INACTIVE_STATUSES = {"Expired", "Cancelled", "Flat Cancel", "Non-Renewed", "Lapsed"}
 
+_POLICY_QUERY_MAX_SIZE = 200
+_POLICY_SELECT_FIELDS = (
+    "id,name,accountName,accountId,policyNumber,policy_number,status,"
+    "expirationDate,expiration_date,carrier,lineOfBusiness,line_of_business,"
+    "premiumAmount,premium_amount"
+)
+
 
 def _list_rows(body: Any) -> list[dict[str, Any]]:
     if isinstance(body, dict) and isinstance(body.get("list"), list):
@@ -113,7 +126,7 @@ def _lookup_by_policy_number(
     try:
         body = client.get(
             "Policy",
-            params={"maxSize": 200, "select": "id,name,accountName,accountId,policyNumber,policy_number,status,expirationDate,expiration_date,carrier,lineOfBusiness,line_of_business,premiumAmount,premium_amount"},
+            params={"maxSize": _POLICY_QUERY_MAX_SIZE, "select": _POLICY_SELECT_FIELDS},
         )
     except Exception:
         return []
@@ -134,7 +147,7 @@ def _lookup_by_client_name(
     try:
         body = client.get(
             "Policy",
-            params={"maxSize": 200, "select": "id,name,accountName,accountId,policyNumber,policy_number,status,expirationDate,expiration_date,carrier,lineOfBusiness,line_of_business,premiumAmount,premium_amount"},
+            params={"maxSize": _POLICY_QUERY_MAX_SIZE, "select": _POLICY_SELECT_FIELDS},
         )
     except Exception:
         return []
@@ -232,7 +245,9 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
         )
 
     # --- Client-name lookup ---
-    assert client_name is not None  # guarded by the early-return check above
+    # client_name is guaranteed non-None here by the early-return guard above.
+    if client_name is None:
+        return DispatchResult(False, "Internal error: could not extract client name.")
     rows = _lookup_by_client_name(client, client_name)
     if not rows:
         return DispatchResult(
