@@ -1051,11 +1051,20 @@ class Dispatcher:
             ),
             (re.compile(r"\b(total\s+premium|sum\s+premium|premium\s+for)\b", re.I), lookup.handle),
             (re.compile(r"^\s*(what|who|find|lookup|search)\b", re.I), lookup.handle),
+            # Renewal worksheet — MUST precede the broad renewal/revenue route so that
+            # "prepare a renewal worksheet for <client>" does not fall through to revenue.handle.
+            (
+                re.compile(
+                    r"\b(prepare|create|build|generate)\s+(a\s+)?renewal\s+worksheet\b",
+                    re.I,
+                ),
+                "renewal_worksheet",
+            ),
             (
                 re.compile(r"\b(expir(?:e|ing|y)|renewal[-\s]?audit|renewals?|cross-?sell|revenue|opportunit)", re.I),
                 revenue.handle,
             ),
-            # Data quality BEFORE reports — intent LLM sometimes rewrites “data quality” as “kpi”.
+            # Data quality BEFORE reports — intent LLM sometimes rewrites "data quality" as "kpi".
             (
                 re.compile(
                     r"\b(data\s+quality|dq\s+report|audit\s+crm|crm\s+audit|quality\s+check)\b",
@@ -1129,6 +1138,9 @@ class Dispatcher:
         if handler == "agency_fact":
             from hermes.commands.fact_retriever import handle as fact_handle
             return fact_handle(client, text, supa=self.supa)
+        if handler == "renewal_worksheet":
+            from hermes.commands.renewal_worksheet import handle as rw_handle
+            return rw_handle(client, text)
         if handler == "change_proposals":
             from hermes.commands.change_proposals import handle as cp_handle
             return cp_handle(client, text, supa=self.supa)

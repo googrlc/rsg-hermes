@@ -393,3 +393,259 @@ def test_client_name_never_uses_renewal_name_whole():
     # the screenshot bug: accountName empty -> must NOT show "X - LOB Renewal" whole
     bad = {"id": "r9", "name": "Dream Chaser Trucking - Other Renewal"}
     assert complete._client_name(bad) == "Dream Chaser Trucking"
+
+
+# ============================================================ renewal_worksheet
+# Unit tests for hermes/commands/renewal_worksheet.py
+# All tests use synthetic identifiers only — no real client names or policy
+# numbers appear in any assertion string.
+
+from hermes.commands import renewal_worksheet as rw_mod
+from hermes.core.dispatcher import Dispatcher, DispatchResult
+
+
+def _make_dispatcher():
+    """Instantiate Dispatcher without a live Supabase connection."""
+    from unittest.mock import MagicMock
+    d = Dispatcher(use_openai=False)
+    d.supa = MagicMock()
+    return d
+
+
+def _policy_row(
+    *,
+    account="Test Corp LLC",
+    policy_number="TST-0001",
+    line_of_business="Commercial Auto",
+    carrier="Test Carrier",
+    status="Active",
+    exp="2027-01-01",
+    acct_id="acct-1",
+    policy_id="pol-1",
+):
+    return {
+        "id": policy_id,
+        "name": f"{account} - {line_of_business} Renewal",
+        "accountName": account,
+        "accountId": acct_id,
+        "policyNumber": policy_number,
+        "lineOfBusiness": line_of_business,
+        "carrier": carrier,
+        "status": status,
+        "expirationDate": exp,
+        "premiumAmount": 5000,
+    }
+
+
+# ---------------------------------------------------------------- parse_request
+
+def test_parse_request_policy_number():
+    result = rw_mod.parse_request("prepare renewal worksheet for policy TST-0001")
+    assert result["policy_number"] == "TST-0001"
+
+
+def test_parse_request_policy_number_normalised():
+    result = rw_mod.parse_request("prepare renewal worksheet for policy  tst-0001 ")
+    assert result["policy_number"] == "TST-0001"
+
+
+def test_parse_request_client_name():
+    result = rw_mod.parse_request("prepare a renewal worksheet for Test Corp LLC")
+    assert result["client_name"] == "Test Corp LLC"
+    assert result["policy_number"] is None
+
+
+def test_parse_request_build_variant():
+    result = rw_mod.parse_request("build renewal worksheet for Test Corp LLC")
+    assert result["client_name"] == "Test Corp LLC"
+
+
+def test_parse_request_generate_variant():
+    result = rw_mod.parse_request("generate a renewal worksheet for Test Corp LLC")
+    assert result["client_name"] == "Test Corp LLC"
+
+
+def test_parse_request_create_variant():
+    result = rw_mod.parse_request("create renewal worksheet for Test Corp LLC")
+    assert result["client_name"] == "Test Corp LLC"
+
+
+# ---------------------------------------------------------------- normalise
+
+def test_normalise_strips_and_uppercases():
+    assert rw_mod._normalise_policy_number("  tst-0001  ") == "TST-0001"
+
+
+def test_normalise_collapses_internal_spaces():
+    assert rw_mod._normalise_policy_number("TST  0001") == "TST 0001"
+
+
+# ---------------------------------------------------------------- route precedence
+
+def test_worksheet_route_precedes_renewal_sentinel():
+    """'prepare a renewal worksheet for ...' must NOT route to revenue.handle."""
+    from unittest.mock import MagicMock, patch
+    from hermes.core.dispatcher import DispatchResult
+
+    d = _make_dispatcher()
+    mock_client = MagicMock()
+    mock_client.get.return_value = {
+        "list": [_policy_row(account="Test Corp LLC", policy_number="TST-0001")]
+    }
+
+    # Patch the worksheet handler so we can confirm it is the one called.
+    with patch("hermes.commands.renewal_worksheet.handle") as rw_handle:
+        rw_handle.return_value = DispatchResult(True, "worksheet ran for Test Corp LLC")
+        result = d.dispatch(mock_client, "prepare a renewal worksheet for Test Corp LLC")
+        rw_handle.assert_called_once()
+
+    assert result.ok
+    assert "Test Corp LLC" in result.message
+
+
+def test_renewal_audit_still_routes_to_revenue():
+    """Existing 'renewal audit' command must not be intercepted by the worksheet route."""
+    from unittest.mock import MagicMock, patch
+    from hermes.core.dispatcher import DispatchResult
+
+    d = _make_dispatcher()
+    mock_client = MagicMock()
+    # revenue.handle queries Policy and Task entities for the audit
+    mock_client.get.return_value = {"list": []}
+
+    with patch("hermes.commands.renewal_worksheet.handle") as rw_handle:
+        rw_handle.return_value = DispatchResult(True, "worksheet ran")
+        result = d.dispatch(mock_client, "renewal audit")
+        rw_handle.assert_not_called()
+
+    # result.ok is True and comes from revenue.handle (not the worksheet handler)
+    assert result.ok
+
+
+# ---------------------------------------------------------------- exact policy match
+
+def test_exact_policy_match_returns_worksheet():
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {
+        "list": [_policy_row(policy_number="TST-0001", account="Test Corp LLC")]
+    }
+    result = rw_mod.handle(mock_client, "prepare renewal worksheet for policy TST-0001")
+    assert result.ok
+    assert "TST-0001" in result.message
+    assert result.data["source"] == "espocrm"
+
+
+def test_exact_policy_no_fuzzy_cross_match():
+    """Policy TST-0001 must not match TST-00010 (prefix collision guard)."""
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {
+        "list": [_policy_row(policy_number="TST-00010", account="Test Corp LLC")]
+    }
+    result = rw_mod.handle(mock_client, "prepare renewal worksheet for policy TST-0001")
+    assert not result.ok
+    assert result.data["reconciliation_needed"] is True
+
+
+# ---------------------------------------------------------------- missing policy
+
+def test_missing_policy_returns_reconciliation_needed():
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {"list": []}
+    result = rw_mod.handle(mock_client, "prepare renewal worksheet for policy NOTEXIST-999")
+    assert not result.ok
+    assert result.data["reconciliation_needed"] is True
+    assert "NOTEXIST-999" in result.message
+
+
+def test_missing_client_returns_reconciliation_needed():
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {"list": []}
+    result = rw_mod.handle(mock_client, "prepare renewal worksheet for Unknown Client XYZ")
+    assert not result.ok
+    assert result.data["reconciliation_needed"] is True
+
+
+# ---------------------------------------------------------------- ambiguity
+
+def test_ambiguous_policy_number_returns_candidates():
+    """Multiple policies sharing the same normalised number → no worksheet, list candidates."""
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {
+        "list": [
+            _policy_row(policy_number="DUP-001", policy_id="pol-a", account="Acme A"),
+            _policy_row(policy_number="DUP-001", policy_id="pol-b", account="Acme B"),
+        ]
+    }
+    result = rw_mod.handle(mock_client, "prepare renewal worksheet for policy DUP-001")
+    assert not result.ok
+    assert result.data["ambiguous"] is True
+    assert len(result.data["candidates"]) == 2
+
+
+def test_ambiguous_client_name_returns_candidates():
+    """Multiple active policies matching a client name → no worksheet, list candidates."""
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {
+        "list": [
+            _policy_row(policy_number="POL-001", policy_id="pol-a", line_of_business="Commercial Auto"),
+            _policy_row(policy_number="POL-002", policy_id="pol-b", line_of_business="General Liability"),
+        ]
+    }
+    result = rw_mod.handle(mock_client, "prepare renewal worksheet for Test Corp LLC")
+    assert not result.ok
+    assert result.data["ambiguous"] is True
+    assert len(result.data["candidates"]) == 2
+
+
+def test_ambiguous_does_not_create_records():
+    """Ambiguous responses must never silently choose a record — ok=False, no worksheet key."""
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {
+        "list": [
+            _policy_row(policy_number="POL-001", policy_id="pol-a"),
+            _policy_row(policy_number="POL-002", policy_id="pol-b"),
+        ]
+    }
+    result = rw_mod.handle(mock_client, "prepare renewal worksheet for Test Corp LLC")
+    assert not result.ok
+    # No write key present — no record was chosen or created.
+    assert "worksheet" not in (result.data or {})
+
+
+# ---------------------------------------------------------------- idempotency
+
+def test_repeated_identical_request_returns_same_result():
+    """Calling handle() twice with the same input returns identical results."""
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {
+        "list": [_policy_row(policy_number="TST-0001", account="Test Corp LLC")]
+    }
+    r1 = rw_mod.handle(mock_client, "prepare renewal worksheet for policy TST-0001")
+    r2 = rw_mod.handle(mock_client, "prepare renewal worksheet for policy TST-0001")
+    assert r1.ok == r2.ok
+    assert r1.message == r2.message
+
+
+# ---------------------------------------------------------------- inactive status filter
+
+def test_inactive_policies_excluded_from_client_lookup():
+    """Cancelled/expired policies must not appear in client-name results."""
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.get.return_value = {
+        "list": [
+            _policy_row(status="Cancelled", policy_number="OLD-001"),
+            _policy_row(status="Expired", policy_number="OLD-002"),
+        ]
+    }
+    result = rw_mod.handle(mock_client, "prepare renewal worksheet for Test Corp LLC")
+    assert not result.ok
+    assert result.data["reconciliation_needed"] is True
