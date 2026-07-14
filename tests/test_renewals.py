@@ -401,7 +401,7 @@ def test_client_name_never_uses_renewal_name_whole():
 # numbers appear in any assertion string.
 
 from hermes.commands import renewal_worksheet as rw_mod
-from hermes.core.dispatcher import Dispatcher
+from hermes.core.dispatcher import Dispatcher, DispatchResult
 
 
 def _make_dispatcher():

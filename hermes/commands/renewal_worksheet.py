@@ -69,9 +69,13 @@ def parse_request(text: str) -> dict[str, str | None]:
     for_match = _FOR_CLIENT_RE.search(remaining)
     if for_match:
         candidate = for_match.group(1).strip()
-        # Strip trailing noise that might be left after policy extraction.
-        # Use a fixed-length bounded pattern to avoid ReDoS.
-        candidate = re.sub(r"\s+(policy|number|#|no\.?)[ \t]*$", "", candidate, flags=re.I).strip()
+        # Strip trailing noise tokens (e.g. "for Test Corp policy") that may
+        # remain after policy-fragment removal — use plain string ops to avoid
+        # introducing a regex anchor over user-supplied text.
+        for suffix in (" policy", " number", " #", " no.", " no"):
+            if candidate.lower().endswith(suffix):
+                candidate = candidate[: -len(suffix)].strip()
+                break
         if candidate:
             client_name = candidate
 
@@ -228,7 +232,8 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
         )
 
     # --- Client-name lookup ---
-    rows = _lookup_by_client_name(client, client_name)  # type: ignore[arg-type]
+    assert client_name is not None  # guarded by the early-return check above
+    rows = _lookup_by_client_name(client, client_name)
     if not rows:
         return DispatchResult(
             False,
