@@ -15,7 +15,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -304,6 +304,12 @@ class AgencyFactResponse(BaseModel):
     answer_text: str
     candidates: list[dict[str, Any]] = []
     notes: str | None = None
+
+
+@app.get("/")
+async def root_redirect():
+    """Redirect the bare root URL to the Command Center UI."""
+    return RedirectResponse(url="/command-center/", status_code=302)
 
 
 @app.get("/health")
