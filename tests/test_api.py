@@ -32,7 +32,7 @@ def client():
 class TestHealth:
     def test_root_redirects_to_command_center(self, client) -> None:
         resp = client.get("/", follow_redirects=False)
-        assert resp.status_code in (301, 302, 307, 308)
+        assert resp.status_code == 307
         assert resp.headers["location"] == "/command-center/"
 
     def test_health(self, client) -> None:
