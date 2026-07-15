@@ -308,7 +308,7 @@ class AgencyFactResponse(BaseModel):
 
 @app.get("/")
 async def root():
-    """Redirect visitors hitting the root URL to the Command Center UI."""
+    """Redirect visitors hitting the root URL to the Command Center UI via 307."""
     return RedirectResponse(url="/command-center/", status_code=307)
 
 
