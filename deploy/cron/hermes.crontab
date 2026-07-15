@@ -19,6 +19,11 @@ CRON_TZ=America/New_York
 0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
 # Policy Sync v2  — daily 2:10am ET (NowCerts Policy → EspoCRM Policy; no Account writes)
 10 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-policies >> /root/hermes-cron.log 2>&1
+# Renewal eligibility refresh — daily 2:30am ET (after Policy Sync v2). Rebuilds
+# renewal_candidates from the live book (canonical_policies + live NowCerts insured-active)
+# via the centralized eligibility engine, then projects ELIGIBLE events -> project_85_renewals.
+# Supabase-only, no AMS/client writes, idempotent. Dependency: canonical_policies freshness.
+30 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-refresh >> /root/hermes-cron.log 2>&1
 # Outlook -> intake triage — every 30 min, 2h lookback (idempotent via Hermes Triaged category)
 */30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
 # Dashboard KPI history — daily 6:00am ET (Supabase dashboard_kpis, no Slack)
@@ -29,8 +34,9 @@ CRON_TZ=America/New_York
 # (reverses the 7/13 on-demand scope-lock; v2 sanctions scheduled processing). Dry-run
 # first to preview with zero side effects: hermes --renewal-executor --renewal-executor-dry-run
 # */15 8-18 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-executor --renewal-executor-limit 5 >> /root/hermes-cron.log 2>&1
-# PAUSED 2026-07-13 — SCOPE LOCK: on-demand only. No scheduler, no timers, no doorbells.
-# Renewal risk reclassify — daily 7:30am ET (project_85_renewals, no Slack)
+# OPT-IN — Renewal urgency re-grade — re-grades risk_status (urgency only) over eligible
+# renewal_candidates. Secondary to --renewal-refresh (which already grades on rebuild); enable
+# for a faster intraday urgency bump if wanted. No Slack.
 # 30 7 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-classify >> /root/hermes-cron.log 2>&1
 # Revenue sentinel — Project 85 daily briefing -> #the-boss, weekdays 8:00am ET
 0 8 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --revenue-sentinel >> /root/hermes-cron.log 2>&1
