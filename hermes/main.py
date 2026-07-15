@@ -139,15 +139,31 @@ def main() -> int:
         help="Preview renewal reclassification without writing",
     )
     parser.add_argument(
-        "--renewal-reconcile",
+        "--renewal-executor",
         action="store_true",
-        help="Run Renewal Loop v6 reconcile (retry due Momentum notes writebacks + digest failures)",
+        help="Process approved renewal jobs from outbound_sync_queue (Job Contract v2)",
     )
     parser.add_argument(
-        "--renewal-reconcile-limit",
+        "--renewal-executor-limit",
         type=int,
-        default=100,
-        help="Cap due writebacks processed by --renewal-reconcile",
+        default=1,
+        help="Max approved renewal jobs to process this run (contract: claim one)",
+    )
+    parser.add_argument(
+        "--renewal-executor-dry-run",
+        action="store_true",
+        help="Preview renewal jobs (validate+read+compare) without claiming or writing",
+    )
+    parser.add_argument(
+        "--run-renewal-executor-worker",
+        action="store_true",
+        help="Continuously process approved renewal jobs every N seconds (opt-in)",
+    )
+    parser.add_argument(
+        "--renewal-executor-poll-seconds",
+        type=float,
+        default=300.0,
+        help="Poll interval for --run-renewal-executor-worker (default: 300s)",
     )
     parser.add_argument(
         "--commission-audit",
@@ -908,16 +924,32 @@ def main() -> int:
             print(f"  {status}: {stats}")
         return 0
 
-    if args.renewal_reconcile:
-        from hermes.renewals.loop import run_reconcile
+    if args.renewal_executor or args.renewal_executor_dry_run:
+        from hermes.renewals.executor import run_executor
 
-        summary = run_reconcile(limit=args.renewal_reconcile_limit)
-        print(
-            f"Renewal reconcile: attempted={summary['attempted']} "
-            f"succeeded={summary['succeeded']} retrying={summary['retrying']} "
-            f"failed={summary['failed']} alerted={summary['alerted']}"
+        summary = run_executor(
+            limit=args.renewal_executor_limit,
+            dry_run=args.renewal_executor_dry_run,
         )
-        return 0 if summary["ok"] else 1
+        mode = "dry-run" if args.renewal_executor_dry_run else "live"
+        print(
+            f"Renewal executor ({mode}): claimed={summary['claimed']} "
+            f"completed={summary['completed']} failed={summary['failed']} "
+            f"blocked={summary['blocked']}"
+        )
+        for pv in summary.get("previews", []):
+            detail = pv.get("reason") or pv.get("intended_change")
+            print(f"  {pv['verdict']}: {pv['action']} policy={pv['policy_number']} — {detail}")
+        return 0 if summary["failed"] == 0 and summary["blocked"] == 0 else 1
+
+    if args.run_renewal_executor_worker:
+        from hermes.renewals.executor import run_worker_loop
+
+        run_worker_loop(
+            poll_seconds=args.renewal_executor_poll_seconds,
+            limit=args.renewal_executor_limit,
+        )
+        return 0
 
     if args.revenue_sentinel_health:
         from hermes.jobs import revenue_sentinel

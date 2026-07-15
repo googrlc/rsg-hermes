@@ -47,6 +47,30 @@ Phase 0 gates everything (pending patch deploy, `rsg-sync-daily` clean, stale
 `canonical_policies` resolved, ingest dedup, manual renewal fires). See the brief's
 **Phases & Gates**.
 
+## Renewal Executor — Job Contract v2 (2026-07-15)
+
+`hermes/renewals/executor.py` is the controlled, **queue-driven** execution worker.
+The upstream Renewal Desk Site stages **human-approved** instructions in Supabase
+`outbound_sync_queue` (`object_type='renewal'`, `destination_system='nowcerts'`,
+`status='queued'`, `approved_by` + `approved_at` set, `payload.action` +
+`payload.expected_result` present, `payload.renewal_id` resolving in
+`project_85_renewals`). Hermes claims one, validates, reads NowCerts, compares,
+executes exactly the approved action, **re-reads to verify** (a 200 is not proof),
+writes a receipt to `renewal_execution_receipts`, marks the queue row
+completed/failed, records the outcome in `renewal_actions`, and escalates
+high-impact failures to `#systems-check`. Actions: `request_terms`,
+`prepare_options` (no AMS write), `client_follow_up`, `update_ams` (approved fields
+only). Run: `hermes --renewal-executor` (add `--renewal-executor-dry-run` to preview
+with zero side effects). Scheduled/triggered, **not** always-on.
+
+**Renewal Loop v6 is retired** (`loop.py`, the `/webhooks/espo/disposition` +
+`/webhooks/espo/worksheet` endpoints, and `--renewal-reconcile`). Its ledger tables
+(`renewals_master`, `renewal_events`, `crm_dispositions`, `ams_writeback_log`) remain
+in the DB as history but are no longer written. The Momentum MCP notes client
+(`momentum_mcp_client.py`) survives — the executor's `note` channel uses it. This
+supersedes the brief's "no new tables / Walker-is-the-write-path" model for the
+execution path; the `/walker/*` read+draft workstation is unaffected.
+
 ## Files here
 
 | File | Runs where | Purpose |

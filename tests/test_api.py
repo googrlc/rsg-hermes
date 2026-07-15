@@ -48,40 +48,6 @@ class TestHealth:
         assert "Pong" in data["message"]
 
 
-class TestRenewalLoopWebhooks:
-    @patch("hermes.renewals.loop.handle_disposition_webhook")
-    @patch("hermes.renewals.complete.verify_secret")
-    def test_disposition_webhook(self, mock_verify, mock_handle, client) -> None:
-        mock_verify.return_value = True
-        mock_handle.return_value = {"received": 1, "logged": 1}
-        resp = client.post(
-            "/webhooks/espo/disposition",
-            json={"event_uuid": "evt-1", "data": {"id": "r-1", "disposition": "won"}},
-            headers={"X-Service-Webhook-Secret": "topsecret"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["logged"] == 1
-
-    @patch("hermes.renewals.complete.verify_secret")
-    def test_disposition_webhook_rejects_bad_secret(self, mock_verify, client) -> None:
-        mock_verify.return_value = False
-        resp = client.post("/webhooks/espo/disposition", json={})
-        assert resp.status_code == 401
-
-    @patch("hermes.renewals.loop.handle_worksheet_webhook")
-    @patch("hermes.renewals.complete.verify_secret")
-    def test_worksheet_webhook(self, mock_verify, mock_handle, client) -> None:
-        mock_verify.return_value = True
-        mock_handle.return_value = {"received": 1, "logged": 1}
-        resp = client.post(
-            "/webhooks/espo/worksheet",
-            json={"event_uuid": "evt-2", "data": {"id": "r-1"}},
-            headers={"X-Service-Webhook-Secret": "topsecret"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["received"] == 1
-
-
 class TestDispatch:
     @patch("hermes.api._get_dispatcher")
     @patch("hermes.api._get_espo")

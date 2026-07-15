@@ -23,9 +23,13 @@ CRON_TZ=America/New_York
 */30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
 # Dashboard KPI history — daily 6:00am ET (Supabase dashboard_kpis, no Slack)
 0 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --snapshot-kpis >> /root/hermes-cron.log 2>&1
+# OPT-IN 2026-07-15 — Renewal Executor (Job Contract v2). Processes human-approved
+# renewal jobs from outbound_sync_queue → NowCerts, idempotent (guarded claim), writes
+# receipts to renewal_execution_receipts. Uncommenting is the deliberate go-live step
+# (reverses the 7/13 on-demand scope-lock; v2 sanctions scheduled processing). Dry-run
+# first to preview with zero side effects: hermes --renewal-executor --renewal-executor-dry-run
+# */15 8-18 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-executor --renewal-executor-limit 5 >> /root/hermes-cron.log 2>&1
 # PAUSED 2026-07-13 — SCOPE LOCK: on-demand only. No scheduler, no timers, no doorbells.
-# Renewal Loop v6 reconcile — daily 6:15am ET (#systems-check on failed writebacks)
-# 15 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-reconcile >> /root/hermes-cron.log 2>&1
 # Renewal risk reclassify — daily 7:30am ET (project_85_renewals, no Slack)
 # 30 7 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-classify >> /root/hermes-cron.log 2>&1
 # Revenue sentinel — Project 85 daily briefing -> #the-boss, weekdays 8:00am ET

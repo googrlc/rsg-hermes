@@ -397,6 +397,32 @@ class NowCertsClient:
                 return str(rows[0]["id"])
         return None
 
+    def find_policy_by_number(self, number: str) -> dict[str, Any] | None:
+        """Return a single policy's current detail record by policy number.
+
+        GET /api/PolicyDetailList with ``$filter=number eq '<number>'`` — the same
+        rich shape ``fetch_policies`` returns (carries ``databaseId`` plus current
+        field values like premium/effective/expiration). The renewal executor uses
+        this for the mandatory read-before-write and read-after-write verification
+        on ``update_ams``. Returns None if no policy matches; the caller treats an
+        ambiguous (>1) match as a block rather than guessing.
+        """
+        if not number:
+            return None
+        escaped = str(number).replace("'", "''")  # OData single-quote escape
+        try:
+            body = self._get("/api/PolicyDetailList", params={"$filter": f"number eq '{escaped}'"})
+        except NowCertsClientError:
+            return None
+        rows = body if isinstance(body, list) else body.get("value", body.get("items", []))
+        if not rows:
+            return None
+        if len(rows) > 1:
+            # Duplicate policy numbers are a stop-and-escalate condition, not a
+            # "pick the first" case — surface all matches so the caller can block.
+            return {"_ambiguous": True, "matches": rows}
+        return rows[0] if isinstance(rows[0], dict) else None
+
     def insert_insured_no_override(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create/enrich an insured WITHOUT clobbering existing AMS fields.
 

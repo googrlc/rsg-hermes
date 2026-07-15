@@ -6,6 +6,15 @@
 **Companion docs:** `BRIEF-renewal-cadence-2026-07-09.md` · RSG Renewal Walker GPT Setup Kit v2 · RSG Renewal Worksheet template
 **Priority:** Revenue-critical. This is the 54.92% → 80% retention machine.
 
+> **⚠️ Superseded for the EXECUTION path (2026-07-15).** The *write* model here
+> ("no new Supabase tables · state on the Espo Opportunity · the `/walker/*` API is
+> the write path") is replaced by the **Hermes Renewal Executor — Job Contract v2**:
+> a queue-driven worker (`hermes/renewals/executor.py`) that executes only
+> human-approved instructions staged in `outbound_sync_queue` and writes receipts to
+> `renewal_execution_receipts`. See [`README.md`](./README.md) → *Renewal Executor —
+> Job Contract v2*. The Walker's **read + draft** workstation role below still stands;
+> only "who writes and from where" changed.
+
 **What changed in v3:** ChatGPT Business is the agency workstation — everything sits on it. So the paste-block bridge dies, the Walker GPT gets an **Action wired to the Hermes bridge**, the worksheet stops being a file anywhere (Drive and canvas are both out — it's CRM state rendered by the Walker on demand), and Slack is demoted to doorbell + siren.
 
 ---

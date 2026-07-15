@@ -158,13 +158,9 @@ WORKSHEET_HIDDEN_FIELDS = {
 
 RENEWAL_TEMPLATE_DOC_ID = os.environ.get("RENEWAL_TEMPLATE_DOC_ID")
 
-# --- Renewal Loop v6 writeback (Momentum MCP, notes-only in v1) ---
+# --- Momentum (NowCerts) MCP notes writeback ---
+# Consumed by the renewal executor's `note` channel (request_terms /
+# client_follow_up). Loop v6's disposition writeback that once used this is retired.
 MOMENTUM_MCP_URL = os.environ.get("MOMENTUM_MCP_URL", "https://mcp.momentumamp.com/mcp").rstrip("/")
 MOMENTUM_MCP_API_KEY = os.environ.get("MOMENTUM_MCP_API_KEY", "")
 MOMENTUM_MCP_TOOL_NOTES = "manage_notes"
-WRITEBACK_RETRY_DELAYS = (30, 120, 600, 3600, 21600)
-
-# --- Reconcile alert threshold (v6 §6.1) ---
-# Daily reconcile posts to #systems-check ONLY when failures are older than
-# this many hours, to avoid noise on freshly-exhausted retries.
-RECONCILE_FAILED_ALERT_MIN_AGE_HOURS = 24

@@ -21,6 +21,13 @@ VALID_ACTION_TYPES = (
     "BOUND",
     "MANUAL_NOTE",
     "RISK_ESCALATION",
+    # Renewal Executor (Job Contract v2) outcome types — one per executed job.
+    "REQUEST_TERMS",
+    "PREPARE_OPTIONS",
+    "CLIENT_FOLLOW_UP",
+    "AMS_UPDATE",
+    "EXECUTION_BLOCKED",
+    "EXECUTION_FAILED",
 )
 
 

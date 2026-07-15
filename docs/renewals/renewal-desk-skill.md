@@ -17,6 +17,20 @@ description: >
 
 > Canonical spec: `docs/renewals/BRIEF-renewal-walker-runner-2026-07-13.md` (v3).
 > This skill is the **execution arm** — the sanctioned write door. It is live today.
+>
+> **Automated path (Job Contract v2, 2026-07-15):** the same execution role also
+> runs headless as `hermes/renewals/executor.py` (`hermes --renewal-executor`). It
+> processes **only** rows in `outbound_sync_queue` where `object_type='renewal'`,
+> `destination_system='nowcerts'`, `status='queued'`, **both** `approved_by` and
+> `approved_at` are set, `payload.renewal_id` resolves in `project_85_renewals`, and
+> the payload carries an explicit `action` + `expected_result`. It reads NowCerts,
+> compares, executes exactly the approved action (`request_terms` / `prepare_options`
+> / `client_follow_up` / `update_ams`), re-reads to verify, and writes a receipt to
+> `renewal_execution_receipts`. It never infers approval from notes/Slack/chat, never
+> retries an ambiguous write, and escalates high-impact failures to `#systems-check`.
+> See `docs/renewals/README.md`. When you (the interactive skill) work a renewal
+> conversationally, the approval + queue rules below still govern; the automated
+> executor is the same contract without a human in the request loop.
 
 ## Purpose & role split
 
