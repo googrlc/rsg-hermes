@@ -10,6 +10,12 @@ from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientEr
 
 log = logging.getLogger(__name__)
 
+# risk_status describes the URGENCY of an already-eligible renewal event — it must
+# never decide whether a policy is a renewal (eligibility lives in
+# renewal_candidates.eligibility_state). The classifier now emits only these three.
+URGENCY_RISK_STATUSES = ("SAFE", "AT_RISK", "CRITICAL")
+# The full tuple stays for DB-enum / legacy-row validation compatibility; RENEWED
+# and LAPSED are terminal lifecycle outcomes, no longer produced as risk values.
 VALID_RISK_STATUSES = ("SAFE", "AT_RISK", "CRITICAL", "RENEWED", "LAPSED")
 VALID_ACTION_TYPES = (
     "EMAIL_SENT",

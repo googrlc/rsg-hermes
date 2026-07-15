@@ -29,7 +29,7 @@ from hermes.operations import renewal_tracker
 from hermes.operations.guardrails import log_guardrail_event
 from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
 
-from . import config
+from . import config, eligibility
 from .momentum_mcp_client import MomentumMCPClient, MomentumMCPClientError
 
 log = logging.getLogger(__name__)
@@ -313,6 +313,16 @@ def process_job(
                       before_state={"matches": len(before_state.get("matches") or [])},
                       notifier_cls=notifier_cls, started_at=started_at)
 
+    # 5b. Execution-time eligibility revalidation — the SAME centralized rule,
+    # re-run on the freshly-read NowCerts policy + a live insured-active check.
+    # Blocks only on a definitive `excluded` verdict (policy went dead/superseded
+    # or the insured was deactivated since approval) — a human already approved,
+    # so ambiguous/needs_verification does not hard-block here.
+    reval = _revalidate_eligibility(nowcerts, before_state, now=now)
+    if reval:
+        return _block(supa, ctx, reason=reval, before_state=before_state,
+                      notifier_cls=notifier_cls, started_at=started_at)
+
     # 4/5. Compare current values with the approved instruction.
     if ctx.action == ACTION_UPDATE_AMS and _is_noop(before_state, ctx.fields):
         # Already in the approved state — complete idempotently, no write.
@@ -386,6 +396,37 @@ def _validate(supa: SupabaseClient, ctx: JobContext) -> str | None:
 # ------------------------------------------------------------------------------
 # Compare / execute / verify
 # ------------------------------------------------------------------------------
+def _revalidate_eligibility(
+    nowcerts: NowCertsClient, before_state: dict[str, Any], *, now: datetime
+) -> str | None:
+    """Execution-time safety gate using the centralized eligibility vocabulary.
+
+    Blocks only on *definitive drift since approval* — the policy went dead
+    (Cancelled/Expired/Flat Cancel/Non-Renewed/Lapsed), was superseded
+    (Renewed/Rewritten), or the insured was deactivated. It deliberately does NOT
+    apply the 120-day discovery window or lineage checks (those are discovery
+    filters, not execution concerns) — a human already approved this specific job.
+    Transient AMS read failures never block.
+    """
+    guid = before_state.get("insuredDatabaseId") or before_state.get("InsuredDatabaseId")
+    if guid:
+        try:
+            if not nowcerts.is_insured_active(str(guid)):
+                return "insured is no longer active in NowCerts"
+        except NowCertsClientError:
+            pass  # don't block on a transient AMS read failure
+
+    status = eligibility.normalize_status(
+        before_state.get("policyStatus") or before_state.get("PolicyStatus")
+        or before_state.get("status") or before_state.get("Status")
+    )
+    if status in eligibility.EXCLUDE_STATUSES:
+        return f"policy lifecycle status is now {status}"
+    if status in eligibility.SUPERSEDED_STATUSES:
+        return f"policy has been superseded ({status})"
+    return None
+
+
 def _current_value(before: dict[str, Any], key: str) -> Any:
     """Case-insensitive field lookup (write keys are PascalCase, reads camelCase)."""
     if key in before:

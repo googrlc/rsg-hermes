@@ -56,17 +56,21 @@ class FakeSupa:
 
 
 class FakeNowCerts:
-    def __init__(self, *, policy=None, policy_after=None, task_result=None):
+    def __init__(self, *, policy=None, policy_after=None, task_result=None, insured_active=True):
         self._policy = policy
         self._policy_after = policy_after if policy_after is not None else policy
         self.task_calls: list[dict] = []
         self.update_calls: list[dict] = []
         self.reads = 0
         self.task_result = task_result or {"database_id": "task-1"}
+        self.insured_active = insured_active
 
     def find_policy_by_number(self, number):
         self.reads += 1
         return self._policy if self.reads == 1 else self._policy_after
+
+    def is_insured_active(self, guid):
+        return self.insured_active
 
     def insert_task(self, payload):
         self.task_calls.append(payload)
@@ -136,7 +140,8 @@ def renewal_map(renewal_id="ren-1"):
     return {renewal_id: {"id": renewal_id, "policy_number": "POL1", "client_name": "Acme"}}
 
 
-POLICY = {"databaseId": "pol-guid", "number": "POL1", "premium": 4000, "insuredDatabaseId": "ins-guid"}
+POLICY = {"databaseId": "pol-guid", "number": "POL1", "premium": 4000,
+          "insuredDatabaseId": "ins-guid", "policyStatus": "Active"}
 
 
 @pytest.fixture(autouse=True)
@@ -325,6 +330,33 @@ def test_duplicate_policy_blocks():
 
     assert out.outcome == "blocked"
     assert nc.update_calls == []
+
+
+def test_revalidation_blocks_when_policy_now_dead():
+    supa = FakeSupa(renewals=renewal_map())
+    nc = FakeNowCerts(policy={**POLICY, "policyStatus": "Cancelled"})
+    out = executor.process_job(supa, make_row("update_ams", fields={"Premium": 4200}),
+                               nowcerts=nc, notifier_cls=FakeNotifier)
+    assert out.outcome == "blocked"
+    assert nc.update_calls == []
+    assert "Cancelled" in (out.reason or "")
+
+
+def test_revalidation_blocks_when_policy_superseded():
+    supa = FakeSupa(renewals=renewal_map())
+    nc = FakeNowCerts(policy={**POLICY, "policyStatus": "Renewed"})
+    out = executor.process_job(supa, make_row("request_terms"), nowcerts=nc, notifier_cls=FakeNotifier)
+    assert out.outcome == "blocked"
+    assert nc.task_calls == []
+
+
+def test_revalidation_blocks_when_insured_inactive():
+    supa = FakeSupa(renewals=renewal_map())
+    nc = FakeNowCerts(policy=dict(POLICY), insured_active=False)
+    out = executor.process_job(supa, make_row("request_terms"), nowcerts=nc, notifier_cls=FakeNotifier)
+    assert out.outcome == "blocked"
+    assert nc.task_calls == []
+    assert "insured" in (out.reason or "").lower()
 
 
 def test_missing_renewal_blocks():

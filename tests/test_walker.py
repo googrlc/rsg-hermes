@@ -211,9 +211,9 @@ class TestServiceLogic:
         supa = MagicMock()
         supa.select.side_effect = [
             [
-                {"id": "1", "premium_current": 200000, "risk_status": "RENEWED"},
-                {"id": "2", "premium_current": 100000, "risk_status": "LAPSED"},
-                {"id": "3", "premium_current": 85000, "risk_status": "SAFE"},
+                {"normalized_status": "Renewed", "eligibility_state": "excluded", "premium_current": 200000},
+                {"normalized_status": "Cancelled", "eligibility_state": "excluded", "premium_current": 100000},
+                {"normalized_status": "Active", "eligibility_state": "eligible", "premium_current": 85000},
             ],
             [{"updated_at": "2026-07-13"}],  # freshness
         ]

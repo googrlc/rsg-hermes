@@ -52,46 +52,28 @@ def classify_risk(
     today: date,
     increase_percentage: float | None = None,
 ) -> str:
-    """Return a risk_status from VALID_RISK_STATUSES.
+    """URGENCY of an ALREADY-ELIGIBLE renewal event: SAFE | AT_RISK | CRITICAL.
 
-    Order of authority: terminal lifecycle state (renewed/lapsed) → premium
-    increase (when a renewal quote exists) → pending-cancel → active renewal in
-    progress → expiration timing for in-force/unknown policies.
+    Grades urgency only — it must NEVER decide whether a policy is a renewal.
+    Eligibility is owned entirely by ``hermes.renewals.eligibility``; terminal
+    lifecycle states (renewed/lapsed/cancelled) are excluded upstream and never
+    reach here, so this no longer emits RENEWED/LAPSED.
+
+    Order: premium increase (when a renewal quote exists) → expiration timing.
     """
-    status = (policy_status or "").strip().lower()
     exp = _parse_date(expiration_date)
     days_until = (exp - today).days if exp is not None else None
     past_due = days_until is not None and days_until < 0
 
-    # 1. Authoritative terminal states from the AMS/commission record.
-    if status in RENEWED_STATUSES:
-        return "RENEWED"
-    if status in LAPSED_STATUSES:
-        return "LAPSED"
-
-    # 2. Premium increase (only meaningful once a renewal quote is recorded).
     if increase_percentage is not None:
         if increase_percentage > 15:
             return "CRITICAL"
         if increase_percentage >= 5:
             return "AT_RISK"
 
-    # 3. Carrier flagged the policy for cancellation.
-    if status in PENDING_CANCEL_STATUSES:
-        return "CRITICAL"
-
-    # 4. Actively in the renewal pipeline.
-    if status in IN_RENEWAL_STATUSES:
-        if past_due or (days_until is not None and days_until <= 30):
-            return "CRITICAL"
-        return "AT_RISK"
-
-    # 5. In-force / unknown — classify on timing.
     if days_until is None:
         return "SAFE"
-    if past_due:
-        return "CRITICAL"  # past x-date with no renewal/lapse recorded → urgent review
-    if days_until <= 30:
+    if past_due or days_until <= 30:
         return "CRITICAL"
     if days_until <= 90:
         return "AT_RISK"
@@ -141,74 +123,67 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _increase_pct(row: dict[str, Any]) -> float | None:
+    cur = _as_float(row.get("premium_current"))
+    ren = _as_float(row.get("premium_renewal"))
+    if cur and cur > 0 and ren is not None:
+        return (ren - cur) / cur * 100
+    return None
+
+
 def refresh_renewals(
     supa: SupabaseClient,
     *,
     dry_run: bool = False,
     today: date | None = None,
 ) -> dict[str, Any]:
-    """Reclassify every project_85_renewals row against crm_commissions.
+    """Re-grade URGENCY (risk_status) over ELIGIBLE renewal_candidates.
 
-    Writes back changed ``risk_status`` (+ backfills ``premium_current`` from the
-    commission record when missing, and refreshes ``ai_strategy_notes``). Returns
-    a summary with per-status counts and the number of rows changed.
+    Urgency-only: this never changes ``eligibility_state`` — the eligibility
+    engine owns membership. It updates ``renewal_candidates.risk_status`` and
+    mirrors it onto the project_85_renewals projection by policy_number. A full
+    rebuild (candidate_refresh.run_refresh / ``--renewal-refresh``) is what
+    (re)computes eligibility itself.
     """
     today = today or date.today()
 
-    renewals = supa.select(
-        "project_85_renewals",
-        columns="id,policy_number,client_name,expiration_date,premium_current,premium_renewal,risk_status,last_contact_date",
-        limit=2000,
+    rows = supa.select(
+        "renewal_candidates",
+        params={"eligibility_state": "eq.eligible"},
+        columns="id,policy_number,renewal_event_date,normalized_status,premium_current,premium_renewal,risk_status",
+        limit=5000,
     )
-    commissions = supa.select(
-        "crm_commissions",
-        columns="policy_number,policy_status,premium,expiration_date",
-        limit=2000,
-    )
-    by_policy = _best_commission_by_policy(commissions)
 
     by_risk: dict[str, int] = {s: 0 for s in VALID_RISK_STATUSES}
     changed = 0
-    matched = 0
-
-    for r in renewals:
-        comm = by_policy.get(r.get("policy_number"))
-        if comm is not None:
-            matched += 1
-        policy_status = comm.get("policy_status") if comm else None
-        exp = r.get("expiration_date")
-        days_until = (_parse_date(exp) - today).days if _parse_date(exp) else None
-
+    for r in rows:
         new_status = classify_risk(
-            policy_status=policy_status,
-            expiration_date=exp,
+            policy_status=r.get("normalized_status"),
+            expiration_date=r.get("renewal_event_date"),
             today=today,
-            increase_percentage=_as_float(r.get("increase_percentage")),
+            increase_percentage=_increase_pct(r),
         )
-        by_risk[new_status] += 1
-
-        update: dict[str, Any] = {}
+        by_risk[new_status] = by_risk.get(new_status, 0) + 1
         if new_status != r.get("risk_status"):
-            update["risk_status"] = new_status
-        # backfill premium_current from the commission record when missing
-        if not _as_float(r.get("premium_current")) and comm and _as_float(comm.get("premium")):
-            update["premium_current"] = _as_float(comm.get("premium"))
-        if update:
-            update["ai_strategy_notes"] = build_strategy_note(new_status, policy_status, days_until)
             changed += 1
             if not dry_run:
-                supa.update("project_85_renewals", r["id"], update)
+                supa.update("renewal_candidates", r["id"], {"risk_status": new_status})
+                if r.get("policy_number"):
+                    supa.update_where(
+                        "project_85_renewals",
+                        {"risk_status": new_status},
+                        filters={"policy_number": f"eq.{r['policy_number']}"},
+                    )
 
     summary = {
         "dry_run": dry_run,
         "as_of": today.isoformat(),
-        "total": len(renewals),
-        "matched_commissions": matched,
+        "total": len(rows),
         "changed": changed,
         "by_risk": by_risk,
     }
     log.info(
-        "renewal classify: total=%d matched=%d changed=%d dry_run=%s by_risk=%s",
-        len(renewals), matched, changed, dry_run, by_risk,
+        "renewal urgency re-grade: total=%d changed=%d dry_run=%s by_risk=%s",
+        len(rows), changed, dry_run, by_risk,
     )
     return summary

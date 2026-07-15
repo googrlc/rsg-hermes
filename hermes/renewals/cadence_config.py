@@ -144,6 +144,8 @@ TOUCH_SPEC = {
 # Rule #1: Medicare is excluded entirely — no touches, no cards, ever.
 MEDICARE_LOB_KEYWORDS = (
     "medicare",
+    "medicare advantage",
+    "mapd",
     "medigap",
     "med supp",
     "pdp",

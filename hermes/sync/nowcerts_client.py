@@ -423,6 +423,29 @@ class NowCertsClient:
             return {"_ambiguous": True, "matches": rows}
         return rows[0] if isinstance(rows[0], dict) else None
 
+    def is_insured_active(self, insured_database_id: str) -> bool:
+        """Best-effort live check of an insured's Active flag by GUID.
+
+        Used by the renewal executor's execution-time revalidation. NowCerts does
+        not reliably support ``$filter`` on the insured id GUID, so an empty or
+        unfilterable response is treated as "unknown -> active" (the nightly
+        candidate refresh already vets insured-active via the bulk InsuredDetailList,
+        and the executor's hard safety is the policy lifecycle status). Returns
+        False only when the AMS explicitly reports the insured inactive.
+        """
+        if not insured_database_id:
+            return True
+        q = str(insured_database_id).replace("'", "''")  # OData single-quote escape
+        try:
+            body = self._get("/api/InsuredList", params={"$filter": f"id eq '{q}'"})
+        except NowCertsClientError:
+            return True
+        rows = body if isinstance(body, list) else body.get("value", [])
+        if not rows or not isinstance(rows[0], dict):
+            return True
+        active = rows[0].get("active")
+        return True if active is None else bool(active)
+
     def insert_insured_no_override(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create/enrich an insured WITHOUT clobbering existing AMS fields.
 

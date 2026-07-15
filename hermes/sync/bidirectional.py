@@ -153,7 +153,10 @@ def run_crm_to_hub(
 
                 if not dry_run:
                     _upsert_golden_commission(supa, commission_row)
-                    _maybe_upsert_renewal_watchlist(supa, policy, dry_run=dry_run)
+                    # project_85_renewals is no longer seeded from Espo Policy rows.
+                    # Renewal membership is owned by the eligibility engine
+                    # (hermes/renewals/candidate_refresh -> renewal_candidates,
+                    # projected to project_85_renewals). Run via --renewal-refresh.
 
                 result.commissions_mirrored += 1
             except (SupabaseClientError, Exception) as exc:
@@ -381,7 +384,12 @@ def _maybe_upsert_renewal_watchlist(
     *,
     dry_run: bool,
 ) -> None:
-    """Drive project_85_renewals from Espo Policy rows when enough fields exist."""
+    """DEPRECATED — no longer called by the sync.
+
+    project_85_renewals is now a projection of ELIGIBLE renewal_candidates built by
+    the eligibility engine (hermes/renewals/candidate_refresh), not seeded from
+    EspoCRM Policy rows. Retained only for backward compatibility / tests.
+    """
     if dry_run:
         return
     commission_row = map_policy_to_commission(policy, None)

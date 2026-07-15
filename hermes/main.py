@@ -129,14 +129,24 @@ def main() -> int:
         help="Cap renewal-sweep candidates (use 1 for a safe first live run)",
     )
     parser.add_argument(
+        "--renewal-refresh",
+        action="store_true",
+        help="Rebuild renewal_candidates from the live book (eligibility engine) + project eligible to project_85_renewals",
+    )
+    parser.add_argument(
+        "--renewal-refresh-dry-run",
+        action="store_true",
+        help="Preview renewal eligibility (eligible/needs_verification/excluded counts) without writing",
+    )
+    parser.add_argument(
         "--renewal-classify",
         action="store_true",
-        help="Reclassify project_85_renewals risk_status from crm_commissions (Command Center)",
+        help="Re-grade urgency (risk_status) over eligible renewal_candidates (Command Center)",
     )
     parser.add_argument(
         "--renewal-classify-dry-run",
         action="store_true",
-        help="Preview renewal reclassification without writing",
+        help="Preview renewal urgency re-grade without writing",
     )
     parser.add_argument(
         "--renewal-executor",
@@ -906,6 +916,24 @@ def main() -> int:
               f"{result['candidates']} candidate(s)")
         return 0
 
+    if args.renewal_refresh or args.renewal_refresh_dry_run:
+        from hermes.renewals.candidate_refresh import run_refresh
+
+        summary = run_refresh(dry_run=args.renewal_refresh_dry_run)
+        print(
+            f"Renewal refresh ({'dry-run' if summary['dry_run'] else 'live'}): "
+            f"{summary['policies']} policies -> {summary['candidates']} events "
+            f"(eligible={summary['eligible']}, needs_verification={summary['needs_verification']}, "
+            f"excluded={summary['excluded']}, working_queue={summary['in_working_queue']})"
+        )
+        if summary.get("projected") is not None:
+            print(f"  projected {summary['projected']} eligible -> project_85_renewals; "
+                  f"pruned {summary.get('pruned', 0)} stale")
+        for s in summary.get("sample_eligible", []):
+            print(f"  {s['branch']}: {s['policy_number']} {s['event_date']} seg={s['segment']} "
+                  f"queue={s['in_working_queue']} risk={s['risk_status']}")
+        return 0
+
     if args.renewal_classify or args.renewal_classify_dry_run:
         from hermes.integrations.supabase_client import SupabaseClient
         from hermes.operations.renewal_classifier import refresh_renewals
@@ -916,9 +944,8 @@ def main() -> int:
         )
         verb = "Would change" if summary["dry_run"] else "Changed"
         print(
-            f"Renewal classify ({'dry-run' if summary['dry_run'] else 'live'}): "
-            f"{summary['total']} renewals, {summary['matched_commissions']} matched to commissions, "
-            f"{verb} {summary['changed']}."
+            f"Renewal urgency re-grade ({'dry-run' if summary['dry_run'] else 'live'}): "
+            f"{summary['total']} eligible renewals, {verb} {summary['changed']}."
         )
         for status, stats in summary["by_risk"].items():
             print(f"  {status}: {stats}")

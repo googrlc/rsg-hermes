@@ -429,25 +429,32 @@ class WalkerService:
         }
 
     def get_scoreboard(self) -> dict[str, Any]:
-        """Retention %, renewed/lost premium."""
-        renewals = self.supa.select(
-            "project_85_renewals",
-            columns="id,policy_number,client_name,expiration_date,premium_current,risk_status",
-            limit=2000,
+        """Retention %, renewed/lost premium.
+
+        Derived from renewal_candidates lifecycle (normalized_status), not from
+        risk_status — risk_status is urgency-only now and no longer carries the
+        renewed/lapsed disposition.
+        """
+        rows = self.supa.select(
+            "renewal_candidates",
+            columns="normalized_status,eligibility_state,premium_current",
+            limit=5000,
         )
 
         renewed_premium = 0.0
         lost_premium = 0.0
         active_premium = 0.0
 
-        for r in renewals:
-            risk = r.get("risk_status") or ""
+        _renewed = {"Renewed", "Rewritten"}
+        _lost = {"Cancelled", "Expired", "Flat Cancel", "Non-Renewed", "Lapsed"}
+        for r in rows:
+            status = r.get("normalized_status") or ""
             prem = _as_float(r.get("premium_current")) or 0.0
-            if risk == "RENEWED":
+            if status in _renewed:
                 renewed_premium += prem
-            elif risk == "LAPSED":
+            elif status in _lost:
                 lost_premium += prem
-            elif risk in ("SAFE", "AT_RISK", "CRITICAL"):
+            elif r.get("eligibility_state") == "eligible":
                 active_premium += prem
 
         decided = renewed_premium + lost_premium
@@ -455,7 +462,7 @@ class WalkerService:
 
         return {
             "data_as_of": self._last_refresh_stamp(),
-            "total_renewals": len(renewals),
+            "total_renewals": len(rows),
             "retention_pct": retention_pct,
             "renewed_premium": round(renewed_premium, 2),
             "lost_premium": round(lost_premium, 2),
