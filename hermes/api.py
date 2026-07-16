@@ -702,6 +702,28 @@ async def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
             "note": "Quote queued to NowCerts (approved). It writes when the quote executor runs."}
 
 
+class StageUpdateRequest(BaseModel):
+    stage: str
+    lost_reason: str | None = None
+
+
+@app.post("/api/opportunities/{opportunity_id}/stage")
+async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest):
+    """Move an opportunity to a new pipeline stage (Kanban drag). Syncs status
+    (Bound→won, Lost→lost). Supabase-only — does not touch NowCerts."""
+    from hermes.intake import opportunities as opp
+
+    stage = (req.stage or "").strip()
+    if stage not in opp.STAGES:
+        raise HTTPException(status_code=400, detail=f"Unknown stage '{stage}'; must be one of {list(opp.STAGES)}")
+    try:
+        row = opp.advance_stage(_get_supa(), opportunity_id, stage, lost_reason=req.lost_reason)
+    except Exception as exc:
+        log.exception("stage update failed: %s", opportunity_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "opportunity": row}
+
+
 @app.get("/api/clients/search")
 async def search_clients_endpoint(q: str, limit: int = 20):
     """Search the canonical book by insured name — powers the New-Opportunity client

@@ -10,7 +10,7 @@
     --canvas:#faf8f2; --card:#ffffff; --border:#eae6db; --border-soft:#f0ece2;
     --ink:#17271f; --ink-soft:#3b4a43; --muted:#8a938d; --label:#9aa39d;
     --accent:#1f7a5f; --accent-deep:#155741; --sage:#dbe9e1; --sage-soft:#e9f1ec; --badge-ink:#1f6b52;
-    --warn:#b6862a; --crit:#b0442f; --safe:#2f7d5c;
+    --warn:#b6862a; --crit:#b0442f; --safe:#2f7d5c; --kcol:#f1ede3;
     --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
@@ -18,7 +18,7 @@
   body.theme-gretchen{
     --sidebar:#2c2340; --sidebar-line:#3d3155; --sidebar-text:#d4cce4; --sidebar-muted:#9a8fb5;
     --canvas:#f8f5fc; --border:#ece7f3; --border-soft:#f2eef8;
-    --accent:#6d4aa8; --accent-deep:#4e3382; --sage:#e6ddf4; --sage-soft:#f0eaf9; --badge-ink:#5b3f97;
+    --accent:#6d4aa8; --accent-deep:#4e3382; --sage:#e6ddf4; --sage-soft:#f0eaf9; --badge-ink:#5b3f97; --kcol:#efe9f6;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
@@ -144,6 +144,19 @@
   .toast{background:#123029;color:#eaf3ee;padding:13px 18px;border-radius:11px;font-size:13.5px;box-shadow:0 14px 34px -14px rgba(0,0,0,.5);max-width:360px}
   .toast.err{background:#5a241b}
 
+  /* Kanban */
+  .kanban{display:flex;gap:14px;margin-top:24px;overflow-x:auto;padding-bottom:12px;align-items:flex-start}
+  .kcol{flex:0 0 264px;background:var(--kcol);border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;max-height:74vh}
+  .kcol-head{display:flex;justify-content:space-between;align-items:center;padding:13px 15px;font-family:var(--serif);font-size:15px;font-weight:600;border-bottom:1px solid var(--border-soft)}
+  .kcol-body{padding:12px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;min-height:70px;flex:1}
+  .kcol-body.kover{background:var(--sage-soft);outline:2px dashed var(--accent);outline-offset:-6px;border-radius:10px}
+  .kcard{background:#fff;border:1px solid var(--border);border-radius:11px;padding:12px 13px;cursor:grab;box-shadow:0 1px 2px rgba(20,46,55,.05)}
+  .kcard:hover{border-color:#d5cfc0}
+  .kcard.dragging{opacity:.45}
+  .kc-name{font-family:var(--serif);font-size:14.5px;font-weight:600;margin-bottom:3px;line-height:1.25}
+  .kc-meta{font-size:12px;color:var(--muted)}
+  .kc-foot{display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap}
+  .kc-carrier{font-size:11.5px;color:var(--ink-soft)}
   @media(max-width:1080px){.kpis{grid-template-columns:repeat(3,1fr)}.cards{grid-template-columns:repeat(2,1fr)}.split{grid-template-columns:1fr}}
 </style>
 </head>
@@ -228,6 +241,7 @@ async function show(view){
   if(view==='cases') return renderCases(host);
   if(view==='intake') return renderIntake(host);
   if(view==='hermes') return renderAskHermes(host);
+  if(view==='pipeline') return renderPipeline(host);
   return renderTable(host, TABLES[view]);
 }
 
@@ -280,6 +294,55 @@ async function renderTable(host,cfg){
     wrap.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     if(cfg.rowClick){ wrap.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>cfg.rowClick(rows[+tr.dataset.i])); }
   }catch(e){ host.querySelector('.table-wrap').innerHTML=`<div class="empty">Couldn’t load — ${esc(e.message)}</div>`; }
+}
+
+/* ---------- Pipeline Kanban ---------- */
+const PIPE_STAGES=['New','Info Gathering','Quoting','Quoted','Bound','Lost'];
+let PIPE={};
+async function renderPipeline(host){
+  host.innerHTML=`<section class="view">
+    <div class="view-head"><div><div class="eyebrow">Quote-to-bind workflow</div><h1 class="h1">Pipeline</h1>
+      <p class="lede">Drag an opportunity between stages to update it. Click a card to view it or send a quote to NowCerts.</p></div>
+      <div class="btns"><button class="btn primary" id="pipeNew">+ New Opportunity</button></div></div>
+    <div class="kanban" id="kanban"><div class="loading">Loading…</div></div></section>`;
+  $('#pipeNew').onclick=openNewOpp;
+  try{
+    const opps=firstArray(await api('/api/opportunities'));
+    PIPE={}; const byStage={}; PIPE_STAGES.forEach(s=>byStage[s]=[]);
+    opps.forEach(o=>{ PIPE[o.id]=o; const s=PIPE_STAGES.includes(o.stage)?o.stage:'New'; byStage[s].push(o); });
+    $('#kanban').innerHTML=PIPE_STAGES.map(s=>`
+      <div class="kcol">
+        <div class="kcol-head"><span>${esc(s)}</span><span class="badge">${byStage[s].length}</span></div>
+        <div class="kcol-body" data-stage="${esc(s)}">${byStage[s].map(kcard).join('')}</div>
+      </div>`).join('');
+    wireKanban();
+  }catch(e){ $('#kanban').innerHTML=`<div class="empty">Couldn’t load pipeline — ${esc(e.message)}</div>`; }
+}
+function kcard(o){
+  return `<div class="kcard" draggable="true" data-id="${esc(o.id)}">
+    <div class="kc-name">${esc(o.insured_name||'—')}</div>
+    <div class="kc-meta">${esc(o.line_of_business||'')}</div>
+    <div class="kc-foot">${o.premium_estimate?`<span class="badge">${money(o.premium_estimate)}</span>`:''}${o.carrier?`<span class="kc-carrier">${esc(o.carrier)}</span>`:''}${o.insured_id?'':`<span class="chip warn">no insured</span>`}</div>
+  </div>`;
+}
+function wireKanban(){
+  let dragId=null;
+  document.querySelectorAll('.kcard').forEach(c=>{
+    c.addEventListener('dragstart',e=>{ dragId=c.dataset.id; c.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+    c.addEventListener('dragend',()=>{ dragId=null; c.classList.remove('dragging'); });
+    c.addEventListener('click',()=>{ const o=PIPE[c.dataset.id]; if(o) openOpportunity(o); });
+  });
+  document.querySelectorAll('.kcol-body').forEach(col=>{
+    col.addEventListener('dragover',e=>{ e.preventDefault(); col.classList.add('kover'); });
+    col.addEventListener('dragleave',()=>col.classList.remove('kover'));
+    col.addEventListener('drop',async e=>{ e.preventDefault(); col.classList.remove('kover');
+      const id=dragId, newStage=col.dataset.stage; if(!id)return;
+      const o=PIPE[id]; if(!o||o.stage===newStage)return;
+      try{ await api('/api/opportunities/'+encodeURIComponent(id)+'/stage',{method:'POST',body:JSON.stringify({stage:newStage})});
+        toast('Moved to '+newStage); renderPipeline($('#viewHost'));
+      }catch(err){ toast(err.message,true); }
+    });
+  });
 }
 
 /* ---------- Client 360 ---------- */
