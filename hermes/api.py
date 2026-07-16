@@ -859,6 +859,39 @@ async def list_clients_endpoint(limit: int = 500):
     return {"clients": rows, "count": len(rows)}
 
 
+@app.get("/api/clients/{insured_guid}")
+async def client_360_endpoint(insured_guid: str):
+    """Client 360 — the insured's record plus their whole book: policies,
+    opportunities, and cases, keyed on the NowCerts insured GUID."""
+    supa = _get_supa()
+
+    def sel(table, cols, params):
+        try:
+            return supa.select(table, columns=cols, params=params, limit=500)
+        except Exception:
+            return []
+
+    client = sel("canonical_clients", "*", {"nowcerts_insured_guid": f"eq.{insured_guid}"})
+    policies = sel(
+        "canonical_policies",
+        "policy_number,carrier,lines_of_business,status,effective_date,expiration_date,annualized_premium,premium_amount",
+        {"nowcerts_insured_guid": f"eq.{insured_guid}", "order": "expiration_date.asc"},
+    )
+    opportunities = sel(
+        "opportunities", "id,line_of_business,stage,status,premium_estimate,carrier,quote_number,next_action",
+        {"insured_id": f"eq.{insured_guid}", "order": "updated_at.desc"},
+    )
+    cases = sel(
+        "agency_crm_cases", "id,case_number,title,case_type,status,priority,created_at",
+        {"insured_database_id": f"eq.{insured_guid}", "order": "created_at.desc"},
+    )
+    return {
+        "client": client[0] if client else None,
+        "policies": policies, "opportunities": opportunities, "cases": cases,
+        "counts": {"policies": len(policies), "opportunities": len(opportunities), "cases": len(cases)},
+    }
+
+
 @app.get("/api/policies")
 async def list_policies_endpoint(limit: int = 1000):
     """Canonical policy book (read-only mirror), soonest-expiring first."""

@@ -174,6 +174,7 @@
 
 <script>
 const API = ""; // same origin
+const NOWCERTS_INSURED_URL = ""; // set to e.g. "https://app.nowcerts.com/InsuredDetail?insuredDatabaseId={guid}" to enable "Open in NowCerts"
 const $ = (s,r=document)=>r.querySelector(s);
 const el = (h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild;};
 const esc = (v)=> (v==null?'':String(v)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -193,7 +194,8 @@ const userOptions = ()=> USERS.map(u=>`<option value="${esc(u.email)}">${esc(u.d
 
 /* ---------- View configs ---------- */
 const TABLES = {
-  clients:{title:'Clients',eyebrow:'Read-only mirror',lede:'NowCerts insured records mirrored to Supabase.',endpoint:'/api/clients',
+  clients:{title:'Clients',eyebrow:'Read-only mirror',lede:'NowCerts insured records — click a client for their full 360.',endpoint:'/api/clients',
+    rowClick:(r)=>renderClient360(r.nowcerts_insured_guid),
     cols:[['insured_name','Client'],['client_type','Type'],['city','City'],['state','State'],['email','Email'],['phone','Phone']]},
   policies:{title:'Policies',eyebrow:'Read-only mirror',lede:'Coverage and premium mirrors from the canonical book.',endpoint:'/api/policies',
     cols:[['policy_number','Policy #'],['carrier','Carrier'],['lines_of_business','LOB'],['status','Status'],['expiration_date','Expires'],['annualized_premium','Annualized',money]]},
@@ -258,14 +260,55 @@ async function renderTable(host,cfg){
     const wrap = host.querySelector('.table-wrap');
     if(!rows.length){ wrap.innerHTML=`<div class="empty">Nothing here yet.</div>`; return; }
     const head = cfg.cols.map(c=>`<th>${c[1]}</th>`).join('');
-    const body = rows.map(r=>'<tr>'+cfg.cols.map(c=>{
+    const body = rows.map((r,i)=>`<tr${cfg.rowClick?` data-i="${i}" style="cursor:pointer"`:''}>`+cfg.cols.map(c=>{
       const fmt=c[2]; const raw=r[c[0]];
       const cell = fmt?fmt(raw):(raw==null||raw===''?'<span class="muted">—</span>':esc(raw));
       const num = fmt===money?' class="num"':'';
       return `<td${num}>${cell}</td>`;
     }).join('')+'</tr>').join('');
     wrap.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    if(cfg.rowClick){ wrap.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>cfg.rowClick(rows[+tr.dataset.i])); }
   }catch(e){ host.querySelector('.table-wrap').innerHTML=`<div class="empty">Couldn’t load — ${esc(e.message)}</div>`; }
+}
+
+/* ---------- Client 360 ---------- */
+function miniTable(rows,cols,empty){
+  if(!rows||!rows.length) return `<div class="empty" style="padding:22px">${empty}</div>`;
+  const head=cols.map(c=>`<th>${c[1]}</th>`).join('');
+  const body=rows.map(r=>'<tr>'+cols.map(c=>{const fmt=c[2];const v=r[c[0]];const cell=fmt?fmt(v):(v==null||v===''?'<span class="muted">—</span>':esc(v));return `<td${fmt===money?' class="num"':''}>${cell}</td>`;}).join('')+'</tr>').join('');
+  return `<div class="table-wrap" style="margin-top:0"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+async function renderClient360(guid){
+  const host=$('#viewHost'); $('#viewTitle').textContent='Client';
+  document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('active',a.dataset.view==='clients'));
+  host.innerHTML=`<section class="view"><div class="loading">Loading client…</div></section>`;
+  try{
+    const d=await api('/api/clients/'+encodeURIComponent(guid)); const c=d.client||{};
+    const contact=[c.city&&c.state?`${esc(c.city)}, ${esc(c.state)}`:esc(c.city||c.state||''),esc(c.email||''),esc(c.phone||'')].filter(Boolean).join(' · ');
+    host.innerHTML=`<section class="view">
+      <div style="margin-bottom:12px"><a class="open" style="cursor:pointer" id="back360">← All clients</a></div>
+      <div class="view-head"><div>
+        <div class="eyebrow">canonical_clients · ${esc(c.client_type||'client')}</div>
+        <h1 class="h1">${esc(c.insured_name||'Client')}</h1>
+        <p class="lede">${contact||'No contact details on file.'}</p>
+      </div><div class="btns">
+        ${NOWCERTS_INSURED_URL?`<a class="btn" target="_blank" rel="noopener" href="${NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(guid))}">Open in NowCerts ↗</a>`:''}
+        <button class="btn primary" id="c360opp">+ New Opportunity</button></div></div>
+      <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin:24px 0 30px">
+        ${kpiTile('Policies',d.counts.policies,'on the book')}
+        ${kpiTile('Opportunities',d.counts.opportunities,'in pipeline')}
+        ${kpiTile('Cases',d.counts.cases,'service work')}
+      </div>
+      <div class="tasks-h"><span>Policies</span><span class="badge">${d.counts.policies}</span></div>
+      <div class="panel">${miniTable(d.policies,[['policy_number','Policy #'],['carrier','Carrier'],['lines_of_business','LOB'],['status','Status'],['expiration_date','Expires'],['annualized_premium','Annualized',money]],'No policies on the book.')}</div>
+      <div class="tasks-h" style="margin-top:26px"><span>Opportunities</span><span class="badge">${d.counts.opportunities}</span></div>
+      <div class="panel">${miniTable(d.opportunities,[['line_of_business','LOB'],['stage','Stage',chip],['status','Status',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']],'No opportunities yet.')}</div>
+      <div class="tasks-h" style="margin-top:26px"><span>Cases</span><span class="badge">${d.counts.cases}</span></div>
+      <div class="panel">${miniTable(d.cases,[['case_number','Case #'],['title','Title'],['case_type','Type'],['status','Status',chip],['priority','Priority']],'No cases yet.')}</div>
+    </section>`;
+    $('#back360').onclick=()=>show('clients');
+    $('#c360opp').onclick=()=>openNewOpp({name:c.insured_name,id:guid});
+  }catch(e){ host.innerHTML=`<section class="view"><div class="empty">Couldn’t load client — ${esc(e.message)}</div></section>`; }
 }
 
 /* ---------- Cases master-detail ---------- */
@@ -345,7 +388,7 @@ function wireClientPicker(idPrefix){
 }
 async function submitBtn(btn,fn){ btn.disabled=true; const old=btn.textContent; btn.textContent='Saving…'; try{ await fn(); }catch(e){ toast(e.message,true);} btn.disabled=false; btn.textContent=old; }
 
-async function openNewOpp(){
+async function openNewOpp(preClient){
   await loadUsers();
   openModal(`<div class="modal-head"><h3>New opportunity</h3><p>Any client — new, inactive, or a cross-sell in a new line.</p></div>
    <div class="modal-body">${clientPicker('opp')}
@@ -356,6 +399,7 @@ async function openNewOpp(){
      <div class="field"><label>Created by</label><select id="oppBy">${userOptions()}</select></div></div>
    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="oppSave">Create opportunity</button></div>`);
   wireClientPicker('opp');
+  if(preClient&&preClient.name){ $('#oppName').value=preClient.name; $('#oppId').value=preClient.id||''; $('#oppSearch').value=preClient.name; $('#oppPicked').textContent='✓ '+preClient.name; }
   $('#oppSave').onclick=(e)=>submitBtn(e.target,async()=>{
     const name=$('#oppName').value||$('#oppSearch').value, lob=$('#oppLob').value.trim();
     if(!name){throw new Error('Pick a client first.')} if(!lob){throw new Error('Line of business is required.')}
