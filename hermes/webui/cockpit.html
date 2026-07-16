@@ -159,6 +159,7 @@
   .kc-meta{font-size:12px;color:var(--muted)}
   .kc-foot{display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap}
   .kc-carrier{font-size:11.5px;color:var(--ink-soft)}
+  .kc-sub{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.4}
   @media(max-width:1080px){.kpis{grid-template-columns:repeat(3,1fr)}.cards{grid-template-columns:repeat(2,1fr)}.split{grid-template-columns:1fr}}
 </style>
 </head>
@@ -327,11 +328,17 @@ async function renderPipeline(host){
     wireKanban();
   }catch(e){ $('#kanban').innerHTML=`<div class="empty">Couldn’t load pipeline — ${esc(e.message)}</div>`; }
 }
+function ago(iso){ if(!iso)return''; const d=Math.floor((Date.now()-new Date(iso))/86400000); return d<=0?'today':(d+'d ago'); }
 function kcard(o){
+  const meta=[o.line_of_business, o.referral_source||o.lead_source].filter(Boolean).join(' · ');
+  const who=o.assigned_to?('@'+String(o.assigned_to).split('@')[0]):'';
+  const sub=[who, o.created_at?ago(o.created_at):''].filter(Boolean).join(' · ');
   return `<div class="kcard" draggable="true" data-id="${esc(o.id)}">
     <div class="kc-name">${esc(o.insured_name||'—')}</div>
-    <div class="kc-meta">${esc(o.line_of_business||'')}</div>
+    <div class="kc-meta">${esc(meta)}</div>
     <div class="kc-foot">${o.premium_estimate?`<span class="badge">${money(o.premium_estimate)}</span>`:''}${o.carrier?`<span class="kc-carrier">${esc(o.carrier)}</span>`:''}${o.insured_id?'':`<span class="chip warn">no insured</span>`}</div>
+    ${sub?`<div class="kc-sub">${esc(sub)}</div>`:''}
+    ${o.next_action?`<div class="kc-sub">▸ ${esc(o.next_action)}</div>`:''}
   </div>`;
 }
 function wireKanban(){
@@ -621,13 +628,22 @@ async function openOpportunity(o){
   await loadUsers(); const linked=!!o.insured_id;
   openModal(`<div class="modal-head"><h3>${esc(o.insured_name||'Opportunity')}</h3><p>${esc(o.line_of_business||'')} · ${esc(o.stage||'')}</p></div>
    <div class="modal-body">
-     <div class="meta" style="grid-template-columns:1fr 1fr;margin:0;padding:0;border:none">
+     <div class="meta" style="grid-template-columns:1fr 1fr;margin:0;padding:0;border:none;gap:14px">
+       <div><div class="m-l">Insured</div><div class="m-v">${esc(o.insured_name||'—')}</div></div>
+       <div><div class="m-l">Line of business</div><div class="m-v">${esc(o.line_of_business||'—')}</div></div>
        <div><div class="m-l">Stage</div><div class="m-v">${esc(o.stage||'—')}</div></div>
+       <div><div class="m-l">Status</div><div class="m-v">${esc(o.status||'—')}</div></div>
        <div><div class="m-l">Est. premium</div><div class="m-v">${o.premium_estimate?money(o.premium_estimate):'—'}</div></div>
        <div><div class="m-l">Carrier</div><div class="m-v">${esc(o.carrier||'—')}</div></div>
+       <div><div class="m-l">Referral source</div><div class="m-v">${esc(o.referral_source||o.lead_source||'—')}</div></div>
+       <div><div class="m-l">Assigned to</div><div class="m-v">${esc(o.assigned_to||'—')}</div></div>
+       <div><div class="m-l">Prospect type</div><div class="m-v">${esc(o.prospect_type||'—')}</div></div>
        <div><div class="m-l">Quote #</div><div class="m-v">${esc(o.quote_number||'—')}</div></div>
+       <div><div class="m-l">Created</div><div class="m-v">${esc((o.created_at||'').slice(0,10)||'—')}</div></div>
+       <div><div class="m-l">Last update</div><div class="m-v">${esc((o.updated_at||'').slice(0,10)||'—')}</div></div>
      </div>
-     ${o.next_action?`<div class="t-meta">Next: ${esc(o.next_action)}</div>`:''}
+     ${o.next_action?`<div class="t-meta" style="margin-top:12px">▸ Next: ${esc(o.next_action)}${o.next_action_date?' ('+esc(String(o.next_action_date).slice(0,10))+')':''}</div>`:''}
+     ${o.lost_reason?`<div class="t-meta">Lost reason: ${esc(o.lost_reason)}</div>`:''}
      <div style="border-top:1px solid var(--border-soft);padding-top:14px">
        <div class="eyebrow" style="margin-bottom:8px">Write back to NowCerts</div>
        ${linked?`<div class="t-meta" style="margin-bottom:10px">Queues this as a quote (Policy · IsQuote) for approval-gated write-back to the AMS.</div><div class="field"><label>Approved by</label><select id="sqBy">${userOptions()}</select></div>`
