@@ -176,6 +176,22 @@ def main() -> int:
         help="Poll interval for --run-renewal-executor-worker (default: 300s)",
     )
     parser.add_argument(
+        "--intake-executor",
+        action="store_true",
+        help="Process approved new-business intake jobs (create_insured) from outbound_sync_queue",
+    )
+    parser.add_argument(
+        "--intake-executor-limit",
+        type=int,
+        default=1,
+        help="Max approved intake jobs to process this run",
+    )
+    parser.add_argument(
+        "--intake-executor-dry-run",
+        action="store_true",
+        help="Preview intake insured payloads (field keys) without claiming or writing — verify casing",
+    )
+    parser.add_argument(
         "--commission-audit",
         action="store_true",
         help="Run Revenue Integrity commission blind-spot audit once",
@@ -977,6 +993,27 @@ def main() -> int:
             limit=args.renewal_executor_limit,
         )
         return 0
+
+    if args.intake_executor or args.intake_executor_dry_run:
+        from hermes.intake.executor import run_intake_executor
+
+        summary = run_intake_executor(
+            limit=args.intake_executor_limit,
+            dry_run=args.intake_executor_dry_run,
+        )
+        mode = "dry-run" if args.intake_executor_dry_run else "live"
+        print(
+            f"Intake executor ({mode}): claimed={summary['claimed']} "
+            f"completed={summary['completed']} failed={summary['failed']}"
+        )
+        for pv in summary.get("previews", []):
+            ins = pv.get("insured", {})
+            who = ins.get("CommercialName") or f"{ins.get('FirstName', '')} {ins.get('LastName', '')}".strip()
+            print(
+                f"  PREVIEW insured={who!r} ProspectType={ins.get('ProspectType')} "
+                f"InsuredType={ins.get('InsuredType')} keys={sorted(ins.keys())}"
+            )
+        return 0 if summary["failed"] == 0 else 1
 
     if args.revenue_sentinel_health:
         from hermes.jobs import revenue_sentinel

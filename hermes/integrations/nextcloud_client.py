@@ -131,6 +131,14 @@ class NextcloudClient:
             raise NextcloudError(f"PUT {rel_path} failed: {resp.status_code} {resp.text[:200]}")
         return self._rel_with_base(rel_path)
 
+    def ensure_client_folders(self, client: str) -> str:
+        """Create the standard Clients/{client}/{category}/ folder tree. Returns the client base path."""
+        self._require_configured()
+        base = f"Clients/{_sanitize_segment(client)}"
+        for category in CLIENT_CATEGORIES:
+            self.ensure_dirs(f"{base}/{category}")
+        return self._rel_with_base(base)
+
     def file_document(
         self,
         *,
