@@ -867,6 +867,70 @@ async def list_tasks_endpoint(case_id: str | None = None, limit: int = 200):
     return {"tasks": rows, "count": len(rows)}
 
 
+class PushToAmsRequest(BaseModel):
+    approved_by: str
+
+
+@app.post("/api/cases/{case_id}/push-to-ams")
+async def push_case_to_ams(case_id: str, req: PushToAmsRequest):
+    """Approved push: log this case in the NowCerts task ledger. approved_by must be a user."""
+    from hermes.casework.executor import stage_case_job
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+    try:
+        rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
+    except Exception:
+        rows = []
+    if not rows:
+        raise HTTPException(status_code=404, detail="case not found")
+    try:
+        job = stage_case_job(supa, case=rows[0], approved_by=req.approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("push case failed: %s", case_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "queued": True, "queue_id": job.get("id"),
+            "note": "Case queued to NowCerts (approved). Writes when the casework executor runs."}
+
+
+@app.post("/api/tasks/{task_id}/push-to-ams")
+async def push_task_to_ams(task_id: str, req: PushToAmsRequest):
+    """Approved push: log this task in the NowCerts task ledger (uses its case's insured)."""
+    from hermes.casework.executor import stage_task_job
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+    try:
+        rows = supa.select("agency_crm_tasks", columns="*", params={"id": f"eq.{task_id}"}, limit=1)
+    except Exception:
+        rows = []
+    if not rows:
+        raise HTTPException(status_code=404, detail="task not found")
+    task = rows[0]
+    insured_id, policy_number = None, None
+    if task.get("case_id"):
+        try:
+            crows = supa.select("agency_crm_cases", columns="insured_database_id,policy_number",
+                                params={"id": f"eq.{task['case_id']}"}, limit=1)
+            if crows:
+                insured_id = crows[0].get("insured_database_id")
+                policy_number = crows[0].get("policy_number")
+        except Exception:
+            pass
+    try:
+        job = stage_task_job(supa, task=task, insured_database_id=insured_id,
+                             policy_number=policy_number, approved_by=req.approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("push task failed: %s", task_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "queued": True, "queue_id": job.get("id"),
+            "note": "Task queued to NowCerts (approved). Writes when the casework executor runs."}
+
+
 @app.get("/api/cases/{case_id}/documents")
 async def case_documents_endpoint(case_id: str):
     """Nextcloud document links filed against a case (agency_crm_document_links)."""

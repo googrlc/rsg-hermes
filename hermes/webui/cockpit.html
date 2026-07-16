@@ -392,6 +392,7 @@ async function selectCase(i){
     <h3>${esc(c.title||c.insured_name||'Case')}</h3>
     <div class="d-sub">${esc(c.insured_name||'')}${c.policy_number?' · '+esc(c.policy_number):''}</div>
     ${c.insured_database_id&&NOWCERTS_INSURED_URL?`<div style="margin-top:8px"><a class="mono" target="_blank" rel="noopener" href="${NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(c.insured_database_id))}">Open insured in NowCerts ↗</a></div>`:''}
+    <div style="margin-top:12px"><button class="btn" id="pushCaseBtn">Send case to NowCerts →</button>${c.nowcerts_task_id?' <span class="chip safe">synced</span>':''}</div>
     ${c.description?`<div class="d-note">${esc(c.description)}</div>`:''}
     <div class="meta">
       <div><div class="m-l">Owner</div><div class="m-v">${esc(c.owner_email||'—')}</div></div>
@@ -403,10 +404,12 @@ async function selectCase(i){
     <div id="taskrows"><div class="loading">Loading tasks…</div></div>
     <div class="tasks-h"><span>Documents</span><span class="badge" id="dcount">…</span></div>
     <div id="docrows"><div class="loading">Loading…</div></div>`;
+  const pcb=$('#pushCaseBtn'); if(pcb) pcb.onclick=()=>openPushToAms('case', c.id, c.title||c.insured_name);
   try{
     const tasks = firstArray(await api('/api/tasks?case_id='+encodeURIComponent(c.id)));
     $('#tcount').textContent=tasks.length;
-    $('#taskrows').innerHTML = tasks.length? tasks.map(t=>`<div class="task"><div><div class="t-title">${esc(t.title)}</div><div class="t-meta">${esc(t.priority||'medium')} · ${esc(t.assigned_to_email||'unassigned')}${t.nowcerts_task_id&&NOWCERTS_TASK_URL?` · <a target="_blank" rel="noopener" style="color:var(--accent);font-weight:600" href="${NOWCERTS_TASK_URL.replace('{guid}',encodeURIComponent(t.nowcerts_task_id))}">NowCerts ↗</a>`:''}</div></div><div class="t-status">${esc((t.status||'').replace('_',' '))||'—'}</div></div>`).join('') : `<div class="empty" style="padding:20px">No tasks yet.</div>`;
+    $('#taskrows').innerHTML = tasks.length? tasks.map(t=>`<div class="task"><div><div class="t-title">${esc(t.title)}</div><div class="t-meta">${esc(t.priority||'medium')} · ${esc(t.assigned_to_email||'unassigned')}${t.nowcerts_task_id&&NOWCERTS_TASK_URL?` · <a target="_blank" rel="noopener" style="color:var(--accent);font-weight:600" href="${NOWCERTS_TASK_URL.replace('{guid}',encodeURIComponent(t.nowcerts_task_id))}">NowCerts ↗</a>`:''}</div></div><div class="t-status">${t.nowcerts_task_id?esc((t.status||'').replace('_',' ')):`<a data-push-task="${esc(t.id)}" data-push-title="${esc(t.title)}" style="color:var(--accent);font-weight:600;cursor:pointer">Push →</a>`}</div></div>`).join('') : `<div class="empty" style="padding:20px">No tasks yet.</div>`;
+    $('#taskrows').querySelectorAll('[data-push-task]').forEach(a=>a.onclick=()=>openPushToAms('task', a.dataset.pushTask, a.dataset.pushTitle));
   }catch(e){ $('#taskrows').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
   try{
     const docs = firstArray(await api('/api/cases/'+encodeURIComponent(c.id)+'/documents'));
@@ -457,6 +460,18 @@ async function openNewOpp(preClient){
     if(!name){throw new Error('Pick a client first.')} if(!lob){throw new Error('Line of business is required.')}
     const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:$('#oppCarrier').value||null,source:'cockpit',created_by:$('#oppBy').value})});
     closeModal(); toast(r.created?'Opportunity created.':'Opportunity already existed — opened.'); show('pipeline');
+  });
+}
+async function openPushToAms(kind, id, label){
+  await loadUsers();
+  openModal(`<div class="modal-head"><h3>Send ${kind} to NowCerts</h3><p>${esc(label||'')}</p></div>
+   <div class="modal-body"><div class="t-meta">Logs this ${kind} in the NowCerts task ledger — approval-gated write-back to the AMS.</div>
+     <div class="field"><label>Approved by</label><select id="pushBy">${userOptions()}</select></div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="pushGo">Queue to NowCerts</button></div>`);
+  $('#pushGo').onclick=(e)=>submitBtn(e.target,async()=>{
+    await api('/api/'+(kind==='case'?'cases':'tasks')+'/'+encodeURIComponent(id)+'/push-to-ams',{method:'POST',body:JSON.stringify({approved_by:$('#pushBy').value})});
+    closeModal(); toast(kind.charAt(0).toUpperCase()+kind.slice(1)+' queued to NowCerts — writes when the casework executor runs.');
+    if(activeCase) selectCase(CASES.indexOf(activeCase));
   });
 }
 function openPolicy(p){

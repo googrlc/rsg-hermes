@@ -208,6 +208,22 @@ def main() -> int:
         help="Preview quote Policy/Insert payloads without claiming or writing to NowCerts",
     )
     parser.add_argument(
+        "--casework-executor",
+        action="store_true",
+        help="Process approved case/task jobs (agency_crm case/task → NowCerts task) from outbound_sync_queue",
+    )
+    parser.add_argument(
+        "--casework-executor-limit",
+        type=int,
+        default=1,
+        help="Max approved case/task jobs to process this run",
+    )
+    parser.add_argument(
+        "--casework-executor-dry-run",
+        action="store_true",
+        help="Preview case/task NowCerts task payloads without claiming or writing",
+    )
+    parser.add_argument(
         "--run-scheduler",
         action="store_true",
         help="Run the executor scheduler loop (intake+renewal every N s, locked). Requires SCHEDULER_ENABLED.",
@@ -1219,6 +1235,24 @@ def main() -> int:
             print(f"  PREVIEW opp={pv.get('opportunity_id')} policy_keys={sorted(pol.keys())} "
                   f"insured={pol.get('InsuredDatabaseId')} lob={pol.get('LineOfBusinessName')} "
                   f"carrier={pol.get('CarrierName')} premium={pol.get('Premium')} IsQuote={pol.get('IsQuote')}")
+        return 0 if summary["failed"] == 0 else 1
+
+    if args.casework_executor or args.casework_executor_dry_run:
+        from hermes.casework.executor import run_casework_executor
+
+        summary = run_casework_executor(
+            limit=args.casework_executor_limit,
+            dry_run=args.casework_executor_dry_run,
+        )
+        mode = "dry-run" if args.casework_executor_dry_run else "live"
+        print(
+            f"Casework executor ({mode}): claimed={summary['claimed']} "
+            f"completed={summary['completed']} failed={summary['failed']}"
+        )
+        for pv in summary.get("previews", []):
+            t = pv.get("task", {})
+            print(f"  PREVIEW {pv.get('object_type')} {pv.get('target')} title={t.get('title')!r} "
+                  f"insured={t.get('insured_database_id')} category={t.get('category_name')}")
         return 0 if summary["failed"] == 0 else 1
 
     if args.scheduler_health:
