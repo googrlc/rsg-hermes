@@ -1,8 +1,9 @@
 """Tests for the NowCerts → Supabase canonical book sync.
 
-Covers: client/mirror upsert, policy insert with client linkage, volatile refresh
-with renewed_policy/lineage preservation, duplicate-row collapse, NowCerts-side
-collapse, schema-adaptive column filtering, and dry-run no-op.
+Keyed on the LIVE natural keys (canonical_clients.nowcerts_insured_guid,
+canonical_policies.policy_guid — the CSV-loaded tables have no surrogate id).
+Covers: client upsert, policy insert/update, renewed_policy lineage preservation,
+missing-guid skip, schema-adaptive column filtering, and dry-run no-op.
 """
 from __future__ import annotations
 
@@ -15,27 +16,21 @@ from hermes.sync import canonical_book_sync as cbs
 class FakeSupabase:
     def __init__(self, tables: dict[str, list[dict[str, Any]]] | None = None) -> None:
         self.tables: dict[str, list[dict[str, Any]]] = tables or {}
-        self._n = 0
 
     def select(self, table, *, columns="*", params=None, limit=100):
         return [dict(r) for r in self.tables.get(table, [])][:limit]
 
     def insert(self, table, payload):
-        self._n += 1
-        row = {"id": f"{table[:3]}-{self._n}", **payload}
-        self.tables.setdefault(table, []).append(row)
-        return dict(row)
+        self.tables.setdefault(table, []).append(dict(payload))
+        return dict(payload)
 
-    def update(self, table, record_id, payload):
+    def update_where(self, table, payload, *, filters):
+        matched = []
         for r in self.tables.get(table, []):
-            if str(r.get("id")) == str(record_id):
+            if all(str(r.get(col)) == val.split("eq.", 1)[1] for col, val in filters.items()):
                 r.update(payload)
-                return dict(r)
-        raise AssertionError(f"update: no {table} row {record_id}")
-
-    def delete(self, table, record_id):
-        rows = self.tables.get(table, [])
-        self.tables[table] = [r for r in rows if str(r.get("id")) != str(record_id)]
+                matched.append(dict(r))
+        return matched
 
 
 class FakeNowCerts:
@@ -51,36 +46,72 @@ class FakeNowCerts:
 
 
 # --- builders ----------------------------------------------------------------
-def nc_insured(guid, name="Acme LLC", *, active=True, itype="Commercial", fein="12-3456789"):
+def nc_insured(guid, name="Acme LLC", *, itype="Commercial"):
     return {"id": guid, "commercialName": name, "insuredType": itype,
-            "fein": fein, "active": active}
+            "firstName": "", "lastName": "", "eMail": "a@b.com", "city": "Atlanta"}
 
 
-def nc_policy(number, insured_guid="ins1", *, status="Active", eff="2026-01-01",
-              exp="2027-01-01", premium=1000.0, carrier="Acme Mutual", lob="General Liability"):
+def nc_policy(number, insured_guid="ins1", *, guid=None, status="Active",
+              eff="2026-01-01", exp="2027-01-01", premium=1000.0,
+              carrier="Acme Mutual", lob="General Liability"):
     return {
-        "number": number, "databaseId": f"pg-{number}", "insuredDatabaseId": insured_guid,
-        "status": status, "effectiveDate": eff, "expirationDate": exp,
-        "totalPremium": premium, "carrierName": carrier,
-        "lineOfBusinesses": [{"lineOfBusinessName": lob}],
+        "number": number, "databaseId": guid or f"pg-{number}",
+        "insuredDatabaseId": insured_guid, "status": status,
+        "effectiveDate": eff, "expirationDate": exp, "totalPremium": premium,
+        "carrierName": carrier, "lineOfBusinesses": [{"lineOfBusinessName": lob}],
     }
+
+
+def _live_policy_row(**over):
+    """A realistic canonical_policies row — every live column present (nulls allowed),
+    mirroring what PostgREST returns and what column discovery introspects."""
+    row = {
+        "policy_guid": "pg-P1", "nowcerts_insured_guid": "ins1", "policy_number": "P1",
+        "lines_of_business": "General Liability", "business_type": None, "carrier": "Old Carrier",
+        "status": "Active", "active": True, "effective_date": "2025-09-01",
+        "expiration_date": "2026-09-01", "current_term_amount": 1000.0,
+        "premium_amount": 1000.0, "annualized_premium": 1000.0,
+        "renewed_policy": None, "state": "GA", "source_file": "csv", "created_at": "2026-06-10",
+    }
+    row.update(over)
+    return row
+
+
+def _live_client_row(**over):
+    row = {
+        "nowcerts_insured_guid": "ins1", "insured_name": "Old Name",
+        "insured_name_normalized": "old name", "first_name": None, "last_name": None,
+        "client_type": "Commercial", "business_type": None, "phone": None,
+        "cell_phone": None, "email": None, "address_line1": None, "city": None,
+        "state": None, "zip": None, "espocrm_id": None, "created_at": "2026-06-10",
+        "updated_at": "2026-06-10",
+    }
+    row.update(over)
+    return row
 
 
 def run(supa, nc, **kw):
     return cbs.run_canonical_book_sync(nc, supa, **kw)
 
 
-# --- client + mirror ---------------------------------------------------------
-def test_new_insured_creates_client_and_mirror():
-    supa = FakeSupabase()
+# --- clients -----------------------------------------------------------------
+def test_new_insured_creates_client():
+    supa = FakeSupabase({cbs.CLIENTS_TABLE: [_live_client_row(nowcerts_insured_guid="seed")]})
     nc = FakeNowCerts(insureds=[nc_insured("ins1", "Acme LLC")])
     res = run(supa, nc)
-    assert res.clients_created == 1 and res.mirror_written == 1
-    client = supa.tables["canonical_clients"][0]
-    assert client["nowcerts_insured_guid"] == "ins1"
-    assert client["name"] == "Acme LLC"
-    mirror = supa.tables[cbs.MIRROR_TABLE][0]
-    assert mirror["insured_guid"] == "ins1" and mirror["active"] is True
+    assert res.clients_created == 1
+    client = next(c for c in supa.tables[cbs.CLIENTS_TABLE] if c[cbs.CLIENT_KEY] == "ins1")
+    assert client["insured_name"] == "Acme LLC"
+    assert client["insured_name_normalized"] == "acme llc"
+
+
+def test_existing_client_updates_not_duplicates():
+    supa = FakeSupabase({cbs.CLIENTS_TABLE: [_live_client_row(nowcerts_insured_guid="ins1", insured_name="Old Name")]})
+    nc = FakeNowCerts(insureds=[nc_insured("ins1", "New Name")])
+    res = run(supa, nc)
+    assert res.clients_created == 0 and res.clients_updated == 1
+    rows = [c for c in supa.tables[cbs.CLIENTS_TABLE] if c[cbs.CLIENT_KEY] == "ins1"]
+    assert len(rows) == 1 and rows[0]["insured_name"] == "New Name"
 
 
 def test_insured_without_guid_or_name_skipped():
@@ -88,144 +119,66 @@ def test_insured_without_guid_or_name_skipped():
     nc = FakeNowCerts(insureds=[{"id": "", "commercialName": ""}, {"id": "x", "commercialName": ""}])
     res = run(supa, nc)
     assert res.clients_created == 0
-    assert supa.tables.get("canonical_clients", []) == []
+    assert supa.tables.get(cbs.CLIENTS_TABLE, []) == []
 
 
-def test_existing_client_updates_not_duplicates():
-    supa = FakeSupabase({"canonical_clients": [
-        {"id": "c-1", "nowcerts_insured_guid": "ins1", "name": "Old Name"}
-    ]})
-    nc = FakeNowCerts(insureds=[nc_insured("ins1", "New Name")])
-    res = run(supa, nc)
-    assert res.clients_created == 0 and res.clients_updated == 1
-    assert len(supa.tables["canonical_clients"]) == 1
-    assert supa.tables["canonical_clients"][0]["name"] == "New Name"
-
-
-# --- policy insert + linkage -------------------------------------------------
-def test_new_policy_inserted_and_linked_to_client():
+# --- policies ----------------------------------------------------------------
+def test_new_policy_inserted_by_guid():
     supa = FakeSupabase()
-    nc = FakeNowCerts(
-        insureds=[nc_insured("ins1", "Acme LLC")],
-        policies=[nc_policy("P1", "ins1", premium=2500.0)],
-    )
+    nc = FakeNowCerts(policies=[nc_policy("P1", "ins1", premium=2500.0)])
     res = run(supa, nc)
     assert res.policies_created == 1 and res.policies_updated == 0
     pol = supa.tables[cbs.POLICIES_TABLE][0]
+    assert pol["policy_guid"] == "pg-P1"
     assert pol["policy_number"] == "P1"
     assert pol["nowcerts_insured_guid"] == "ins1"
-    assert pol["client_id"] == supa.tables["canonical_clients"][0]["id"]
+    assert pol["lines_of_business"] == "General Liability"
     assert pol["annualized_premium"] == 2500.0 and pol["premium_amount"] == 2500.0
     assert pol["active"] is True
-    assert pol["policy_guid"] == "pg-P1"
 
 
-# --- volatile refresh + lineage preservation ---------------------------------
-def _live_policy_row(**over):
-    """A realistic canonical_policies row — every live column present (nulls allowed),
-    mirroring what PostgREST returns and what column discovery introspects."""
-    row = {
-        "id": "pol-1", "policy_number": "P1", "policy_guid": "pg-P1",
-        "nowcerts_insured_guid": "ins1", "client_id": None, "renewed_policy": None,
-        "line_of_business": "General Liability", "carrier": "Old Carrier",
-        "status": "Active", "active": True,
-        "effective_date": "2025-09-01", "expiration_date": "2026-09-01",
-        "annualized_premium": 1000.0, "current_term_amount": 1000.0, "premium_amount": 1000.0,
-        "raw_payload": {}, "synced_at": "2026-06-10T00:00:00Z", "updated_at": "2026-06-10T00:00:00Z",
-    }
-    row.update(over)
-    return row
+def test_policy_without_guid_skipped():
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[{"number": "NOGUID", "insuredDatabaseId": "ins1", "status": "Active"}])
+    res = run(supa, nc)
+    assert res.policies_skipped_no_guid == 1 and res.policies_created == 0
 
 
 def test_existing_policy_refreshes_volatile_and_preserves_lineage():
     supa = FakeSupabase({cbs.POLICIES_TABLE: [
-        _live_policy_row(renewed_policy="P0", client_id="c-existing")
+        _live_policy_row(policy_guid="pg-P1", renewed_policy="P0", status="Active")
     ]})
-    nc = FakeNowCerts(policies=[nc_policy("P1", "ins9", status="Renewing",
+    nc = FakeNowCerts(policies=[nc_policy("P1", "ins9", guid="pg-P1", status="Renewing",
                                           exp="2027-09-01", premium=3300.0)])
     res = run(supa, nc)
     assert res.policies_updated == 1 and res.policies_created == 0
     pol = supa.tables[cbs.POLICIES_TABLE][0]
-    # lineage + client linkage preserved (never overwritten)
-    assert pol["renewed_policy"] == "P0"
-    assert pol["client_id"] == "c-existing"
-    # volatile fields refreshed from live NowCerts
-    assert pol["status"] == "Renewing"
+    assert pol["renewed_policy"] == "P0"          # lineage preserved (never sent on update)
+    assert pol["status"] == "Renewing"            # volatile refreshed
     assert pol["expiration_date"] == "2027-09-01"
     assert pol["premium_amount"] == 3300.0
 
 
-def test_empty_client_id_backfilled_when_resolvable():
-    supa = FakeSupabase({cbs.POLICIES_TABLE: [{
-        "id": "pol-1", "policy_number": "P1", "renewed_policy": None,
-        "client_id": None, "status": "Active",
-        "expiration_date": "2026-09-01", "synced_at": "2026-06-10T00:00:00Z",
-    }]})
-    nc = FakeNowCerts(
-        insureds=[nc_insured("ins1", "Acme LLC")],
-        policies=[nc_policy("P1", "ins1")],
-    )
-    run(supa, nc)
-    pol = next(p for p in supa.tables[cbs.POLICIES_TABLE] if p["policy_number"] == "P1")
-    assert pol["client_id"] == supa.tables["canonical_clients"][0]["id"]
-
-
-# --- duplicate collapse ------------------------------------------------------
-def test_duplicate_policy_rows_collapsed_to_status_keeper():
-    supa = FakeSupabase({cbs.POLICIES_TABLE: [
-        {"id": "keep", "policy_number": "D1", "status": "Active",
-         "expiration_date": "2027-01-01", "synced_at": "2026-06-10T00:00:00Z",
-         "renewed_policy": "D0", "client_id": "c1"},
-        {"id": "loser", "policy_number": "D1", "status": "Renewed",
-         "expiration_date": "2026-01-01", "synced_at": "2026-06-10T00:00:00Z",
-         "renewed_policy": None, "client_id": None},
-    ]})
-    nc = FakeNowCerts(policies=[nc_policy("D1", "ins1", status="Active")])
-    res = run(supa, nc)
-    assert res.dup_rows_collapsed == 1
-    remaining = [r for r in supa.tables[cbs.POLICIES_TABLE] if r["policy_number"] == "D1"]
-    assert len(remaining) == 1 and remaining[0]["id"] == "keep"
-    assert remaining[0]["renewed_policy"] == "D0"  # keeper lineage retained
-
-
-def test_nowcerts_side_collapse_prefers_active():
-    supa = FakeSupabase()
-    nc = FakeNowCerts(policies=[
-        nc_policy("X1", "ins1", status="Renewed"),
-        nc_policy("X1", "ins1", status="Active"),
-    ])
-    res = run(supa, nc)
-    assert res.policies_created == 1
-    assert supa.tables[cbs.POLICIES_TABLE][0]["status"] == "Active"
-
-
 # --- schema adaptivity -------------------------------------------------------
 def test_writes_filtered_to_existing_columns():
-    # Seed an existing row whose column set omits `carrier` — discovery should
-    # detect the live schema and drop `carrier` from a new-policy insert.
-    supa = FakeSupabase({cbs.POLICIES_TABLE: [{
-        "id": "pol-0", "policy_number": "SEED", "status": "Active",
-        "expiration_date": "2027-01-01", "synced_at": "2026-06-10T00:00:00Z",
-        "policy_guid": "pg-SEED", "nowcerts_insured_guid": "ins1",
-        "annualized_premium": 1.0, "premium_amount": 1.0, "active": True,
-        "renewed_policy": None, "client_id": None, "effective_date": "2026-01-01",
-    }]})
+    # Seed a live row whose column set omits `carrier`; a new-policy insert must
+    # drop `carrier` rather than error on an unknown column.
+    seed = _live_policy_row(policy_guid="pg-SEED", policy_number="SEED")
+    seed.pop("carrier")
+    supa = FakeSupabase({cbs.POLICIES_TABLE: [seed]})
     nc = FakeNowCerts(policies=[nc_policy("NEW1", "ins1", carrier="Ghost Carrier")])
     run(supa, nc)
     new_row = next(p for p in supa.tables[cbs.POLICIES_TABLE] if p["policy_number"] == "NEW1")
-    assert "carrier" not in new_row  # unknown column never written
+    assert "carrier" not in new_row
 
 
-# --- dry run -----------------------------------------------------------------
+# --- dry run / limit ---------------------------------------------------------
 def test_dry_run_makes_no_writes():
     supa = FakeSupabase()
-    nc = FakeNowCerts(
-        insureds=[nc_insured("ins1", "Acme LLC")],
-        policies=[nc_policy("P1", "ins1")],
-    )
+    nc = FakeNowCerts(insureds=[nc_insured("ins1")], policies=[nc_policy("P1", "ins1")])
     res = run(supa, nc, dry_run=True)
     assert res.clients_created == 1 and res.policies_created == 1  # counted
-    assert supa.tables.get("canonical_clients", []) == []          # but not written
+    assert supa.tables.get(cbs.CLIENTS_TABLE, []) == []            # not written
     assert supa.tables.get(cbs.POLICIES_TABLE, []) == []
 
 
