@@ -317,11 +317,12 @@ async function renderPipeline(host){
     const cr=decided?Math.round(won/decided*100):0;
     const cs=$('#closeStat'); if(cs) cs.textContent=`Close ratio ${decided?cr+'%':'—'} · ${won}W / ${lost}L`;
     const stageTotal=s=>byStage[s].reduce((a,o)=>a+(Number(o.premium_estimate)||0),0);
+    const stageWtd=s=>byStage[s].reduce((a,o)=>a+((Number(o.premium_estimate)||0)*(Number(o.probability)||0)/100),0);
     $('#kanban').innerHTML=PIPE_STAGES.map(s=>`
       <div class="kcol">
         <div class="kcol-head">
           <div class="kh-top"><span>${esc(s)}</span><span class="badge">${byStage[s].length}</span></div>
-          <div class="kh-total">${money(stageTotal(s))} est. premium</div>
+          <div class="kh-total">${money(stageTotal(s))} est${stageWtd(s)?` · ${money(stageWtd(s))} wtd`:''}</div>
         </div>
         <div class="kcol-body" data-stage="${esc(s)}">${byStage[s].map(kcard).join('')}</div>
       </div>`).join('');
@@ -336,7 +337,7 @@ function kcard(o){
   return `<div class="kcard" draggable="true" data-id="${esc(o.id)}">
     <div class="kc-name">${esc(o.insured_name||'—')}</div>
     <div class="kc-meta">${esc(meta)}</div>
-    <div class="kc-foot">${o.premium_estimate?`<span class="badge">${money(o.premium_estimate)}</span>`:''}${o.carrier?`<span class="kc-carrier">${esc(o.carrier)}</span>`:''}${o.insured_id?'':`<span class="chip warn">no insured</span>`}</div>
+    <div class="kc-foot">${o.premium_estimate?`<span class="badge">${money(o.premium_estimate)}</span>`:''}${o.probability!=null?`<span class="badge">${o.probability}%</span>`:''}${o.carrier?`<span class="kc-carrier">${esc(o.carrier)}</span>`:''}${o.insured_id?'':`<span class="chip warn">no insured</span>`}</div>
     ${sub?`<div class="kc-sub">${esc(sub)}</div>`:''}
     ${o.next_action?`<div class="kc-sub">▸ ${esc(o.next_action)}</div>`:''}
   </div>`;
@@ -582,14 +583,16 @@ async function openNewOpp(preClient){
        <div class="field"><label>Stage</label><select id="oppStage">${['New','Info Gathering','Quoting','Quoted','Bound','Lost'].map(s=>`<option>${s}</option>`).join('')}</select></div></div>
      <div class="row2"><div class="field"><label>Est. premium</label><input id="oppPrem" type="number" placeholder="0"/></div>
        <div class="field"><label>Carrier</label><input id="oppCarrier"/></div></div>
-     <div class="field"><label>Created by</label><select id="oppBy">${userOptions()}</select></div></div>
+     <div class="row2"><div class="field"><label>Probability (%)</label><input id="oppProb" type="number" min="0" max="100" placeholder="0–100"/></div>
+       <div class="field"><label>Created by</label><select id="oppBy">${userOptions()}</select></div></div>
+     <div class="field"><label>Description</label><textarea id="oppDesc" placeholder="Notes, context, what they need…"></textarea></div></div>
    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="oppSave">Create opportunity</button></div>`);
   wireClientPicker('opp');
   if(preClient&&preClient.name){ $('#oppName').value=preClient.name; $('#oppId').value=preClient.id||''; $('#oppSearch').value=preClient.name; $('#oppPicked').textContent='✓ '+preClient.name; }
   $('#oppSave').onclick=(e)=>submitBtn(e.target,async()=>{
     const name=$('#oppName').value||$('#oppSearch').value, lob=$('#oppLob').value.trim();
     if(!name){throw new Error('Pick a client first.')} if(!lob){throw new Error('Line of business is required.')}
-    const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:$('#oppCarrier').value||null,source:'cockpit',created_by:$('#oppBy').value})});
+    const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:$('#oppCarrier').value||null,description:$('#oppDesc').value||null,probability:parseInt($('#oppProb').value,10)||null,source:'cockpit',created_by:$('#oppBy').value})});
     closeModal(); toast(r.created?'Opportunity created.':'Opportunity already existed — opened.'); show('pipeline');
   });
 }
@@ -635,6 +638,8 @@ async function openOpportunity(o){
        <div><div class="m-l">Status</div><div class="m-v">${esc(o.status||'—')}</div></div>
        <div><div class="m-l">Est. premium</div><div class="m-v">${o.premium_estimate?money(o.premium_estimate):'—'}</div></div>
        <div><div class="m-l">Carrier</div><div class="m-v">${esc(o.carrier||'—')}</div></div>
+       <div><div class="m-l">Probability</div><div class="m-v">${o.probability!=null?o.probability+'%':'—'}</div></div>
+       <div><div class="m-l">Weighted value</div><div class="m-v">${(o.premium_estimate&&o.probability)?money(o.premium_estimate*o.probability/100):'—'}</div></div>
        <div><div class="m-l">Referral source</div><div class="m-v">${esc(o.referral_source||o.lead_source||'—')}</div></div>
        <div><div class="m-l">Assigned to</div><div class="m-v">${esc(o.assigned_to||'—')}</div></div>
        <div><div class="m-l">Prospect type</div><div class="m-v">${esc(o.prospect_type||'—')}</div></div>
@@ -642,6 +647,7 @@ async function openOpportunity(o){
        <div><div class="m-l">Created</div><div class="m-v">${esc((o.created_at||'').slice(0,10)||'—')}</div></div>
        <div><div class="m-l">Last update</div><div class="m-v">${esc((o.updated_at||'').slice(0,10)||'—')}</div></div>
      </div>
+     ${o.description?`<div style="margin-top:12px;font-size:13.5px;color:var(--ink-soft);white-space:pre-wrap;line-height:1.5">${esc(o.description)}</div>`:''}
      ${o.next_action?`<div class="t-meta" style="margin-top:12px">▸ Next: ${esc(o.next_action)}${o.next_action_date?' ('+esc(String(o.next_action_date).slice(0,10))+')':''}</div>`:''}
      ${o.lost_reason?`<div class="t-meta">Lost reason: ${esc(o.lost_reason)}</div>`:''}
      <div style="border-top:1px solid var(--border-soft);padding-top:14px">

@@ -67,6 +67,8 @@ def create_opportunity(
     lead_source: str | None = None,
     assigned_to: str | None = None,
     next_action: str | None = None,
+    description: str | None = None,
+    probability: int | None = None,
     source: str | None = None,
     created_by: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
@@ -104,6 +106,8 @@ def create_opportunity(
             "lead_source": lead_source,
             "assigned_to": assigned_to,
             "next_action": next_action,
+            "description": description,
+            "probability": probability,
             "source": source,
             "created_by": created_by,
         },
