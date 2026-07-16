@@ -671,6 +671,33 @@ async def list_opportunities_endpoint(stage: str | None = None, status: str | No
     return {"opportunities": rows, "count": len(rows)}
 
 
+class SendQuoteRequest(BaseModel):
+    approved_by: str
+
+
+@app.post("/api/opportunities/{opportunity_id}/send-to-nowcerts")
+async def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
+    """Approved push: enqueue this opportunity to NowCerts as a quote (Policy · IsQuote).
+    Writes nothing synchronously — the quote executor completes it and stamps the
+    quote id/number back onto the opportunity. approved_by must be a real user."""
+    from hermes.quotes.executor import stage_quote_job
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+    rows = supa.select("opportunities", columns="*", params={"id": f"eq.{opportunity_id}"}, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail="opportunity not found")
+    try:
+        job = stage_quote_job(supa, opportunity=rows[0], approved_by=req.approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("send quote failed: %s", opportunity_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "queued": True, "queue_id": job.get("id"),
+            "note": "Quote queued to NowCerts (approved). It writes when the quote executor runs."}
+
+
 @app.get("/api/clients/search")
 async def search_clients_endpoint(q: str, limit: int = 20):
     """Search the canonical book by insured name — powers the New-Opportunity client

@@ -205,7 +205,7 @@ const TABLES = {
     cols:[['policy_number','Policy #'],['client_name','Client'],['expiration_date','Expires'],['risk_status','Urgency',chip],['premium_current','Premium',money]]},
   commissions:{title:'Commissions',eyebrow:'Ledger reconciliation',lede:'Expected vs actual commission, keyed by policy.',endpoint:'/api/commissions',
     cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['reconciliation_status','Status',chip]]},
-  pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies.',endpoint:'/api/opportunities',action:'newOpp',
+  pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies. Click one to send a quote to NowCerts.',endpoint:'/api/opportunities',action:'newOpp',rowClick:(o)=>openOpportunity(o),
     cols:[['insured_name','Client'],['line_of_business','LOB'],['stage','Stage',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']]},
   tasks:{title:'Tasks',eyebrow:'Case-linked execution',lede:'Tasks across all cases.',endpoint:'/api/tasks',action:'newTask',
     cols:[['title','Task'],['status','Status',chip],['priority','Priority'],['assigned_to_email','Assignee'],['due_at','Due']]},
@@ -458,6 +458,28 @@ async function openNewOpp(preClient){
     const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:$('#oppCarrier').value||null,source:'cockpit',created_by:$('#oppBy').value})});
     closeModal(); toast(r.created?'Opportunity created.':'Opportunity already existed — opened.'); show('pipeline');
   });
+}
+async function openOpportunity(o){
+  await loadUsers(); const linked=!!o.insured_id;
+  openModal(`<div class="modal-head"><h3>${esc(o.insured_name||'Opportunity')}</h3><p>${esc(o.line_of_business||'')} · ${esc(o.stage||'')}</p></div>
+   <div class="modal-body">
+     <div class="meta" style="grid-template-columns:1fr 1fr;margin:0;padding:0;border:none">
+       <div><div class="m-l">Stage</div><div class="m-v">${esc(o.stage||'—')}</div></div>
+       <div><div class="m-l">Est. premium</div><div class="m-v">${o.premium_estimate?money(o.premium_estimate):'—'}</div></div>
+       <div><div class="m-l">Carrier</div><div class="m-v">${esc(o.carrier||'—')}</div></div>
+       <div><div class="m-l">Quote #</div><div class="m-v">${esc(o.quote_number||'—')}</div></div>
+     </div>
+     ${o.next_action?`<div class="t-meta">Next: ${esc(o.next_action)}</div>`:''}
+     <div style="border-top:1px solid var(--border-soft);padding-top:14px">
+       <div class="eyebrow" style="margin-bottom:8px">Write back to NowCerts</div>
+       ${linked?`<div class="t-meta" style="margin-bottom:10px">Queues this as a quote (Policy · IsQuote) for approval-gated write-back to the AMS.</div><div class="field"><label>Approved by</label><select id="sqBy">${userOptions()}</select></div>`
+               :`<div class="chip warn">Not linked to a NowCerts insured — create/link the insured via Intake before quoting.</div>`}
+     </div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>${linked?`<button class="btn primary" id="sqSend">Send quote to NowCerts</button>`:''}</div>`);
+  if(linked){ $('#sqSend').onclick=(e)=>submitBtn(e.target,async()=>{
+    await api('/api/opportunities/'+encodeURIComponent(o.id)+'/send-to-nowcerts',{method:'POST',body:JSON.stringify({approved_by:$('#sqBy').value})});
+    closeModal(); toast('Quote queued to NowCerts — writes when the quote executor runs.');
+  }); }
 }
 async function openNewCase(){
   await loadUsers();
