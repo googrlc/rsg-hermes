@@ -686,6 +686,151 @@ async def search_clients_endpoint(q: str, limit: int = 20):
     return {"clients": rows, "count": len(rows)}
 
 
+# ── Cases + Tasks (workflow) — sanctioned create/list for any cockpit ──
+def _active_user_emails(supa) -> set[str]:
+    rows = supa.select(
+        "agency_crm_users", columns="email",
+        params={"active": "eq.true"}, limit=1000,
+    )
+    return {str(r.get("email")).lower() for r in rows if r.get("email")}
+
+
+def _require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
+    """Reject any *_email that isn't an active agency_crm_users identity.
+
+    This is the API-level guard for the FK that made CRM task creation fail
+    silently — the cockpit picks emails from /api/agency-users, never free-typed.
+    """
+    valid = _active_user_emails(supa)
+    for label, email in pairs:
+        if email and email.lower() not in valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label} '{email}' is not an active agency_crm_users identity",
+            )
+
+
+@app.get("/api/agency-users")
+async def list_agency_users_endpoint():
+    """Active CRM users — powers owner/assignee pickers (valid FK targets)."""
+    rows = _get_supa().select(
+        "agency_crm_users", columns="email,display_name,role,active",
+        params={"active": "eq.true", "order": "display_name.asc"}, limit=200,
+    )
+    return {"users": rows, "count": len(rows)}
+
+
+class CaseCreateRequest(BaseModel):
+    title: str
+    case_type: str = "service"          # renewal|service|claims|marketing|endorsement|...
+    description: str | None = None
+    priority: str = "medium"
+    owner_email: str
+    created_by_email: str | None = None
+    insured_name: str | None = None
+    insured_database_id: str | None = None   # NowCerts insured guid
+    policy_number: str | None = None
+    due_at: str | None = None
+
+
+@app.post("/api/cases")
+async def create_case_endpoint(req: CaseCreateRequest):
+    """Create a general agency_crm_cases row (any case_type) for any cockpit.
+    Owner/creator emails are validated against agency_crm_users (FK guard)."""
+    import uuid
+
+    from hermes.renewals import cases as C
+
+    supa = _get_supa()
+    creator = req.created_by_email or C._service_email()
+    _require_users(supa, [("owner_email", req.owner_email), ("created_by_email", creator)])
+
+    case_number = (
+        f"{(req.case_type or 'CASE')[:3].upper()}-"
+        f"{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    )
+    try:
+        case = supa.insert("agency_crm_cases", C._compact({
+            "case_type": req.case_type,
+            "case_number": case_number,
+            "title": req.title,
+            "description": req.description,
+            "status": "open",
+            "priority": req.priority or "medium",
+            "owner_email": req.owner_email,
+            "created_by_email": creator,
+            "insured_name": req.insured_name,
+            "insured_database_id": req.insured_database_id,
+            "policy_number": req.policy_number,
+            "due_at": req.due_at,
+        }))
+        C.log_case_event(
+            supa, case_id=str(case.get("id")), event_type="case_created",
+            summary=f"{req.case_type} case opened: {req.title}", actor_email=creator,
+        )
+    except Exception as exc:
+        log.exception("create case failed: %s", req.title)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "case": case}
+
+
+@app.get("/api/cases")
+async def list_cases_endpoint(status: str | None = None, case_type: str | None = None, limit: int = 100):
+    """List cases, newest first."""
+    params: dict[str, str] = {"order": "created_at.desc"}
+    if status:
+        params["status"] = f"eq.{status}"
+    if case_type:
+        params["case_type"] = f"eq.{case_type}"
+    rows = _get_supa().select("agency_crm_cases", columns="*", params=params, limit=limit)
+    return {"cases": rows, "count": len(rows)}
+
+
+class TaskCreateRequest(BaseModel):
+    case_id: str
+    title: str
+    description: str | None = None
+    priority: str = "medium"
+    assigned_to_email: str | None = None
+    created_by_email: str | None = None
+    due_at: str | None = None
+
+
+@app.post("/api/tasks")
+async def create_task_endpoint(req: TaskCreateRequest):
+    """Create a task under a case. assigned_to/created_by validated vs agency_crm_users."""
+    from hermes.renewals import cases as C
+
+    supa = _get_supa()
+    creator = req.created_by_email or C._service_email()
+    _require_users(supa, [("assigned_to_email", req.assigned_to_email), ("created_by_email", creator)])
+
+    try:
+        created = C.create_tasks(
+            supa, case_id=req.case_id,
+            tasks=[{"title": req.title, "description": req.description,
+                    "assigned_to_email": req.assigned_to_email}],
+            created_by_email=creator,
+        )
+    except Exception as exc:
+        log.exception("create task failed: %s", req.title)
+        raise HTTPException(status_code=502, detail=str(exc))
+    if not created:
+        # Title already exists under this case (idempotent no-op).
+        return {"ok": True, "created": False, "task": None}
+    return {"ok": True, "created": True, "task": created[0]}
+
+
+@app.get("/api/tasks")
+async def list_tasks_endpoint(case_id: str | None = None, limit: int = 200):
+    """List tasks, optionally scoped to a case."""
+    params: dict[str, str] = {"order": "created_at.desc"}
+    if case_id:
+        params["case_id"] = f"eq.{case_id}"
+    rows = _get_supa().select("agency_crm_tasks", columns="*", params=params, limit=limit)
+    return {"tasks": rows, "count": len(rows)}
+
+
 @app.get("/api/hermes/sync-health")
 async def sync_health():
     """Queue-centric health snapshot for dashboard SyncHealthCheck component."""
