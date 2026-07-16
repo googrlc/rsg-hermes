@@ -1,15 +1,16 @@
 """Map an intake account into a NowCerts Insured (prospect) payload.
 
-The read side of NowCerts returns camelCase (commercialName, prospectType,
-insuredType, …); the Insert endpoints take PascalCase (CommercialName, FirstName,
-FEIN, AddressLine1, … per NowCertsClient.create_insured's docstring). This module
-produces the PascalCase Insert payload.
+Uses the **connected NowCerts tool contract**, not raw ProspectType/InsuredType
+keys:
+    insuredType : "0" commercial, "1" personal   (string codes)
+    type        : 0 insured,       1 prospect     (int codes)
+Name/address fields are the connector's PascalCase common fields:
+    CommercialName, FirstName, LastName, FEIN, AddressLine1, City, State, Zip,
+    EMail, PhoneNumber.
 
-⚠️  WRITE-FIELD CASING IS UNVERIFIED for a few fields — notably ProspectType and
-InsuredType. NowCerts silently drops unknown insert fields (same failure mode as
-EspoCRM casing). Before the FIRST live insert, run one dry-run insert and confirm
-these keys stick; do not trust this mapping blind. Nothing here writes — it only
-builds the payload for the approval-gated intake executor.
+Nothing here writes — it only builds the payload for the approval-gated intake
+executor. The lead temperature (Hot/Cold) is kept on the Supabase opportunities
+row (``prospect_type``), not sent to NowCerts.
 """
 
 from __future__ import annotations
@@ -19,6 +20,11 @@ from typing import Any
 from hermes.intake.opportunities import INSURED_TYPES, PROSPECT_TYPES
 
 DEFAULT_PROSPECT_TYPE = "Prospect"
+
+# NowCerts connector codes.
+_INSURED_TYPE_CODE = {"Commercial": "0", "Personal": "1"}
+TYPE_INSURED = 0
+TYPE_PROSPECT = 1
 
 
 def _first(account: dict[str, Any], *keys: str) -> Any:
@@ -43,8 +49,17 @@ def normalize_insured_type(value: Any) -> str | None:
     return None
 
 
+def insured_type_code(value: Any) -> str | None:
+    """Personal|Commercial (or a segment label) -> connector code '1'|'0', else None."""
+    label = normalize_insured_type(value)
+    return _INSURED_TYPE_CODE.get(label) if label else None
+
+
 def normalize_prospect_type(value: Any) -> str:
-    """Map a lead temperature to a NowCerts prospect_type; default 'Prospect'."""
+    """Lead temperature -> Supabase prospect_type (Hot/Cold/Prospect); default 'Prospect'.
+
+    Used for the opportunities pipeline row; NOT sent to NowCerts.
+    """
     s = str(value or "").strip().lower().replace(" ", "_")
     mapping = {
         "hot": "Hot_Prospect", "hot_prospect": "Hot_Prospect", "warm": "Hot_Prospect",
@@ -59,16 +74,12 @@ def map_to_insured(
     account: dict[str, Any],
     *,
     insured_type: str | None = None,
-    prospect_type: str = DEFAULT_PROSPECT_TYPE,
+    is_prospect: bool = True,
 ) -> dict[str, Any]:
-    """Build a NowCerts Insured Insert payload (prospect) from an intake account.
-
-    ``insured_type`` (Personal|Commercial) decides CommercialName vs First/Last.
-    """
-    itype = normalize_insured_type(insured_type) or normalize_insured_type(
+    """Build a NowCerts Insured Insert payload from an intake account (connector contract)."""
+    itype_label = normalize_insured_type(insured_type) or normalize_insured_type(
         _first(account, "insured_type", "segment", "type")
     )
-    ptype = normalize_prospect_type(prospect_type)
 
     name = _first(account, "commercial_name", "account_name", "name")
     first = _first(account, "first_name", "firstName", "primary_first_name")
@@ -79,16 +90,18 @@ def map_to_insured(
         "AddressLine1": _first(account, "address_line1", "address", "street", "AddressLine1"),
         "City": _first(account, "city", "City"),
         "State": _first(account, "state", "State"),
-        "ZipCode": _first(account, "zip", "zip_code", "postal_code", "ZipCode"),
+        "Zip": _first(account, "zip", "zip_code", "postal_code", "ZipCode", "Zip"),
         "EMail": _first(account, "email", "eMail", "email_address"),
-        "CellPhone": _first(account, "phone", "cell_phone", "mobile", "phoneNumber"),
-        # ⚠️ verify these two keys stick on a dry-run insert before going live.
-        "ProspectType": ptype,
-        "InsuredType": itype,
+        "PhoneNumber": _first(account, "phone", "cell_phone", "mobile", "phoneNumber"),
+        # Connector codes (not raw ProspectType/InsuredType keys).
+        "type": TYPE_PROSPECT if is_prospect else TYPE_INSURED,
     }
+    code = _INSURED_TYPE_CODE.get(itype_label) if itype_label else None
+    if code is not None:
+        payload["insuredType"] = code
 
-    # Commercial => CommercialName; Personal => First/Last (fall back sensibly).
-    if itype == "Personal" and (first or last):
+    # Personal => First/Last; else CommercialName.
+    if itype_label == "Personal" and (first or last):
         payload["FirstName"] = first
         payload["LastName"] = last
     else:
@@ -98,5 +111,5 @@ def map_to_insured(
         if last:
             payload["LastName"] = last
 
-    # Drop empties so we never send blank keys that could clobber existing data.
+    # Drop blanks (but keep type=0, which is a valid code, not "empty").
     return {k: v for k, v in payload.items() if v not in (None, "")}

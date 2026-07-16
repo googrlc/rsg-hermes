@@ -112,7 +112,9 @@ def commit_intake(
         opp_rows.append(row)
 
     # 2. Gated NowCerts insured-create job.
-    insured_payload = nowcerts_map.map_to_insured(account, insured_type=itype, prospect_type=ptype)
+    # ptype (Hot/Cold/Prospect) stays on the opportunities row; the NowCerts
+    # insured write uses the connector's numeric type code (prospect=1).
+    insured_payload = nowcerts_map.map_to_insured(account, insured_type=itype, is_prospect=True)
     job = _stage_insured_job(
         supa,
         insured_payload=insured_payload,
