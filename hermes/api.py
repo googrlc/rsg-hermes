@@ -924,8 +924,8 @@ async def list_policies_endpoint(limit: int = 1000):
     """Canonical policy book (read-only mirror), soonest-expiring first."""
     rows = _get_supa().select(
         "canonical_policies",
-        columns="policy_number,nowcerts_insured_guid,carrier,lines_of_business,status,"
-                "effective_date,expiration_date,premium_amount,annualized_premium",
+        columns="policy_guid,policy_number,nowcerts_insured_guid,carrier,lines_of_business,status,"
+                "effective_date,expiration_date,premium_amount,annualized_premium,agency_commission_amount,state",
         params={"order": "expiration_date.asc"}, limit=limit,
     )
     return {"policies": rows, "count": len(rows)}
