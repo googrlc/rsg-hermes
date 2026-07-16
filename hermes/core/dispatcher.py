@@ -148,6 +148,20 @@ class Dispatcher:
                 re.compile(r"\b(create|generate|add)\s+(the\s+)?renewal\s+tasks?\b", re.I),
                 "renewal_tasks_create",
             ),
+            # Renewal PDF generate + file-to-Nextcloud (both verbs -> same generate+file
+            # handler). Before data_entry ("create … pdf") and revenue ("file … renewal …").
+            (
+                re.compile(r"\b(generate|create|build|make)\s+(the\s+)?(renewal\s+)?(worksheet\s+)?pdf\b", re.I),
+                "renewal_pdf",
+            ),
+            (
+                re.compile(
+                    r"\bfile\s+(the\s+)?(renewal\s+)?(worksheet|review|pdf)\b.*\bnextcloud\b"
+                    r"|\bfile\s+(the\s+)?renewal\b.*\bnextcloud\b",
+                    re.I | re.S,
+                ),
+                "renewal_file",
+            ),
             (
                 re.compile(r"^\s*(research|enrich|investigate|look\s+up|web\s+research)\s+(business|account|company)?\b", re.I),
                 business_research.handle,
@@ -361,6 +375,9 @@ class Dispatcher:
         if handler == "renewal_tasks_create":
             from hermes.commands.renewal_cases import create_tasks_handle
             return create_tasks_handle(client, text, supa=self.supa)
+        if handler in ("renewal_pdf", "renewal_file"):
+            from hermes.commands.renewal_documents import generate_pdf_handle
+            return generate_pdf_handle(client, text, supa=self.supa)
         if handler == "change_proposals":
             from hermes.commands.change_proposals import handle as cp_handle
             return cp_handle(client, text, supa=self.supa)
