@@ -435,3 +435,14 @@ def test_run_executor_dry_run_is_side_effect_free():
     assert supa.update_wheres == []       # no claim
     assert supa.inserts == []             # no receipt
     assert nc.update_calls == []          # no NowCerts mutation
+
+
+def test_extract_created_id_handles_nested_data():
+    """NowCerts Zapier InsertTask nests the id under `data` — must be found there."""
+    from hermes.renewals.executor import _extract_created_id
+    assert _extract_created_id({"database_id": "top"}) == "top"
+    assert _extract_created_id({"data": {"database_id": "3421de3d"}}) == "3421de3d"
+    assert _extract_created_id({"data": {"id": "nid"}}) == "nid"
+    assert _extract_created_id({"data": {}}) is None
+    assert _extract_created_id({}) is None
+    assert _extract_created_id(None) is None
