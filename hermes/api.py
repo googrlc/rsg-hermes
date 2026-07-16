@@ -1037,6 +1037,35 @@ async def list_commissions_endpoint(limit: int = 1000):
     return {"commissions": rows, "count": len(rows)}
 
 
+_RENEWAL_LOST = {"cancelled", "non-renewed", "non-renewal", "lapsed", "expired", "flat cancel", "rewritten"}
+
+
+def _renewal_outcome(r: dict) -> str:
+    """Won (retained) / Lost / Open, from the candidate's lineage + status."""
+    ns = str(r.get("normalized_status") or "").strip().lower()
+    if r.get("successor_policy_number") or ns == "renewed":
+        return "Won"
+    if ns in _RENEWAL_LOST:
+        return "Lost"
+    return "Open"
+
+
+@app.get("/api/renewals")
+async def list_renewals_endpoint(limit: int = 1000):
+    """Renewal worklist from renewal_candidates — carries the NowCerts insured GUID
+    (for the AMS deep-link) and a derived Won/Lost/Open outcome per renewal."""
+    rows = _get_supa().select(
+        "renewal_candidates",
+        columns="insured_id,policy_number,client_name,line_of_business,renewal_event_date,"
+                "expiration_date,normalized_status,successor_policy_number,risk_status,segment,"
+                "in_working_queue,eligibility_state,premium_current,premium_renewal",
+        params={"order": "renewal_event_date.desc"}, limit=limit,
+    )
+    for r in rows:
+        r["outcome"] = _renewal_outcome(r)
+    return {"renewals": rows, "count": len(rows)}
+
+
 @app.get("/api/workspace-stats")
 async def workspace_stats_endpoint():
     """KPI tile counts for the Workspace home."""

@@ -28,6 +28,12 @@ CRON_TZ=America/New_York
 # go-live step. Dry-run to preview with zero writes: hermes --sync-canonical-book-dry-run
 # ENABLED 2026-07-16 after a verified full run (+249 clients / +157 policies, 0 errors).
 20 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-canonical-book >> /root/hermes-cron.log 2>&1
+# Commission ledger seed — daily 2:25am ET (after the book sync). Writes EXPECTED
+# commission per commissionable policy into commission_ledger (NowCerts agency
+# commission, rule fallback). Preserves statement-sourced actuals/reconciliation —
+# only the expected side is refreshed. So every new/refreshed policy shows on the
+# Commissions page automatically. Money-data but non-destructive (expected only).
+25 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-commissions >> /root/hermes-cron.log 2>&1
 # Renewal eligibility refresh — daily 2:30am ET (after Policy Sync v2). Rebuilds
 # renewal_candidates from the live book (canonical_policies + live NowCerts insured-active)
 # via the centralized eligibility engine, then projects ELIGIBLE events -> project_85_renewals.

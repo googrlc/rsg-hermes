@@ -224,8 +224,9 @@ const TABLES = {
     cols:[['insured_name','Client'],['client_type','Type'],['city','City'],['state','State'],['email','Email'],['phone','Phone']]},
   policies:{title:'Policies',eyebrow:'Read-only mirror',lede:'Coverage and premium mirrors from the canonical book. Click a policy for details.',endpoint:'/api/policies',rowClick:(p)=>openPolicy(p),
     cols:[['policy_number','Policy #'],['carrier','Carrier'],['lines_of_business','LOB'],['status','Status'],['expiration_date','Expires'],['annualized_premium','Annualized',money]]},
-  renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Current eligible renewal events from the eligibility engine.',endpoint:'/api/command-center/renewals',
-    cols:[['policy_number','Policy #'],['client_name','Client'],['expiration_date','Expires'],['risk_status','Urgency',chip],['premium_current','Premium',money]]},
+  renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Renewal events with win/loss outcome. Click a row to open the insured in NowCerts.',endpoint:'/api/renewals',
+    rowClick:(r)=>{ if(r.insured_id&&NOWCERTS_INSURED_URL) window.open(NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(r.insured_id)),'_blank','noopener'); },
+    cols:[['client_name','Client'],['policy_number','Policy #'],['line_of_business','LOB'],['renewal_event_date','Renewal'],['risk_status','Urgency',chip],['outcome','Outcome',chip],['premium_current','Premium',money]]},
   commissions:{title:'Commissions',eyebrow:'Ledger reconciliation',lede:'Expected vs actual commission, keyed by policy.',endpoint:'/api/commissions',
     cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['reconciliation_status','Status',chip]]},
   pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies. Click one to send a quote to NowCerts.',endpoint:'/api/opportunities',action:'newOpp',rowClick:(o)=>openOpportunity(o),
@@ -233,7 +234,7 @@ const TABLES = {
   tasks:{title:'Tasks',eyebrow:'Case-linked execution',lede:'Tasks across all cases.',endpoint:'/api/tasks',action:'newTask',
     cols:[['title','Task'],['status','Status',chip],['priority','Priority'],['assigned_to_email','Assignee'],['due_at','Due']]},
 };
-function chip(v){ if(!v)return '—'; const s=String(v).toLowerCase(); let cls=''; if(/crit/.test(s))cls='crit'; else if(/risk|warn|pending|open|not_started/.test(s))cls='warn'; else if(/safe|reconciled|won|synced|completed/.test(s))cls='safe'; return `<span class="chip ${cls}">${esc(v)}</span>`; }
+function chip(v){ if(!v)return '—'; const s=String(v).toLowerCase(); let cls=''; if(/crit|lost/.test(s))cls='crit'; else if(/risk|warn|pending|open|not_started/.test(s))cls='warn'; else if(/safe|reconciled|won|synced|completed/.test(s))cls='safe'; return `<span class="chip ${cls}">${esc(v)}</span>`; }
 
 /* ---------- Router ---------- */
 async function show(view){
