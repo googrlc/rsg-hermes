@@ -43,7 +43,8 @@ def test_commit_creates_pipeline_job_and_folder():
     assert out["intake_job_id"] == "out-1"
     assert out["nextcloud_folder"] == "Clients/Acme Plumbing LLC"
     assert out["insured_preview"]["CommercialName"] == "Acme Plumbing LLC"
-    assert out["insured_preview"]["ProspectType"] == "Prospect"
+    assert out["insured_preview"]["type"] == 1            # prospect code
+    assert out["insured_preview"]["insuredType"] == "0"  # commercial code
     assert out["insured_type"] == "Commercial"
 
 

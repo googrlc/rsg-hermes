@@ -1010,8 +1010,8 @@ def main() -> int:
             ins = pv.get("insured", {})
             who = ins.get("CommercialName") or f"{ins.get('FirstName', '')} {ins.get('LastName', '')}".strip()
             print(
-                f"  PREVIEW insured={who!r} ProspectType={ins.get('ProspectType')} "
-                f"InsuredType={ins.get('InsuredType')} keys={sorted(ins.keys())}"
+                f"  PREVIEW insured={who!r} type={ins.get('type')} "
+                f"insuredType={ins.get('insuredType')} keys={sorted(ins.keys())}"
             )
         return 0 if summary["failed"] == 0 else 1
 
