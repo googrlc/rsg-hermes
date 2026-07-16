@@ -47,11 +47,15 @@ DEFAULT_TASK_TEMPLATES: list[tuple[str, str]] = [
 
 
 def _service_email() -> str:
-    return os.environ.get("HERMES_SERVICE_EMAIL", "hermes@risk-solutionsgroup.com")
+    # created_by_email / actor_email are FK'd to agency_crm_users — must be a real
+    # user. No hermes bot user exists yet, so default to the admin; override with
+    # HERMES_SERVICE_EMAIL once a hermes@ user is added to agency_crm_users.
+    return os.environ.get("HERMES_SERVICE_EMAIL", "lamar@risksolutionsgroup.net")
 
 
-def _default_owner_email() -> str | None:
-    return os.environ.get("HERMES_RENEWAL_OWNER_EMAIL") or None
+def _default_owner_email() -> str:
+    # owner_email is required + FK'd to agency_crm_users — default to the renewal CSR.
+    return os.environ.get("HERMES_RENEWAL_OWNER_EMAIL") or "gretchen@risksolutionsgroup.net"
 
 
 def _compact(payload: dict[str, Any]) -> dict[str, Any]:
