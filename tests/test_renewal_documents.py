@@ -109,7 +109,7 @@ def test_nextcloud_put_error_raises():
 def test_generate_and_file_ok():
     supa = _supa({
         "renewal_candidates": [_candidate()],
-        "renewal_cases": [{"id": "case-1", "policy_number": "TST-0001"}],
+        "agency_crm_cases": [{"id": "case-1", "policy_number": "TST-0001", "insured_database_id": "i1"}],
     })
     ncloud = MagicMock()
     ncloud.is_configured.return_value = True
@@ -126,7 +126,7 @@ def test_generate_and_file_ok():
 
 
 def test_generate_without_nextcloud_configured():
-    supa = _supa({"renewal_candidates": [_candidate()], "renewal_cases": []})
+    supa = _supa({"renewal_candidates": [_candidate()], "agency_crm_cases": []})
     ncloud = MagicMock()
     ncloud.is_configured.return_value = False
     r = rd.generate_pdf_handle(
