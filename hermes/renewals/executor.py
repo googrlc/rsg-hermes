@@ -248,6 +248,8 @@ def _eligible_jobs(supa: SupabaseClient, *, limit: int) -> list[dict[str, Any]]:
             "status": f"eq.{QUEUE_QUEUED}",
             "approved_by": "not.is.null",
             "approved_at": "not.is.null",
+            # Honor backoff: skip jobs scheduled for the future.
+            "or": f"(scheduled_for.is.null,scheduled_for.lte.{_utcnow().isoformat()})",
             "order": "created_at.asc",
         },
         limit=max(limit, 1),

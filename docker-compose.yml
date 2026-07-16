@@ -65,6 +65,27 @@ services:
     # min. Replaces the retired pg_cron rsg-sync outbound path (pg_cron stays
     # disabled).
     command: ["hermes", "--run-outbound-drain-worker", "--outbound-drain-poll-seconds", "900"]
+  hermes-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rsg-hermes-scheduler
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    # Executor scheduler: intake + renewal every 5 min with single-instance
+    # locking, backoff/dead-letter, stalled-queue reclaim, and #systems-check
+    # alerts. DISABLED by default TWO ways:
+    #   1. compose profile "scheduler" — a plain `docker compose up -d` skips it;
+    #      start explicitly with `docker compose --profile scheduler up -d hermes-scheduler`.
+    #   2. SCHEDULER_ENABLED env — the command exits immediately unless truthy.
+    profiles: ["scheduler"]
+    # Let the in-flight cycle finish on SIGTERM so no claimed job is abandoned.
+    stop_grace_period: 60s
+    command: ["hermes", "--run-scheduler", "--scheduler-interval", "300", "--scheduler-batch", "10"]
 
 networks:
   hermes-shared:
