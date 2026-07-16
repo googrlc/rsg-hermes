@@ -52,7 +52,9 @@ class NextcloudClient:
         verify_tls: bool | None = None,
     ) -> None:
         self.url = (url if url is not None else os.environ.get("NEXTCLOUD_URL", "")).strip().rstrip("/")
-        self.user = (user if user is not None else os.environ.get("NEXTCLOUD_USER", "")).strip()
+        # Accept either NEXTCLOUD_USER or the box's existing NEXTCLOUD_USERNAME.
+        env_user = os.environ.get("NEXTCLOUD_USER") or os.environ.get("NEXTCLOUD_USERNAME", "")
+        self.user = (user if user is not None else env_user).strip()
         self.app_password = (
             app_password if app_password is not None else os.environ.get("NEXTCLOUD_APP_PASSWORD", "")
         ).strip()
