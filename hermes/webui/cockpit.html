@@ -155,6 +155,7 @@
       <a data-view="intake"><svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M12 12v5M9.5 14.5h5"/></svg>Intake</a>
       <a data-view="cases"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Cases</a>
       <a data-view="tasks"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>Tasks</a>
+      <a data-view="hermes"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>Ask Hermes</a>
       <a class="external" href="https://rsg-commission-tracker-339396843209.us-east1.run.app/" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>Commission Tracker</a>
     </nav>
     <div class="side-foot"><div class="row"><span class="dot"></span>Supabase connected</div><div>Hermes mirrors + CRM workflow</div></div>
@@ -220,6 +221,7 @@ async function show(view){
   if(view==='workspace') return renderWorkspace(host);
   if(view==='cases') return renderCases(host);
   if(view==='intake') return renderIntake(host);
+  if(view==='hermes') return renderAskHermes(host);
   return renderTable(host, TABLES[view]);
 }
 
@@ -312,6 +314,49 @@ async function renderClient360(guid){
     $('#back360').onclick=()=>show('clients');
     $('#c360opp').onclick=()=>openNewOpp({name:c.insured_name,id:guid});
   }catch(e){ host.innerHTML=`<section class="view"><div class="empty">Couldn’t load client — ${esc(e.message)}</div></section>`; }
+}
+
+/* ---------- Ask Hermes (conversational) ---------- */
+let HERMES_HISTORY = [];
+async function renderAskHermes(host){
+  host.innerHTML=`<section class="view">
+    <div class="view-head"><div><div class="eyebrow">Conversational · read + preview</div><h1 class="h1">Ask Hermes</h1>
+      <p class="lede">Ask for a client assessment, a renewal review, a report, a lookup, or research. Write actions are previewed here — run them through the proper flow (Intake, Pipeline, Cases).</p></div></div>
+    <div class="panel" style="display:flex;flex-direction:column;height:60vh;margin-top:20px">
+      <div id="chatlog" style="flex:1;overflow:auto;padding:22px;display:flex;flex-direction:column;gap:14px"></div>
+      <div style="border-top:1px solid var(--border-soft);padding:16px;display:flex;gap:10px">
+        <input id="chatInput" placeholder="Ask Hermes… e.g. 'Assess retention risk for JB Noble' or 'What renews this week?'" style="flex:1;padding:12px 14px;border:1px solid var(--border);border-radius:11px;font-size:14px;font-family:var(--sans)"/>
+        <button class="btn primary" id="chatSend">Send</button>
+      </div></div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap" id="suggests">
+      ${["What renews this week?","Assess retention risk for our top clients","Summarize the pipeline","Which quotes are stale?"].map(s=>`<button class="btn" data-s="${esc(s)}" style="padding:7px 12px;font-size:12.5px">${esc(s)}</button>`).join('')}
+    </div></section>`;
+  const log=$('#chatlog');
+  function bubble(who,text){
+    const mine=who==='you';
+    const b=el(`<div style="align-self:${mine?'flex-end':'flex-start'};max-width:78%;background:${mine?'var(--sage-soft)':'#fff'};border:1px solid var(--border);border-radius:14px;padding:12px 16px;font-size:14px;line-height:1.55;white-space:pre-wrap">${esc(text)}</div>`);
+    log.append(b); log.scrollTop=log.scrollHeight; return b;
+  }
+  if(!HERMES_HISTORY.length){ bubble('hermes',"Ask me for a client assessment, a renewal review, a report, a lookup, or research. I answer here; anything that would write gets previewed, not run."); }
+  else HERMES_HISTORY.forEach(m=>bubble(m.who,m.text));
+  async function send(q){
+    q=(q||'').trim(); if(!q)return;
+    $('#chatInput').value='';
+    bubble('you',q); HERMES_HISTORY.push({who:'you',text:q});
+    const thinking=bubble('hermes','…'); $('#chatSend').disabled=true;
+    try{
+      const r=await api('/api/command-center/ask',{method:'POST',body:JSON.stringify({prompt:q})});
+      thinking.remove();
+      const msg=r.message||'(no response)';
+      bubble('hermes',msg); HERMES_HISTORY.push({who:'hermes',text:msg});
+      if(r.requires_confirmation){ log.append(el(`<div style="align-self:flex-start;font-size:12px;color:var(--warn)">This is a write action — run it through the proper flow (Intake / Pipeline / Cases) to execute.</div>`)); log.scrollTop=log.scrollHeight; }
+    }catch(e){ thinking.remove(); bubble('hermes','Error: '+e.message); }
+    $('#chatSend').disabled=false; $('#chatInput').focus();
+  }
+  $('#chatSend').onclick=()=>send($('#chatInput').value);
+  $('#chatInput').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); send($('#chatInput').value); } });
+  $('#suggests').querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>send(b.dataset.s));
+  setTimeout(()=>$('#chatInput')&&$('#chatInput').focus(),50);
 }
 
 /* ---------- Intake portal (new business → NowCerts) ---------- */
