@@ -1025,6 +1025,50 @@ async def list_policies_endpoint(limit: int = 1000):
     return {"policies": rows, "count": len(rows)}
 
 
+class CommissionRuleRequest(BaseModel):
+    id: str | None = None
+    carrier_name: str
+    lob: str
+    nb_percent: float | None = None
+    renewal_percent: float | None = None
+    commission_basis: str | None = "gross"
+    active: bool = True
+
+
+@app.get("/api/commission-rules")
+async def list_commission_rules(limit: int = 500):
+    """Commission terms — carrier/LOB → new-business % and renewal %."""
+    rows = _get_supa().select(
+        "commission_rules",
+        columns="id,carrier_name,lob,nb_percent,renewal_percent,commission_basis,active",
+        params={"order": "carrier_name.asc"}, limit=limit,
+    )
+    return {"rules": rows, "count": len(rows)}
+
+
+@app.post("/api/commission-rules")
+async def upsert_commission_rule(req: CommissionRuleRequest):
+    """Add or update a commission term (carrier + LOB rate). Feeds expected
+    commission when NowCerts doesn't carry an agency commission amount."""
+    supa = _get_supa()
+    payload = {k: v for k, v in {
+        "carrier_name": (req.carrier_name or "").strip(),
+        "lob": (req.lob or "").strip(),
+        "nb_percent": req.nb_percent,
+        "renewal_percent": req.renewal_percent,
+        "commission_basis": req.commission_basis or "gross",
+        "active": req.active,
+    }.items() if v is not None}
+    if not payload.get("carrier_name") or not payload.get("lob"):
+        raise HTTPException(status_code=400, detail="carrier_name and lob are required")
+    try:
+        row = supa.update("commission_rules", req.id, payload) if req.id else supa.insert("commission_rules", payload)
+    except Exception as exc:
+        log.exception("commission rule upsert failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "rule": row}
+
+
 @app.get("/api/commissions")
 async def list_commissions_endpoint(limit: int = 1000):
     """Commission ledger (expected vs actual), newest statement first."""

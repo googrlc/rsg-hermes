@@ -227,8 +227,8 @@ const TABLES = {
   renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Renewal events with win/loss outcome. Click a row to open the insured in NowCerts.',endpoint:'/api/renewals',
     rowClick:(r)=>{ if(r.insured_id&&NOWCERTS_INSURED_URL) window.open(NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(r.insured_id)),'_blank','noopener'); },
     cols:[['client_name','Client'],['policy_number','Policy #'],['line_of_business','LOB'],['renewal_event_date','Renewal'],['risk_status','Urgency',chip],['outcome','Outcome',chip],['premium_current','Premium',money]]},
-  commissions:{title:'Commissions',eyebrow:'Ledger reconciliation',lede:'Expected vs actual commission, keyed by policy.',endpoint:'/api/commissions',
-    cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['reconciliation_status','Status',chip]]},
+  commissions:{title:'Commissions',eyebrow:'Ledger reconciliation',lede:'Expected vs actual commission, keyed by policy. Manage carrier rates with Commission terms.',endpoint:'/api/commissions',action:'commTerms',
+    cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['delta','Delta',money],['reconciliation_status','Status',chip]]},
   pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies. Click one to send a quote to NowCerts.',endpoint:'/api/opportunities',action:'newOpp',rowClick:(o)=>openOpportunity(o),
     cols:[['insured_name','Client'],['line_of_business','LOB'],['stage','Stage',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']]},
   tasks:{title:'Tasks',eyebrow:'Case-linked execution',lede:'Tasks across all cases.',endpoint:'/api/tasks',action:'newTask',
@@ -278,12 +278,14 @@ const kpiTile=(l,n,s)=>`<div class="kpi"><div class="k-label">${l}</div><div cla
 
 /* ---------- Generic table ---------- */
 async function renderTable(host,cfg){
-  const actionBtn = cfg.action ? `<div class="btns"><button class="btn primary" id="actBtn">${cfg.action==='newOpp'?'+ New Opportunity':'+ New Task'}</button></div>`:'';
+  const actLabels={newOpp:'+ New Opportunity',newTask:'+ New Task',commTerms:'Commission terms'};
+  const actionBtn = cfg.action ? `<div class="btns"><button class="btn primary" id="actBtn">${actLabels[cfg.action]||'Action'}</button></div>`:'';
   host.innerHTML = `<section class="view">
     <div class="view-head"><div><div class="eyebrow">${cfg.eyebrow}</div><h1 class="h1">${cfg.title}</h1><p class="lede">${cfg.lede}</p></div>${actionBtn}</div>
     <div class="panel table-wrap"><div class="loading">Loading…</div></div></section>`;
   if(cfg.action==='newOpp') $('#actBtn').onclick=openNewOpp;
   if(cfg.action==='newTask') $('#actBtn').onclick=()=>openNewTask();
+  if(cfg.action==='commTerms') $('#actBtn').onclick=openCommTerms;
   try{
     const rows = firstArray(await api(cfg.endpoint));
     const wrap = host.querySelector('.table-wrap');
@@ -298,6 +300,37 @@ async function renderTable(host,cfg){
     wrap.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     if(cfg.rowClick){ wrap.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>cfg.rowClick(rows[+tr.dataset.i])); }
   }catch(e){ host.querySelector('.table-wrap').innerHTML=`<div class="empty">Couldn’t load — ${esc(e.message)}</div>`; }
+}
+
+/* ---------- Commission terms editor ---------- */
+async function openCommTerms(){
+  openModal(`<div class="modal-head"><h3>Commission terms</h3><p>Carrier + line-of-business rates. Used for expected commission when NowCerts has no agency commission amount on the policy.</p></div>
+   <div class="modal-body">
+     <div id="ruleList"><div class="loading">Loading…</div></div>
+     <div style="border-top:1px solid var(--border-soft);padding-top:14px">
+       <div class="eyebrow" style="margin-bottom:10px">Add / update a term</div>
+       <div class="row2"><div class="field"><label>Carrier</label><input id="crCarrier" placeholder="Acme Mutual"/></div>
+         <div class="field"><label>Line of business</label><input id="crLob" placeholder="General Liability"/></div></div>
+       <div class="row2"><div class="field"><label>New business %</label><input id="crNb" type="number" step="0.1" placeholder="15"/></div>
+         <div class="field"><label>Renewal %</label><input id="crRen" type="number" step="0.1" placeholder="12"/></div></div>
+     </div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn primary" id="crSave">Save term</button></div>`);
+  async function loadRules(){
+    try{ const rules=(await api('/api/commission-rules')).rules||[];
+      $('#ruleList').innerHTML = rules.length
+        ? `<div class="table-wrap" style="margin-top:0"><table><thead><tr><th>Carrier</th><th>LOB</th><th>NB %</th><th>Ren %</th></tr></thead><tbody>${rules.map(r=>`<tr><td>${esc(r.carrier_name)}</td><td>${esc(r.lob)}</td><td class="num">${r.nb_percent!=null?r.nb_percent+'%':'—'}</td><td class="num">${r.renewal_percent!=null?r.renewal_percent+'%':'—'}</td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty" style="padding:20px">No commission terms yet — add one below.</div>`;
+    }catch(e){ $('#ruleList').innerHTML=`<div class="empty" style="padding:16px">${esc(e.message)}</div>`; }
+  }
+  loadRules();
+  $('#crSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const carrier=$('#crCarrier').value.trim(), lob=$('#crLob').value.trim();
+    if(!carrier||!lob){throw new Error('Carrier and line of business are required.')}
+    await api('/api/commission-rules',{method:'POST',body:JSON.stringify({carrier_name:carrier,lob:lob,nb_percent:parseFloat($('#crNb').value)||null,renewal_percent:parseFloat($('#crRen').value)||null})});
+    toast('Commission term saved.');
+    ['crCarrier','crLob','crNb','crRen'].forEach(i=>$('#'+i).value='');
+    loadRules();
+  });
 }
 
 /* ---------- Pipeline Kanban ---------- */
