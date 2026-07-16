@@ -87,6 +87,15 @@ def test_create_case_targets_agency_crm_and_details():
     assert case_payload["case_type"] == "renewal"
     assert case_payload["insured_database_id"] == "i"
     assert case_payload["status"] == "open"
+    assert case_payload["case_number"] == "REN-TST0001-20270101"  # required, generated
+
+
+def test_renewal_case_number_is_deterministic():
+    n1 = cases.renewal_case_number("TST-0001", "lin-1", "2027-01-01")
+    n2 = cases.renewal_case_number("TST-0001", "lin-1", "2027-01-01")
+    assert n1 == n2 == "REN-TST0001-20270101"
+    # falls back to lineage when no policy number
+    assert cases.renewal_case_number(None, "lin-9", "2027-06-15") == "REN-LIN9-20270615"
 
 
 def test_create_case_idempotent_via_identity():

@@ -14,6 +14,7 @@ event date) so repeated Hermes commands return the same case.
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -55,6 +56,18 @@ def _default_owner_email() -> str | None:
 def _compact(payload: dict[str, Any]) -> dict[str, Any]:
     """Drop None values so we never send blank keys that could clobber shared rows."""
     return {k: v for k, v in payload.items() if v is not None}
+
+
+def renewal_case_number(
+    policy_number: str | None, policy_lineage_id: str, renewal_event_date: str
+) -> str:
+    """Deterministic case_number for a renewal event (agency_crm_cases.case_number is
+    required with no default). Same renewal-event identity always yields the same
+    number, so retries stay idempotent even before the case row exists.
+    """
+    base = re.sub(r"[^A-Za-z0-9]+", "", str(policy_number or policy_lineage_id or "UNKNOWN")).upper()[:24]
+    date_compact = str(renewal_event_date)[:10].replace("-", "")
+    return f"REN-{base or 'UNKNOWN'}-{date_compact}"
 
 
 def default_tasks(assigned_to_email: str | None = None) -> list[dict[str, Any]]:
@@ -117,6 +130,8 @@ def create_case(
         CASES_TABLE,
         _compact({
             "case_type": CASE_TYPE_RENEWAL,
+            # Required, no DB default — Hermes generates it deterministically.
+            "case_number": renewal_case_number(policy_number, policy_lineage_id, renewal_event_date),
             "title": f"Renewal — {client_name or policy_number or 'client'}",
             "description": f"Renewal review for policy {policy_number}" if policy_number else "Renewal review",
             "status": CASE_STATUS_OPEN,
