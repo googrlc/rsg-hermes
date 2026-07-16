@@ -837,6 +837,16 @@ async def list_tasks_endpoint(case_id: str | None = None, limit: int = 200):
     return {"tasks": rows, "count": len(rows)}
 
 
+@app.get("/api/cases/{case_id}/documents")
+async def case_documents_endpoint(case_id: str):
+    """Nextcloud document links filed against a case (agency_crm_document_links)."""
+    rows = _get_supa().select(
+        "agency_crm_document_links", columns="*",
+        params={"case_id": f"eq.{case_id}", "order": "created_at.desc"}, limit=200,
+    )
+    return {"documents": rows, "count": len(rows)}
+
+
 # ── Book reads + Workspace KPIs (power the CRM cockpit views) ──
 @app.get("/api/clients")
 async def list_clients_endpoint(limit: int = 500):

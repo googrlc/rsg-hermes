@@ -28,6 +28,8 @@
   .nav a svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;opacity:.85}
   .nav a:hover{background:#1b3a44}
   .nav a.active{background:var(--sage);color:var(--accent-deep);font-weight:600}
+  .nav a.external{color:var(--sidebar-muted);margin-top:6px}
+  .nav a.external:hover{color:var(--sidebar-text)}
   .side-foot{padding:18px 22px;border-top:1px solid var(--sidebar-line);font-size:12px;color:var(--sidebar-muted)}
   .side-foot .row{display:flex;align-items:center;gap:8px;color:#d7e2de;font-weight:600;margin-bottom:2px}
   .dot{width:8px;height:8px;border-radius:50%;background:#43c493;box-shadow:0 0 0 3px rgba(67,196,147,.18);flex:0 0 auto}
@@ -152,6 +154,7 @@
       <a data-view="pipeline"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Pipeline</a>
       <a data-view="cases"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Cases</a>
       <a data-view="tasks"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>Tasks</a>
+      <a class="external" href="https://rsg-commission-tracker-339396843209.us-east1.run.app/" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>Commission Tracker</a>
     </nav>
     <div class="side-foot"><div class="row"><span class="dot"></span>Supabase connected</div><div>Hermes mirrors + CRM workflow</div></div>
   </aside>
@@ -302,12 +305,19 @@ async function selectCase(i){
       <div><div class="m-l">Opened</div><div class="m-v">${esc((c.opened_at||c.created_at||'').slice(0,10)||'—')}</div></div>
     </div>
     <div class="tasks-h"><span>Tasks</span><span class="badge" id="tcount">…</span></div>
-    <div id="taskrows"><div class="loading">Loading tasks…</div></div>`;
+    <div id="taskrows"><div class="loading">Loading tasks…</div></div>
+    <div class="tasks-h"><span>Documents</span><span class="badge" id="dcount">…</span></div>
+    <div id="docrows"><div class="loading">Loading…</div></div>`;
   try{
     const tasks = firstArray(await api('/api/tasks?case_id='+encodeURIComponent(c.id)));
     $('#tcount').textContent=tasks.length;
     $('#taskrows').innerHTML = tasks.length? tasks.map(t=>`<div class="task"><div><div class="t-title">${esc(t.title)}</div><div class="t-meta">${esc(t.priority||'medium')} · ${esc(t.assigned_to_email||'unassigned')}</div></div><div class="t-status">${esc((t.status||'').replace('_',' '))||'—'}</div></div>`).join('') : `<div class="empty" style="padding:20px">No tasks yet.</div>`;
   }catch(e){ $('#taskrows').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+  try{
+    const docs = firstArray(await api('/api/cases/'+encodeURIComponent(c.id)+'/documents'));
+    $('#dcount').textContent=docs.length;
+    $('#docrows').innerHTML = docs.length? docs.map(d=>`<div class="task"><div><div class="t-title">${esc(d.title||d.nextcloud_path||'Document')}</div><div class="t-meta">${esc(d.content_type||'file')}${d.uploaded_by_email?' · '+esc(d.uploaded_by_email):''}</div></div>${d.nextcloud_url?`<a class="t-status" style="color:var(--accent);font-weight:600" href="${esc(d.nextcloud_url)}" target="_blank" rel="noopener">Open ↗</a>`:'<span class="t-status">—</span>'}</div>`).join('') : `<div class="empty" style="padding:18px">No documents filed in Nextcloud.</div>`;
+  }catch(e){ $('#docrows').innerHTML=`<div class="empty" style="padding:18px">Documents unavailable — ${esc(e.message)}</div>`; }
 }
 
 /* ---------- Modals ---------- */
@@ -391,7 +401,7 @@ async function openNewTask(preCase){
   });
 }
 
-document.getElementById('nav').addEventListener('click',e=>{const a=e.target.closest('a');if(a){e.preventDefault();show(a.dataset.view);}});
+document.getElementById('nav').addEventListener('click',e=>{const a=e.target.closest('a');if(a&&a.dataset.view){e.preventDefault();show(a.dataset.view);}});
 show('workspace');
 </script>
 </body>
