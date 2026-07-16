@@ -14,6 +14,12 @@
     --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
+  /* Gretchen's workspace — same app, lavender skin (?u=gretchen) */
+  body.theme-gretchen{
+    --sidebar:#2c2340; --sidebar-line:#3d3155; --sidebar-text:#d4cce4; --sidebar-muted:#9a8fb5;
+    --canvas:#f8f5fc; --border:#ece7f3; --border-soft:#f2eef8;
+    --accent:#6d4aa8; --accent-deep:#4e3382; --sage:#e6ddf4; --sage-soft:#f0eaf9; --badge-ink:#5b3f97;
+  }
   *{box-sizing:border-box}
   body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
   .app{display:flex;min-height:100vh}
@@ -144,7 +150,7 @@
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="brand"><div class="mark">RSG</div><div class="sub">Agency CRM</div></div>
+    <div class="brand"><div class="mark">RSG</div><div class="sub" id="brandSub">Agency CRM</div></div>
     <nav class="nav" id="nav">
       <a data-view="workspace" class="active"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Workspace</a>
       <a data-view="clients"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>Clients</a>
@@ -599,6 +605,11 @@ async function openNewTask(preCase){
 }
 
 document.getElementById('nav').addEventListener('click',e=>{const a=e.target.closest('a');if(a&&a.dataset.view){e.preventDefault();show(a.dataset.view);}});
+
+// Personal workspace skin — Gretchen gets a lavender space via ?u=gretchen (yours stays default).
+(function(){ const who=(new URLSearchParams(location.search).get('u')||'').toLowerCase();
+  if(who==='gretchen'){ document.body.classList.add('theme-gretchen'); const s=document.getElementById('brandSub'); if(s) s.textContent="Gretchen's Desk"; }
+})();
 show('workspace');
 </script>
 </body>
