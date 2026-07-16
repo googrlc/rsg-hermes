@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>RSG Agency CRM</title>
+<style>
+  :root{
+    --sidebar:#142e37; --sidebar-line:#20404a; --sidebar-text:#c4d2ce; --sidebar-muted:#8ca19b;
+    --canvas:#faf8f2; --card:#ffffff; --border:#eae6db; --border-soft:#f0ece2;
+    --ink:#17271f; --ink-soft:#3b4a43; --muted:#8a938d; --label:#9aa39d;
+    --accent:#1f7a5f; --accent-deep:#155741; --sage:#dbe9e1; --sage-soft:#e9f1ec; --badge-ink:#1f6b52;
+    --warn:#b6862a; --crit:#b0442f; --safe:#2f7d5c;
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  .app{display:flex;min-height:100vh}
+  a{color:inherit}
+
+  .sidebar{width:224px;flex:0 0 224px;background:var(--sidebar);color:var(--sidebar-text);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+  .brand{padding:22px 22px 20px}
+  .brand .mark{font-family:var(--serif);font-size:30px;font-weight:700;letter-spacing:.5px;color:#fff;line-height:1}
+  .brand .sub{margin-top:6px;font-size:10.5px;letter-spacing:.22em;color:#7fb6a2;text-transform:uppercase}
+  .nav{display:flex;flex-direction:column;gap:2px;padding:6px 12px;flex:1}
+  .nav a{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:9px;color:var(--sidebar-text);text-decoration:none;font-size:14.5px;cursor:pointer;transition:background .12s,color .12s}
+  .nav a svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;opacity:.85}
+  .nav a:hover{background:#1b3a44}
+  .nav a.active{background:var(--sage);color:var(--accent-deep);font-weight:600}
+  .side-foot{padding:18px 22px;border-top:1px solid var(--sidebar-line);font-size:12px;color:var(--sidebar-muted)}
+  .side-foot .row{display:flex;align-items:center;gap:8px;color:#d7e2de;font-weight:600;margin-bottom:2px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#43c493;box-shadow:0 0 0 3px rgba(67,196,147,.18);flex:0 0 auto}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .topbar{display:flex;align-items:center;gap:22px;padding:16px 34px;border-bottom:1px solid var(--border);background:var(--canvas);position:sticky;top:0;z-index:5}
+  .topbar h2{font-family:var(--serif);font-size:21px;margin:0;font-weight:600}
+  .search{flex:1;max-width:560px;position:relative}
+  .search input{width:100%;padding:11px 16px 11px 40px;border:1px solid var(--border);border-radius:11px;background:#fff;font-size:14px;color:var(--ink);font-family:var(--sans)}
+  .search input::placeholder{color:#a9b1ab}
+  .search>svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:16px;height:16px;stroke:#9aa39d;fill:none;stroke-width:1.8}
+  .live{margin-left:auto;display:flex;align-items:center;gap:8px;border:1px solid var(--border);background:#fff;padding:8px 14px;border-radius:999px;font-size:13px;color:var(--ink-soft)}
+
+  .view{padding:30px 34px 60px}
+  .eyebrow{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--label);font-weight:600}
+  .h1{font-family:var(--serif);font-size:34px;font-weight:600;margin:6px 0 8px;letter-spacing:.2px}
+  .lede{color:var(--muted);font-size:14.5px;max-width:680px;margin:0}
+  .view-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+  .pill{border:1px solid var(--sage);background:var(--sage-soft);color:var(--accent-deep);padding:7px 14px;border-radius:999px;font-size:12.5px;white-space:nowrap}
+
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin:26px 0 30px}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px}
+  .kpi .k-label{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--label);font-weight:600}
+  .kpi .k-num{font-family:var(--serif);font-size:38px;font-weight:600;margin:10px 0 6px;line-height:1;font-variant-numeric:tabular-nums}
+  .kpi .k-sub{font-size:12px;color:var(--muted)}
+
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .navcard{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;display:flex;flex-direction:column;min-height:150px;cursor:pointer;transition:border-color .12s,box-shadow .12s,transform .12s}
+  .navcard:hover{border-color:#d5cfc0;box-shadow:0 6px 22px -14px rgba(20,46,55,.25);transform:translateY(-1px)}
+  .navcard .nc-top{display:flex;align-items:flex-start;justify-content:space-between}
+  .navcard h3{font-family:var(--serif);font-size:22px;font-weight:600;margin:0}
+  .badge{background:var(--sage);color:var(--badge-ink);font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .navcard p{color:var(--muted);font-size:13px;margin:6px 0 0;flex:1}
+  .open{color:var(--accent);font-size:13.5px;font-weight:600;margin-top:14px}
+
+  .btns{display:flex;gap:10px}
+  .btn{font-size:13.5px;font-weight:600;padding:10px 16px;border-radius:10px;border:1px solid var(--border);background:#fff;color:var(--ink-soft);cursor:pointer;font-family:var(--sans)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn:hover{filter:brightness(.98)}
+  .btn:disabled{opacity:.6;cursor:default}
+
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .table-wrap{margin-top:24px;overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+  thead th{text-align:left;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--label);font-weight:600;padding:13px 16px;border-bottom:1px solid var(--border);white-space:nowrap}
+  tbody td{padding:13px 16px;border-bottom:1px solid var(--border-soft);color:var(--ink-soft);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fcfbf7}
+  td.num{font-variant-numeric:tabular-nums;text-align:right}
+  .chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;background:var(--sage-soft);color:var(--badge-ink)}
+  .chip.warn{background:#f6edd8;color:var(--warn)} .chip.crit{background:#f6e0da;color:var(--crit)} .chip.safe{background:#e0efe6;color:var(--safe)}
+  .muted{color:var(--muted)} .mono{font-family:var(--sans);color:var(--accent);font-weight:600;font-size:12px}
+
+  .split{display:grid;grid-template-columns:340px 1fr;gap:22px;margin-top:26px;align-items:start}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border-soft)}
+  .panel-head h4{font-family:var(--serif);font-size:17px;margin:0;font-weight:600}
+  .caselist{display:flex;flex-direction:column;max-height:70vh;overflow:auto}
+  .caserow{display:grid;grid-template-columns:78px 1fr auto;gap:12px;padding:15px 18px;border-bottom:1px solid var(--border-soft);cursor:pointer;align-items:start}
+  .caserow:last-child{border-bottom:none}
+  .caserow:hover{background:#fcfbf7}
+  .caserow.active{background:var(--sage-soft);box-shadow:inset 3px 0 0 var(--accent)}
+  .caserow .cno{font-size:11px;color:var(--accent);font-weight:600;line-height:1.35}
+  .caserow .cname{font-family:var(--serif);font-size:15.5px;font-weight:600;margin-bottom:3px}
+  .caserow .cdesc{font-size:12px;color:var(--muted);line-height:1.4}
+  .caserow .copen{font-size:12.5px;color:var(--accent);font-weight:600}
+  .detail{padding:24px 26px}
+  .detail .d-eyebrow{font-size:11.5px;color:var(--accent);font-weight:600}
+  .detail h3{font-family:var(--serif);font-size:26px;font-weight:600;margin:8px 0 6px}
+  .detail .d-sub{color:var(--ink-soft);font-size:14px}
+  .detail .d-note{color:var(--muted);font-size:13.5px;margin-top:10px;padding-top:14px;border-top:1px solid var(--border-soft)}
+  .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:20px 0 6px;padding:16px 0;border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft)}
+  .meta .m-l{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--label);font-weight:600;margin-bottom:5px}
+  .meta .m-v{font-size:14px;color:var(--ink);font-weight:500}
+  .tasks-h{display:flex;align-items:center;gap:10px;margin:22px 0 12px}
+  .tasks-h span{font-family:var(--serif);font-size:18px;font-weight:600}
+  .task{display:flex;align-items:center;gap:14px;padding:14px 2px;border-top:1px solid var(--border-soft)}
+  .task:first-of-type{border-top:none}
+  .task .t-title{font-size:14px;font-weight:600;color:var(--ink)}
+  .task .t-meta{font-size:12px;color:var(--muted);margin-top:2px}
+  .task .t-status{font-size:12.5px;color:var(--muted);margin-left:auto}
+
+  .empty,.loading{padding:44px;text-align:center;color:var(--muted);font-size:14px}
+
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(20,46,55,.34);display:none;align-items:flex-start;justify-content:center;padding:60px 20px;z-index:40;overflow:auto}
+  .overlay.open{display:flex}
+  .modal{background:var(--card);border-radius:16px;width:100%;max-width:520px;box-shadow:0 24px 60px -24px rgba(20,46,55,.5)}
+  .modal-head{padding:22px 24px 16px;border-bottom:1px solid var(--border-soft)}
+  .modal-head h3{font-family:var(--serif);font-size:22px;margin:0;font-weight:600}
+  .modal-head p{margin:5px 0 0;color:var(--muted);font-size:13px}
+  .modal-body{padding:20px 24px;display:flex;flex-direction:column;gap:15px}
+  .field label{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--label);font-weight:600;margin-bottom:6px}
+  .field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;font-family:var(--sans);color:var(--ink);background:#fff}
+  .field textarea{resize:vertical;min-height:64px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .modal-foot{padding:16px 24px 22px;display:flex;justify-content:flex-end;gap:10px}
+  .picker{position:relative}
+  .picker-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px -14px rgba(20,46,55,.4);max-height:220px;overflow:auto;z-index:2;display:none}
+  .picker-results.open{display:block}
+  .picker-results div{padding:9px 12px;font-size:13.5px;cursor:pointer;border-bottom:1px solid var(--border-soft)}
+  .picker-results div:hover{background:var(--sage-soft)}
+  .picked{margin-top:6px;font-size:12.5px;color:var(--accent-deep)}
+
+  /* toast */
+  .toast-wrap{position:fixed;right:22px;bottom:22px;display:flex;flex-direction:column;gap:10px;z-index:60}
+  .toast{background:#123029;color:#eaf3ee;padding:13px 18px;border-radius:11px;font-size:13.5px;box-shadow:0 14px 34px -14px rgba(0,0,0,.5);max-width:360px}
+  .toast.err{background:#5a241b}
+
+  @media(max-width:1080px){.kpis{grid-template-columns:repeat(3,1fr)}.cards{grid-template-columns:repeat(2,1fr)}.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="mark">RSG</div><div class="sub">Agency CRM</div></div>
+    <nav class="nav" id="nav">
+      <a data-view="workspace" class="active"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Workspace</a>
+      <a data-view="clients"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>Clients</a>
+      <a data-view="policies"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Policies</a>
+      <a data-view="renewals"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2"/><path d="M18 4v5h-5M6 20v-5h5"/></svg>Renewals</a>
+      <a data-view="commissions"><svg viewBox="0 0 24 24"><path d="M12 3v18M8 7h6a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6"/></svg>Commissions</a>
+      <a data-view="pipeline"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Pipeline</a>
+      <a data-view="cases"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Cases</a>
+      <a data-view="tasks"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>Tasks</a>
+    </nav>
+    <div class="side-foot"><div class="row"><span class="dot"></span>Supabase connected</div><div>Hermes mirrors + CRM workflow</div></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h2 id="viewTitle">Workspace</h2>
+      <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><input id="globalSearch" placeholder="Search clients, policies, work, cases…"/></div>
+      <div class="live"><span class="dot"></span>Live data</div>
+    </header>
+    <div id="viewHost"></div>
+  </main>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+const API = ""; // same origin
+const $ = (s,r=document)=>r.querySelector(s);
+const el = (h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild;};
+const esc = (v)=> (v==null?'':String(v)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money = (v)=> v==null||v===''?'—':'$'+Number(v).toLocaleString('en-US',{maximumFractionDigits:0});
+const firstArray = (d)=> Array.isArray(d)?d:(d&&typeof d==='object'?(Object.values(d).find(Array.isArray)||[]):[]);
+let USERS=[];
+
+async function api(path,opts){
+  const r = await fetch(API+path, Object.assign({headers:{'Content-Type':'application/json'}},opts));
+  const t = await r.text(); let j; try{j=t?JSON.parse(t):{}}catch{ j={detail:t} }
+  if(!r.ok) throw new Error(j.detail||('HTTP '+r.status));
+  return j;
+}
+function toast(msg,isErr){ const t=el(`<div class="toast ${isErr?'err':''}">${esc(msg)}</div>`); $('#toasts').append(t); setTimeout(()=>t.remove(),4200); }
+async function loadUsers(){ if(USERS.length)return USERS; try{USERS=(await api('/api/agency-users')).users||[]}catch{USERS=[]} return USERS; }
+const userOptions = ()=> USERS.map(u=>`<option value="${esc(u.email)}">${esc(u.display_name||u.email)}</option>`).join('');
+
+/* ---------- View configs ---------- */
+const TABLES = {
+  clients:{title:'Clients',eyebrow:'Read-only mirror',lede:'NowCerts insured records mirrored to Supabase.',endpoint:'/api/clients',
+    cols:[['insured_name','Client'],['client_type','Type'],['city','City'],['state','State'],['email','Email'],['phone','Phone']]},
+  policies:{title:'Policies',eyebrow:'Read-only mirror',lede:'Coverage and premium mirrors from the canonical book.',endpoint:'/api/policies',
+    cols:[['policy_number','Policy #'],['carrier','Carrier'],['lines_of_business','LOB'],['status','Status'],['expiration_date','Expires'],['annualized_premium','Annualized',money]]},
+  renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Current eligible renewal events from the eligibility engine.',endpoint:'/api/command-center/renewals',
+    cols:[['policy_number','Policy #'],['client_name','Client'],['expiration_date','Expires'],['risk_status','Urgency',chip],['premium_current','Premium',money]]},
+  commissions:{title:'Commissions',eyebrow:'Ledger reconciliation',lede:'Expected vs actual commission, keyed by policy.',endpoint:'/api/commissions',
+    cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['reconciliation_status','Status',chip]]},
+  pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies.',endpoint:'/api/opportunities',action:'newOpp',
+    cols:[['insured_name','Client'],['line_of_business','LOB'],['stage','Stage',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']]},
+  tasks:{title:'Tasks',eyebrow:'Case-linked execution',lede:'Tasks across all cases.',endpoint:'/api/tasks',action:'newTask',
+    cols:[['title','Task'],['status','Status',chip],['priority','Priority'],['assigned_to_email','Assignee'],['due_at','Due']]},
+};
+function chip(v){ if(!v)return '—'; const s=String(v).toLowerCase(); let cls=''; if(/crit/.test(s))cls='crit'; else if(/risk|warn|pending|open|not_started/.test(s))cls='warn'; else if(/safe|reconciled|won|synced|completed/.test(s))cls='safe'; return `<span class="chip ${cls}">${esc(v)}</span>`; }
+
+/* ---------- Router ---------- */
+async function show(view){
+  document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
+  $('#viewTitle').textContent = view.charAt(0).toUpperCase()+view.slice(1);
+  const host = $('#viewHost');
+  if(view==='workspace') return renderWorkspace(host);
+  if(view==='cases') return renderCases(host);
+  return renderTable(host, TABLES[view]);
+}
+
+/* ---------- Workspace ---------- */
+async function renderWorkspace(host){
+  host.innerHTML = `<section class="view">
+    <div class="view-head"><div>
+      <div class="eyebrow">Live Supabase model</div><h1 class="h1">Agency workspace</h1>
+      <p class="lede">Clients and Policies are read-only mirrors; Renewals, Commissions, Pipeline, Cases, and Tasks write back to Supabase.</p>
+    </div><div class="pill">Hermes mirror · live</div></div>
+    <div class="kpis" id="kpis">${kpiTile('Clients','…','canonical_clients').repeat(1)}</div>
+    <div class="cards" id="wcards"></div></section>`;
+  const tiles=[['Clients','clients','canonical_clients'],['Policies','policies','annualized'],['Renewals','renewals','need attention'],
+    ['Pipeline','pipeline','open opportunities'],['Open cases','open_cases','agency_crm_cases'],['Open tasks','open_tasks','agency_crm_tasks']];
+  try{
+    const s = await api('/api/workspace-stats');
+    $('#kpis').innerHTML = tiles.map(([lbl,key,sub])=>{
+      const val = key==='clients'?s.clients:key==='policies'?s.policies:s[key];
+      const subT = key==='policies'?money(s.annualized_premium)+' annualized':sub;
+      return kpiTile(lbl, (val??0).toLocaleString(), subT);
+    }).join('');
+    const cards=[['Clients',s.clients,'NowCerts insured records','clients'],['Policies',s.policies,'Coverage and premium mirrors','policies'],
+      ['Renewals',s.renewals,'Current eligible worklist','renewals'],['Commissions',s.commissions,'Ledger reconciliation','commissions'],
+      ['Pipeline',s.pipeline,'Quote-to-bind workflow','pipeline'],['Cases',s.open_cases,'Agency service work','cases'],['Tasks',s.open_tasks,'Case-linked execution','tasks']];
+    $('#wcards').innerHTML = cards.map(([t,n,d,v])=>`<div class="navcard" data-goto="${v}"><div class="nc-top"><h3>${t}</h3><span class="badge">${(n??0).toLocaleString()}</span></div><p>${d}</p><div class="open">Open →</div></div>`).join('');
+    $('#wcards').querySelectorAll('[data-goto]').forEach(c=>c.onclick=()=>show(c.dataset.goto));
+  }catch(e){ $('#kpis').innerHTML = `<div class="empty" style="grid-column:1/-1">Workspace stats unavailable — deploy the latest API. (${esc(e.message)})</div>`; }
+}
+const kpiTile=(l,n,s)=>`<div class="kpi"><div class="k-label">${l}</div><div class="k-num">${n}</div><div class="k-sub">${s}</div></div>`;
+
+/* ---------- Generic table ---------- */
+async function renderTable(host,cfg){
+  const actionBtn = cfg.action ? `<div class="btns"><button class="btn primary" id="actBtn">${cfg.action==='newOpp'?'+ New Opportunity':'+ New Task'}</button></div>`:'';
+  host.innerHTML = `<section class="view">
+    <div class="view-head"><div><div class="eyebrow">${cfg.eyebrow}</div><h1 class="h1">${cfg.title}</h1><p class="lede">${cfg.lede}</p></div>${actionBtn}</div>
+    <div class="panel table-wrap"><div class="loading">Loading…</div></div></section>`;
+  if(cfg.action==='newOpp') $('#actBtn').onclick=openNewOpp;
+  if(cfg.action==='newTask') $('#actBtn').onclick=()=>openNewTask();
+  try{
+    const rows = firstArray(await api(cfg.endpoint));
+    const wrap = host.querySelector('.table-wrap');
+    if(!rows.length){ wrap.innerHTML=`<div class="empty">Nothing here yet.</div>`; return; }
+    const head = cfg.cols.map(c=>`<th>${c[1]}</th>`).join('');
+    const body = rows.map(r=>'<tr>'+cfg.cols.map(c=>{
+      const fmt=c[2]; const raw=r[c[0]];
+      const cell = fmt?fmt(raw):(raw==null||raw===''?'<span class="muted">—</span>':esc(raw));
+      const num = fmt===money?' class="num"':'';
+      return `<td${num}>${cell}</td>`;
+    }).join('')+'</tr>').join('');
+    wrap.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  }catch(e){ host.querySelector('.table-wrap').innerHTML=`<div class="empty">Couldn’t load — ${esc(e.message)}</div>`; }
+}
+
+/* ---------- Cases master-detail ---------- */
+let CASES=[], activeCase=null;
+async function renderCases(host){
+  host.innerHTML = `<section class="view">
+    <div class="view-head"><div><div class="eyebrow">agency_crm_cases · read/write</div><h1 class="h1">Cases</h1>
+      <p class="lede">Create cases, update ownership, and manage their tasks.</p></div>
+      <div class="btns"><button class="btn" id="newTaskBtn">+ New task</button><button class="btn primary" id="openCaseBtn">+ Open case</button></div></div>
+    <div class="split"><div class="panel"><div class="panel-head"><h4>All cases</h4><span class="badge" id="caseCount">…</span></div><div class="caselist" id="caselist"><div class="loading">Loading…</div></div></div>
+    <div class="panel detail" id="caseDetail"><div class="empty">Select a case.</div></div></div></section>`;
+  $('#openCaseBtn').onclick=openNewCase;
+  $('#newTaskBtn').onclick=()=>openNewTask(activeCase);
+  try{
+    CASES = firstArray(await api('/api/cases'));
+    $('#caseCount').textContent = CASES.length;
+    const list=$('#caselist');
+    if(!CASES.length){ list.innerHTML=`<div class="empty">No cases yet.</div>`; return; }
+    list.innerHTML = CASES.map((c,i)=>`<div class="caserow ${i===0?'active':''}" data-i="${i}">
+      <div class="cno">${esc(c.case_number||'')}</div>
+      <div><div class="cname">${esc(c.insured_name||c.title||'Case')}</div><div class="cdesc">${esc(c.title||'')}${c.owner_email?' · '+esc(c.owner_email):''}</div></div>
+      <div class="copen">Open</div></div>`).join('');
+    list.querySelectorAll('.caserow').forEach(r=>r.onclick=()=>{list.querySelectorAll('.caserow').forEach(x=>x.classList.remove('active'));r.classList.add('active');selectCase(+r.dataset.i);});
+    selectCase(0);
+  }catch(e){ $('#caselist').innerHTML=`<div class="empty">Couldn’t load cases — ${esc(e.message)}</div>`; }
+}
+async function selectCase(i){
+  activeCase=CASES[i]; const c=activeCase; const d=$('#caseDetail');
+  d.innerHTML=`<div class="d-eyebrow">${esc(c.case_number||'')} · ${esc(c.case_type||'case')}</div>
+    <h3>${esc(c.title||c.insured_name||'Case')}</h3>
+    <div class="d-sub">${esc(c.insured_name||'')}${c.policy_number?' · '+esc(c.policy_number):''}</div>
+    ${c.description?`<div class="d-note">${esc(c.description)}</div>`:''}
+    <div class="meta">
+      <div><div class="m-l">Owner</div><div class="m-v">${esc(c.owner_email||'—')}</div></div>
+      <div><div class="m-l">Priority</div><div class="m-v">${esc(c.priority||'—')}</div></div>
+      <div><div class="m-l">Due</div><div class="m-v">${esc(c.due_at||'—')}</div></div>
+      <div><div class="m-l">Opened</div><div class="m-v">${esc((c.opened_at||c.created_at||'').slice(0,10)||'—')}</div></div>
+    </div>
+    <div class="tasks-h"><span>Tasks</span><span class="badge" id="tcount">…</span></div>
+    <div id="taskrows"><div class="loading">Loading tasks…</div></div>`;
+  try{
+    const tasks = firstArray(await api('/api/tasks?case_id='+encodeURIComponent(c.id)));
+    $('#tcount').textContent=tasks.length;
+    $('#taskrows').innerHTML = tasks.length? tasks.map(t=>`<div class="task"><div><div class="t-title">${esc(t.title)}</div><div class="t-meta">${esc(t.priority||'medium')} · ${esc(t.assigned_to_email||'unassigned')}</div></div><div class="t-status">${esc((t.status||'').replace('_',' '))||'—'}</div></div>`).join('') : `<div class="empty" style="padding:20px">No tasks yet.</div>`;
+  }catch(e){ $('#taskrows').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+}
+
+/* ---------- Modals ---------- */
+function closeModal(){ $('#overlay').classList.remove('open'); $('#modal').innerHTML=''; }
+$('#overlay').addEventListener('click',e=>{ if(e.target.id==='overlay') closeModal(); });
+function openModal(html){ $('#modal').innerHTML=html; $('#overlay').classList.add('open'); }
+
+function clientPicker(idPrefix){
+  return `<div class="field"><label>Client</label><div class="picker">
+    <input id="${idPrefix}Search" placeholder="Search the book (2+ chars)…" autocomplete="off"/>
+    <div class="picker-results" id="${idPrefix}Results"></div></div>
+    <div class="picked" id="${idPrefix}Picked"></div>
+    <input type="hidden" id="${idPrefix}Name"/><input type="hidden" id="${idPrefix}Id"/></div>`;
+}
+function wireClientPicker(idPrefix){
+  const inp=$('#'+idPrefix+'Search'), res=$('#'+idPrefix+'Results'); let timer;
+  inp.addEventListener('input',()=>{ clearTimeout(timer); const q=inp.value.trim();
+    if(q.length<2){res.classList.remove('open');return;}
+    timer=setTimeout(async()=>{ try{ const cs=(await api('/api/clients/search?q='+encodeURIComponent(q))).clients||[];
+      res.innerHTML=cs.map(c=>`<div data-id="${esc(c.nowcerts_insured_guid)}" data-name="${esc(c.insured_name)}">${esc(c.insured_name)}<span class="muted"> — ${esc([c.city,c.state].filter(Boolean).join(', ')||c.client_type||'')}</span></div>`).join('')||'<div class="muted">No matches</div>';
+      res.classList.add('open');
+      res.querySelectorAll('[data-id]').forEach(d=>d.onclick=()=>{ $('#'+idPrefix+'Name').value=d.dataset.name; $('#'+idPrefix+'Id').value=d.dataset.id; $('#'+idPrefix+'Picked').textContent='✓ '+d.dataset.name; inp.value=d.dataset.name; res.classList.remove('open'); });
+    }catch(e){ res.innerHTML='<div class="muted">'+esc(e.message)+'</div>';res.classList.add('open'); } },220);
+  });
+}
+async function submitBtn(btn,fn){ btn.disabled=true; const old=btn.textContent; btn.textContent='Saving…'; try{ await fn(); }catch(e){ toast(e.message,true);} btn.disabled=false; btn.textContent=old; }
+
+async function openNewOpp(){
+  await loadUsers();
+  openModal(`<div class="modal-head"><h3>New opportunity</h3><p>Any client — new, inactive, or a cross-sell in a new line.</p></div>
+   <div class="modal-body">${clientPicker('opp')}
+     <div class="row2"><div class="field"><label>Line of business</label><input id="oppLob" placeholder="General Liability"/></div>
+       <div class="field"><label>Stage</label><select id="oppStage">${['New','Info Gathering','Quoting','Quoted','Bound','Lost'].map(s=>`<option>${s}</option>`).join('')}</select></div></div>
+     <div class="row2"><div class="field"><label>Est. premium</label><input id="oppPrem" type="number" placeholder="0"/></div>
+       <div class="field"><label>Carrier</label><input id="oppCarrier"/></div></div>
+     <div class="field"><label>Created by</label><select id="oppBy">${userOptions()}</select></div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="oppSave">Create opportunity</button></div>`);
+  wireClientPicker('opp');
+  $('#oppSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const name=$('#oppName').value||$('#oppSearch').value, lob=$('#oppLob').value.trim();
+    if(!name){throw new Error('Pick a client first.')} if(!lob){throw new Error('Line of business is required.')}
+    const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:$('#oppCarrier').value||null,source:'cockpit',created_by:$('#oppBy').value})});
+    closeModal(); toast(r.created?'Opportunity created.':'Opportunity already existed — opened.'); show('pipeline');
+  });
+}
+async function openNewCase(){
+  await loadUsers();
+  openModal(`<div class="modal-head"><h3>Open case</h3><p>Service, renewal, claims, marketing, or endorsement work.</p></div>
+   <div class="modal-body">
+     <div class="field"><label>Title</label><input id="caseTitle" placeholder="COI request — Acme LLC"/></div>
+     <div class="row2"><div class="field"><label>Type</label><select id="caseType">${['service','renewal','claims','marketing','endorsement'].map(s=>`<option>${s}</option>`).join('')}</select></div>
+       <div class="field"><label>Priority</label><select id="casePrio">${['low','medium','high'].map(s=>`<option${s==='medium'?' selected':''}>${s}</option>`).join('')}</select></div></div>
+     <div class="row2"><div class="field"><label>Owner</label><select id="caseOwner">${userOptions()}</select></div>
+       <div class="field"><label>Created by</label><select id="caseBy">${userOptions()}</select></div></div>
+     ${clientPicker('case')}
+     <div class="field"><label>Description</label><textarea id="caseDesc"></textarea></div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="caseSave">Open case</button></div>`);
+  wireClientPicker('case');
+  $('#caseSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const title=$('#caseTitle').value.trim(); if(!title){throw new Error('Title is required.')}
+    const r=await api('/api/cases',{method:'POST',body:JSON.stringify({title,case_type:$('#caseType').value,priority:$('#casePrio').value,owner_email:$('#caseOwner').value,created_by_email:$('#caseBy').value,insured_name:$('#caseName').value||null,insured_database_id:$('#caseId').value||null,description:$('#caseDesc').value||null})});
+    closeModal(); toast('Case '+(r.case&&r.case.case_number?r.case.case_number:'')+' opened.'); show('cases');
+  });
+}
+async function openNewTask(preCase){
+  await loadUsers(); if(!CASES.length){ try{CASES=firstArray(await api('/api/cases'))}catch{} }
+  const caseOpts = CASES.map(c=>`<option value="${esc(c.id)}"${preCase&&preCase.id===c.id?' selected':''}>${esc(c.case_number||'')} — ${esc(c.insured_name||c.title||'')}</option>`).join('');
+  openModal(`<div class="modal-head"><h3>New task</h3><p>Add a task under a case.</p></div>
+   <div class="modal-body">
+     <div class="field"><label>Case</label><select id="taskCase">${caseOpts||'<option value="">No cases yet</option>'}</select></div>
+     <div class="field"><label>Title</label><input id="taskTitle" placeholder="Call the client"/></div>
+     <div class="row2"><div class="field"><label>Assignee</label><select id="taskAssignee">${userOptions()}</select></div>
+       <div class="field"><label>Priority</label><select id="taskPrio">${['low','medium','high'].map(s=>`<option${s==='medium'?' selected':''}>${s}</option>`).join('')}</select></div></div>
+     <div class="field"><label>Description</label><textarea id="taskDesc"></textarea></div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="taskSave">Create task</button></div>`);
+  $('#taskSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const cid=$('#taskCase').value, title=$('#taskTitle').value.trim();
+    if(!cid){throw new Error('Pick a case.')} if(!title){throw new Error('Title is required.')}
+    const r=await api('/api/tasks',{method:'POST',body:JSON.stringify({case_id:cid,title,assigned_to_email:$('#taskAssignee').value,priority:$('#taskPrio').value,description:$('#taskDesc').value||null})});
+    closeModal(); toast(r.created===false?'Task already existed.':'Task created.'); show($('#viewTitle').textContent.toLowerCase()==='cases'?'cases':'tasks');
+  });
+}
+
+document.getElementById('nav').addEventListener('click',e=>{const a=e.target.closest('a');if(a){e.preventDefault();show(a.dataset.view);}});
+show('workspace');
+</script>
+</body>
+</html>
