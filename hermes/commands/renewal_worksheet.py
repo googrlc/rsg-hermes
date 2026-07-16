@@ -1,26 +1,24 @@
-"""Prepare a client-specific renewal worksheet on demand.
+"""Prepare a client-specific renewal worksheet on demand — NowCerts-sourced.
 
 Recognises variants such as:
   - prepare a renewal worksheet for <client>
   - prepare renewal worksheet for policy <policy number>
   - create/build/generate a renewal worksheet for <client>
 
-Route precedence: this handler is registered BEFORE the broad
-renewal/revenue route so it intercepts worksheet requests first.
+Route precedence: this handler is registered BEFORE the broad renewal/revenue
+route so it intercepts worksheet requests first.
 
-Resolution rules
-----------------
-* Exact policy-number match is preferred when a policy number is
-  supplied.  Policy numbers are normalised (strip whitespace, fold to
-  upper-case) before comparison, but a normalised key may never match
-  a *different* normalised key (no fuzzy / partial matching).
-* When only a client name is supplied and multiple active/renewing
-  policies match, all candidates are returned and no worksheet is
-  generated until the caller selects one.
-* When a policy is absent from EspoCRM the handler returns an explicit
+Resolution rules (NowCerts is the source of truth; EspoCRM is NOT consulted)
+--------------------------------------------------------------------------
+* An exact policy number resolves one policy via
+  ``hermes.renewals.resolve.resolve_exact_policy`` (NowCerts
+  ``find_policy_by_number``). Duplicate policy numbers are a stop-and-escalate
+  condition, never guessed.
+* When only a client name is supplied, matching renewal candidates are listed
+  from the reconciled ``renewal_candidates`` index and no worksheet is generated
+  until the caller picks an exact policy number.
+* When a policy is absent from NowCerts the handler returns an explicit
   reconciliation-needed response and never creates or merges a record.
-* Repeated identical requests are idempotent — no duplicate PDF, task,
-  or renewal row is created.
 """
 
 from __future__ import annotations
@@ -29,10 +27,12 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from hermes.core.dispatcher import DispatchResult
-from hermes.renewals import worksheet
+from hermes.renewals import resolve, worksheet
 
 if TYPE_CHECKING:
     from hermes.core.client import EspoClient
+    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes.sync.nowcerts_client import NowCertsClient
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +76,7 @@ def parse_request(text: str) -> dict[str, str | None]:
     if for_match:
         candidate = for_match.group(1).strip()
         # Strip trailing noise tokens (e.g. "for Test Corp policy") that may
-        # remain after policy-fragment removal — use plain string ops to avoid
-        # introducing a regex anchor over user-supplied text.
+        # remain after policy-fragment removal.
         for suffix in (" policy", " number", " #", " no.", " no"):
             if candidate.lower().endswith(suffix):
                 candidate = candidate[: -len(suffix)].strip()
@@ -89,116 +88,88 @@ def parse_request(text: str) -> dict[str, str | None]:
 
 
 # ---------------------------------------------------------------------------
-# EspoCRM lookups
+# Rendering helpers
 # ---------------------------------------------------------------------------
 
-_INACTIVE_STATUSES = {"Expired", "Cancelled", "Flat Cancel", "Non-Renewed", "Lapsed"}
-
-_POLICY_QUERY_MAX_SIZE = 200
-_POLICY_SELECT_FIELDS = (
-    "id,name,accountName,accountId,policyNumber,policy_number,status,"
-    "expirationDate,expiration_date,carrier,lineOfBusiness,line_of_business,"
-    "premiumAmount,premium_amount"
-)
-
-
-def _list_rows(body: Any) -> list[dict[str, Any]]:
-    if isinstance(body, dict) and isinstance(body.get("list"), list):
-        return [r for r in body["list"] if isinstance(r, dict)]
-    if isinstance(body, list):
-        return [r for r in body if isinstance(r, dict)]
-    return []
+def _eligibility_banner(verdict: Any) -> str:
+    """One-line eligibility note for the worksheet header (informational only)."""
+    if verdict is None:
+        return ""
+    state = getattr(verdict, "state", "") or ""
+    reason = getattr(verdict, "reason", "") or ""
+    icon = {"eligible": "✅", "needs_verification": "🔍", "excluded": "⛔"}.get(state, "")
+    label = state.replace("_", " ").title() if state else "Unknown"
+    tail = f" — {reason}" if reason else ""
+    return f"{icon} Eligibility: **{label}**{tail}"
 
 
-def _get_field(row: dict[str, Any], *keys: str) -> Any:
-    for k in keys:
-        v = row.get(k)
-        if v is not None:
-            return v
-    return None
+def _candidate_summary(row: dict[str, Any]) -> str:
+    name = row.get("client_name") or "Unknown"
+    lob = row.get("line_of_business") or "?"
+    pnum = row.get("policy_number") or "?"
+    exp = row.get("expiration_date") or "?"
+    risk = row.get("risk_status") or ""
+    risk_tag = f" | {risk}" if risk else ""
+    return f"- {name} | {lob} | policy #{pnum} | exp {exp}{risk_tag}"
 
 
-def _lookup_by_policy_number(
-    client: "EspoClient",
-    policy_number: str,
+def _worksheet_result(resolved: resolve.ResolvedPolicy) -> DispatchResult:
+    policy = resolved.policy or {}
+    content = worksheet.build_worksheet_content(policy)
+    acct = policy.get("accountName") or policy.get("policyNumber") or "client"
+    banner = _eligibility_banner(resolved.eligibility)
+    header = f"📄 Renewal Worksheet — {acct} (policy #{policy.get('policyNumber')})"
+    body = f"{header}\n{banner}\n\n{content}" if banner else f"{header}\n\n{content}"
+    return DispatchResult(
+        True,
+        body,
+        {
+            "worksheet": policy,
+            "source": "nowcerts",
+            "policy_guid": policy.get("policy_guid"),
+            "eligibility_state": getattr(resolved.eligibility, "state", None),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Client-name lookup (reconciled candidate index — never NowCerts fuzzy search)
+# ---------------------------------------------------------------------------
+
+def _candidates_by_name(
+    supa: "SupabaseClient", client_name: str
 ) -> list[dict[str, Any]]:
-    """Return all Policy rows whose normalised policy number exactly matches *policy_number*."""
+    needle = client_name.replace("*", "").replace(",", "").strip()
     try:
-        body = client.get(
-            "Policy",
-            params={"maxSize": _POLICY_QUERY_MAX_SIZE, "select": _POLICY_SELECT_FIELDS},
+        return supa.select(
+            "renewal_candidates",
+            columns="client_name,policy_number,line_of_business,expiration_date,"
+            "risk_status,eligibility_state,nowcerts_policy_guid",
+            # Discovery surfaces the actionable pool only — excluded (cancelled/
+            # expired/superseded) candidates never appear in a name search.
+            params={"client_name": f"ilike.*{needle}*", "eligibility_state": "neq.excluded"},
+            limit=25,
         )
     except Exception:
         return []
-    rows = _list_rows(body)
-    matches = []
-    for row in rows:
-        raw = _get_field(row, "policyNumber", "policy_number") or ""
-        if _normalise_policy_number(str(raw)) == policy_number:
-            matches.append(row)
-    return matches
-
-
-def _lookup_by_client_name(
-    client: "EspoClient",
-    client_name: str,
-) -> list[dict[str, Any]]:
-    """Return active/renewing Policy rows whose account name contains *client_name* (case-insensitive)."""
-    try:
-        body = client.get(
-            "Policy",
-            params={"maxSize": _POLICY_QUERY_MAX_SIZE, "select": _POLICY_SELECT_FIELDS},
-        )
-    except Exception:
-        return []
-    rows = _list_rows(body)
-    needle = client_name.lower().strip()
-    matches = []
-    for row in rows:
-        status = str(row.get("status") or "")
-        if status in _INACTIVE_STATUSES:
-            continue
-        account = str(_get_field(row, "accountName") or row.get("name") or "").lower()
-        if needle in account:
-            matches.append(row)
-    return matches
-
-
-# ---------------------------------------------------------------------------
-# Worksheet text builder
-# ---------------------------------------------------------------------------
-
-def _policy_row_to_renewal_dict(row: dict[str, Any]) -> dict[str, Any]:
-    """Map a Policy CRM row into the shape that ``worksheet.build_worksheet_content`` expects."""
-    return {
-        "id": row.get("id"),
-        "name": row.get("name"),
-        "accountName": _get_field(row, "accountName"),
-        "accountId": _get_field(row, "accountId"),
-        "carrier": row.get("carrier"),
-        "line_of_business": _get_field(row, "lineOfBusiness", "line_of_business"),
-        "expiration_date": _get_field(row, "expirationDate", "expiration_date"),
-        "current_premium": _get_field(row, "premiumAmount", "premium_amount"),
-        "pipeline_stage": row.get("status"),
-        "policyNumber": _get_field(row, "policyNumber", "policy_number"),
-    }
-
-
-def _policy_summary(row: dict[str, Any]) -> str:
-    acct = _get_field(row, "accountName") or row.get("name") or "Unknown"
-    lob = _get_field(row, "lineOfBusiness", "line_of_business") or "?"
-    carrier = row.get("carrier") or "?"
-    exp = _get_field(row, "expirationDate", "expiration_date") or "?"
-    pnum = _get_field(row, "policyNumber", "policy_number") or "?"
-    return f"- {acct} | {lob} | {carrier} | policy #{pnum} | exp {exp}"
 
 
 # ---------------------------------------------------------------------------
 # Public handler
 # ---------------------------------------------------------------------------
 
-def handle(client: "EspoClient", text: str) -> DispatchResult:
-    """Prepare a renewal worksheet for the requested client or policy."""
+def handle(
+    client: "EspoClient",
+    text: str,
+    *,
+    supa: "SupabaseClient | None" = None,
+    nowcerts: "NowCertsClient | None" = None,
+) -> DispatchResult:
+    """Prepare a renewal worksheet for the requested client or policy.
+
+    ``client`` (EspoClient) is accepted for dispatcher-signature compatibility but
+    unused — all reads come from NowCerts + the Supabase candidate index.
+    """
     req = parse_request(text)
     policy_number = req["policy_number"]
     client_name = req["client_name"]
@@ -211,58 +182,66 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
             "`prepare renewal worksheet for policy <policy number>`.",
         )
 
-    # --- Exact policy-number lookup ---
+    if nowcerts is None:
+        try:
+            from hermes.sync.nowcerts_client import NowCertsClient
+
+            nowcerts = NowCertsClient()
+        except Exception as exc:  # pragma: no cover - env/config dependent
+            return DispatchResult(
+                False, f"NowCerts is not reachable right now ({exc})."
+            )
+
+    # --- Exact policy-number path ---
     if policy_number:
-        rows = _lookup_by_policy_number(client, policy_number)
-        if not rows:
+        resolved = resolve.resolve_exact_policy(
+            nowcerts, policy_number=policy_number, supa=supa
+        )
+        if resolved.reason == resolve.NOT_FOUND:
             return DispatchResult(
                 False,
-                f"⚠️ Reconciliation needed — policy **{policy_number}** was not found in EspoCRM.\n"
-                "The record may exist only in NowCerts or the renewal table.\n"
+                f"⚠️ Reconciliation needed — policy **{policy_number}** was not found in NowCerts.\n"
                 "No worksheet was generated and no record was created.",
                 {"reconciliation_needed": True, "policy_number": policy_number},
             )
-        if len(rows) > 1:
-            lines = [
-                f"⚠️ Ambiguous match — {len(rows)} policies share policy number **{policy_number}**. "
-                "No worksheet was generated. Please select the exact record:",
-            ]
-            lines.extend(_policy_summary(r) for r in rows)
-            lines.append("\nRe-submit with the specific record ID to proceed.")
+        if resolved.reason == resolve.AMBIGUOUS:
+            n = len(resolved.matches or [])
             return DispatchResult(
                 False,
-                "\n".join(lines),
-                {"ambiguous": True, "candidates": rows, "policy_number": policy_number},
+                f"⚠️ Ambiguous match — {n} policies share policy number **{policy_number}** in NowCerts. "
+                "No worksheet was generated. Escalate to reconcile the duplicate before proceeding.",
+                {"ambiguous": True, "matches": resolved.matches, "policy_number": policy_number},
             )
-        row = rows[0]
-        renewal = _policy_row_to_renewal_dict(row)
-        content = worksheet.build_worksheet_content(renewal)
-        acct = renewal.get("accountName") or renewal.get("name") or policy_number
-        return DispatchResult(
-            True,
-            f"📄 Renewal Worksheet — {acct} (policy #{policy_number})\n\n{content}",
-            {"worksheet": renewal, "source": "espocrm"},
-        )
+        if not resolved.ok:
+            return DispatchResult(
+                False,
+                f"Could not resolve policy **{policy_number}** (need an exact policy number or NowCerts GUID).",
+            )
+        return _worksheet_result(resolved)
 
-    # --- Client-name lookup ---
-    # client_name is guaranteed non-None here by the early-return guard above.
-    if client_name is None:
-        return DispatchResult(False, "Internal error: could not extract client name.")
-    rows = _lookup_by_client_name(client, client_name)
+    # --- Client-name path (list candidates; never auto-pick) ---
+    assert client_name is not None
+    if supa is None:
+        return DispatchResult(
+            False,
+            f"To look up **{client_name}** by name I need the candidate index.\n"
+            "Re-submit with the exact policy number: "
+            "`prepare renewal worksheet for policy <policy number>`.",
+        )
+    rows = _candidates_by_name(supa, client_name)
     if not rows:
         return DispatchResult(
             False,
-            f"⚠️ Reconciliation needed — no active/renewing policies found for **{client_name}** in EspoCRM.\n"
-            "The record may exist only in NowCerts or the renewal table.\n"
-            "No worksheet was generated and no record was created.",
+            f"⚠️ Reconciliation needed — no renewal candidates found for **{client_name}**.\n"
+            "No worksheet was generated. Check the exact client name, or supply the policy number.",
             {"reconciliation_needed": True, "client_name": client_name},
         )
     if len(rows) > 1:
         lines = [
-            f"Multiple active policies match **{client_name}** ({len(rows)} found). "
-            "No worksheet was generated. Please select one:",
+            f"Multiple policies match **{client_name}** ({len(rows)} found). "
+            "No worksheet was generated. Pick one:",
         ]
-        lines.extend(_policy_summary(r) for r in rows)
+        lines.extend(_candidate_summary(r) for r in rows)
         lines.append(
             "\nRe-submit with the specific policy number: "
             "`prepare renewal worksheet for policy <policy number>`."
@@ -273,12 +252,16 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
             {"ambiguous": True, "candidates": rows, "client_name": client_name},
         )
 
-    row = rows[0]
-    renewal = _policy_row_to_renewal_dict(row)
-    content = worksheet.build_worksheet_content(renewal)
-    acct = renewal.get("accountName") or renewal.get("name") or client_name
-    return DispatchResult(
-        True,
-        f"📄 Renewal Worksheet — {acct}\n\n{content}",
-        {"worksheet": renewal, "source": "espocrm"},
+    # Exactly one candidate → resolve it exactly by its policy number.
+    only = rows[0]
+    resolved = resolve.resolve_exact_policy(
+        nowcerts, policy_number=only.get("policy_number"), supa=supa
     )
+    if not resolved.ok:
+        return DispatchResult(
+            False,
+            f"⚠️ Reconciliation needed — candidate for **{client_name}** "
+            f"(policy #{only.get('policy_number')}) did not resolve in NowCerts.",
+            {"reconciliation_needed": True, "client_name": client_name, "candidate": only},
+        )
+    return _worksheet_result(resolved)
