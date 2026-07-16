@@ -147,7 +147,9 @@
   /* Kanban */
   .kanban{display:flex;gap:14px;margin-top:24px;overflow-x:auto;padding-bottom:12px;align-items:flex-start}
   .kcol{flex:0 0 264px;background:var(--kcol);border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;max-height:74vh}
-  .kcol-head{display:flex;justify-content:space-between;align-items:center;padding:13px 15px;font-family:var(--serif);font-size:15px;font-weight:600;border-bottom:1px solid var(--border-soft)}
+  .kcol-head{display:flex;flex-direction:column;gap:4px;padding:13px 15px;border-bottom:1px solid var(--border-soft)}
+  .kh-top{display:flex;justify-content:space-between;align-items:center;font-family:var(--serif);font-size:15px;font-weight:600}
+  .kh-total{font-size:12px;color:var(--muted);font-weight:500;font-variant-numeric:tabular-nums}
   .kcol-body{padding:12px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;min-height:70px;flex:1}
   .kcol-body.kover{background:var(--sage-soft);outline:2px dashed var(--accent);outline-offset:-6px;border-radius:10px}
   .kcard{background:#fff;border:1px solid var(--border);border-radius:11px;padding:12px 13px;cursor:grab;box-shadow:0 1px 2px rgba(20,46,55,.05)}
@@ -310,9 +312,13 @@ async function renderPipeline(host){
     const opps=firstArray(await api('/api/opportunities'));
     PIPE={}; const byStage={}; PIPE_STAGES.forEach(s=>byStage[s]=[]);
     opps.forEach(o=>{ PIPE[o.id]=o; const s=PIPE_STAGES.includes(o.stage)?o.stage:'New'; byStage[s].push(o); });
+    const stageTotal=s=>byStage[s].reduce((a,o)=>a+(Number(o.premium_estimate)||0),0);
     $('#kanban').innerHTML=PIPE_STAGES.map(s=>`
       <div class="kcol">
-        <div class="kcol-head"><span>${esc(s)}</span><span class="badge">${byStage[s].length}</span></div>
+        <div class="kcol-head">
+          <div class="kh-top"><span>${esc(s)}</span><span class="badge">${byStage[s].length}</span></div>
+          <div class="kh-total">${money(stageTotal(s))} est. premium</div>
+        </div>
         <div class="kcol-body" data-stage="${esc(s)}">${byStage[s].map(kcard).join('')}</div>
       </div>`).join('');
     wireKanban();
