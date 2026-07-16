@@ -136,10 +136,21 @@ def _worksheet_result(resolved: resolve.ResolvedPolicy) -> DispatchResult:
 # Client-name lookup (reconciled candidate index — never NowCerts fuzzy search)
 # ---------------------------------------------------------------------------
 
+def escape_ilike(value: str) -> str:
+    """Neutralize PostgREST/SQL-LIKE metacharacters so a name matches literally.
+
+    Backslash first (LIKE escape char), then the ``%``/``_`` wildcards; strip the
+    PostgREST ``*`` wildcard and commas (PostgREST value separators). Prevents a
+    name like ``A%`` or ``a_b`` from broadening the discovery match.
+    """
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return escaped.replace("*", "").replace(",", " ").strip()
+
+
 def _candidates_by_name(
     supa: "SupabaseClient", client_name: str
 ) -> list[dict[str, Any]]:
-    needle = client_name.replace("*", "").replace(",", "").strip()
+    needle = escape_ilike(client_name)
     try:
         return supa.select(
             "renewal_candidates",

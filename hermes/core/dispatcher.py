@@ -100,16 +100,30 @@ class Dispatcher:
     """Order matters: first matching pattern wins."""
 
     def __init__(self, *, use_openai: bool = False) -> None:
-        from hermes.commands import business_research, data_entry, lookup, revenue
+        from hermes.commands import business_research, data_entry, lookup, merge, revenue
 
         self.use_openai = use_openai
         self.supa: SupabaseClient | None = None
         self._slack_ctx: dict[str, Any] = {}
         self._pending_write: dict[str, Any] | None = None
 
+        self._nowcerts: Any = None  # shared NowCerts client, lazily created + reused (#110)
+
         self._init_supabase()
 
         self._routes: list[tuple[re.Pattern[str], Handler | str]] = [
+            # --- Core operational commands (#108: restored after the PR #107 de-dup
+            # dropped them). All specific/anchored, so none intercept renewal routes. ---
+            (re.compile(r"^\s*(ping|health|status)\s*$", re.I), "ping"),
+            (re.compile(r"\b(changelog|crm\s+changes|nightly\s+report|daily\s+changes|what\s+changed)\b", re.I), "changelog"),
+            (re.compile(r"\bsync\b.*\b(nowcerts|status|conflicts?|errors?|runs?)\b", re.I), "sync"),
+            (re.compile(r"^\s*sync\s", re.I), "sync"),
+            (
+                re.compile(r"\b(repair|fix|link)\b.*\b(policy|policies)\b.*\b(account|accounts)\b", re.I),
+                "policy_repair",
+            ),
+            (re.compile(r"^\s*merge\s+", re.I), merge.handle),
+            (re.compile(r"\bcan\s+be\s+merged\b", re.I), merge.handle),
             # CRM change proposal approval — must precede research/intake/lookup.
             (
                 re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+(?P<id>\S+)\s*$", re.I),
@@ -309,6 +323,23 @@ class Dispatcher:
             log.info("Supabase not configured -- dual-write disabled")
             self.supa = None
 
+    def _get_shared_nowcerts(self) -> Any:
+        """Lazily create ONE NowCerts client and reuse it across renewal commands (#110).
+
+        Reuses the token/session lifecycle instead of re-authenticating per request.
+        Construction failure is not cached — the next command retries — and handlers
+        receive None, which drives their existing 'NowCerts not reachable' path.
+        """
+        if self._nowcerts is not None:
+            return self._nowcerts
+        try:
+            from hermes.sync.nowcerts_client import NowCertsClient
+
+            self._nowcerts = NowCertsClient()
+        except Exception:
+            return None
+        return self._nowcerts
+
     def set_slack_context(
         self,
         *,
@@ -342,6 +373,17 @@ class Dispatcher:
         if handler == "data_quality":
             from hermes.commands.data_quality import handle as dq_handle
             return dq_handle(client, text, supa=self.supa)
+        if handler == "ping":
+            return DispatchResult(True, "Hermes is online and connected to CRM.")
+        if handler == "sync":
+            from hermes.commands.sync import handle as sync_handle
+            return sync_handle(client, text, supa=self.supa)
+        if handler == "changelog":
+            from hermes.commands.changelog import handle as changelog_handle
+            return changelog_handle(client, text)
+        if handler == "policy_repair":
+            from hermes.commands.policy_repair import handle as policy_repair_handle
+            return policy_repair_handle(client, text)
         if handler == "agency_intake":
             from hermes.commands.agency_intake import handle as ai_handle
             return ai_handle(client, text, supa=self.supa, **self._slack_ctx)
@@ -350,16 +392,16 @@ class Dispatcher:
             return fact_handle(client, text, supa=self.supa)
         if handler == "renewal_worksheet":
             from hermes.commands.renewal_worksheet import handle as rw_handle
-            return rw_handle(client, text, supa=self.supa)
+            return rw_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_queue":
             from hermes.commands.renewal_desk import queue_handle
             return queue_handle(client, text, supa=self.supa)
         if handler == "renewal_open":
             from hermes.commands.renewal_desk import open_handle
-            return open_handle(client, text, supa=self.supa)
+            return open_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_research":
             from hermes.commands.renewal_desk import research_handle
-            return research_handle(client, text, supa=self.supa)
+            return research_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_wb_propose":
             from hermes.commands.renewal_writeback import propose_handle
             return propose_handle(client, text, supa=self.supa)
@@ -371,13 +413,13 @@ class Dispatcher:
             return confirm_handle(client, text, supa=self.supa)
         if handler == "renewal_case_create":
             from hermes.commands.renewal_cases import create_case_handle
-            return create_case_handle(client, text, supa=self.supa)
+            return create_case_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_tasks_create":
             from hermes.commands.renewal_cases import create_tasks_handle
-            return create_tasks_handle(client, text, supa=self.supa)
+            return create_tasks_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler in ("renewal_pdf", "renewal_file"):
             from hermes.commands.renewal_documents import generate_pdf_handle
-            return generate_pdf_handle(client, text, supa=self.supa)
+            return generate_pdf_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "change_proposals":
             from hermes.commands.change_proposals import handle as cp_handle
             return cp_handle(client, text, supa=self.supa)
