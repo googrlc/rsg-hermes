@@ -86,8 +86,38 @@ def normalize_nowcerts_policy(
         "expiration_date": _iso_date(raw.get("expirationDate") or raw.get("expiration_date")),
         "current_premium": _premium(raw),
         "pipeline_stage": raw.get("policyStatus") or raw.get("status"),
+        # eligibility.evaluate reads `status`/`normalized_status`, not pipeline_stage.
+        "status": raw.get("policyStatus") or raw.get("status"),
         "source": "nowcerts",
     }
+
+
+def _enrich_from_candidate(
+    normalized: dict[str, Any], candidate: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Backfill fields the sparse single-policy read is missing, from the ALREADY-VETTED
+    renewal_candidate row (built by the nightly refresh off richer NowCerts data).
+
+    Execution-time revalidation's job is to confirm the policy still exists + the
+    insured is active — not to re-downgrade a vetted-eligible event just because
+    ``find_policy_by_number`` returned a thin record (null effective date / status).
+    """
+    if not candidate:
+        return normalized
+    fills = {
+        "effective_date": "effective_date",
+        "expiration_date": "expiration_date",
+        "line_of_business": "line_of_business",
+        "current_premium": "premium_current",
+        "status": "normalized_status",
+        "pipeline_stage": "normalized_status",
+    }
+    for norm_key, cand_key in fills.items():
+        if normalized.get(norm_key) in (None, ""):
+            val = candidate.get(cand_key)
+            if val not in (None, ""):
+                normalized[norm_key] = val
+    return normalized
 
 
 def _candidate_by_guid(supa: "SupabaseClient", guid: str) -> list[dict[str, Any]]:
@@ -160,6 +190,7 @@ def resolve_exact_policy(
 
     client_name = (candidate or {}).get("client_name")
     normalized = normalize_nowcerts_policy(raw, client_name=client_name)
+    normalized = _enrich_from_candidate(normalized, candidate)
 
     insured_guid = normalized.get("insured_database_id")
     insured_active = nowcerts.is_insured_active(insured_guid) if insured_guid else True

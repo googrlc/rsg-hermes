@@ -124,3 +124,20 @@ def test_resolve_by_guid_needs_supa():
 def test_resolve_needs_identifier():
     r = resolve.resolve_exact_policy(_nc(None), today=TODAY)
     assert not r.ok and r.reason == resolve.NEED_IDENTIFIER
+
+
+def test_resolve_enriches_thin_read_from_candidate():
+    """A sparse find_policy_by_number read (no effective date/status) + a vetted
+    candidate row must resolve ELIGIBLE, not get downgraded to needs_verification."""
+    thin = {"databaseId": "g1", "insuredDatabaseId": "i1", "policyNumber": "TST-0001",
+            "carrierName": "GEICO", "expirationDate": "2026-10-29"}  # no effective/status/premium
+    cand = {"client_name": "Acme LLC", "policy_number": "TST-0001",
+            "effective_date": "2025-10-29", "expiration_date": "2026-10-29",
+            "premium_current": 12000, "line_of_business": "Commercial Auto",
+            "normalized_status": "Active"}
+    r = resolve.resolve_exact_policy(_nc(thin), policy_number="TST-0001", supa=_supa([cand]), today=TODAY)
+    assert r.ok and r.reason == resolve.RESOLVED
+    assert r.policy["effective_date"] == "2025-10-29"   # backfilled from candidate
+    assert r.policy["status"] == "Active"               # backfilled -> eligibility can read it
+    assert r.policy["current_premium"] == 12000
+    assert r.eligibility.state == "eligible"
