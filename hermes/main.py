@@ -382,6 +382,23 @@ def main() -> int:
         help="Cap the number of quotes processed (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--sync-commissions",
+        action="store_true",
+        help="Seed commission_ledger EXPECTED values from canonical_policies (NowCerts agency commission "
+             "+ rule fallback). Preserves statement-sourced actuals/reconciliation. Keyed per policy_number.",
+    )
+    parser.add_argument(
+        "--sync-commissions-dry-run",
+        action="store_true",
+        help="Preview the commission expected-value seed (counts + no writes)",
+    )
+    parser.add_argument(
+        "--sync-commissions-limit",
+        type=int,
+        default=None,
+        help="Cap the number of policies processed (useful for a first dry-run)",
+    )
+    parser.add_argument(
         "--enrich-nowcerts",
         type=str,
         default=None,
@@ -711,6 +728,29 @@ def main() -> int:
             for err in quote_result.errors[:50]:
                 print(f"- {err}")
         return 0 if quote_result.ok else 1
+
+    # --- Canonical book → commission_ledger expected-value seeding ---
+    if args.sync_commissions or args.sync_commissions_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.commission_sync import run_commission_sync
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+
+        comm_result = run_commission_sync(
+            supa,
+            dry_run=args.sync_commissions_dry_run,
+            limit=args.sync_commissions_limit,
+        )
+        print(comm_result.message)
+        if comm_result.errors:
+            print("\nErrors:")
+            for err in comm_result.errors[:50]:
+                print(f"- {err}")
+        return 0 if comm_result.ok else 1
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
     if args.enrich_nowcerts:
