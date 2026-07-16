@@ -83,6 +83,10 @@ def test_create_case_targets_agency_crm_and_details():
     assert created is True
     inserted_tables = [c.args[0] for c in supa.insert.call_args_list]
     assert "agency_crm_cases" in inserted_tables and "renewal_case_details" in inserted_tables
+    # audit event emitted to the shared timeline
+    assert "agency_crm_case_events" in inserted_tables
+    event_payload = next(c.args[1] for c in supa.insert.call_args_list if c.args[0] == "agency_crm_case_events")
+    assert event_payload["event_type"] == "case_created"
     case_payload = next(c.args[1] for c in supa.insert.call_args_list if c.args[0] == "agency_crm_cases")
     assert case_payload["case_type"] == "renewal"
     assert case_payload["insured_database_id"] == "i"

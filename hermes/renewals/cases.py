@@ -24,6 +24,7 @@ CASES_TABLE = "agency_crm_cases"
 TASKS_TABLE = "agency_crm_tasks"
 DETAILS_TABLE = "renewal_case_details"
 DOCLINKS_TABLE = "agency_crm_document_links"
+EVENTS_TABLE = "agency_crm_case_events"
 
 CASE_TYPE_RENEWAL = "renewal"
 CASE_STATUS_OPEN = "open"           # agency_crm_cases.status vocabulary
@@ -56,6 +57,28 @@ def _default_owner_email() -> str | None:
 def _compact(payload: dict[str, Any]) -> dict[str, Any]:
     """Drop None values so we never send blank keys that could clobber shared rows."""
     return {k: v for k, v in payload.items() if v is not None}
+
+
+def log_case_event(
+    supa: "SupabaseClient",
+    *,
+    case_id: str,
+    event_type: str,
+    summary: str,
+    details: dict[str, Any] | None = None,
+    actor_email: str | None = None,
+) -> dict[str, Any]:
+    """Append a row to the shared agency_crm_case_events timeline (best-effort audit)."""
+    return supa.insert(
+        EVENTS_TABLE,
+        _compact({
+            "case_id": case_id,
+            "event_type": event_type,
+            "summary": summary,
+            "details": details,
+            "actor_email": actor_email or _service_email(),
+        }),
+    )
 
 
 def renewal_case_number(
@@ -155,6 +178,15 @@ def create_case(
             "line_of_business": line_of_business,
             "segment": segment,
         }),
+    )
+    log_case_event(
+        supa,
+        case_id=str(case.get("id")),
+        event_type="case_created",
+        summary=f"Renewal case opened for policy {policy_number or policy_lineage_id}",
+        details={"case_type": CASE_TYPE_RENEWAL, "insured_id": insured_id,
+                 "renewal_event_date": renewal_event_date},
+        actor_email=created_by_email or _service_email(),
     )
     return case, True
 
