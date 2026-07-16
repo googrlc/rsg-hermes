@@ -5,14 +5,14 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl gcc && rm -rf /var/lib/apt/lists/*
 
-# Pin poetry <2 so `poetry lock --no-update` works and a pyproject/lock drift
-# (e.g. a dep added without a re-lock) self-heals at build time instead of failing.
-RUN pip install "poetry>=1.8,<2"
+# Poetry 2.x — it reads the PEP 621 [project] table this pyproject uses
+# (poetry 1.x needs [tool.poetry] and cannot lock this file).
+RUN pip install poetry
 
 COPY pyproject.toml poetry.lock ./
-# Re-lock (no version bumps) so newly-added deps like reportlab are resolved, then
-# install the main group.
-RUN poetry lock --no-update \
+# Refresh the lock so deps added to pyproject without a re-lock (e.g. reportlab)
+# are resolved — otherwise `poetry install` fails on pyproject/lock drift.
+RUN poetry lock \
     && poetry config virtualenvs.create false \
     && poetry install --only main --no-interaction --no-ansi --no-root
 
