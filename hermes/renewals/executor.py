@@ -454,6 +454,24 @@ def _is_noop(before: dict[str, Any], fields: dict[str, Any]) -> bool:
     return all(_values_equal(_current_value(before, k), v) for k, v in fields.items())
 
 
+def _extract_created_id(result: Any) -> str | None:
+    """Pull the created task/note id from a NowCerts insert response.
+
+    NowCerts' Zapier InsertTask nests the record under ``data`` (e.g.
+    ``result["data"]["database_id"]``), so check BOTH the top level and the
+    nested ``data`` object — otherwise a successfully-created task reads as
+    "no id" and fails read-after-write verification.
+    """
+    if not isinstance(result, dict):
+        return None
+    for obj in (result, result.get("data") if isinstance(result.get("data"), dict) else {}):
+        for key in ("database_id", "databaseId", "noteId", "note_id", "id"):
+            val = obj.get(key)
+            if val:
+                return str(val)
+    return None
+
+
 def _execute(
     nowcerts: NowCertsClient,
     momentum: MomentumMCPClient | None,
@@ -482,14 +500,12 @@ def _execute(
             "renewalId": ctx.renewal_id,
         }
         result = client.manage_notes(note_payload)
-        note_id = result.get("noteId") or result.get("note_id") or result.get("id")
-        return result, {"note_id": str(note_id) if note_id else None}
+        return result, {"note_id": _extract_created_id(result)}
 
     task_payload = _build_task_payload(ctx, before)
     result = nowcerts.insert_task(task_payload)
-    task_id = result.get("database_id") or result.get("databaseId") or result.get("id")
     return result, {
-        "task_database_id": str(task_id) if task_id else None,
+        "task_database_id": _extract_created_id(result),
         "insured_database_id": task_payload.get("insured_database_id"),
     }
 
@@ -519,17 +535,12 @@ def _verify(
         return True, after, None
 
     # request_terms / client_follow_up: the returned record id is the persistence
-    # proof for a create. No list re-read endpoint for tasks/notes.
-    created_id = (
-        result.get("database_id")
-        or result.get("databaseId")
-        or result.get("noteId")
-        or result.get("note_id")
-        or result.get("id")
-    )
+    # proof for a create. No list re-read endpoint for tasks/notes. NowCerts nests
+    # the id under `data`, so _extract_created_id checks top-level AND nested.
+    created_id = _extract_created_id(result)
     if not created_id:
         return False, {"result": result}, "NowCerts returned no id for the created task/note"
-    return True, {"created_id": str(created_id)}, None
+    return True, {"created_id": created_id}, None
 
 
 def _build_task_payload(ctx: JobContext, before: dict[str, Any]) -> dict[str, Any]:
