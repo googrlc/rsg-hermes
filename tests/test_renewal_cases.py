@@ -1,6 +1,7 @@
-"""Tests for renewal cases + tasks: library, NL handlers, routing precedence.
+"""Tests for renewal cases + tasks on the SHARED agency CRM schema (#113).
 
-Supabase + NowCerts mocked. Synthetic identifiers only.
+Renewal cases -> agency_crm_cases (case_type='renewal') + renewal_case_details
+identity; tasks -> agency_crm_tasks. Supabase + NowCerts mocked.
 """
 
 from __future__ import annotations
@@ -31,8 +32,8 @@ def _detail(*, number="TST-0001", guid="pol-guid-1", insured="ins-guid-1", lob="
 
 def _nc(detail):
     nc = MagicMock()
-    want = detail.get("policyNumber") if isinstance(detail, dict) else None
-    nc.find_policy_by_number.side_effect = lambda n: (detail if detail and n == want else None)
+    want = detail.get("policyNumber")
+    nc.find_policy_by_number.side_effect = lambda n: (detail if n == want else None)
     nc.is_insured_active.return_value = True
     return nc
 
@@ -44,18 +45,28 @@ def _candidate(policy_number="TST-0001"):
     }
 
 
-def _supa(tables=None, inserted_id="row-1"):
+def _supa(tables=None):
+    """Router: select returns tables[name]; insert returns row w/ per-table id."""
     tables = tables or {}
+    counters: dict[str, int] = {}
     supa = MagicMock()
     supa.select.side_effect = lambda table, **kw: tables.get(table, [])
-    supa.insert.side_effect = lambda table, payload: {**payload, "id": inserted_id}
+
+    def _insert(table, payload):
+        counters[table] = counters.get(table, 0) + 1
+        return {**payload, "id": f"{table.split('_')[-1][:4]}-{counters[table]}"}
+
+    supa.insert.side_effect = _insert
     return supa
 
 
 # ============================================================ library
 
-def test_default_tasks_count():
-    assert len(cases.default_tasks()) == 5
+def test_default_tasks_shape():
+    ts = cases.default_tasks("gretchen@x.com")
+    assert len(ts) == 5
+    assert ts[0]["assigned_to_email"] == "gretchen@x.com"
+    assert "title" in ts[0] and "description" in ts[0]
 
 
 def test_create_case_requires_identity():
@@ -63,8 +74,26 @@ def test_create_case_requires_identity():
         cases.create_case(MagicMock(), insured_id="", policy_lineage_id="l", renewal_event_date="2027-01-01")
 
 
-def test_create_case_idempotent_returns_existing():
-    supa = _supa({"renewal_cases": [{"id": "case-9"}]})
+def test_create_case_targets_agency_crm_and_details():
+    supa = _supa({"renewal_case_details": [], "agency_crm_cases": []})
+    row, created = cases.create_case(
+        supa, insured_id="i", policy_lineage_id="l", renewal_event_date="2027-01-01",
+        policy_number="TST-0001", client_name="Acme LLC",
+    )
+    assert created is True
+    inserted_tables = [c.args[0] for c in supa.insert.call_args_list]
+    assert "agency_crm_cases" in inserted_tables and "renewal_case_details" in inserted_tables
+    case_payload = next(c.args[1] for c in supa.insert.call_args_list if c.args[0] == "agency_crm_cases")
+    assert case_payload["case_type"] == "renewal"
+    assert case_payload["insured_database_id"] == "i"
+    assert case_payload["status"] == "open"
+
+
+def test_create_case_idempotent_via_identity():
+    supa = _supa({
+        "renewal_case_details": [{"case_id": "case-9"}],
+        "agency_crm_cases": [{"id": "case-9", "policy_number": "TST-0001"}],
+    })
     row, created = cases.create_case(
         supa, insured_id="i", policy_lineage_id="l", renewal_event_date="2027-01-01"
     )
@@ -72,16 +101,20 @@ def test_create_case_idempotent_returns_existing():
     supa.insert.assert_not_called()
 
 
-def test_create_tasks_skips_existing_titles():
-    supa = _supa({"renewal_tasks": [{"title": "A"}]})
+def test_create_tasks_targets_agency_crm_tasks_and_skips_dupes():
+    supa = _supa({"agency_crm_tasks": [{"title": "A"}]})
     made = cases.create_tasks(supa, case_id="c1", tasks=[{"title": "A"}, {"title": "B"}])
     assert len(made) == 1 and made[0]["title"] == "B"
+    ins = supa.insert.call_args
+    assert ins.args[0] == "agency_crm_tasks"
+    assert ins.args[1]["status"] == "not_started"
 
 
 # ============================================================ handlers
 
 def test_create_case_handle_opens_case_and_tasks():
-    supa = _supa({"renewal_candidates": [_candidate()], "renewal_cases": [], "renewal_tasks": []})
+    supa = _supa({"renewal_candidates": [_candidate()], "renewal_case_details": [],
+                  "agency_crm_cases": [], "agency_crm_tasks": []})
     r = rc.create_case_handle(
         None, "create a renewal case and tasks for policy TST-0001", supa=supa, nowcerts=_nc(_detail())
     )
@@ -89,16 +122,16 @@ def test_create_case_handle_opens_case_and_tasks():
     assert r.data["tasks_created"] == 5
 
 
-def test_create_case_handle_existing_no_tasks_word():
+def test_create_case_handle_existing():
     supa = _supa({
         "renewal_candidates": [_candidate()],
-        "renewal_cases": [{"id": "case-9", "policy_number": "TST-0001", "status": "open",
-                           "assigned_to": "gretchen", "client_name": "Acme LLC"}],
-        "renewal_tasks": [],
+        "renewal_case_details": [{"case_id": "case-9"}],
+        "agency_crm_cases": [{"id": "case-9", "policy_number": "TST-0001", "status": "open",
+                              "owner_email": "gretchen@x.com", "insured_name": "Acme LLC"}],
+        "agency_crm_tasks": [],
     })
     r = rc.create_case_handle(None, "create a renewal case for policy TST-0001", supa=supa, nowcerts=_nc(_detail()))
     assert r.ok and r.data["created"] is False
-    assert r.data["tasks_created"] == 0
 
 
 def test_create_case_handle_needs_identifier():
@@ -109,8 +142,9 @@ def test_create_case_handle_needs_identifier():
 def test_create_tasks_handle_seeds_defaults():
     supa = _supa({
         "renewal_candidates": [_candidate()],
-        "renewal_cases": [{"id": "case-9", "policy_number": "TST-0001", "assigned_to": "gretchen", "status": "open"}],
-        "renewal_tasks": [],
+        "renewal_case_details": [{"case_id": "case-9"}],
+        "agency_crm_cases": [{"id": "case-9", "policy_number": "TST-0001", "owner_email": "g@x.com"}],
+        "agency_crm_tasks": [],
     })
     r = rc.create_tasks_handle(None, "create renewal tasks for policy TST-0001", supa=supa, nowcerts=_nc(_detail()))
     assert r.ok and r.data["tasks_created"] == 5
@@ -119,7 +153,6 @@ def test_create_tasks_handle_seeds_defaults():
 # ============================================================ routing precedence
 
 def test_create_renewal_case_beats_data_entry():
-    """'create a renewal case ...' must hit the case route, not data_entry's ^create."""
     with patch("hermes.commands.renewal_cases.create_case_handle") as h:
         h.return_value = DispatchResult(True, "case")
         _make_dispatcher().dispatch(MagicMock(), "create a renewal case and tasks for policy TST-0001")

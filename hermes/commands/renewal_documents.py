@@ -77,12 +77,22 @@ def generate_pdf_handle(
     except Exception as exc:
         return DispatchResult(False, f"Generated the PDF but filing to Nextcloud failed ({exc}).")
 
-    # Link the filed document to the renewal case, if one exists.
+    # Link the filed document to the renewal case (shared agency CRM schema), if one exists.
     linked = False
     try:
         case = cases.get_case_by_policy(supa, str(policy_number)) if policy_number else None
         if case:
-            supa.update("renewal_cases", case["id"], {"nextcloud_path": res["path"]})
+            cases.link_document(
+                supa,
+                case_id=case["id"],
+                title=filename,
+                nextcloud_path=res["path"],
+                nextcloud_url=res.get("url"),
+                insured_id=case.get("insured_database_id"),
+                content_type="application/pdf",
+            )
+            # Keep the case's folder pointer current on the shared cases table.
+            supa.update(cases.CASES_TABLE, case["id"], {"nextcloud_folder_url": res.get("url") or res["path"]})
             linked = True
     except Exception:
         linked = False
