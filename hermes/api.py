@@ -588,6 +588,104 @@ async def command_center_list_save_list():
     return {"drafts": list_open_drafts(_get_supa())}
 
 
+# ── Opportunities (sales pipeline) — sanctioned create/list/search for any cockpit ──
+class OpportunityCreateRequest(BaseModel):
+    line_of_business: str
+    client_identifier: str | None = None
+    insured_name: str | None = None
+    fein: str | None = None
+    insured_id: str | None = None            # NowCerts insured guid
+    prospect_type: str | None = None
+    insured_type: str | None = None
+    stage: str = "New"
+    premium_estimate: float | None = None
+    carrier: str | None = None
+    lead_source: str | None = None
+    assigned_to: str | None = None
+    next_action: str | None = None
+    source: str = "manual"
+    created_by: str | None = None
+
+    @model_validator(mode="after")
+    def _need_client(self):
+        if not (self.client_identifier or self.insured_name):
+            raise ValueError("client_identifier or insured_name is required")
+        return self
+
+
+@app.post("/api/opportunities")
+async def create_opportunity_endpoint(req: OpportunityCreateRequest):
+    """Create (or return existing) a pipeline opportunity for ANY client — new,
+    inactive, or a cross-sell on a current client. Idempotent per
+    (client_identifier, line_of_business); the smart create logic (identifier,
+    dedup, insured link) lives in one place so every cockpit writes correctly.
+    """
+    from hermes.intake import opportunities as opp
+
+    ci = req.client_identifier or opp.make_client_identifier(req.insured_name, req.fein)
+    stage = (req.stage or opp.STAGE_NEW).strip()
+    if stage not in opp.STAGES:
+        raise HTTPException(status_code=400, detail=f"Unknown stage '{stage}'; must be one of {list(opp.STAGES)}")
+    try:
+        row, created = opp.create_opportunity(
+            _get_supa(),
+            client_identifier=ci,
+            line_of_business=req.line_of_business,
+            insured_name=req.insured_name,
+            insured_id=req.insured_id,
+            prospect_type=req.prospect_type,
+            insured_type=req.insured_type,
+            stage=stage,
+            premium_estimate=req.premium_estimate,
+            carrier=req.carrier,
+            lead_source=req.lead_source,
+            assigned_to=req.assigned_to,
+            next_action=req.next_action,
+            source=req.source,
+            created_by=req.created_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("create opportunity failed: %s / %s", ci, req.line_of_business)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "created": created, "opportunity": row}
+
+
+@app.get("/api/opportunities")
+async def list_opportunities_endpoint(stage: str | None = None, status: str | None = "open", limit: int = 100):
+    """List pipeline opportunities (default open), newest-updated first."""
+    from hermes.intake import opportunities as opp
+
+    try:
+        rows = opp.list_opportunities(_get_supa(), stage=stage, status=status, limit=limit)
+    except Exception as exc:
+        log.exception("list opportunities failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"opportunities": rows, "count": len(rows)}
+
+
+@app.get("/api/clients/search")
+async def search_clients_endpoint(q: str, limit: int = 20):
+    """Search the canonical book by insured name — powers the New-Opportunity client
+    picker (active OR inactive clients). Returns the NowCerts guid + display fields.
+    """
+    query = (q or "").strip()
+    if len(query) < 2:
+        return {"clients": [], "count": 0}
+    try:
+        rows = _get_supa().select(
+            "canonical_clients",
+            columns="nowcerts_insured_guid,insured_name,client_type,city,state,email,phone",
+            params={"insured_name": f"ilike.*{query}*", "order": "insured_name.asc"},
+            limit=limit,
+        )
+    except Exception as exc:
+        log.exception("client search failed: %s", query)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"clients": rows, "count": len(rows)}
+
+
 @app.get("/api/hermes/sync-health")
 async def sync_health():
     """Queue-centric health snapshot for dashboard SyncHealthCheck component."""
