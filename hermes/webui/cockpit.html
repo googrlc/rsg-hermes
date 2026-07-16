@@ -199,7 +199,7 @@ const TABLES = {
   clients:{title:'Clients',eyebrow:'Read-only mirror',lede:'NowCerts insured records — click a client for their full 360.',endpoint:'/api/clients',
     rowClick:(r)=>renderClient360(r.nowcerts_insured_guid),
     cols:[['insured_name','Client'],['client_type','Type'],['city','City'],['state','State'],['email','Email'],['phone','Phone']]},
-  policies:{title:'Policies',eyebrow:'Read-only mirror',lede:'Coverage and premium mirrors from the canonical book.',endpoint:'/api/policies',
+  policies:{title:'Policies',eyebrow:'Read-only mirror',lede:'Coverage and premium mirrors from the canonical book. Click a policy for details.',endpoint:'/api/policies',rowClick:(p)=>openPolicy(p),
     cols:[['policy_number','Policy #'],['carrier','Carrier'],['lines_of_business','LOB'],['status','Status'],['expiration_date','Expires'],['annualized_premium','Annualized',money]]},
   renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Current eligible renewal events from the eligibility engine.',endpoint:'/api/command-center/renewals',
     cols:[['policy_number','Policy #'],['client_name','Client'],['expiration_date','Expires'],['risk_status','Urgency',chip],['premium_current','Premium',money]]},
@@ -458,6 +458,25 @@ async function openNewOpp(preClient){
     const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:$('#oppCarrier').value||null,source:'cockpit',created_by:$('#oppBy').value})});
     closeModal(); toast(r.created?'Opportunity created.':'Opportunity already existed — opened.'); show('pipeline');
   });
+}
+function openPolicy(p){
+  openModal(`<div class="modal-head"><h3>${esc(p.policy_number||'Policy')}</h3><p>${esc(p.carrier||'')} · ${esc(p.lines_of_business||'')}</p></div>
+   <div class="modal-body">
+     <div class="meta" style="grid-template-columns:1fr 1fr;margin:0;padding:0;border:none;gap:14px">
+       <div><div class="m-l">Status</div><div class="m-v">${esc(p.status||'—')}</div></div>
+       <div><div class="m-l">State</div><div class="m-v">${esc(p.state||'—')}</div></div>
+       <div><div class="m-l">Effective</div><div class="m-v">${esc(p.effective_date||'—')}</div></div>
+       <div><div class="m-l">Expires</div><div class="m-v">${esc(p.expiration_date||'—')}</div></div>
+       <div><div class="m-l">Premium</div><div class="m-v">${p.premium_amount?money(p.premium_amount):'—'}</div></div>
+       <div><div class="m-l">Annualized</div><div class="m-v">${p.annualized_premium?money(p.annualized_premium):'—'}</div></div>
+       <div><div class="m-l">Agency commission</div><div class="m-v">${p.agency_commission_amount?money(p.agency_commission_amount):'—'}</div></div>
+       <div><div class="m-l">Carrier</div><div class="m-v">${esc(p.carrier||'—')}</div></div>
+     </div></div>
+   <div class="modal-foot">
+     ${p.nowcerts_insured_guid?`<button class="btn" id="pol360">View client 360</button>`:''}
+     ${p.nowcerts_insured_guid&&NOWCERTS_INSURED_URL?`<a class="btn" target="_blank" rel="noopener" href="${NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(p.nowcerts_insured_guid))}">Open in NowCerts ↗</a>`:''}
+     <button class="btn primary" onclick="closeModal()">Close</button></div>`);
+  const b=$('#pol360'); if(b) b.onclick=()=>{closeModal();renderClient360(p.nowcerts_insured_guid);};
 }
 async function openOpportunity(o){
   await loadUsers(); const linked=!!o.insured_id;
