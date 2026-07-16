@@ -144,3 +144,64 @@ def commit_intake(
         "prospect_type": ptype,
         "insured_type": itype,
     }
+
+
+_PERSONAL_LOBS = {
+    "personal auto", "homeowners", "renters", "condo", "dwelling fire",
+    "motorcycle", "boat", "rv", "umbrella (personal)",
+}
+
+
+def _derive_insured_type(account: dict[str, Any], opportunities_spec: list[dict[str, Any]]) -> str | None:
+    explicit = nowcerts_map.normalize_insured_type(
+        account.get("account_type") or account.get("insured_type") or account.get("segment") or account.get("type")
+    )
+    if explicit:
+        return explicit
+    lobs = {(s.get("line_of_business") or "").strip().lower() for s in opportunities_spec}
+    if lobs & _PERSONAL_LOBS:
+        return "Personal"
+    return "Commercial" if any(lobs) else None
+
+
+def commit_draft(
+    supa: "SupabaseClient",
+    payload: dict[str, Any],
+    *,
+    approved_by: str,
+    nextcloud: "NextcloudClient | None" = None,
+    source: str | None = None,
+) -> dict[str, Any]:
+    """Adapt an intake draft/submission payload (account + opportunities) → commit_intake.
+
+    This is the bridge the intake worker calls once a submission is approved.
+    Raises ValueError if the draft carries no line of business to open a pipeline on.
+    """
+    account = payload.get("account") or {}
+    opps = payload.get("opportunities") or []
+    spec = [
+        {
+            "line_of_business": o.get("line_of_business"),
+            "premium_estimate": o.get("premium") or o.get("target_premium"),
+            "carrier": o.get("carrier"),
+        }
+        for o in opps
+        if o.get("line_of_business")
+    ]
+    if not spec:
+        raise ValueError("intake draft has no line_of_business to open an opportunity on")
+
+    prospect_type = "Prospect"
+    if str(account.get("account_type") or "").strip().lower() in ("hot", "hot prospect", "hot_prospect"):
+        prospect_type = "Hot_Prospect"
+
+    return commit_intake(
+        supa,
+        account=account,
+        opportunities_spec=spec,
+        approved_by=approved_by,
+        prospect_type=prospect_type,
+        insured_type=_derive_insured_type(account, spec),
+        nextcloud=nextcloud,
+        source=source or "agency_intake",
+    )

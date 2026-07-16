@@ -335,6 +335,41 @@ def process_one_approved(supa: SupabaseClient) -> bool:
     draft_summary = claimed.get("draft_summary") or {}
     approver = claimed.get("approved_by") or "system"
 
+    # Intake target: NowCerts (record of truth) + Supabase pipeline is the active
+    # architecture; the legacy EspoCRM enqueue is kept behind the flag for rollback.
+    if os.environ.get("HERMES_INTAKE_TARGET", "nowcerts").strip().lower() == "nowcerts":
+        from hermes.integrations.intake_submissions import transition
+        from hermes.intake.commit import commit_draft
+
+        try:
+            result = commit_draft(supa, draft_summary, approved_by=approver)
+        except Exception as exc:
+            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="commit-nowcerts-intake")
+            return True
+        try:
+            supa.update(
+                TABLE, submission_id,
+                {"records_created": {
+                    "target": "nowcerts",
+                    "opportunities": [r.get("id") for r in result.get("opportunities", [])],
+                    "intake_job_id": result.get("intake_job_id"),
+                    "nextcloud_folder": result.get("nextcloud_folder"),
+                }},
+            )
+            # writing -> written -> complete (opportunities created now; the
+            # NowCerts insured create is a separate approval-gated executor job).
+            transition(supa, submission_id, "written",
+                       note="intake opportunities created; NowCerts insured staged")
+            transition(supa, submission_id, "complete",
+                       note=f"intake committed to NowCerts+Supabase by {approver}")
+        except Exception as exc:
+            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="complete-nowcerts-intake")
+        log.info(
+            "Submission %s committed to NowCerts+Supabase (%d opportunities, intake_job=%s)",
+            submission_id, result.get("opportunity_count", 0), result.get("intake_job_id"),
+        )
+        return True
+
     try:
         queue_ids, write_plan = _enqueue_crm_writes(
             supa, draft_summary,

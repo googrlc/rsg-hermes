@@ -632,9 +632,10 @@ class TestProcessOneApproved:
         assert process_one_approved(supa) is False
 
     @patch("hermes.operations.agency_intake_approval._enqueue_crm_writes")
-    def test_happy_path_enqueues_and_transitions(self, mock_enqueue) -> None:
+    def test_happy_path_enqueues_and_transitions(self, mock_enqueue, monkeypatch) -> None:
         from hermes.operations.intake_worker import process_one_approved
 
+        monkeypatch.setenv("HERMES_INTAKE_TARGET", "espocrm")  # legacy enqueue path
         mock_enqueue.return_value = (
             ["q-1", "q-2", "q-3"],
             {"steps": [{"order": 1, "entity": "Account"}]},
@@ -673,9 +674,10 @@ class TestProcessOneApproved:
         assert process_one_approved(supa) is False
 
     @patch("hermes.operations.agency_intake_approval._enqueue_crm_writes")
-    def test_enqueue_failure_transitions_to_failed(self, mock_enqueue) -> None:
+    def test_enqueue_failure_transitions_to_failed(self, mock_enqueue, monkeypatch) -> None:
         from hermes.operations.intake_worker import process_one_approved
 
+        monkeypatch.setenv("HERMES_INTAKE_TARGET", "espocrm")  # legacy enqueue path
         mock_enqueue.side_effect = RuntimeError("supabase down")
 
         supa = MagicMock()

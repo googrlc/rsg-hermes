@@ -118,3 +118,41 @@ def test_executor_no_jobs():
     supa.select.return_value = []
     summary = ie.run_intake_executor(supa=supa, nowcerts=MagicMock())
     assert summary == {"claimed": 0, "completed": 0, "failed": 0, "previews": []}
+
+
+# ---------------------------------------------------------------- commit_draft adapter
+
+def test_commit_draft_maps_payload():
+    supa = _router_supa()
+    nc = MagicMock(); nc.is_configured.return_value = False
+    out = ic.commit_draft(
+        supa,
+        {
+            "account": {"account_name": "X LLC", "fein": "99-9999999", "account_type": "Commercial Lines"},
+            "opportunities": [
+                {"line_of_business": "General Liability", "premium": 5000},
+                {"line_of_business": "Workers Comp"},
+            ],
+        },
+        approved_by="lamar", nextcloud=nc,
+    )
+    assert out["opportunity_count"] == 2
+    assert out["insured_type"] == "Commercial"
+    assert out["insured_preview"]["CommercialName"] == "X LLC"
+
+
+def test_commit_draft_infers_personal_from_lob():
+    supa = _router_supa()
+    nc = MagicMock(); nc.is_configured.return_value = False
+    out = ic.commit_draft(
+        supa,
+        {"account": {"account_name": "Jane Doe Household"},
+         "opportunities": [{"line_of_business": "Homeowners"}]},
+        approved_by="lamar", nextcloud=nc,
+    )
+    assert out["insured_type"] == "Personal"
+
+
+def test_commit_draft_requires_line_of_business():
+    with pytest.raises(ValueError):
+        ic.commit_draft(MagicMock(), {"account": {"name": "X"}, "opportunities": []}, approved_by="lamar")
