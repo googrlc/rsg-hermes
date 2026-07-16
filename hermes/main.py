@@ -359,6 +359,29 @@ def main() -> int:
         help="Cap records processed per entity (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--sync-quotes",
+        action="store_true",
+        help="Run NowCerts quotes → Supabase opportunities pipeline sync (Policy rows with isQuote=true; "
+             "idempotent per client+LOB, never resets a human-advanced stage)",
+    )
+    parser.add_argument(
+        "--sync-quotes-dry-run",
+        action="store_true",
+        help="Preview the quotes → opportunities sync (counts + no writes)",
+    )
+    parser.add_argument(
+        "--sync-quotes-since",
+        type=str,
+        default=None,
+        help="Only sync quotes changed since this ISO datetime (e.g. 2026-06-01T00:00:00)",
+    )
+    parser.add_argument(
+        "--sync-quotes-limit",
+        type=int,
+        default=None,
+        help="Cap the number of quotes processed (useful for a first dry-run)",
+    )
+    parser.add_argument(
         "--enrich-nowcerts",
         type=str,
         default=None,
@@ -657,6 +680,37 @@ def main() -> int:
             for err in book_result.errors[:50]:
                 print(f"- {err}")
         return 0 if book_result.ok else 1
+
+    # --- NowCerts quotes → Supabase opportunities pipeline sync ---
+    if args.sync_quotes or args.sync_quotes_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes.sync.quote_sync import run_quote_sync
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            nc = NowCertsClient()
+        except NowCertsClientError as e:
+            print(f"NowCerts connection failed: {e}", file=sys.stderr)
+            return 2
+
+        quote_result = run_quote_sync(
+            nc,
+            supa,
+            since=args.sync_quotes_since,
+            dry_run=args.sync_quotes_dry_run,
+            limit=args.sync_quotes_limit,
+        )
+        print(quote_result.message)
+        if quote_result.errors:
+            print("\nErrors:")
+            for err in quote_result.errors[:50]:
+                print(f"- {err}")
+        return 0 if quote_result.ok else 1
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
     if args.enrich_nowcerts:
