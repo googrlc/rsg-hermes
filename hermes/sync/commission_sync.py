@@ -55,6 +55,7 @@ class CommissionSyncResult:
     updated: int = 0
     skipped_not_commissionable: int = 0
     skipped_no_premium: int = 0
+    skipped_out_of_window: int = 0
     no_expected: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -68,8 +69,8 @@ class CommissionSyncResult:
             f"commission ledger (from book): scanned={self.policies_scanned} "
             f"inserted={self.inserted} updated={self.updated} "
             f"not_commissionable={self.skipped_not_commissionable} "
-            f"no_premium={self.skipped_no_premium} no_expected={self.no_expected} "
-            f"errors={len(self.errors)}"
+            f"no_premium={self.skipped_no_premium} out_of_window={self.skipped_out_of_window} "
+            f"no_expected={self.no_expected} errors={len(self.errors)}"
         )
 
 
@@ -118,16 +119,29 @@ def run_commission_sync(
     *,
     dry_run: bool = False,
     limit: int | None = None,
+    since: str | None = None,
 ) -> CommissionSyncResult:
     """Seed commission_ledger expected values from canonical_policies.
+
+    Only WON, in-window business is ledgered: a policy's ``effective_date`` must
+    fall in [since, today]. This excludes future-effective (e.g. 2027) staged
+    renewals — not won yet — and pre-``since`` old book, so reconciliation starts
+    fresh and clean.
 
     Args:
         supa: SupabaseClient.
         dry_run: compute + report only, no writes.
         limit: optional cap on policies processed (testing/safety).
+        since: earliest effective_date to include (YYYY-MM-DD). Defaults to
+            HERMES_COMMISSION_SINCE or 2026-01-01.
     """
+    import os as _os
+    from datetime import date as _date
+
     result = CommissionSyncResult()
     now_iso = _utcnow_iso()
+    since = (since or _os.environ.get("HERMES_COMMISSION_SINCE") or "2026-01-01").strip()[:10]
+    today = _date.today().isoformat()
 
     rules = supa.select("commission_rules", columns="*", limit=1000)
     rule_index = _build_rule_index(rules)
@@ -161,6 +175,13 @@ def run_commission_sync(
         prem = _premium(p)
         if not prem or prem <= 0:
             result.skipped_no_premium += 1
+            continue
+
+        # WON + in-window only: effective in [since, today]. Drops future-effective
+        # (2027 staged renewals — not won yet) and pre-since old book.
+        eff_s = str(p.get("effective_date") or "")[:10]
+        if not eff_s or eff_s < since or eff_s > today:
+            result.skipped_out_of_window += 1
             continue
 
         is_renewal = status in RENEWAL_STATUSES

@@ -153,3 +153,17 @@ def test_limit_caps_policies():
     supa = supa_with([cpol(f"P{i}", insured="ins1") for i in range(5)])
     res = cs.run_commission_sync(supa, limit=2)
     assert res.policies_scanned == 2
+
+
+def test_future_effective_excluded():
+    # A 2027-effective policy is a staged renewal — not won yet — so it must not ledger.
+    supa = supa_with([cpol("P1", eff="2027-06-01", exp="2028-06-01")])
+    res = cs.run_commission_sync(supa)
+    assert res.skipped_out_of_window == 1 and res.inserted == 0
+    assert supa.tables.get(cs.LEDGER_TABLE, []) == []
+
+
+def test_pre_since_old_book_excluded():
+    supa = supa_with([cpol("P1", eff="2025-06-01", exp="2026-06-01")])
+    res = cs.run_commission_sync(supa, since="2026-01-01")
+    assert res.skipped_out_of_window == 1 and res.inserted == 0
