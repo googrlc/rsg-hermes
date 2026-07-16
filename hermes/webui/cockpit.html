@@ -305,13 +305,16 @@ async function renderPipeline(host){
   host.innerHTML=`<section class="view">
     <div class="view-head"><div><div class="eyebrow">Quote-to-bind workflow</div><h1 class="h1">Pipeline</h1>
       <p class="lede">Drag an opportunity between stages to update it. Click a card to view it or send a quote to NowCerts.</p></div>
-      <div class="btns"><button class="btn primary" id="pipeNew">+ New Opportunity</button></div></div>
+      <div style="display:flex;align-items:center;gap:12px"><span class="pill" id="closeStat">Close ratio —</span><button class="btn primary" id="pipeNew">+ New Opportunity</button></div></div>
     <div class="kanban" id="kanban"><div class="loading">Loading…</div></div></section>`;
   $('#pipeNew').onclick=openNewOpp;
   try{
     const opps=firstArray(await api('/api/opportunities'));
     PIPE={}; const byStage={}; PIPE_STAGES.forEach(s=>byStage[s]=[]);
     opps.forEach(o=>{ PIPE[o.id]=o; const s=PIPE_STAGES.includes(o.stage)?o.stage:'New'; byStage[s].push(o); });
+    const won=byStage['Bound'].length, lost=byStage['Lost'].length, decided=won+lost;
+    const cr=decided?Math.round(won/decided*100):0;
+    const cs=$('#closeStat'); if(cs) cs.textContent=`Close ratio ${decided?cr+'%':'—'} · ${won}W / ${lost}L`;
     const stageTotal=s=>byStage[s].reduce((a,o)=>a+(Number(o.premium_estimate)||0),0);
     $('#kanban').innerHTML=PIPE_STAGES.map(s=>`
       <div class="kcol">
