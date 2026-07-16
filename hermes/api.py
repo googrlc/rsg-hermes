@@ -831,6 +831,69 @@ async def list_tasks_endpoint(case_id: str | None = None, limit: int = 200):
     return {"tasks": rows, "count": len(rows)}
 
 
+# ── Book reads + Workspace KPIs (power the CRM cockpit views) ──
+@app.get("/api/clients")
+async def list_clients_endpoint(limit: int = 500):
+    """Full canonical client book (read-only mirror)."""
+    rows = _get_supa().select(
+        "canonical_clients",
+        columns="nowcerts_insured_guid,insured_name,client_type,city,state,email,phone",
+        params={"order": "insured_name.asc"}, limit=limit,
+    )
+    return {"clients": rows, "count": len(rows)}
+
+
+@app.get("/api/policies")
+async def list_policies_endpoint(limit: int = 1000):
+    """Canonical policy book (read-only mirror), soonest-expiring first."""
+    rows = _get_supa().select(
+        "canonical_policies",
+        columns="policy_number,nowcerts_insured_guid,carrier,lines_of_business,status,"
+                "effective_date,expiration_date,premium_amount,annualized_premium",
+        params={"order": "expiration_date.asc"}, limit=limit,
+    )
+    return {"policies": rows, "count": len(rows)}
+
+
+@app.get("/api/commissions")
+async def list_commissions_endpoint(limit: int = 1000):
+    """Commission ledger (expected vs actual), newest statement first."""
+    rows = _get_supa().select(
+        "commission_ledger",
+        columns="policy_number,client_name,carrier_name,lob,gross_premium,expected_commission,"
+                "actual_commission,delta,reconciliation_status,statement_date",
+        params={"order": "statement_date.desc"}, limit=limit,
+    )
+    return {"commissions": rows, "count": len(rows)}
+
+
+@app.get("/api/workspace-stats")
+async def workspace_stats_endpoint():
+    """KPI tile counts for the Workspace home."""
+    supa = _get_supa()
+
+    def _rows(table, cols, params=None):
+        try:
+            return supa.select(table, columns=cols, params=params, limit=100000)
+        except Exception:
+            return []
+
+    policies = _rows("canonical_policies", "annualized_premium,premium_amount")
+    annualized = sum(
+        float(p.get("annualized_premium") or p.get("premium_amount") or 0) for p in policies
+    )
+    return {
+        "clients": len(_rows("canonical_clients", "nowcerts_insured_guid")),
+        "policies": len(policies),
+        "annualized_premium": round(annualized, 2),
+        "renewals": len(_rows("project_85_renewals", "id")),
+        "pipeline": len(_rows("opportunities", "id", {"status": "eq.open"})),
+        "open_cases": len(_rows("agency_crm_cases", "id", {"status": "eq.open"})),
+        "open_tasks": len(_rows("agency_crm_tasks", "id", {"status": "neq.completed"})),
+        "commissions": len(_rows("commission_ledger", "id")),
+    }
+
+
 @app.get("/api/hermes/sync-health")
 async def sync_health():
     """Queue-centric health snapshot for dashboard SyncHealthCheck component."""
