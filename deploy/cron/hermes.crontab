@@ -19,6 +19,15 @@ CRON_TZ=America/New_York
 0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
 # Policy Sync v2  — daily 2:10am ET (NowCerts Policy → EspoCRM Policy; no Account writes)
 10 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-policies >> /root/hermes-cron.log 2>&1
+# OPT-IN 2026-07-16 — Canonical book sync — daily 2:20am ET (BEFORE renewal refresh).
+# Pulls live NowCerts insureds+policies into canonical_clients (key nowcerts_insured_guid)
+# and canonical_policies (key policy_guid) — the book --renewal-refresh reads. This
+# satisfies the "Dependency: canonical_policies freshness" note below (the book was
+# CSV-frozen at 2026-06-10 with no refresher). Additive upsert-by-natural-key; never
+# deletes; preserves the renewed_policy lineage pointer. Uncommenting is the deliberate
+# go-live step. Dry-run first to preview with zero writes:
+#   hermes --sync-canonical-book-dry-run
+# 20 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-canonical-book >> /root/hermes-cron.log 2>&1
 # Renewal eligibility refresh — daily 2:30am ET (after Policy Sync v2). Rebuilds
 # renewal_candidates from the live book (canonical_policies + live NowCerts insured-active)
 # via the centralized eligibility engine, then projects ELIGIBLE events -> project_85_renewals.
