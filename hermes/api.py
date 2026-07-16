@@ -684,7 +684,10 @@ async def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
 
     supa = _get_supa()
     _require_users(supa, [("approved_by", req.approved_by)])
-    rows = supa.select("opportunities", columns="*", params={"id": f"eq.{opportunity_id}"}, limit=1)
+    try:
+        rows = supa.select("opportunities", columns="*", params={"id": f"eq.{opportunity_id}"}, limit=1)
+    except Exception:
+        rows = []  # malformed id (opportunities.id is a uuid) → treat as not found
     if not rows:
         raise HTTPException(status_code=404, detail="opportunity not found")
     try:
