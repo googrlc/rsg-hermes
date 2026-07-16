@@ -431,6 +431,13 @@ def main() -> int:
         help="Cap the number of policies processed (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--sync-commissions-since",
+        type=str,
+        default=None,
+        help="Earliest policy effective_date to ledger (YYYY-MM-DD; default 2026-01-01). "
+             "Excludes future-effective + older-than-since business.",
+    )
+    parser.add_argument(
         "--enrich-nowcerts",
         type=str,
         default=None,
@@ -776,6 +783,7 @@ def main() -> int:
             supa,
             dry_run=args.sync_commissions_dry_run,
             limit=args.sync_commissions_limit,
+            since=args.sync_commissions_since,
         )
         print(comm_result.message)
         if comm_result.errors:
