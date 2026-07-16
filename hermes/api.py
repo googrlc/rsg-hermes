@@ -610,6 +610,8 @@ class OpportunityCreateRequest(BaseModel):
     lead_source: str | None = None
     assigned_to: str | None = None
     next_action: str | None = None
+    description: str | None = None
+    probability: int | None = None
     source: str = "manual"
     created_by: str | None = None
 
@@ -648,6 +650,8 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest):
             lead_source=req.lead_source,
             assigned_to=req.assigned_to,
             next_action=req.next_action,
+            description=req.description,
+            probability=req.probability,
             source=req.source,
             created_by=req.created_by,
         )
