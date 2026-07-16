@@ -623,6 +623,11 @@ def drain_outbound_queue(
         params={
             "status": f"eq.{QUEUE_QUEUED}",
             "scheduled_for": f"lte.{now_iso}",
+            # Safety guard: this drain dispatches every row to EspoCRM. NowCerts
+            # renewal rows are owned by the Renewal Executor (approval-gated) and
+            # must never be swept here — a proposed/unapproved writeback would
+            # otherwise be mis-routed into an EspoCRM write.
+            "destination_system": "neq.nowcerts",
             "order": "created_at.asc",
         },
         limit=batch_size,

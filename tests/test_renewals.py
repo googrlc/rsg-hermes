@@ -522,28 +522,80 @@ def test_renewal_audit_still_routes_to_revenue():
     assert result.ok
 
 
+# ---------------------------------------------------------------- NowCerts test doubles
+
+def _nc_detail(*, policy_number="TST-0001", carrier="Test Carrier",
+               lob="Commercial Auto", exp="2027-01-01", eff="2026-01-01",
+               premium=5000, status="Active", guid="pol-guid-1",
+               insured_guid="ins-guid-1"):
+    """A NowCerts PolicyDetail record shaped like find_policy_by_number returns."""
+    return {
+        "databaseId": guid,
+        "insuredDatabaseId": insured_guid,
+        "policyNumber": policy_number,
+        "carrierName": carrier,
+        "lineOfBusiness": lob,
+        "effectiveDate": eff,
+        "expirationDate": exp,
+        "premium": premium,
+        "policyStatus": status,
+    }
+
+
+def _mock_nowcerts(detail):
+    """A NowCerts client whose find_policy_by_number returns *detail* only for an
+    exact number match — mirrors the real OData exact filter (no fuzzy match)."""
+    from unittest.mock import MagicMock
+    nc = MagicMock()
+    want = None if detail is None else detail.get("policyNumber")
+
+    def _find(number):
+        if isinstance(detail, dict) and detail.get("_ambiguous"):
+            return detail
+        return detail if (detail is not None and number == want) else None
+
+    nc.find_policy_by_number.side_effect = _find
+    nc.is_insured_active.return_value = True
+    return nc
+
+
+def _candidate(*, policy_number="TST-0001", client_name="Test Corp LLC",
+               lob="Commercial Auto", exp="2027-01-01", guid="pol-guid-1",
+               state="eligible", risk="AT_RISK"):
+    return {
+        "client_name": client_name,
+        "policy_number": policy_number,
+        "line_of_business": lob,
+        "expiration_date": exp,
+        "risk_status": risk,
+        "eligibility_state": state,
+        "nowcerts_policy_guid": guid,
+    }
+
+
+def _supa_returning(rows):
+    from unittest.mock import MagicMock
+    supa = MagicMock()
+    supa.select.return_value = rows
+    return supa
+
+
 # ---------------------------------------------------------------- exact policy match
 
 def test_exact_policy_match_returns_worksheet():
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {
-        "list": [_policy_row(policy_number="TST-0001", account="Test Corp LLC")]
-    }
-    result = rw_mod.handle(mock_client, "prepare renewal worksheet for policy TST-0001")
+    nc = _mock_nowcerts(_nc_detail(policy_number="TST-0001"))
+    supa = _supa_returning([_candidate(policy_number="TST-0001")])
+    result = rw_mod.handle(None, "prepare renewal worksheet for policy TST-0001", supa=supa, nowcerts=nc)
     assert result.ok
     assert "TST-0001" in result.message
-    assert result.data["source"] == "espocrm"
+    assert result.data["source"] == "nowcerts"
 
 
 def test_exact_policy_no_fuzzy_cross_match():
-    """Policy TST-0001 must not match TST-00010 (prefix collision guard)."""
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {
-        "list": [_policy_row(policy_number="TST-00010", account="Test Corp LLC")]
-    }
-    result = rw_mod.handle(mock_client, "prepare renewal worksheet for policy TST-0001")
+    """Policy TST-0001 must not match TST-00010 (exact OData filter, no prefix match)."""
+    nc = _mock_nowcerts(_nc_detail(policy_number="TST-00010"))
+    supa = _supa_returning([])
+    result = rw_mod.handle(None, "prepare renewal worksheet for policy TST-0001", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["reconciliation_needed"] is True
 
@@ -551,53 +603,43 @@ def test_exact_policy_no_fuzzy_cross_match():
 # ---------------------------------------------------------------- missing policy
 
 def test_missing_policy_returns_reconciliation_needed():
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {"list": []}
-    result = rw_mod.handle(mock_client, "prepare renewal worksheet for policy NOTEXIST-999")
+    nc = _mock_nowcerts(None)
+    supa = _supa_returning([])
+    result = rw_mod.handle(None, "prepare renewal worksheet for policy NOTEXIST-999", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["reconciliation_needed"] is True
     assert "NOTEXIST-999" in result.message
 
 
 def test_missing_client_returns_reconciliation_needed():
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {"list": []}
-    result = rw_mod.handle(mock_client, "prepare renewal worksheet for Unknown Client XYZ")
+    nc = _mock_nowcerts(None)
+    supa = _supa_returning([])  # no candidate rows for the name
+    result = rw_mod.handle(None, "prepare renewal worksheet for Unknown Client XYZ", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["reconciliation_needed"] is True
 
 
 # ---------------------------------------------------------------- ambiguity
 
-def test_ambiguous_policy_number_returns_candidates():
-    """Multiple policies sharing the same normalised number → no worksheet, list candidates."""
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {
-        "list": [
-            _policy_row(policy_number="DUP-001", policy_id="pol-a", account="Acme A"),
-            _policy_row(policy_number="DUP-001", policy_id="pol-b", account="Acme B"),
-        ]
-    }
-    result = rw_mod.handle(mock_client, "prepare renewal worksheet for policy DUP-001")
+def test_ambiguous_policy_number_returns_matches():
+    """Duplicate policy numbers in NowCerts → no worksheet, surface matches, escalate."""
+    ambiguous = {"_ambiguous": True, "matches": [_nc_detail(guid="a"), _nc_detail(guid="b")]}
+    nc = _mock_nowcerts(ambiguous)
+    supa = _supa_returning([])
+    result = rw_mod.handle(None, "prepare renewal worksheet for policy DUP-001", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["ambiguous"] is True
-    assert len(result.data["candidates"]) == 2
+    assert len(result.data["matches"]) == 2
 
 
 def test_ambiguous_client_name_returns_candidates():
-    """Multiple active policies matching a client name → no worksheet, list candidates."""
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {
-        "list": [
-            _policy_row(policy_number="POL-001", policy_id="pol-a", line_of_business="Commercial Auto"),
-            _policy_row(policy_number="POL-002", policy_id="pol-b", line_of_business="General Liability"),
-        ]
-    }
-    result = rw_mod.handle(mock_client, "prepare renewal worksheet for Test Corp LLC")
+    """Multiple candidates matching a client name → no worksheet, list candidates."""
+    nc = _mock_nowcerts(None)
+    supa = _supa_returning([
+        _candidate(policy_number="POL-001", lob="Commercial Auto"),
+        _candidate(policy_number="POL-002", lob="General Liability"),
+    ])
+    result = rw_mod.handle(None, "prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["ambiguous"] is True
     assert len(result.data["candidates"]) == 2
@@ -605,17 +647,13 @@ def test_ambiguous_client_name_returns_candidates():
 
 def test_ambiguous_does_not_create_records():
     """Ambiguous responses must never silently choose a record — ok=False, no worksheet key."""
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {
-        "list": [
-            _policy_row(policy_number="POL-001", policy_id="pol-a"),
-            _policy_row(policy_number="POL-002", policy_id="pol-b"),
-        ]
-    }
-    result = rw_mod.handle(mock_client, "prepare renewal worksheet for Test Corp LLC")
+    nc = _mock_nowcerts(None)
+    supa = _supa_returning([
+        _candidate(policy_number="POL-001"),
+        _candidate(policy_number="POL-002"),
+    ])
+    result = rw_mod.handle(None, "prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
     assert not result.ok
-    # No write key present — no record was chosen or created.
     assert "worksheet" not in (result.data or {})
 
 
@@ -623,29 +661,24 @@ def test_ambiguous_does_not_create_records():
 
 def test_repeated_identical_request_returns_same_result():
     """Calling handle() twice with the same input returns identical results."""
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {
-        "list": [_policy_row(policy_number="TST-0001", account="Test Corp LLC")]
-    }
-    r1 = rw_mod.handle(mock_client, "prepare renewal worksheet for policy TST-0001")
-    r2 = rw_mod.handle(mock_client, "prepare renewal worksheet for policy TST-0001")
+    supa = _supa_returning([_candidate(policy_number="TST-0001")])
+    r1 = rw_mod.handle(None, "prepare renewal worksheet for policy TST-0001",
+                       supa=supa, nowcerts=_mock_nowcerts(_nc_detail(policy_number="TST-0001")))
+    r2 = rw_mod.handle(None, "prepare renewal worksheet for policy TST-0001",
+                       supa=supa, nowcerts=_mock_nowcerts(_nc_detail(policy_number="TST-0001")))
     assert r1.ok == r2.ok
     assert r1.message == r2.message
 
 
-# ---------------------------------------------------------------- inactive status filter
+# ---------------------------------------------------------------- excluded filter
 
-def test_inactive_policies_excluded_from_client_lookup():
-    """Cancelled/expired policies must not appear in client-name results."""
-    from unittest.mock import MagicMock
-    mock_client = MagicMock()
-    mock_client.get.return_value = {
-        "list": [
-            _policy_row(status="Cancelled", policy_number="OLD-001"),
-            _policy_row(status="Expired", policy_number="OLD-002"),
-        ]
-    }
-    result = rw_mod.handle(mock_client, "prepare renewal worksheet for Test Corp LLC")
+def test_excluded_candidates_absent_from_client_lookup():
+    """A client with only excluded (cancelled/expired) candidates → reconciliation-needed.
+
+    The DB query filters eligibility_state!=excluded, so the mock returns no rows.
+    """
+    nc = _mock_nowcerts(None)
+    supa = _supa_returning([])  # excluded rows filtered out at the query
+    result = rw_mod.handle(None, "prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["reconciliation_needed"] is True
