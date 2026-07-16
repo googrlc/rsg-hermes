@@ -25,9 +25,9 @@ CRON_TZ=America/New_York
 # satisfies the "Dependency: canonical_policies freshness" note below (the book was
 # CSV-frozen at 2026-06-10 with no refresher). Additive upsert-by-natural-key; never
 # deletes; preserves the renewed_policy lineage pointer. Uncommenting is the deliberate
-# go-live step. Dry-run first to preview with zero writes:
-#   hermes --sync-canonical-book-dry-run
-# 20 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-canonical-book >> /root/hermes-cron.log 2>&1
+# go-live step. Dry-run to preview with zero writes: hermes --sync-canonical-book-dry-run
+# ENABLED 2026-07-16 after a verified full run (+249 clients / +157 policies, 0 errors).
+20 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-canonical-book >> /root/hermes-cron.log 2>&1
 # Renewal eligibility refresh — daily 2:30am ET (after Policy Sync v2). Rebuilds
 # renewal_candidates from the live book (canonical_policies + live NowCerts insured-active)
 # via the centralized eligibility engine, then projects ELIGIBLE events -> project_85_renewals.
