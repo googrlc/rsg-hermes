@@ -192,6 +192,28 @@ def main() -> int:
         help="Preview intake insured payloads (field keys) without claiming or writing — verify casing",
     )
     parser.add_argument(
+        "--run-scheduler",
+        action="store_true",
+        help="Run the executor scheduler loop (intake+renewal every N s, locked). Requires SCHEDULER_ENABLED.",
+    )
+    parser.add_argument(
+        "--scheduler-interval",
+        type=int,
+        default=int(os.environ.get("SCHEDULER_INTERVAL_SECONDS", "300")),
+        help="Scheduler cadence in seconds (default 300 = 5 min)",
+    )
+    parser.add_argument(
+        "--scheduler-batch",
+        type=int,
+        default=int(os.environ.get("SCHEDULER_BATCH", "10")),
+        help="Max jobs each executor processes per cycle (default 10)",
+    )
+    parser.add_argument(
+        "--scheduler-health",
+        action="store_true",
+        help="Print scheduler health (NowCerts queue depths + lock state) and exit",
+    )
+    parser.add_argument(
         "--commission-audit",
         action="store_true",
         help="Run Revenue Integrity commission blind-spot audit once",
@@ -1014,6 +1036,24 @@ def main() -> int:
                 f"insuredType={ins.get('insuredType')} keys={sorted(ins.keys())}"
             )
         return 0 if summary["failed"] == 0 else 1
+
+    if args.scheduler_health:
+        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes.scheduler.runner import scheduler_health
+
+        import json as _json
+        print(_json.dumps(scheduler_health(SupabaseClient()), indent=2, default=str))
+        return 0
+
+    if args.run_scheduler:
+        enabled = os.environ.get("SCHEDULER_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+        if not enabled:
+            print("Scheduler is DISABLED (set SCHEDULER_ENABLED=true to enable). Exiting.")
+            return 0
+        from hermes.scheduler.runner import run_scheduler_loop
+
+        run_scheduler_loop(interval_seconds=args.scheduler_interval, batch=args.scheduler_batch)
+        return 0
 
     if args.revenue_sentinel_health:
         from hermes.jobs import revenue_sentinel

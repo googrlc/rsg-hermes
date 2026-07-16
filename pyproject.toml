@@ -3,7 +3,8 @@ name = "rsg-hermes"
 version = "0.1.0"
 description = "Hermes — EspoCRM coordinator (CLI, Slack, REST client)"
 readme = "README.md"
-requires-python = ">=3.11"
+# Upper bound required so poetry can resolve deps that cap Python (e.g. reportlab <4).
+requires-python = ">=3.11,<4"
 dependencies = [
   "requests>=2.28.0",
   "python-dotenv>=1.0.0",
@@ -18,8 +19,9 @@ dependencies = [
   "python-multipart>=0.0.6",
   # Renewal cadence email drafts (hermes/renewals/emails.py)
   "jinja2>=3.1",
-  # Renewal worksheet PDF generation (hermes/renewals/pdf.py)
-  "reportlab>=4.0",
+  # Renewal worksheet PDF generation (hermes/renewals/pdf.py). Pinned so the
+  # image is reproducible; also force-installed in the Dockerfile.
+  "reportlab==5.0.0",
   # Voice output — free Edge TTS (no API key needed).
   "edge-tts>=6.1",
 ]
