@@ -508,6 +508,7 @@ async def command_center_download_file(file_id: str):
 
 class AskRequest(BaseModel):
     prompt: str
+    persona: str | None = None
 
 
 @app.post("/api/command-center/ask")
@@ -541,7 +542,7 @@ async def command_center_ask(req: AskRequest):
     from hermes.core.nl_agent import ask as nl_ask
 
     try:
-        result = nl_ask(_get_espo(), prompt, confirmed=False)
+        result = nl_ask(_get_espo(), prompt, confirmed=False, persona=(req.persona or None))
     except Exception as exc:
         log.exception("command-center ask failed: %s", prompt)
         raise HTTPException(status_code=502, detail=str(exc))

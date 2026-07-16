@@ -187,6 +187,31 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "email_search",
+            "description": (
+                "Search the connected agency mailbox (Microsoft 365) for recent emails. Use "
+                "when asked about emails, messages, or the inbox — e.g. 'any emails from JB "
+                "Noble?', 'what did the carrier send about that renewal?', 'anything new in my "
+                "inbox today?'. Matches sender, subject, and preview across recent inbox mail."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Keywords, a sender name/email, or subject terms to match. Omit for the latest mail.",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "How many days back to search (default 14).",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "renewals_overview",
             "description": (
                 "Upcoming policy renewals and at-risk/retention clients from the Project 85 "
@@ -393,17 +418,22 @@ Only execute writes when the caller has set confirmed=true."""
 _SYSTEM_PROMPT = _DEFAULT_PERSONA + "\n\n" + _PLATFORM_GUIDE
 
 
-def _compose_system_prompt() -> str:
-    """System prompt for this instance: persona overlay (if any) + platform guide.
+def _compose_system_prompt(persona_key: str | None = None) -> str:
+    """System prompt for this request: persona overlay + platform guide.
 
-    When HERMES_PERSONA_FILE is set and readable, its contents fully replace the
-    default identity/voice; the shared platform guide (tools, field aliases,
-    write-safety rules) is always appended so every instance keeps the same
-    capabilities and guardrails.
+    ``persona_key`` selects a bundled persona (hermes/personas/{key}.md) per
+    request — e.g. Lamar's owner/revenue voice on the same box that defaults to
+    Gretchen. Falls back to the instance persona (HERMES_PERSONA_FILE) and then
+    the built-in default. The shared platform guide (tools, field aliases,
+    write-safety) is always appended so capabilities/guardrails never change.
     """
-    from hermes.core.identity import load_persona
+    from hermes.core.identity import load_named_persona, load_persona
 
-    persona = load_persona() or _DEFAULT_PERSONA
+    persona = ""
+    if persona_key:
+        persona = load_named_persona(persona_key)
+    if not persona:
+        persona = load_persona() or _DEFAULT_PERSONA
     return persona + "\n\n" + _PLATFORM_GUIDE
 
 
@@ -579,6 +609,58 @@ def _exec_merge(client: "EspoClient", args: dict[str, Any], *, confirmed: bool =
     return merge_handle(client, f"merge {entity.lower()} {source_id} into {target_id}")
 
 
+def _exec_email_search(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """Search the connected Microsoft 365 mailbox for recent matching emails.
+
+    Reuses the proven MS365 inbox read (same path the triage lane uses); filters
+    recent inbox mail by sender/subject/preview in Python. Read-only.
+    """
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    query = (args.get("query") or "").strip()
+    try:
+        days = max(1, min(int(args.get("days") or 14), 90))
+    except (TypeError, ValueError):
+        days = 14
+
+    mailbox = (os.environ.get("HERMES_ASK_MAILBOX")
+               or os.environ.get("MS365_MAILBOXES", "").split(",")[0]).strip()
+    if not mailbox:
+        return DispatchResult(False, "No mailbox is connected (set HERMES_ASK_MAILBOX or MS365_MAILBOXES). Email search is unavailable.")
+
+    try:
+        from hermes.integrations.ms365_client import MS365Client
+
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        msgs = MS365Client().list_inbox_messages(mailbox, since_iso=since, top=50)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("email_search failed")
+        return DispatchResult(False, f"Couldn't reach the mailbox: {exc}")
+
+    terms = query.lower().split()
+
+    def _match(m: dict[str, Any]) -> bool:
+        if not terms:
+            return True
+        frm = (m.get("from") or {}).get("emailAddress") or {}
+        hay = " ".join([str(m.get("subject") or ""), str(m.get("bodyPreview") or ""),
+                        str(frm.get("name") or ""), str(frm.get("address") or "")]).lower()
+        return all(t in hay for t in terms)
+
+    hits = [m for m in msgs if _match(m)][:15]
+    label = f' matching "{query}"' if query else ""
+    if not hits:
+        return DispatchResult(True, f"No emails in the last {days} days{label}.")
+    lines = []
+    for m in hits:
+        frm = (m.get("from") or {}).get("emailAddress") or {}
+        who = frm.get("name") or frm.get("address") or "?"
+        when = str(m.get("receivedDateTime") or "")[:10]
+        lines.append(f"- {when} · {who}: {m.get('subject') or '(no subject)'}")
+    return DispatchResult(True, f"{len(hits)} email(s){label} (last {days}d):\n" + "\n".join(lines), {"emails": hits})
+
+
 _EXECUTORS: dict[str, Any] = {
     "search_records": _exec_search,
     "get_field_value": _exec_get_field,
@@ -587,6 +669,7 @@ _EXECUTORS: dict[str, Any] = {
     "renewals_overview": _exec_renewals,
     "web_research": _exec_web_research,
     "list_skills": _exec_list_skills,
+    "email_search": _exec_email_search,
     "create_record": _exec_create,
     "update_record": _exec_update,
     "intake_lead": _exec_intake,
@@ -617,6 +700,7 @@ def ask(
     *,
     confirmed: bool = False,
     conversation: list[dict[str, str]] | None = None,
+    persona: str | None = None,
 ) -> DispatchResult:
     """Process a natural language CRM request using the OpenAI agent.
 
@@ -640,7 +724,7 @@ def ask(
 
     model = resolve_model(None)
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": _compose_system_prompt()}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": _compose_system_prompt(persona)}]
     if conversation:
         messages.extend(conversation)
     messages.append({"role": "user", "content": text})

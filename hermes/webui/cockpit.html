@@ -351,7 +351,8 @@ async function renderAskHermes(host){
     bubble('you',q); HERMES_HISTORY.push({who:'you',text:q});
     const thinking=bubble('hermes','…'); $('#chatSend').disabled=true;
     try{
-      const r=await api('/api/command-center/ask',{method:'POST',body:JSON.stringify({prompt:q})});
+      const persona=((new URLSearchParams(location.search).get('u')||'').toLowerCase()==='gretchen')?'gretchen':'lamar';
+      const r=await api('/api/command-center/ask',{method:'POST',body:JSON.stringify({prompt:q,persona})});
       thinking.remove();
       const msg=r.message||'(no response)';
       bubble('hermes',msg); HERMES_HISTORY.push({who:'hermes',text:msg});

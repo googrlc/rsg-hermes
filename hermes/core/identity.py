@@ -70,3 +70,22 @@ def load_persona(path: str | None = None) -> str:
     except OSError as exc:  # unreadable / missing — degrade to default identity
         log.warning("HERMES_PERSONA_FILE=%s is set but could not be read: %s", resolved, exc)
         return ""
+
+
+@functools.lru_cache(maxsize=8)
+def load_named_persona(key: str) -> str:
+    """Load a bundled persona by key from hermes/personas/{key}.md, or '' if absent.
+
+    Lets the conversational agent switch voice per request (e.g. Lamar's
+    owner/revenue persona vs the instance default) without a second instance.
+    """
+    import re
+    from pathlib import Path
+
+    if not key or not re.fullmatch(r"[a-z0-9_-]+", key):
+        return ""
+    path = Path(__file__).resolve().parent.parent / "personas" / f"{key}.md"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
