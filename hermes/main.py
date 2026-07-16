@@ -335,6 +335,30 @@ def main() -> int:
         help="Cap the number of policies processed (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--sync-canonical-book",
+        action="store_true",
+        help="Run NowCerts → Supabase canonical book sync (refreshes canonical_clients/canonical_policies/"
+             "nowcerts_insured_mirror that --renewal-refresh reads). Additive, preserves renewed_policy lineage.",
+    )
+    parser.add_argument(
+        "--sync-canonical-book-dry-run",
+        action="store_true",
+        help="Preview the canonical book sync (counts + no writes to Supabase)",
+    )
+    parser.add_argument(
+        "--sync-canonical-book-since",
+        type=str,
+        default=None,
+        help="Incremental: only pull NowCerts records changed since this ISO datetime "
+             "(omit for the full nightly reconciliation that also collapses duplicates)",
+    )
+    parser.add_argument(
+        "--sync-canonical-book-limit",
+        type=int,
+        default=None,
+        help="Cap records processed per entity (useful for a first dry-run)",
+    )
+    parser.add_argument(
         "--enrich-nowcerts",
         type=str,
         default=None,
@@ -602,6 +626,37 @@ def main() -> int:
             for err in pol_result.errors[:50]:
                 print(f"- {err}")
         return 0 if pol_result.ok else 1
+
+    # --- NowCerts → Supabase canonical book sync (feeds --renewal-refresh) ---
+    if args.sync_canonical_book or args.sync_canonical_book_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.canonical_book_sync import run_canonical_book_sync
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            nc = NowCertsClient()
+        except NowCertsClientError as e:
+            print(f"NowCerts connection failed: {e}", file=sys.stderr)
+            return 2
+
+        book_result = run_canonical_book_sync(
+            nc,
+            supa,
+            since=args.sync_canonical_book_since,
+            dry_run=args.sync_canonical_book_dry_run,
+            limit=args.sync_canonical_book_limit,
+        )
+        print(book_result.message)
+        if book_result.errors:
+            print("\nErrors:")
+            for err in book_result.errors[:50]:
+                print(f"- {err}")
+        return 0 if book_result.ok else 1
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
     if args.enrich_nowcerts:
