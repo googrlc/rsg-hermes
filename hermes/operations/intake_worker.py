@@ -364,6 +364,7 @@ def process_one_approved(supa: SupabaseClient) -> bool:
                        note=f"intake committed to NowCerts+Supabase by {approver}")
         except Exception as exc:
             _safe_transition_to_failed(supa, submission_id, exc=exc, stage="complete-nowcerts-intake")
+            return True  # #112: do NOT fall through to the success log after a failed transition
         log.info(
             "Submission %s committed to NowCerts+Supabase (%d opportunities, intake_job=%s)",
             submission_id, result.get("opportunity_count", 0), result.get("intake_job_id"),

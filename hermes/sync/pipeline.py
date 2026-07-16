@@ -582,6 +582,13 @@ def _is_unique_violation(exc: Exception) -> bool:
     return "23505" in text or "duplicate key" in text.lower()
 
 
+# Shared guard: the EspoCRM outbound processors must NEVER consume NowCerts rows.
+# Those are owned by the approval-gated Renewal Executor; a general/legacy Espo
+# drain picking one up would mis-route a proposed AMS write into EspoCRM. Applied
+# identically to BOTH the run-specific processor and the run-agnostic drain.
+_ESPO_OUTBOUND_GUARD: dict[str, str] = {"destination_system": "neq.nowcerts"}
+
+
 def _process_outbound_queue(
     supa: SupabaseClient,
     espo: EspoClient,
@@ -593,6 +600,7 @@ def _process_outbound_queue(
     queued = supa.select(
         "outbound_sync_queue",
         params={
+            **_ESPO_OUTBOUND_GUARD,
             "run_id": f"eq.{run_id}",
             "status": f"eq.{QUEUE_QUEUED}",
             "order": "created_at.asc",
@@ -621,13 +629,9 @@ def drain_outbound_queue(
     queued = supa.select(
         "outbound_sync_queue",
         params={
+            **_ESPO_OUTBOUND_GUARD,  # never sweep NowCerts rows (see constant above)
             "status": f"eq.{QUEUE_QUEUED}",
             "scheduled_for": f"lte.{now_iso}",
-            # Safety guard: this drain dispatches every row to EspoCRM. NowCerts
-            # renewal rows are owned by the Renewal Executor (approval-gated) and
-            # must never be swept here — a proposed/unapproved writeback would
-            # otherwise be mis-routed into an EspoCRM write.
-            "destination_system": "neq.nowcerts",
             "order": "created_at.asc",
         },
         limit=batch_size,
