@@ -223,7 +223,7 @@ const TABLES = {
     rowClick:(r)=>renderClient360(r.nowcerts_insured_guid),
     cols:[['insured_name','Client'],['client_type','Type'],['city','City'],['state','State'],['email','Email'],['phone','Phone']]},
   policies:{title:'Policies',eyebrow:'Read-only mirror',lede:'Coverage and premium mirrors from the canonical book. Click a policy for details.',endpoint:'/api/policies',rowClick:(p)=>openPolicy(p),
-    cols:[['policy_number','Policy #'],['carrier','Carrier'],['lines_of_business','LOB'],['status','Status'],['expiration_date','Expires'],['annualized_premium','Annualized',money]]},
+    cols:[['insured_name','Client'],['policy_number','Policy #'],['carrier','Carrier'],['lines_of_business','LOB'],['status','Status'],['expiration_date','Expires'],['annualized_premium','Annualized',money]]},
   renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Renewal events with win/loss outcome. Click a row to open the insured in NowCerts.',endpoint:'/api/renewals',
     rowClick:(r)=>{ if(r.insured_id&&NOWCERTS_INSURED_URL) window.open(NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(r.insured_id)),'_blank','noopener'); },
     cols:[['client_name','Client'],['policy_number','Policy #'],['line_of_business','LOB'],['renewal_event_date','Renewal'],['risk_status','Urgency',chip],['outcome','Outcome',chip],['premium_current','Premium',money]]},
@@ -643,9 +643,10 @@ async function openPushToAms(kind, id, label){
   });
 }
 function openPolicy(p){
-  openModal(`<div class="modal-head"><h3>${esc(p.policy_number||'Policy')}</h3><p>${esc(p.carrier||'')} · ${esc(p.lines_of_business||'')}</p></div>
+  openModal(`<div class="modal-head"><h3>${esc(p.insured_name||p.policy_number||'Policy')}</h3><p>${esc(p.policy_number||'')} · ${esc(p.carrier||'')} · ${esc(p.lines_of_business||'')}</p></div>
    <div class="modal-body">
      <div class="meta" style="grid-template-columns:1fr 1fr;margin:0;padding:0;border:none;gap:14px">
+       <div><div class="m-l">Client</div><div class="m-v">${esc(p.insured_name||'—')}</div></div>
        <div><div class="m-l">Status</div><div class="m-v">${esc(p.status||'—')}</div></div>
        <div><div class="m-l">State</div><div class="m-v">${esc(p.state||'—')}</div></div>
        <div><div class="m-l">Effective</div><div class="m-v">${esc(p.effective_date||'—')}</div></div>
