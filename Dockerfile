@@ -9,6 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
+# The container runs as a non-root user with no writable HOME, so fontconfig
+# has nowhere to cache — point its cache at a world-writable dir so WeasyPrint
+# renders fast and quietly instead of re-scanning fonts on every PDF.
+ENV XDG_CACHE_HOME=/tmp/.cache
+RUN mkdir -p /tmp/.cache/fontconfig && chmod -R 1777 /tmp/.cache
+
 # Poetry 2.x — it reads the PEP 621 [project] table this pyproject uses
 # (poetry 1.x needs [tool.poetry] and cannot lock this file).
 RUN pip install poetry
