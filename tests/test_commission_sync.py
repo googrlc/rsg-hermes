@@ -129,6 +129,21 @@ def test_non_commissionable_status_skipped():
     assert res.skipped_not_commissionable == 1 and res.inserted == 0
 
 
+def test_up_for_renewal_excluded():
+    # "Up for Renewal" is pending — not won — so it must not ledger a commission.
+    supa = supa_with([cpol("P1", status="Up for Renewal")])
+    res = cs.run_commission_sync(supa)
+    assert res.skipped_not_commissionable == 1 and res.inserted == 0
+    assert supa.tables.get(cs.LEDGER_TABLE, []) == []
+
+
+def test_renewing_is_ledgered():
+    supa = supa_with([cpol("P1", status="Renewing", premium=2000.0)])
+    res = cs.run_commission_sync(supa)
+    assert res.inserted == 1
+    assert supa.tables[cs.LEDGER_TABLE][0]["is_renewal"] is True
+
+
 def test_zero_premium_skipped():
     supa = supa_with([cpol("P1", premium=0.0)])
     res = cs.run_commission_sync(supa)

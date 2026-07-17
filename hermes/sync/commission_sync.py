@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hermes.jobs.commission_ingest import (
-    COMMISSIONABLE_STATUSES,
     RENEWAL_STATUSES,
     _build_rule_index,
     _compute_expected_commission,
@@ -38,6 +37,11 @@ log = logging.getLogger(__name__)
 
 LEDGER_TABLE = "commission_ledger"
 STATEMENT_SOURCE = "canonical_book"
+
+# Only WON, in-force business ledgers a commission: the policy must be Active,
+# Renewed, or Renewing. "Up for Renewal" (pending, not yet won) is intentionally
+# excluded, as is everything cancelled/expired/lapsed/etc.
+LEDGER_STATUSES = frozenset({"Active", "Renewed", "Renewing"})
 
 # Fallback ledger columns when the table is empty (schema-adaptive otherwise).
 _LEDGER_COLS = {
@@ -169,7 +173,7 @@ def run_commission_sync(
         if not pn:
             continue
         status = elig.normalize_status(p.get("status"))
-        if status not in COMMISSIONABLE_STATUSES:
+        if status not in LEDGER_STATUSES:
             result.skipped_not_commissionable += 1
             continue
         prem = _premium(p)
