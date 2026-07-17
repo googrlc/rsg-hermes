@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -728,6 +728,135 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
         log.exception("stage update failed: %s", opportunity_id)
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "opportunity": row}
+
+
+# ── Opportunity quotes — carrier quotes (with PDF) attached to an opportunity ──
+def _load_opportunity(supa, opportunity_id: str) -> dict[str, Any]:
+    try:
+        rows = supa.select("opportunities", columns="*", params={"id": f"eq.{opportunity_id}"}, limit=1)
+    except Exception:
+        rows = []  # malformed uuid → not found
+    if not rows:
+        raise HTTPException(status_code=404, detail="opportunity not found")
+    return rows[0]
+
+
+async def _file_quote_pdf(supa, quote: dict[str, Any], upload: "UploadFile") -> dict[str, Any] | None:
+    """File an uploaded PDF into the client's Nextcloud Quotes/ folder. Returns a
+    warning dict on failure (quote is still saved) or None on success/no-file."""
+    if upload is None:
+        return None
+    data = await upload.read()
+    if not data:
+        return None
+    from hermes.quotes import documents as quote_docs
+
+    try:
+        quote_docs.file_quote_pdf(
+            supa, quote, content=data,
+            original_filename=upload.filename,
+            content_type=upload.content_type or "application/pdf",
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001 — never lose the quote over a filing hiccup
+        log.exception("quote pdf filing failed for quote %s", quote.get("id"))
+        return {"document_warning": f"Quote saved, but the PDF could not be filed to Nextcloud: {exc}"}
+
+
+@app.post("/api/opportunities/{opportunity_id}/quotes")
+async def create_quote_endpoint(
+    opportunity_id: str,
+    file: UploadFile | None = File(None),
+    carrier: str | None = Form(None),
+    line_of_business: str | None = Form(None),
+    premium: str | None = Form(None),
+    effective_date: str | None = Form(None),
+    expiration_date: str | None = Form(None),
+    quote_number: str | None = Form(None),
+    notes: str | None = Form(None),
+    created_by: str | None = Form(None),
+):
+    """Add a carrier quote to an opportunity, optionally attaching the quote PDF
+    (filed into the client's Nextcloud Quotes/ folder). Multipart form."""
+    from hermes.quotes import store as quote_store
+
+    supa = _get_supa()
+    opportunity = _load_opportunity(supa, opportunity_id)
+    try:
+        quote = quote_store.create_quote(
+            supa, opportunity=opportunity, carrier=carrier, line_of_business=line_of_business,
+            premium=premium, effective_date=effective_date, expiration_date=expiration_date,
+            quote_number=quote_number, notes=notes, created_by=created_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("create quote failed for opportunity %s", opportunity_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    warn = await _file_quote_pdf(supa, quote, file)
+    fresh = quote_store.get_quote(supa, str(quote["id"])) or quote
+    return {"ok": True, "quote": fresh, **(warn or {})}
+
+
+@app.get("/api/opportunities/{opportunity_id}/quotes")
+async def list_opportunity_quotes_endpoint(opportunity_id: str):
+    """Quotes attached to one opportunity (newest first)."""
+    from hermes.quotes import store as quote_store
+
+    rows = quote_store.list_quotes(_get_supa(), opportunity_id=opportunity_id)
+    return {"quotes": rows, "count": len(rows)}
+
+
+@app.get("/api/quotes")
+async def list_quotes_endpoint(limit: int = 500):
+    """All carrier quotes — the Quotes module. Grouped by opportunity."""
+    from hermes.quotes import store as quote_store
+
+    try:
+        rows = quote_store.list_quotes(_get_supa(), limit=limit)
+    except Exception as exc:
+        log.exception("list quotes failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"quotes": rows, "count": len(rows)}
+
+
+@app.post("/api/quotes/{quote_id}/document")
+async def attach_quote_document_endpoint(quote_id: str, file: UploadFile = File(...)):
+    """Attach (or replace) the quote PDF on an existing quote."""
+    from hermes.quotes import store as quote_store
+
+    supa = _get_supa()
+    quote = quote_store.get_quote(supa, quote_id)
+    if not quote:
+        raise HTTPException(status_code=404, detail="quote not found")
+    warn = await _file_quote_pdf(supa, quote, file)
+    if warn:
+        raise HTTPException(status_code=502, detail=warn["document_warning"])
+    return {"ok": True, "quote": quote_store.get_quote(supa, quote_id)}
+
+
+@app.post("/api/quotes/{quote_id}/send-to-nowcerts")
+async def send_quote_to_nowcerts(quote_id: str, req: SendQuoteRequest):
+    """Approved push: enqueue this carrier quote to NowCerts (Policy · IsQuote).
+    Writes nothing synchronously — the quote executor completes it and stamps the
+    quote number/guid back onto the quote row. approved_by must be a real user."""
+    from hermes.quotes import store as quote_store
+    from hermes.quotes.executor import stage_quote_row
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+    quote = quote_store.get_quote(supa, quote_id)
+    if not quote:
+        raise HTTPException(status_code=404, detail="quote not found")
+    try:
+        job = stage_quote_row(supa, quote=quote, approved_by=req.approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("send quote failed: %s", quote_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "queued": True, "queue_id": job.get("id"),
+            "note": "Quote queued to NowCerts (approved). It writes when the quote executor runs."}
 
 
 @app.get("/api/clients/search")

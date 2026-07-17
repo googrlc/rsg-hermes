@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from hermes.intake import opportunities as opp
+from hermes.quotes import store as quote_store
 from hermes.renewals.executor import (
     DESTINATION_NOWCERTS,
     QUEUE_COMPLETED,
@@ -69,6 +70,77 @@ def map_opportunity_to_quote(o: dict[str, Any]) -> dict[str, Any]:
     if o.get("expiration_date"):
         payload["ExpirationDate"] = str(o["expiration_date"])
     return payload
+
+
+def map_quote_row_to_nowcerts(q: dict[str, Any]) -> dict[str, Any]:
+    """Build a NowCerts Policy/Insert payload (IsQuote=true) from a quote row.
+
+    Same NowCerts shape as ``map_opportunity_to_quote``; a quote row carries the
+    carrier's real terms (``premium``, effective/expiration dates) directly.
+    """
+    payload: dict[str, Any] = {"IsQuote": True}
+    if q.get("insured_id"):
+        payload["InsuredDatabaseId"] = q["insured_id"]
+    if q.get("insured_name"):
+        payload["InsuredName"] = q["insured_name"]
+    if q.get("line_of_business"):
+        payload["LineOfBusinessName"] = q["line_of_business"]
+    if q.get("carrier"):
+        payload["CarrierName"] = q["carrier"]
+    if q.get("premium") is not None:
+        try:
+            payload["Premium"] = float(q["premium"])
+        except (TypeError, ValueError):
+            pass
+    if q.get("quote_number"):
+        payload["Number"] = q["quote_number"]
+    if q.get("effective_date"):
+        payload["EffectiveDate"] = str(q["effective_date"])
+    if q.get("expiration_date"):
+        payload["ExpirationDate"] = str(q["expiration_date"])
+    return payload
+
+
+def stage_quote_row(
+    supa: "SupabaseClient", *, quote: dict[str, Any], approved_by: str
+) -> dict[str, Any]:
+    """Enqueue an approved carrier quote (opportunity_quotes row) for NowCerts.
+
+    Raises ValueError if the quote isn't tied to a NowCerts insured (create/link
+    the insured via Intake first). Marks the quote 'Queued' on enqueue.
+    """
+    qid = str(quote.get("id") or "")
+    if not qid:
+        raise ValueError("quote id is required")
+    if not quote.get("insured_id"):
+        raise ValueError(
+            "quote has no insured_id (NowCerts insured GUID) — create/link the insured before quoting"
+        )
+    job = supa.insert(
+        QUEUE_TABLE,
+        {
+            "object_type": OBJECT_TYPE_QUOTE,
+            "object_id": qid,
+            "destination_system": DESTINATION_NOWCERTS,
+            "action": "create",
+            "payload": {
+                "action": QUOTE_ACTION,
+                "quote_id": qid,
+                "opportunity_id": quote.get("opportunity_id"),
+                "insured_id": quote.get("insured_id"),
+                "policy": map_quote_row_to_nowcerts(quote),
+            },
+            "status": QUEUE_QUEUED,
+            "attempt_count": 0,
+            "approved_by": approved_by,
+            "approved_at": _utcnow().isoformat(),
+        },
+    )
+    try:
+        quote_store.set_status(supa, qid, quote_store.STATUS_QUEUED)
+    except Exception:
+        log.exception("quote: failed to mark %s queued", qid)
+    return job
 
 
 def stage_quote_job(
@@ -149,9 +221,12 @@ def run_quote_executor(
         payload = dict(job.get("payload") or {})
         policy = payload.get("policy") or {}
         opp_id = payload.get("opportunity_id")
+        quote_id = payload.get("quote_id")
 
         if dry_run:
-            summary["previews"].append({"queue_id": job.get("id"), "opportunity_id": opp_id, "policy": policy})
+            summary["previews"].append(
+                {"queue_id": job.get("id"), "opportunity_id": opp_id, "quote_id": quote_id, "policy": policy}
+            )
             continue
 
         claimed = supa.update_where(
@@ -178,6 +253,14 @@ def run_quote_executor(
                     opp.link_nowcerts(supa, opp_id, quote_number=number, nowcerts_quote_guid=guid)
                 except Exception:
                     log.exception("quote: failed to stamp opportunity %s", opp_id)
+            if quote_id:
+                try:
+                    quote_store.link_nowcerts(
+                        supa, quote_id, quote_number=number,
+                        nowcerts_quote_guid=guid, status=quote_store.STATUS_SENT,
+                    )
+                except Exception:
+                    log.exception("quote: failed to stamp quote row %s", quote_id)
             supa.update(QUEUE_TABLE, job.get("id"),
                         {"status": QUEUE_COMPLETED, "updated_at": _utcnow().isoformat()})
             summary["completed"] += 1
