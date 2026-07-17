@@ -227,7 +227,7 @@ const TABLES = {
   renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Renewal events with win/loss outcome. Click a row to open the insured in NowCerts.',endpoint:'/api/renewals',
     rowClick:(r)=>{ if(r.insured_id&&NOWCERTS_INSURED_URL) window.open(NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(r.insured_id)),'_blank','noopener'); },
     cols:[['client_name','Client'],['policy_number','Policy #'],['line_of_business','LOB'],['renewal_event_date','Renewal'],['risk_status','Urgency',chip],['outcome','Outcome',chip],['premium_current','Premium',money]]},
-  commissions:{title:'Commissions',eyebrow:'Ledger reconciliation',lede:'Expected vs actual commission, keyed by policy. Manage carrier rates with Commission terms.',endpoint:'/api/commissions',action:'commTerms',
+  commissions:{title:'Commissions',eyebrow:'Reconciled · read-only',lede:'Reconciled commissions only (read-only). Ingest and reconcile in the standalone Commission Tracker.',endpoint:'/api/commissions',
     cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['delta','Delta',money],['reconciliation_status','Status',chip]]},
   pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies. Click one to send a quote to NowCerts.',endpoint:'/api/opportunities',action:'newOpp',rowClick:(o)=>openOpportunity(o),
     cols:[['insured_name','Client'],['line_of_business','LOB'],['stage','Stage',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']]},
