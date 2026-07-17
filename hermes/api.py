@@ -313,9 +313,11 @@ async def root():
 
 
 @app.get("/cockpit")
-async def cockpit():
-    """RSG Agency CRM cockpit — 8-view CRM UI served from hermes/webui/cockpit.html."""
-    return RedirectResponse(url="/command-center/cockpit.html", status_code=307)
+async def cockpit(request: Request):
+    """RSG Agency CRM cockpit — 8-view CRM UI served from hermes/webui/cockpit.html.
+    Forwards the query string so theme params (e.g. ?u=gretchen) survive the redirect."""
+    q = request.url.query
+    return RedirectResponse(url="/command-center/cockpit.html" + (f"?{q}" if q else ""), status_code=307)
 
 
 @app.get("/health")
