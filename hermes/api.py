@@ -15,7 +15,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -808,12 +808,13 @@ async def list_opportunity_quotes_endpoint(opportunity_id: str):
 
 
 @app.get("/api/quotes")
-async def list_quotes_endpoint(limit: int = 500):
-    """All carrier quotes — the Quotes module. Grouped by opportunity."""
+async def list_quotes_endpoint(insured_id: str | None = None, limit: int = 500):
+    """All carrier quotes — the Quotes module (grouped by opportunity). Pass
+    insured_id to get one client's quotes across their opportunities."""
     from hermes.quotes import store as quote_store
 
     try:
-        rows = quote_store.list_quotes(_get_supa(), limit=limit)
+        rows = quote_store.list_quotes(_get_supa(), insured_id=insured_id, limit=limit)
     except Exception as exc:
         log.exception("list quotes failed")
         raise HTTPException(status_code=502, detail=str(exc))
@@ -857,6 +858,119 @@ async def send_quote_to_nowcerts(quote_id: str, req: SendQuoteRequest):
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "queued": True, "queue_id": job.get("id"),
             "note": "Quote queued to NowCerts (approved). It writes when the quote executor runs."}
+
+
+# ── Proposals — standard client-facing proposals assembled from carrier quotes ──
+class ProposalCreateRequest(BaseModel):
+    quote_ids: list[str] = Field(default_factory=list)
+    insured_id: str | None = None
+    insured_name: str | None = None
+    client_identifier: str | None = None
+    opportunity_id: str | None = None
+    title: str | None = None
+    segment: str | None = None                     # Personal | Commercial
+    proposal_type: str = "New Business"
+    notes: str | None = None
+    fmt: Literal["html", "pdf", "both"] = "html"
+    created_by: str | None = None
+
+    @model_validator(mode="after")
+    def _need_quotes(self):
+        if not self.quote_ids:
+            raise ValueError("select at least one quote for the proposal")
+        return self
+
+
+class ProposalRegenerateRequest(BaseModel):
+    fmt: Literal["html", "pdf", "both"] = "html"
+
+
+class ProposalStatusRequest(BaseModel):
+    status: str
+
+
+@app.post("/api/proposals")
+async def create_proposal_endpoint(req: ProposalCreateRequest):
+    """Create a proposal from selected carrier quotes, render it (LOB-grouped),
+    and file it into the client's Nextcloud Proposals/ folder. fmt: html|pdf|both."""
+    from hermes.proposals import documents as prop_docs
+    from hermes.proposals import store as prop_store
+
+    supa = _get_supa()
+    try:
+        proposal = prop_store.create_proposal(
+            supa, insured_id=req.insured_id, insured_name=req.insured_name,
+            client_identifier=req.client_identifier, opportunity_id=req.opportunity_id,
+            quote_ids=req.quote_ids, title=req.title, segment=req.segment,
+            proposal_type=req.proposal_type, notes=req.notes, created_by=req.created_by,
+        )
+        result = prop_docs.generate_and_file(supa, proposal, fmt=req.fmt)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("create proposal failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "proposal": result["proposal"], "warnings": result["warnings"]}
+
+
+@app.get("/api/proposals")
+async def list_proposals_endpoint(insured_id: str | None = None, limit: int = 500):
+    """All proposals (newest first), or one client's when insured_id is given."""
+    from hermes.proposals import store as prop_store
+
+    try:
+        rows = prop_store.list_proposals(_get_supa(), insured_id=insured_id, limit=limit)
+    except Exception as exc:
+        log.exception("list proposals failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"proposals": rows, "count": len(rows)}
+
+
+@app.get("/api/proposals/{proposal_id}")
+async def get_proposal_endpoint(proposal_id: str):
+    from hermes.proposals import store as prop_store
+
+    row = prop_store.get_proposal(_get_supa(), proposal_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    return {"proposal": row}
+
+
+@app.get("/api/proposals/{proposal_id}/view", response_class=HTMLResponse)
+async def view_proposal_endpoint(proposal_id: str):
+    """The rendered proposal HTML — open in a tab or print to PDF from the browser."""
+    from hermes.proposals import store as prop_store
+
+    row = prop_store.get_proposal(_get_supa(), proposal_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    return HTMLResponse(content=row.get("content_html") or "<p>Not yet rendered.</p>")
+
+
+@app.post("/api/proposals/{proposal_id}/regenerate")
+async def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerateRequest):
+    """Re-render a proposal (picks up edited quotes/notes). fmt: html|pdf|both."""
+    from hermes.proposals import documents as prop_docs
+    from hermes.proposals import store as prop_store
+
+    supa = _get_supa()
+    row = prop_store.get_proposal(supa, proposal_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    try:
+        result = prop_docs.generate_and_file(supa, row, fmt=req.fmt)
+    except Exception as exc:
+        log.exception("regenerate proposal failed: %s", proposal_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "proposal": result["proposal"], "warnings": result["warnings"]}
+
+
+@app.post("/api/proposals/{proposal_id}/status")
+async def set_proposal_status_endpoint(proposal_id: str, req: ProposalStatusRequest):
+    from hermes.proposals import store as prop_store
+
+    row = prop_store.set_status(_get_supa(), proposal_id, req.status)
+    return {"ok": True, "proposal": row}
 
 
 @app.get("/api/clients/search")

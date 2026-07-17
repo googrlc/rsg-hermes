@@ -138,10 +138,18 @@ def list_quotes(
     supa: "SupabaseClient",
     *,
     opportunity_id: str | None = None,
+    insured_id: str | None = None,
     limit: int = 500,
 ) -> list[dict[str, Any]]:
-    """List quotes. Default order groups by opportunity (the Quotes module view)."""
-    params: dict[str, str] = {"order": "opportunity_id.asc,created_at.desc"}
+    """List quotes. Default order groups by opportunity (the Quotes module view).
+
+    Filter by ``opportunity_id`` (one opp) or ``insured_id`` (all of a client's
+    quotes across their opportunities — used by the proposal builder).
+    """
     if opportunity_id:
         params = {"opportunity_id": f"eq.{opportunity_id}", "order": "created_at.desc"}
+    elif insured_id:
+        params = {"insured_id": f"eq.{insured_id}", "order": "line_of_business.asc,created_at.desc"}
+    else:
+        params = {"order": "opportunity_id.asc,created_at.desc"}
     return supa.select(TABLE, columns="*", params=params, limit=limit)

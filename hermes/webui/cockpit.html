@@ -175,7 +175,7 @@
       <a data-view="commissions"><svg viewBox="0 0 24 24"><path d="M12 3v18M8 7h6a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6"/></svg>Commissions</a>
       <a data-view="pipeline"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Pipeline</a>
       <a data-view="quotes"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>Quotes</a>
-      <a data-view="intake"><svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M12 12v5M9.5 14.5h5"/></svg>Intake</a>
+      <a data-view="proposals"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M9 12h6M9 16h4"/></svg>Proposals</a>
       <a data-view="cases"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Cases</a>
       <a data-view="tasks"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>Tasks</a>
       <a data-view="hermes"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>Ask Hermes</a>
@@ -251,7 +251,7 @@ async function show(view){
   const host = $('#viewHost');
   if(view==='workspace') return renderWorkspace(host);
   if(view==='cases') return renderCases(host);
-  if(view==='intake') return renderIntake(host);
+  if(view==='proposals') return renderProposals(host);
   if(view==='hermes') return renderAskHermes(host);
   if(view==='pipeline') return renderPipeline(host);
   if(view==='quotes') return renderQuotes(host);
@@ -489,53 +489,8 @@ async function renderAskHermes(host){
   setTimeout(()=>$('#chatInput')&&$('#chatInput').focus(),50);
 }
 
-/* ---------- Intake portal (new business → NowCerts) ---------- */
-async function renderIntake(host){
-  await loadUsers();
-  host.innerHTML=`<section class="view">
-    <div class="view-head"><div><div class="eyebrow">New business · writes to NowCerts</div><h1 class="h1">Intake</h1>
-      <p class="lede">Capture a new prospect. Hermes parses it into an account + contacts + opportunities; you approve, and it's queued to NowCerts as an insured you can work.</p></div></div>
-    <div class="split" style="grid-template-columns:1fr 1fr">
-      <div class="panel" style="padding:22px;display:flex;flex-direction:column;gap:14px">
-        <div class="field"><label>New-business details</label><textarea id="intakeText" style="min-height:220px" placeholder="Business / client name, contact name, phone, email, mailing address, current carrier + renewal date, and the lines of coverage they need (GL, Workers Comp, Commercial Auto, Property, Home, Auto…)."></textarea></div>
-        <div class="field"><label>Submitted by</label><select id="intakeBy">${userOptions()}</select></div>
-        <button class="btn primary" id="intakeParse" style="align-self:flex-start">Parse intake →</button>
-      </div>
-      <div class="panel" id="intakePreview"><div class="empty" style="padding:40px">The parsed draft will appear here for review before anything is sent to NowCerts.</div></div>
-    </div></section>`;
-  $('#intakeParse').onclick=(e)=>submitBtn(e.target,async()=>{
-    const raw=$('#intakeText').value.trim(); if(!raw){throw new Error('Enter the new-business details first.')}
-    $('#intakePreview').innerHTML=`<div class="loading">Parsing…</div>`;
-    const r=await api('/agency-intake',{method:'POST',body:JSON.stringify({raw_text:raw,submitted_by:$('#intakeBy').value,source_type:'cockpit'})});
-    renderIntakePreview(r);
-  });
-}
-function renderIntakePreview(r){
-  const p=r.payload_preview||{}, acct=p.account||{}, opps=p.opportunities||[], contacts=p.contacts||[];
-  const acctLine=Object.entries(acct).filter(([k,v])=>v&&typeof v!=='object').map(([k,v])=>`${esc(k)}: ${esc(v)}`).join(' · ')||'—';
-  const warn=(r.validation_warnings&&r.validation_warnings.length)?`<div class="chip warn" style="display:inline-block;margin-bottom:12px">${r.validation_warnings.length} warning(s): ${esc(r.validation_warnings.join('; '))}</div>`:'';
-  $('#intakePreview').innerHTML=`<div style="padding:22px">
-    <div class="eyebrow">Draft ${esc(r.draft_id||'')}</div>
-    <h3 style="font-family:var(--serif);font-size:21px;margin:6px 0 12px;font-weight:600">${esc(acct.name||acct.account_name||'New account')}</h3>
-    ${warn}
-    <div class="tasks-h"><span>Account</span></div>
-    <div class="t-meta" style="font-size:13px;line-height:1.6">${acctLine}</div>
-    <div class="tasks-h" style="margin-top:16px"><span>Contacts</span><span class="badge">${contacts.length}</span></div>
-    ${contacts.length?contacts.map(c=>`<div class="task"><div><div class="t-title">${esc(c.name||[c.firstName,c.lastName].filter(Boolean).join(' ')||'Contact')}</div><div class="t-meta">${esc([c.email,c.phone].filter(Boolean).join(' · '))||'—'}</div></div></div>`).join(''):'<div class="t-meta">—</div>'}
-    <div class="tasks-h" style="margin-top:16px"><span>Opportunities</span><span class="badge">${opps.length}</span></div>
-    ${opps.length?opps.map(o=>`<div class="task"><div><div class="t-title">${esc(o.line_of_business||o.name||'Opportunity')}</div><div class="t-meta">${esc(o.stage||'New')}${o.premium_estimate?' · '+money(o.premium_estimate):''}</div></div></div>`).join(''):'<div class="t-meta">—</div>'}
-    <div style="margin-top:22px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <select id="intakeToken" class="btn" style="padding:9px 12px;font-weight:500">
-        <option value="APPROVE ALL">Approve all</option><option value="APPROVE CRM ONLY">CRM only</option><option value="APPROVE SUPABASE ONLY">Supabase only</option></select>
-      <button class="btn primary" id="intakeApprove">Approve &amp; send to NowCerts</button>
-    </div></div>`;
-  $('#intakeApprove').onclick=(e)=>submitBtn(e.target,async()=>{
-    const res=await api('/agency-intake/approve',{method:'POST',body:JSON.stringify({draft_id:r.draft_id,token:$('#intakeToken').value,approver:($('#intakeBy')&&$('#intakeBy').value)||'cockpit'})});
-    const n=(res.enqueued_queue_ids||[]).length;
-    toast('Intake approved'+(n?` — ${n} job(s) queued to NowCerts.`:' — processed.'));
-    $('#intakePreview').innerHTML=`<div class="empty" style="padding:36px">✓ Approved.${n?` ${n} write-back job(s) queued`:''} — it appears in NowCerts as an insured once the intake executor runs, then shows up in your book and pipeline.</div>`;
-  });
-}
+/* Intake portal removed from the cockpit (parked for re-homing). The
+   /agency-intake backend endpoints remain intact. */
 
 /* ---------- Cases master-detail ---------- */
 let CASES=[], activeCase=null;
@@ -718,12 +673,13 @@ async function openOpportunity(o){
      <div style="border-top:1px solid var(--border-soft);padding-top:14px">
        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
          <div class="eyebrow">Quotes</div>
-         <button class="btn" id="addQuote">+ Add carrier quote</button></div>
+         <div style="display:flex;gap:8px"><button class="btn" id="addQuote">+ Add carrier quote</button>${linked?`<button class="btn" id="buildProp">Build proposal</button>`:''}</div></div>
        ${linked?'':`<div class="chip warn" style="margin-bottom:10px">Not linked to a NowCerts insured — you can still attach quotes and PDFs, but sending to the AMS needs the insured linked via Intake.</div>`}
        <div id="oppQuotes"><div class="loading">Loading quotes…</div></div>
      </div></div>
    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Close</button></div>`);
   $('#addQuote').onclick=()=>openNewQuote(o);
+  const bp=$('#buildProp'); if(bp) bp.onclick=()=>openProposalBuilder({insured_id:o.insured_id,insured_name:o.insured_name,opportunity_id:o.id,preselectOpp:o.id});
   loadOppQuotes(o);
 }
 async function loadOppQuotes(o){
@@ -824,6 +780,95 @@ async function renderQuotes(host){
     wrap.innerHTML=html;
     wrap.querySelectorAll('tbody tr[data-i]').forEach(tr=>tr.onclick=()=>openQuote(flat[+tr.dataset.i], ()=>show('quotes')));
   }catch(e){ host.querySelector('.table-wrap').innerHTML='<div class="empty">Couldn’t load — '+esc(e.message)+'</div>'; }
+}
+
+/* ---------- Proposals (standard packets from quotes) ---------- */
+async function renderProposals(host){
+  host.innerHTML=`<section class="view">
+    <div class="view-head"><div><div class="eyebrow">Client-facing packets</div><h1 class="h1">Proposals</h1><p class="lede">Standard proposals built from carrier quotes — commercial or personal, one line or many. Grouped by client.</p></div><div class="btns"><button class="btn primary" id="newProp">+ New proposal</button></div></div>
+    <div class="panel table-wrap"><div class="loading">Loading…</div></div></section>`;
+  $('#newProp').onclick=()=>openProposalBuilder();
+  try{
+    const rows=(await api('/api/proposals')).proposals||[];
+    const wrap=host.querySelector('.table-wrap');
+    if(!rows.length){ wrap.innerHTML='<div class="empty">No proposals yet — click “New proposal”, or use “Build proposal” inside an opportunity.</div>'; return; }
+    let html='<table><thead><tr><th>Client</th><th>Title</th><th>Type</th><th>Package total</th><th>Status</th><th>Created</th></tr></thead><tbody>';
+    rows.forEach((p,i)=>{ html+=`<tr data-i="${i}" style="cursor:pointer"><td>${esc(p.insured_name||'—')}</td><td>${esc(p.title||'—')}</td><td>${esc(p.proposal_type||'—')}</td><td class="num">${p.total_premium?money(p.total_premium):'—'}</td><td>${chip(p.status)}</td><td>${esc((p.created_at||'').slice(0,10))}</td></tr>`; });
+    html+='</tbody></table>';
+    wrap.innerHTML=html;
+    wrap.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>openProposal(rows[+tr.dataset.i]));
+  }catch(e){ host.querySelector('.table-wrap').innerHTML='<div class="empty">Couldn’t load — '+esc(e.message)+'</div>'; }
+}
+async function openProposalBuilder(opts){
+  opts=opts||{}; await loadUsers();
+  const known=!!opts.insured_id;
+  let picked={id:opts.insured_id||'', name:opts.insured_name||''};
+  openModal(`<div class="modal-head"><h3>New proposal</h3><p>Select the carrier quotes to include — grouped by line of business. Commercial or personal, one line or many.</p></div>
+   <div class="modal-body">
+     ${known?`<div class="t-meta" style="margin-bottom:10px">Client: <strong>${esc(opts.insured_name||'')}</strong></div>`
+            :`${clientPicker('prop')}<button class="btn" id="propLoad" style="margin-bottom:10px">Load client's quotes</button>`}
+     <div id="propQuotes"><div class="t-meta">${known?'Loading quotes…':'Pick a client, then load their quotes.'}</div></div>
+     <div class="row2" style="margin-top:12px"><div class="field"><label>Title</label><input id="propTitle" placeholder="${esc(opts.insured_name||'Client')} — Insurance Proposal"/></div>
+       <div class="field"><label>Type</label><select id="propType">${['New Business','Renewal','Comparison'].map(s=>`<option>${s}</option>`).join('')}</select></div></div>
+     <div class="row2"><div class="field"><label>Segment</label><select id="propSeg"><option value="">—</option><option>Commercial</option><option>Personal</option></select></div>
+       <div class="field"><label>Format</label><select id="propFmt"><option value="html">HTML</option><option value="pdf">PDF</option><option value="both">Both</option></select></div></div>
+     <div class="field"><label>Recommendation / notes</label><textarea id="propNotes" placeholder="Why this package, coverage highlights, next steps…"></textarea></div>
+     <div class="field"><label>Prepared by</label><select id="propBy">${userOptions()}</select></div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="propGen">Generate proposal</button></div>`);
+  async function loadQuotes(insuredId,name){
+    picked={id:insuredId,name:name||picked.name};
+    const h=$('#propQuotes'); h.innerHTML='<div class="loading">Loading quotes…</div>';
+    try{
+      const rows=(await api('/api/quotes?insured_id='+encodeURIComponent(insuredId))).quotes||[];
+      if(!rows.length){ h.innerHTML='<div class="t-meta">No quotes for this client yet — add quotes from the Pipeline first.</div>'; return; }
+      const groups={}; rows.forEach(q=>{(groups[q.line_of_business||'Other']=groups[q.line_of_business||'Other']||[]).push(q);});
+      let html='';
+      Object.entries(groups).forEach(([lob,qs])=>{
+        html+=`<div class="tasks-h" style="margin-top:10px"><span>${esc(lob)}</span></div>`;
+        qs.forEach(q=>{ const pre=((opts.preselect&&opts.preselect.indexOf(q.id)>=0)||(opts.preselectOpp&&q.opportunity_id===opts.preselectOpp))?'checked':''; html+=`<label class="task" style="cursor:pointer;display:flex;gap:10px;align-items:center"><input type="checkbox" class="propQ" value="${esc(q.id)}" ${pre}/><span><span class="t-title">${esc(q.carrier||'—')} · ${q.premium?money(q.premium):'—'}</span><span class="t-meta">${esc(q.effective_date||'')}${q.document_url?' · 📎':''}</span></span></label>`; });
+      });
+      h.innerHTML=html;
+    }catch(e){ h.innerHTML='<div class="t-meta">'+esc(e.message)+'</div>'; }
+  }
+  if(known){ loadQuotes(opts.insured_id,opts.insured_name); }
+  else{ wireClientPicker('prop'); $('#propLoad').onclick=()=>{ const id=$('#propId').value,nm=$('#propName').value||$('#propSearch').value; if(!id){toast('Pick a client linked to a NowCerts insured first.',true);return;} loadQuotes(id,nm); }; }
+  $('#propGen').onclick=(e)=>submitBtn(e.target,async()=>{
+    const ids=[...document.querySelectorAll('.propQ:checked')].map(c=>c.value);
+    if(!ids.length){throw new Error('Select at least one quote.')}
+    if(!picked.id){throw new Error("Load a client's quotes first.")}
+    const body={quote_ids:ids,insured_id:picked.id,insured_name:picked.name,opportunity_id:opts.opportunity_id||null,title:$('#propTitle').value||null,segment:$('#propSeg').value||null,proposal_type:$('#propType').value,notes:$('#propNotes').value||null,fmt:$('#propFmt').value,created_by:$('#propBy').value};
+    const r=await api('/api/proposals',{method:'POST',body:JSON.stringify(body)});
+    closeModal();
+    const w=(r.warnings||[]); toast('Proposal generated.'+(w.length?' — '+w.join('; '):''), !!w.length);
+    openProposal(r.proposal);
+  });
+}
+async function openProposal(p){
+  await loadUsers();
+  const viewUrl=API+'/api/proposals/'+encodeURIComponent(p.id)+'/view';
+  openModal(`<div class="modal-head"><h3>${esc(p.title||'Proposal')}</h3><p>${esc(p.insured_name||'')} · ${esc(p.proposal_type||'')}${p.segment?' · '+esc(p.segment):''}</p></div>
+   <div class="modal-body">
+     <div class="meta" style="grid-template-columns:1fr 1fr;margin:0;padding:0;border:none;gap:14px">
+       <div><div class="m-l">Client</div><div class="m-v">${esc(p.insured_name||'—')}</div></div>
+       <div><div class="m-l">Status</div><div class="m-v">${chip(p.status)}</div></div>
+       <div><div class="m-l">Type</div><div class="m-v">${esc(p.proposal_type||'—')}</div></div>
+       <div><div class="m-l">Package total</div><div class="m-v">${p.total_premium?money(p.total_premium):'—'}</div></div>
+       <div><div class="m-l">Quotes included</div><div class="m-v">${(p.quote_ids||[]).length}</div></div>
+       <div><div class="m-l">Created</div><div class="m-v">${esc((p.created_at||'').slice(0,10)||'—')}</div></div>
+     </div>
+     ${p.notes?`<div style="margin-top:12px;font-size:13.5px;color:var(--ink-soft);white-space:pre-wrap;line-height:1.5">${esc(p.notes)}</div>`:''}
+     <div style="border-top:1px solid var(--border-soft);padding-top:14px;margin-top:14px">
+       <div class="eyebrow" style="margin-bottom:8px">Status</div>
+       <div class="field"><select id="propStatus">${['Draft','Final','Sent'].map(s=>`<option ${p.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+     </div></div>
+   <div class="modal-foot">
+     <a class="btn" href="${viewUrl}" target="_blank" rel="noopener">View / Print ↗</a>
+     ${p.pdf_url?`<a class="btn" href="${esc(p.pdf_url)}" target="_blank" rel="noopener">PDF ↗</a>`:''}
+     <button class="btn" id="propRegen">Regenerate</button>
+     <button class="btn primary" id="propStatusSave">Save status</button>
+     <button class="btn" onclick="closeModal()">Close</button></div>`);
+  $('#propRegen').onclick=(e)=>submitBtn(e.target,async()=>{ const r=await api('/api/proposals/'+encodeURIComponent(p.id)+'/regenerate',{method:'POST',body:JSON.stringify({fmt:'html'})}); closeModal(); toast('Regenerated.'); openProposal(r.proposal); });
+  $('#propStatusSave').onclick=(e)=>submitBtn(e.target,async()=>{ await api('/api/proposals/'+encodeURIComponent(p.id)+'/status',{method:'POST',body:JSON.stringify({status:$('#propStatus').value})}); closeModal(); toast('Status updated.'); show('proposals'); });
 }
 async function openNewCase(){
   await loadUsers();
