@@ -1017,13 +1017,32 @@ async def client_360_endpoint(insured_guid: str):
 
 @app.get("/api/policies")
 async def list_policies_endpoint(limit: int = 1000):
-    """Canonical policy book (read-only mirror), soonest-expiring first."""
-    rows = _get_supa().select(
+    """Canonical policy book (read-only mirror), soonest-expiring first.
+
+    Each policy is stamped with the account/insured name it belongs to
+    (looked up from canonical_clients by NowCerts insured GUID)."""
+    supa = _get_supa()
+    rows = supa.select(
         "canonical_policies",
         columns="policy_guid,policy_number,nowcerts_insured_guid,carrier,lines_of_business,status,"
                 "effective_date,expiration_date,premium_amount,annualized_premium,agency_commission_amount,state",
         params={"order": "expiration_date.asc"}, limit=limit,
     )
+    # Attach the account name via a single lookup on the client mirror.
+    try:
+        clients = supa.select(
+            "canonical_clients",
+            columns="nowcerts_insured_guid,insured_name",
+            limit=10000,
+        )
+        name_by_guid = {
+            c.get("nowcerts_insured_guid"): c.get("insured_name")
+            for c in clients if c.get("nowcerts_insured_guid")
+        }
+    except Exception:
+        name_by_guid = {}
+    for r in rows:
+        r["insured_name"] = name_by_guid.get(r.get("nowcerts_insured_guid"))
     return {"policies": rows, "count": len(rows)}
 
 
