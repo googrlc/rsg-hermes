@@ -12,7 +12,7 @@ Config (env; real values live only in .env / 1Password, never committed):
     NEXTCLOUD_BASE_PATH     optional prefix under the user's files (e.g. "Agency")
 
 Folder taxonomy (confirmed):
-    Clients/{client}/{Renewal Reviews|COIs|Policies|Proposals|Correspondence}/
+    Clients/{client}/{Renewal Reviews|COIs|Policies|Proposals|Quotes|Correspondence}/
     Internal/{folder}/
 """
 
@@ -26,8 +26,9 @@ if TYPE_CHECKING:
     import requests
 
 # The confirmed per-client document categories.
-CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Correspondence")
+CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Quotes", "Correspondence")
 DEFAULT_CATEGORY = "Renewal Reviews"
+QUOTES_CATEGORY = "Quotes"
 
 
 class NextcloudError(RuntimeError):

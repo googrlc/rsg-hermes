@@ -174,6 +174,7 @@
       <a data-view="renewals"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2"/><path d="M18 4v5h-5M6 20v-5h5"/></svg>Renewals</a>
       <a data-view="commissions"><svg viewBox="0 0 24 24"><path d="M12 3v18M8 7h6a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6"/></svg>Commissions</a>
       <a data-view="pipeline"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Pipeline</a>
+      <a data-view="quotes"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>Quotes</a>
       <a data-view="intake"><svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M12 12v5M9.5 14.5h5"/></svg>Intake</a>
       <a data-view="cases"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Cases</a>
       <a data-view="tasks"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>Tasks</a>
@@ -213,6 +214,13 @@ async function api(path,opts){
   if(!r.ok) throw new Error(j.detail||('HTTP '+r.status));
   return j;
 }
+async function apiUpload(path,formData){
+  // Multipart POST — DO NOT set Content-Type (the browser sets the boundary).
+  const r = await fetch(API+path,{method:'POST',body:formData});
+  const t = await r.text(); let j; try{j=t?JSON.parse(t):{}}catch{ j={detail:t} }
+  if(!r.ok) throw new Error(j.detail||('HTTP '+r.status));
+  return j;
+}
 function toast(msg,isErr){ const t=el(`<div class="toast ${isErr?'err':''}">${esc(msg)}</div>`); $('#toasts').append(t); setTimeout(()=>t.remove(),4200); }
 async function loadUsers(){ if(USERS.length)return USERS; try{USERS=(await api('/api/agency-users')).users||[]}catch{USERS=[]} return USERS; }
 const userOptions = ()=> USERS.map(u=>`<option value="${esc(u.email)}">${esc(u.display_name||u.email)}</option>`).join('');
@@ -246,6 +254,7 @@ async function show(view){
   if(view==='intake') return renderIntake(host);
   if(view==='hermes') return renderAskHermes(host);
   if(view==='pipeline') return renderPipeline(host);
+  if(view==='quotes') return renderQuotes(host);
   return renderTable(host, TABLES[view]);
 }
 
@@ -619,15 +628,36 @@ async function openNewOpp(preClient){
        <div class="field"><label>Carrier</label><input id="oppCarrier"/></div></div>
      <div class="row2"><div class="field"><label>Probability (%)</label><input id="oppProb" type="number" min="0" max="100" placeholder="0–100"/></div>
        <div class="field"><label>Created by</label><select id="oppBy">${userOptions()}</select></div></div>
-     <div class="field"><label>Description</label><textarea id="oppDesc" placeholder="Notes, context, what they need…"></textarea></div></div>
+     <div class="field"><label>Description</label><textarea id="oppDesc" placeholder="Notes, context, what they need…"></textarea></div>
+     <div style="border-top:1px solid var(--border-soft);padding-top:12px">
+       <div class="eyebrow" style="margin-bottom:8px">Quote PDF (optional)</div>
+       <div class="t-meta" style="margin-bottom:8px">Attach the carrier's quote now and it files into this client's Nextcloud Quotes folder as the opportunity's first quote (using the carrier/premium above). You can add more from the opportunity later.</div>
+       <div class="row2"><div class="field"><label>Effective date</label><input id="oppEff" type="date"/></div>
+         <div class="field"><label>Expiration date</label><input id="oppExp" type="date"/></div></div>
+       <div class="field"><label>Quote PDF</label><input id="oppPdf" type="file" accept="application/pdf,.pdf"/></div>
+     </div></div>
    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="oppSave">Create opportunity</button></div>`);
   wireClientPicker('opp');
   if(preClient&&preClient.name){ $('#oppName').value=preClient.name; $('#oppId').value=preClient.id||''; $('#oppSearch').value=preClient.name; $('#oppPicked').textContent='✓ '+preClient.name; }
   $('#oppSave').onclick=(e)=>submitBtn(e.target,async()=>{
     const name=$('#oppName').value||$('#oppSearch').value, lob=$('#oppLob').value.trim();
     if(!name){throw new Error('Pick a client first.')} if(!lob){throw new Error('Line of business is required.')}
-    const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:$('#oppCarrier').value||null,description:$('#oppDesc').value||null,probability:parseInt($('#oppProb').value,10)||null,source:'cockpit',created_by:$('#oppBy').value})});
-    closeModal(); toast(r.created?'Opportunity created.':'Opportunity already existed — opened.'); show('pipeline');
+    const carrier=$('#oppCarrier').value||null;
+    const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:carrier,description:$('#oppDesc').value||null,probability:parseInt($('#oppProb').value,10)||null,source:'cockpit',created_by:$('#oppBy').value})});
+    // If a quote PDF was attached, create the opportunity's first quote from the carrier/premium above.
+    const pdf=$('#oppPdf').files[0];
+    let warn='';
+    if(pdf && r.opportunity && r.opportunity.id){
+      const fd=new FormData();
+      fd.append('carrier',carrier||''); fd.append('line_of_business',lob);
+      if($('#oppPrem').value) fd.append('premium',$('#oppPrem').value);
+      if($('#oppEff').value) fd.append('effective_date',$('#oppEff').value);
+      if($('#oppExp').value) fd.append('expiration_date',$('#oppExp').value);
+      fd.append('created_by',$('#oppBy').value||''); fd.append('file',pdf);
+      try{ const qr=await apiUpload('/api/opportunities/'+encodeURIComponent(r.opportunity.id)+'/quotes',fd); if(qr.document_warning) warn=qr.document_warning; }
+      catch(err){ warn='Opportunity saved, but the quote PDF failed: '+err.message; }
+    }
+    closeModal(); toast(warn || (r.created?'Opportunity created.':'Opportunity already existed — opened.'), !!warn); show('pipeline');
   });
 }
 async function openPushToAms(kind, id, label){
@@ -686,15 +716,114 @@ async function openOpportunity(o){
      ${o.next_action?`<div class="t-meta" style="margin-top:12px">▸ Next: ${esc(o.next_action)}${o.next_action_date?' ('+esc(String(o.next_action_date).slice(0,10))+')':''}</div>`:''}
      ${o.lost_reason?`<div class="t-meta">Lost reason: ${esc(o.lost_reason)}</div>`:''}
      <div style="border-top:1px solid var(--border-soft);padding-top:14px">
-       <div class="eyebrow" style="margin-bottom:8px">Write back to NowCerts</div>
-       ${linked?`<div class="t-meta" style="margin-bottom:10px">Queues this as a quote (Policy · IsQuote) for approval-gated write-back to the AMS.</div><div class="field"><label>Approved by</label><select id="sqBy">${userOptions()}</select></div>`
-               :`<div class="chip warn">Not linked to a NowCerts insured — create/link the insured via Intake before quoting.</div>`}
+       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+         <div class="eyebrow">Quotes</div>
+         <button class="btn" id="addQuote">+ Add carrier quote</button></div>
+       ${linked?'':`<div class="chip warn" style="margin-bottom:10px">Not linked to a NowCerts insured — you can still attach quotes and PDFs, but sending to the AMS needs the insured linked via Intake.</div>`}
+       <div id="oppQuotes"><div class="loading">Loading quotes…</div></div>
      </div></div>
-   <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>${linked?`<button class="btn primary" id="sqSend">Send quote to NowCerts</button>`:''}</div>`);
-  if(linked){ $('#sqSend').onclick=(e)=>submitBtn(e.target,async()=>{
-    await api('/api/opportunities/'+encodeURIComponent(o.id)+'/send-to-nowcerts',{method:'POST',body:JSON.stringify({approved_by:$('#sqBy').value})});
-    closeModal(); toast('Quote queued to NowCerts — writes when the quote executor runs.');
-  }); }
+   <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Close</button></div>`);
+  $('#addQuote').onclick=()=>openNewQuote(o);
+  loadOppQuotes(o);
+}
+async function loadOppQuotes(o){
+  const host=$('#oppQuotes'); if(!host) return;
+  try{
+    const rows=(await api('/api/opportunities/'+encodeURIComponent(o.id)+'/quotes')).quotes||[];
+    if(!rows.length){ host.innerHTML='<div class="t-meta">No quotes yet — add a carrier quote above.</div>'; return; }
+    host.innerHTML='<div class="table-wrap" style="margin-top:0"><table><thead><tr><th>Carrier</th><th>Premium</th><th>Status</th><th>PDF</th></tr></thead><tbody>'+
+      rows.map((q,i)=>`<tr data-i="${i}" style="cursor:pointer"><td>${esc(q.carrier||'—')}</td><td class="num">${q.premium?money(q.premium):'—'}</td><td>${chip(q.status)}</td><td>${q.document_url?'📎':'—'}</td></tr>`).join('')+
+      '</tbody></table></div>';
+    host.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>openQuote(rows[+tr.dataset.i], ()=>openOpportunity(o)));
+  }catch(e){ host.innerHTML='<div class="t-meta">'+esc(e.message)+'</div>'; }
+}
+async function openNewQuote(o, onDone){
+  await loadUsers();
+  openModal(`<div class="modal-head"><h3>Add carrier quote</h3><p>${esc(o.insured_name||'')} · ${esc(o.line_of_business||'')}</p></div>
+   <div class="modal-body">
+     <div class="row2"><div class="field"><label>Carrier</label><input id="qCarrier" placeholder="Acme Mutual" value="${esc(o.carrier||'')}"/></div>
+       <div class="field"><label>Line of business</label><input id="qLob" value="${esc(o.line_of_business||'')}"/></div></div>
+     <div class="row2"><div class="field"><label>Premium</label><input id="qPrem" type="number" placeholder="0"/></div>
+       <div class="field"><label>Quote # (optional)</label><input id="qNum"/></div></div>
+     <div class="row2"><div class="field"><label>Effective date</label><input id="qEff" type="date"/></div>
+       <div class="field"><label>Expiration date</label><input id="qExp" type="date"/></div></div>
+     <div class="field"><label>Quote PDF</label><input id="qFile" type="file" accept="application/pdf,.pdf"/></div>
+     <div class="field"><label>Notes</label><textarea id="qNotes" placeholder="Coverage highlights, subjectivities…"></textarea></div>
+     <div class="field"><label>Created by</label><select id="qBy">${userOptions()}</select></div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="qSave">Save quote</button></div>`);
+  $('#qSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const carrier=$('#qCarrier').value.trim();
+    if(!carrier){throw new Error('Carrier is required.')}
+    const fd=new FormData();
+    fd.append('carrier',carrier);
+    fd.append('line_of_business',$('#qLob').value||'');
+    if($('#qPrem').value) fd.append('premium',$('#qPrem').value);
+    if($('#qNum').value) fd.append('quote_number',$('#qNum').value);
+    if($('#qEff').value) fd.append('effective_date',$('#qEff').value);
+    if($('#qExp').value) fd.append('expiration_date',$('#qExp').value);
+    if($('#qNotes').value) fd.append('notes',$('#qNotes').value);
+    fd.append('created_by',$('#qBy').value||'');
+    const f=$('#qFile').files[0]; if(f) fd.append('file',f);
+    const res=await apiUpload('/api/opportunities/'+encodeURIComponent(o.id)+'/quotes',fd);
+    closeModal(); toast(res.document_warning?res.document_warning:'Quote saved.', !!res.document_warning);
+    if(onDone) onDone(); else openOpportunity(o);
+  });
+}
+async function openQuote(q, backTo){
+  await loadUsers(); const linked=!!q.insured_id;
+  const pdf = q.document_url ? `<a class="btn" href="${esc(q.document_url)}" target="_blank" rel="noopener">Open PDF ↗</a>` : '';
+  const sendable = linked && (q.status==='Draft' || q.status==='Lost');
+  openModal(`<div class="modal-head"><h3>${esc(q.carrier||'Quote')}</h3><p>${esc(q.insured_name||'')} · ${esc(q.line_of_business||'')}</p></div>
+   <div class="modal-body">
+     <div class="meta" style="grid-template-columns:1fr 1fr;margin:0;padding:0;border:none;gap:14px">
+       <div><div class="m-l">Carrier</div><div class="m-v">${esc(q.carrier||'—')}</div></div>
+       <div><div class="m-l">Status</div><div class="m-v">${chip(q.status)}</div></div>
+       <div><div class="m-l">Premium</div><div class="m-v">${q.premium?money(q.premium):'—'}</div></div>
+       <div><div class="m-l">Quote #</div><div class="m-v">${esc(q.quote_number||'—')}</div></div>
+       <div><div class="m-l">Effective</div><div class="m-v">${esc(q.effective_date||'—')}</div></div>
+       <div><div class="m-l">Expires</div><div class="m-v">${esc(q.expiration_date||'—')}</div></div>
+       <div><div class="m-l">Document</div><div class="m-v">${q.document_filename?esc(q.document_filename):'<span class="muted">— none attached —</span>'}</div></div>
+       <div><div class="m-l">Created</div><div class="m-v">${esc((q.created_at||'').slice(0,10)||'—')}</div></div>
+     </div>
+     ${q.notes?`<div style="margin-top:12px;font-size:13.5px;color:var(--ink-soft);white-space:pre-wrap;line-height:1.5">${esc(q.notes)}</div>`:''}
+     <div style="border-top:1px solid var(--border-soft);padding-top:14px;margin-top:14px">
+       ${q.document_url?'':`<div class="field"><label>Attach quote PDF</label><input id="qaFile" type="file" accept="application/pdf,.pdf"/></div><button class="btn" id="qaUp" style="margin-bottom:14px">Upload PDF</button>`}
+       <div class="eyebrow" style="margin-bottom:8px">Send to NowCerts</div>
+       ${linked?`<div class="t-meta" style="margin-bottom:10px">Queues this carrier quote (Policy · IsQuote) for approval-gated write-back to the AMS.</div><div class="field"><label>Approved by</label><select id="qsBy">${userOptions()}</select></div>`
+               :`<div class="chip warn">Not linked to a NowCerts insured — link via Intake before sending.</div>`}
+     </div></div>
+   <div class="modal-foot">${pdf}<button class="btn" onclick="closeModal()">Close</button>${sendable?`<button class="btn primary" id="qSend">Send quote to NowCerts</button>`:''}</div>`);
+  const up=$('#qaUp'); if(up) up.onclick=(e)=>submitBtn(e.target,async()=>{
+    const f=$('#qaFile').files[0]; if(!f){throw new Error('Choose a PDF first.')}
+    const fd=new FormData(); fd.append('file',f);
+    await apiUpload('/api/quotes/'+encodeURIComponent(q.id)+'/document',fd);
+    closeModal(); toast('PDF attached.'); if(backTo) backTo();
+  });
+  const sq=$('#qSend'); if(sq) sq.onclick=(e)=>submitBtn(e.target,async()=>{
+    await api('/api/quotes/'+encodeURIComponent(q.id)+'/send-to-nowcerts',{method:'POST',body:JSON.stringify({approved_by:$('#qsBy').value})});
+    closeModal(); toast('Quote queued to NowCerts — writes when the quote executor runs.'); if(backTo) backTo();
+  });
+}
+async function renderQuotes(host){
+  host.innerHTML=`<section class="view">
+    <div class="view-head"><div><div class="eyebrow">Carrier quotes</div><h1 class="h1">Quotes</h1><p class="lede">Every carrier quote, grouped by opportunity. Click a quote to open its PDF or send it to NowCerts.</p></div></div>
+    <div class="panel table-wrap"><div class="loading">Loading…</div></div></section>`;
+  try{
+    const rows=(await api('/api/quotes')).quotes||[];
+    const wrap=host.querySelector('.table-wrap');
+    if(!rows.length){ wrap.innerHTML='<div class="empty">No quotes yet — add one from an opportunity in the Pipeline.</div>'; return; }
+    const groups={}; rows.forEach(q=>{ (groups[q.opportunity_id]=groups[q.opportunity_id]||[]).push(q); });
+    let html='<table><thead><tr><th>Client</th><th>LOB</th><th>Carrier</th><th>Premium</th><th>Effective</th><th>Expires</th><th>Quote #</th><th>Status</th><th>PDF</th></tr></thead><tbody>';
+    let idx=0; const flat=[];
+    Object.values(groups).forEach(g=>{
+      const h=g[0];
+      html+=`<tr><td colspan="9" style="background:var(--border-soft);font-weight:600">${esc(h.insured_name||'—')} · ${esc(h.line_of_business||'')} <span class="muted">(${g.length} quote${g.length>1?'s':''})</span></td></tr>`;
+      g.forEach(q=>{ flat.push(q); html+=`<tr data-i="${idx++}" style="cursor:pointer"><td>${esc(q.insured_name||'—')}</td><td>${esc(q.line_of_business||'—')}</td><td>${esc(q.carrier||'—')}</td><td class="num">${q.premium?money(q.premium):'—'}</td><td>${esc(q.effective_date||'—')}</td><td>${esc(q.expiration_date||'—')}</td><td>${esc(q.quote_number||'—')}</td><td>${chip(q.status)}</td><td>${q.document_url?'📎':'—'}</td></tr>`; });
+    });
+    html+='</tbody></table>';
+    wrap.innerHTML=html;
+    wrap.querySelectorAll('tbody tr[data-i]').forEach(tr=>tr.onclick=()=>openQuote(flat[+tr.dataset.i], ()=>show('quotes')));
+  }catch(e){ host.querySelector('.table-wrap').innerHTML='<div class="empty">Couldn’t load — '+esc(e.message)+'</div>'; }
 }
 async function openNewCase(){
   await loadUsers();
