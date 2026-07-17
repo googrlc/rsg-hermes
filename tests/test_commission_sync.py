@@ -137,11 +137,12 @@ def test_up_for_renewal_excluded():
     assert supa.tables.get(cs.LEDGER_TABLE, []) == []
 
 
-def test_renewing_is_ledgered():
+def test_renewing_excluded():
+    # Renewing is in-process, not yet won — excluded. Only Active/Renewed ledger.
     supa = supa_with([cpol("P1", status="Renewing", premium=2000.0)])
     res = cs.run_commission_sync(supa)
-    assert res.inserted == 1
-    assert supa.tables[cs.LEDGER_TABLE][0]["is_renewal"] is True
+    assert res.skipped_not_commissionable == 1 and res.inserted == 0
+    assert supa.tables.get(cs.LEDGER_TABLE, []) == []
 
 
 def test_zero_premium_skipped():
