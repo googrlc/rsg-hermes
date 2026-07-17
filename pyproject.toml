@@ -22,6 +22,9 @@ dependencies = [
   # Renewal worksheet PDF generation (hermes/renewals/pdf.py). Pinned so the
   # image is reproducible; also force-installed in the Dockerfile.
   "reportlab==5.0.0",
+  # Proposal HTML→PDF rendering (hermes/proposals/generator.py). Needs native
+  # Pango libs (added in the Dockerfile); also force-installed there.
+  "weasyprint>=60",
   # Voice output — free Edge TTS (no API key needed).
   "edge-tts>=6.1",
 ]
