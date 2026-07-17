@@ -38,10 +38,10 @@ log = logging.getLogger(__name__)
 LEDGER_TABLE = "commission_ledger"
 STATEMENT_SOURCE = "canonical_book"
 
-# Only WON, in-force business ledgers a commission: the policy must be Active,
-# Renewed, or Renewing. "Up for Renewal" (pending, not yet won) is intentionally
-# excluded, as is everything cancelled/expired/lapsed/etc.
-LEDGER_STATUSES = frozenset({"Active", "Renewed", "Renewing"})
+# Only WON, in-force business ledgers a commission: the policy must be Active or
+# Renewed. Everything else is excluded — Renewing / Up for Renewal (pending, not
+# yet won) and all cancelled/expired/lapsed/non-renewed statuses.
+LEDGER_STATUSES = frozenset({"Active", "Renewed"})
 
 # Fallback ledger columns when the table is empty (schema-adaptive otherwise).
 _LEDGER_COLS = {
