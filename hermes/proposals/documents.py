@@ -58,6 +58,8 @@ def generate_and_file(
             pdf_bytes = generator.render_pdf(html_str)
         except generator.PdfUnavailable as exc:
             warnings.append(str(exc))
+        except Exception as exc:  # noqa: BLE001 — a render failure must not lose the proposal
+            warnings.append(f"PDF render failed ({exc}); HTML is available.")
 
     if file_to_nextcloud:
         client_name = proposal.get("insured_name") or proposal.get("client_identifier") or "Unknown Client"
