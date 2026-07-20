@@ -213,6 +213,40 @@ class NowCertsClient:
         log.info("NowCerts: total policies fetched = %d", len(all_records))
         return all_records
 
+    def fetch_opportunities(
+        self,
+        *,
+        page_size: int = 100,
+        max_pages: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Fetch all Opportunity records from the OData ``OpportunitiesList`` endpoint.
+
+        A NowCerts Opportunity is a first-class object (distinct from a policy/quote):
+        the agency's pipeline. ``OpportunitiesList`` requires ``$top``, ``$skip`` and
+        ``$orderby`` together (a 400 otherwise). Returns raw dicts shaped like
+        ``OpportunityIntegrationModel``: ``id``, ``insuredDatabaseId``,
+        ``lineOfBusinessName``, ``opportunityStageName``, ``neededBy``,
+        ``currentStageDueDate``, ``referralSourceName``, ``winProbability`` (a
+        categorical Excellent..NotLikely), ``description``, ``assignedTo``,
+        ``createdFromRenewal``.
+        """
+        all_records: list[dict[str, Any]] = []
+        skip = 0
+        for page in range(max_pages):
+            body = self._get(
+                "/api/OpportunitiesList",
+                params={"$top": str(page_size), "$skip": str(skip), "$orderby": "neededBy asc"},
+            )
+            records = body if isinstance(body, list) else body.get("value", body.get("items", []))
+            if not records:
+                break
+            all_records.extend(records)
+            if len(records) < page_size:
+                break
+            skip += page_size
+        log.info("NowCerts: total opportunities fetched = %d", len(all_records))
+        return all_records
+
     # ── Write methods ─────────────────────────────────────────────────────
 
     def _post(self, path: str, payload: dict[str, Any]) -> Any:

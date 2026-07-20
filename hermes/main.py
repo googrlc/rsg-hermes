@@ -414,6 +414,23 @@ def main() -> int:
         help="Cap the number of quotes processed (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--sync-opportunities",
+        action="store_true",
+        help="Mirror NowCerts Opportunities (OpportunitiesList) → Supabase opportunities pipeline. "
+             "Stages stored verbatim; idempotent per NowCerts opportunity id.",
+    )
+    parser.add_argument(
+        "--sync-opportunities-dry-run",
+        action="store_true",
+        help="Preview the NowCerts opportunity → pipeline sync (counts + no writes)",
+    )
+    parser.add_argument(
+        "--sync-opportunities-limit",
+        type=int,
+        default=None,
+        help="Cap the number of opportunities processed (useful for a first dry-run)",
+    )
+    parser.add_argument(
         "--sync-commissions",
         action="store_true",
         help="Seed commission_ledger EXPECTED values from canonical_policies (NowCerts agency commission "
@@ -767,6 +784,37 @@ def main() -> int:
             for err in quote_result.errors[:50]:
                 print(f"- {err}")
         return 0 if quote_result.ok else 1
+
+    # --- NowCerts Opportunities → opportunities pipeline mirror ---
+    if args.sync_opportunities or args.sync_opportunities_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes.sync.opportunity_sync import run_opportunity_sync
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            nc = NowCertsClient()
+        except NowCertsClientError as e:
+            print(f"NowCerts connection failed: {e}", file=sys.stderr)
+            return 2
+
+        opp_result = run_opportunity_sync(
+            nc, supa,
+            dry_run=args.sync_opportunities_dry_run,
+            limit=args.sync_opportunities_limit,
+        )
+        print(opp_result.message)
+        for pv in opp_result.previews[:30]:
+            print(f"  {pv['action'].upper()} {pv['client']!r} · {pv['lob']} · {pv['stage']}")
+        if opp_result.errors:
+            print("\nErrors:")
+            for err in opp_result.errors[:50]:
+                print(f"- {err}")
+        return 0 if opp_result.ok else 1
 
     # --- Canonical book → commission_ledger expected-value seeding ---
     if args.sync_commissions or args.sync_commissions_dry_run:
