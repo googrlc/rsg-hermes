@@ -823,24 +823,40 @@ async def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
 class StageUpdateRequest(BaseModel):
     stage: str
     lost_reason: str | None = None
+    approved_by: str | None = None
 
 
 @app.post("/api/opportunities/{opportunity_id}/stage")
 async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest):
     """Move an opportunity to a new pipeline stage (Kanban drag). Syncs status
-    (Bound→won, Lost→lost). Supabase-only — does not touch NowCerts."""
+    (won/lost). The move itself is Supabase-only; when it lands on a terminal stage
+    (Bound/Won or Lost) it QUEUES an approval-gated writeback to NowCerts — nothing
+    hits the AMS until the opportunity-writeback executor drains it."""
     from hermes.intake import opportunities as opp
 
+    supa = _get_supa()
     stage = (req.stage or "").strip()
     try:
         # advance_stage accepts any non-empty stage (NowCerts owns the vocabulary).
-        row = opp.advance_stage(_get_supa(), opportunity_id, stage, lost_reason=req.lost_reason)
+        row = opp.advance_stage(supa, opportunity_id, stage, lost_reason=req.lost_reason)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         log.exception("stage update failed: %s", opportunity_id)
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "opportunity": row}
+
+    # Terminal → queue the AMS writeback (Bound/Won or Lost). Best-effort: a queue
+    # hiccup must not fail the stage move.
+    queued = None
+    if str(row.get("status") or "") in ("won", "lost") and row.get("nowcerts_opportunity_id"):
+        try:
+            from hermes.sync.opportunity_writeback import stage_writeback
+
+            job = stage_writeback(supa, row, approved_by=req.approved_by or "cockpit-stage-move", stage=stage)
+            queued = bool(job)
+        except Exception:
+            log.exception("opportunity writeback staging failed: %s", opportunity_id)
+    return {"ok": True, "opportunity": row, "writeback_queued": queued}
 
 
 # ── Opportunity quotes — carrier quotes (with PDF) attached to an opportunity ──
