@@ -179,6 +179,15 @@ def test_open_opportunity_promoted_forward_to_quoted():
     assert row["quote_number"] == "Q1"
 
 
+def test_referral_source_pulled_from_quote():
+    """Referral Source is read-only, pulled from the NowCerts quote onto the row."""
+    q = nc_quote("Q1")
+    q["referralSourceName"] = "Website"
+    supa, nc = FakeSupabase(), FakeNowCerts(policies=[q])
+    run(supa, nc)
+    assert supa.tables[opp.TABLE][0]["referral_source"] == "Website"
+
+
 def test_bound_opportunity_not_downgraded_or_promoted():
     """A Bound deal keeps its stage; promotion is forward-only."""
     ci = opp.make_client_identifier("Acme LLC", None)
