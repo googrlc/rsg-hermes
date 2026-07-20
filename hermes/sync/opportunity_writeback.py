@@ -38,12 +38,13 @@ STAGE_BOUND_WON = "Bound / Won"
 STAGE_LOST = "Lost"
 
 # OpportunityIntegrationModel write fields to round-trip from a fresh read so the
-# InsertOpportunity upsert doesn't blank the required ones.
+# InsertOpportunity upsert doesn't blank the required ones. insuredDatabaseId is
+# deliberately EXCLUDED: this is always an update (databaseId is set), and re-sending
+# the insured makes NowCerts try to re-assign it → 400 "Can't assign to Insured/Prospect".
 _WRITE_FIELDS = (
     "lineOfBusinessName", "neededBy", "opportunityStageName", "currentStageDueDate",
     "referralSourceName", "referralSourceContactName", "winProbability", "agencyCommission",
-    "assignedTo", "description", "insuredDatabaseId", "createdFromRenewal",
-    "dispositionDatabaseId", "costOfLead",
+    "assignedTo", "description", "createdFromRenewal", "dispositionDatabaseId", "costOfLead",
 )
 
 

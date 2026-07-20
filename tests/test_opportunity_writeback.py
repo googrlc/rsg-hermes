@@ -75,12 +75,14 @@ def test_stage_writeback_queues_only_terminal_mirrored():
 def test_writeback_payload_roundtrips_and_coerces():
     fresh = {"id": "NCO-1", "lineOfBusinessName": "General Liability", "neededBy": "2026-07-24",
              "winProbability": "VeryGood", "agencyCommission": 10, "assignedTo": "g@x",
-             "opportunityStageName": "Quotes Received", "dispositionDatabaseId": "D1"}
+             "opportunityStageName": "Quotes Received", "dispositionDatabaseId": "D1",
+             "insuredDatabaseId": "INS-1"}
     p = _writeback_payload(fresh, "Bound / Won")
     assert p["databaseId"] == "NCO-1" and p["opportunityStageName"] == "Bound / Won"
     assert p["assignedTo"] == ["g@x"]           # coerced to array
     assert p["dispositionDatabaseId"] == "D1"   # existing disposition round-tripped
     assert p["lineOfBusinessName"] == "General Liability"
+    assert "insuredDatabaseId" not in p         # NOT re-sent on update (avoids the 400)
 
 
 def test_writeback_payload_fills_required_when_missing():
