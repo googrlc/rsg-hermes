@@ -227,7 +227,7 @@ async function apiUpload(path,formData){
 }
 function toast(msg,isErr){ const t=el(`<div class="toast ${isErr?'err':''}">${esc(msg)}</div>`); $('#toasts').append(t); setTimeout(()=>t.remove(),4200); }
 async function loadUsers(){ if(USERS.length)return USERS; try{USERS=(await api('/api/agency-users')).users||[]}catch{USERS=[]} return USERS; }
-const userOptions = ()=> USERS.map(u=>`<option value="${esc(u.email)}">${esc(u.display_name||u.email)}</option>`).join('');
+const userOptions = (selected)=> USERS.map(u=>`<option value="${esc(u.email)}"${u.email===selected?' selected':''}>${esc(u.display_name||u.email)}</option>`).join('');
 
 /* ---------- View configs ---------- */
 const TABLES = {
@@ -729,6 +729,42 @@ function openPolicy(p){
      <button class="btn primary" onclick="closeModal()">Close</button></div>`);
   const b=$('#pol360'); if(b) b.onclick=()=>{closeModal();renderClient360(p.nowcerts_insured_guid);};
 }
+const OPP_LIKELIHOODS=['Excellent','Very Good','Good','Moderate','Not Likely'];
+const OPP_DISPOSITIONS=['','Price','Coverage / Terms','Stayed with current carrier','Went with competitor','No response / Unresponsive','Declined – Underwriting','Out of appetite','Duplicate / Invalid'];
+async function openEditOpp(o){
+  await loadUsers();
+  const stageOpts=[...PIPE_STAGES]; if(o.stage&&!stageOpts.includes(o.stage)) stageOpts.push(o.stage);
+  const sel=(a,b)=>a===b?' selected':'';
+  openModal(`<div class="modal-head"><h3>Edit opportunity</h3><p>${esc(o.insured_name||'')} — worked in the CRM (not written to the AMS until Bound/Won or Lost)</p></div>
+   <div class="modal-body">
+     <div class="row2"><div class="field"><label>Opportunity type</label><select id="eType">${OPP_TYPES.map(t=>`<option${sel(t,o.opportunity_type)}>${t}</option>`).join('')}</select></div>
+       <div class="field"><label>Line of business</label><input id="eLob" value="${esc(o.line_of_business||'')}"/></div></div>
+     <div class="row2"><div class="field"><label>Stage</label><select id="eStage">${stageOpts.map(s=>`<option${sel(s,o.stage)}>${esc(s)}</option>`).join('')}</select></div>
+       <div class="field"><label>Est. premium</label><input id="ePrem" type="number" value="${o.premium_estimate!=null?o.premium_estimate:''}"/></div></div>
+     <div class="row2"><div class="field"><label>Carrier</label><input id="eCarrier" value="${esc(o.carrier||'')}"/></div>
+       <div class="field"><label>Win probability (%)</label><input id="eProb" type="number" min="0" max="100" value="${o.probability!=null?o.probability:''}"/></div></div>
+     <div class="row2"><div class="field"><label>Likelihood</label><select id="eLike">${OPP_LIKELIHOODS.map(l=>`<option${sel(l,o.likelihood)}>${l}</option>`).join('')}</select></div>
+       <div class="field"><label>Assigned to</label><select id="eBy">${userOptions(o.assigned_to)}</select></div></div>
+     <div class="field"><label>Disposition (close reason)</label><select id="eDisp">${OPP_DISPOSITIONS.map(d=>`<option value="${esc(d)}"${sel(d,o.disposition||'')}>${d||'—'}</option>`).join('')}</select></div>
+     <div class="field"><label>Next action</label><input id="eNext" value="${esc(o.next_action||'')}"/></div>
+     <div class="field"><label>Notes</label><textarea id="eDesc">${esc(o.description||'')}</textarea></div>
+     <div class="err" id="eErr"></div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="eSave">Save changes</button></div>`);
+  $('#eSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const prob=parseInt($('#eProb').value,10);
+    const body={
+      opportunity_type:$('#eType').value, line_of_business:$('#eLob').value.trim()||null,
+      stage:$('#eStage').value, premium_estimate:parseFloat($('#ePrem').value)||null,
+      carrier:$('#eCarrier').value.trim()||null, likelihood:$('#eLike').value,
+      disposition:$('#eDisp').value||null, assigned_to:$('#eBy').value||null,
+      next_action:$('#eNext').value.trim()||null, description:$('#eDesc').value.trim()||null,
+    };
+    if(!Number.isNaN(prob)) body.probability=prob;
+    await api('/api/opportunities/'+encodeURIComponent(o.id),{method:'PATCH',body:JSON.stringify(body)});
+    toast('Opportunity updated.'); closeModal();
+    if(document.querySelector('.nav a.active')?.dataset.view==='pipeline') show('pipeline');
+  });
+}
 async function openOpportunity(o){
   await loadUsers(); const linked=!!o.insured_id;
   openModal(`<div class="modal-head"><h3>${esc(o.insured_name||'Opportunity')}</h3><p>${esc(o.line_of_business||'')} · ${esc(o.stage||'')}</p></div>
@@ -759,7 +795,8 @@ async function openOpportunity(o){
        ${linked?'':`<div class="chip warn" style="margin-bottom:10px">Not linked to a NowCerts insured — you can still attach quotes and PDFs, but sending to the AMS needs the insured linked via Intake.</div>`}
        <div id="oppQuotes"><div class="loading">Loading quotes…</div></div>
      </div></div>
-   <div class="modal-foot"><button class="btn primary" onclick="closeModal()">Close</button></div>`);
+   <div class="modal-foot"><button class="btn" id="editOpp">✎ Edit</button><button class="btn primary" onclick="closeModal()">Close</button></div>`);
+  $('#editOpp').onclick=()=>openEditOpp(o);
   $('#addQuote').onclick=()=>openNewQuote(o);
   const bp=$('#buildProp'); if(bp) bp.onclick=()=>openProposalBuilder({insured_id:o.insured_id,insured_name:o.insured_name,opportunity_id:o.id,preselectOpp:o.id});
   loadOppQuotes(o);

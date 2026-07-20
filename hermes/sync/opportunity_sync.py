@@ -158,6 +158,7 @@ class OpportunitySyncResult:
     fetched: int = 0
     created: int = 0
     updated: int = 0
+    skipped_worked: int = 0
     skipped_no_client: int = 0
     previews: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -170,7 +171,8 @@ class OpportunitySyncResult:
     def message(self) -> str:
         return (
             f"nowcerts opportunities → pipeline: fetched={self.fetched} created={self.created} "
-            f"updated={self.updated} skipped_no_client={self.skipped_no_client} errors={len(self.errors)}"
+            f"updated={self.updated} skipped_worked={self.skipped_worked} "
+            f"skipped_no_client={self.skipped_no_client} errors={len(self.errors)}"
         )
 
 
@@ -272,6 +274,12 @@ def run_opportunity_sync(
                     result.created += 1
                 continue
             if existing:
+                # Once a deal is being worked in the CRM (sync_source='crm'), the
+                # inbound AMS sync no longer overwrites it — it lives in the CRM until
+                # terminal (Bound/Won or Lost), when the outbound step writes back.
+                if str(existing.get("sync_source") or "") == "crm":
+                    result.skipped_worked += 1
+                    continue
                 # Don't clobber a human-entered estimate; fill it only if blank.
                 if est is not None and "premium_estimate" in cols and not existing.get("premium_estimate"):
                     payload["premium_estimate"] = est
