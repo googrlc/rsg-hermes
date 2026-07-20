@@ -139,3 +139,56 @@ def test_limit_caps_quotes():
     nc = FakeNowCerts(policies=[nc_quote(f"Q{i}", name=f"Co {i}") for i in range(4)])
     res = run(supa, nc, limit=2)
     assert res.quotes_fetched == 2
+
+
+def test_new_quote_stamps_live_terms():
+    """A new quote lands its real terms (premium_actual, dates, status) on the row."""
+    q = nc_quote("Q1", premium=2500.0, carrier="Travelers")
+    q["effectiveDate"] = "2026-08-01T00:00:00"
+    q["expirationDate"] = "2027-08-01T00:00:00"
+    q["status"] = "Quoted"
+    supa, nc = FakeSupabase(), FakeNowCerts(policies=[q])
+    res = run(supa, nc)
+    assert res.created == 1
+    row = supa.tables[opp.TABLE][0]
+    assert row["premium_actual"] == 2500.0
+    assert row["effective_date"] == "2026-08-01"      # _strip_date drops the time
+    assert row["expiration_date"] == "2027-08-01"
+    assert row["policy_status"] == "Quoted"
+    assert row["sync_source"] == "nowcerts_quote_sync"
+    assert row["synced_at"]                            # timestamp stamped
+
+
+def test_open_opportunity_promoted_forward_to_quoted():
+    """A still-open (Preparing Application) opportunity is promoted forward when a quote arrives."""
+    ci = opp.make_client_identifier("Acme LLC", None)
+    supa = FakeSupabase({opp.TABLE: [{
+        "id": "opp-x", "client_identifier": ci, "line_of_business": "General Liability",
+        "opportunity_type": opp.TYPE_NEW_BUSINESS,
+        "stage": opp.STAGE_PREP, "status": opp.STATUS_OPEN, "premium_actual": None,
+        "effective_date": None, "expiration_date": None, "policy_status": None,
+        "synced_at": None, "sync_source": None, "insured_id": None,
+        "quote_number": None, "nowcerts_quote_guid": None, "carrier": None,
+    }]})
+    nc = FakeNowCerts(policies=[nc_quote("Q1", name="Acme LLC", lob="General Liability")])
+    res = run(supa, nc)
+    assert res.created == 0 and res.linked == 1 and res.promoted == 1
+    row = supa.tables[opp.TABLE][0]
+    assert row["stage"] == opp.STAGE_QUOTES_RECEIVED   # promoted forward
+    assert row["status"] == opp.STATUS_OPEN
+    assert row["quote_number"] == "Q1"
+
+
+def test_bound_opportunity_not_downgraded_or_promoted():
+    """A Bound deal keeps its stage; promotion is forward-only."""
+    ci = opp.make_client_identifier("Acme LLC", None)
+    supa = FakeSupabase({opp.TABLE: [{
+        "id": "opp-x", "client_identifier": ci, "line_of_business": "General Liability",
+        "stage": opp.STAGE_BOUND, "status": opp.STATUS_WON, "insured_id": None,
+        "quote_number": None, "nowcerts_quote_guid": None, "carrier": None,
+    }]})
+    nc = FakeNowCerts(policies=[nc_quote("Q1", name="Acme LLC", lob="General Liability")])
+    res = run(supa, nc)
+    assert res.promoted == 0
+    row = supa.tables[opp.TABLE][0]
+    assert row["stage"] == opp.STAGE_BOUND and row["status"] == opp.STATUS_WON
