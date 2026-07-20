@@ -29,9 +29,29 @@ def test_make_client_identifier():
 
 
 def test_status_for_stage():
-    assert opp.status_for_stage(opp.STAGE_BOUND) == opp.STATUS_WON
+    assert opp.status_for_stage(opp.STAGE_BOUND) == opp.STATUS_WON            # new-business won
+    assert opp.status_for_stage(opp.STAGE_COMPLETE_RENEWAL) == opp.STATUS_WON  # renewal won
     assert opp.status_for_stage(opp.STAGE_LOST) == opp.STATUS_LOST
-    assert opp.status_for_stage(opp.STAGE_QUOTING) == opp.STATUS_OPEN
+    assert opp.status_for_stage(opp.STAGE_NOT_RENEWED) == opp.STATUS_LOST      # renewal lost
+    assert opp.status_for_stage(opp.STAGE_QUOTES_RECEIVED) == opp.STATUS_OPEN
+
+
+def test_stage_probability_and_likelihood_mapping():
+    # Pipeline drives the % ; % maps to the NowCerts likelihood category.
+    assert opp.probability_for_stage(opp.STAGE_PREP) == 10
+    assert opp.probability_for_stage(opp.STAGE_BOUND) == 100
+    assert opp.likelihood_for_probability(100) == opp.LIKELIHOOD_EXCELLENT
+    assert opp.likelihood_for_probability(50) == opp.LIKELIHOOD_GOOD
+    assert opp.likelihood_for_probability(10) == opp.LIKELIHOOD_NOT_LIKELY
+    assert opp.likelihood_for_probability(None) == opp.DEFAULT_LIKELIHOOD == "Good"
+
+
+def test_stages_for_type_splits_pipelines():
+    assert opp.stages_for_type(opp.TYPE_RENEWALS) == opp.RENEWAL_STAGES
+    assert opp.stages_for_type(opp.TYPE_NEW_BUSINESS) == opp.NEW_BUSINESS_STAGES
+    assert opp.stages_for_type("Cross-selling") == opp.NEW_BUSINESS_STAGES
+    assert opp.default_stage_for_type(opp.TYPE_RENEWALS) == opp.STAGE_RENEWAL_90
+    assert opp.default_stage_for_type(opp.TYPE_NEW_BUSINESS) == opp.STAGE_PREP
 
 
 # ---------------------------------------------------------------- create
@@ -43,23 +63,57 @@ def test_create_opportunity_new():
         insured_name="Acme", prospect_type="Hot_Prospect", insured_type="Commercial",
     )
     assert created is True
-    assert row["stage"] == "New" and row["status"] == "open"
+    # defaults: New Business type → first stage, stage-driven probability + likelihood.
+    assert row["opportunity_type"] == "New Business"
+    assert row["stage"] == opp.STAGE_PREP and row["status"] == "open"
+    assert row["probability"] == 10 and row["likelihood"] == opp.LIKELIHOOD_NOT_LIKELY
     assert row["prospect_type"] == "Hot_Prospect"
     supa.insert.assert_called_once()
 
 
-def test_create_opportunity_idempotent():
-    supa = _supa(existing=[{"id": "opp-9", "stage": "Quoting"}])
+def test_create_renewal_opportunity_uses_renewal_stages():
+    supa = _supa(existing=[])
+    row, created = opp.create_opportunity(
+        supa, client_identifier="acme:1", line_of_business="General Liability",
+        opportunity_type=opp.TYPE_RENEWALS,
+    )
+    assert created is True
+    assert row["opportunity_type"] == "Renewals"
+    assert row["stage"] == opp.STAGE_RENEWAL_90
+
+
+def test_create_likelihood_defaults_to_good_when_probability_midrange():
+    supa = _supa(existing=[])
+    row, _ = opp.create_opportunity(
+        supa, client_identifier="acme:1", line_of_business="GL",
+        stage=opp.STAGE_QUOTES_RECEIVED,   # 50% → Good
+    )
+    assert row["probability"] == 50 and row["likelihood"] == "Good"
+
+
+def test_create_opportunity_idempotent_scoped_by_type():
+    supa = _supa(existing=[{"id": "opp-9", "stage": opp.STAGE_SENT_QUOTING}])
     row, created = opp.create_opportunity(
         supa, client_identifier="acme:1", line_of_business="General Liability"
     )
     assert created is False and row["id"] == "opp-9"
+    # existence check is scoped by opportunity_type now
+    _, kw = supa.select.call_args
+    assert kw["params"]["opportunity_type"] == "eq.New Business"
     supa.insert.assert_not_called()
 
 
-def test_create_unknown_stage_raises():
+def test_create_unknown_stage_for_type_raises():
     with pytest.raises(ValueError):
-        opp.create_opportunity(MagicMock(), client_identifier="a", line_of_business="GL", stage="Bogus")
+        # a renewal stage is invalid for a New Business opportunity
+        opp.create_opportunity(MagicMock(), client_identifier="a", line_of_business="GL",
+                               opportunity_type=opp.TYPE_NEW_BUSINESS, stage=opp.STAGE_RENEWAL_90)
+
+
+def test_create_unknown_type_raises():
+    with pytest.raises(ValueError):
+        opp.create_opportunity(MagicMock(), client_identifier="a", line_of_business="GL",
+                               opportunity_type="Nonsense")
 
 
 def test_create_requires_client_and_lob():
@@ -102,9 +156,11 @@ def test_link_nowcerts_noop_when_empty():
 
 def test_list_opportunities_filters():
     supa = _supa(existing=[{"id": "o1"}])
-    opp.list_opportunities(supa, stage="Quoting", assigned_to="gretchen")
+    opp.list_opportunities(supa, stage=opp.STAGE_SENT_QUOTING, opportunity_type=opp.TYPE_RENEWALS,
+                           assigned_to="gretchen")
     _, kw = supa.select.call_args
     params = kw["params"]
-    assert params["stage"] == "eq.Quoting"
+    assert params["stage"] == "eq.Sent For Quoting"
+    assert params["opportunity_type"] == "eq.Renewals"
     assert params["status"] == "eq.open"
     assert params["assigned_to"] == "eq.gretchen"
