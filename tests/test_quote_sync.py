@@ -66,7 +66,7 @@ def test_new_quote_creates_opportunity_and_links_ids():
     res = run(supa, nc)
     assert res.quotes_fetched == 1 and res.created == 1 and res.linked == 0
     row = supa.tables[opp.TABLE][0]
-    assert row["stage"] == opp.STAGE_QUOTED and row["status"] == opp.STATUS_OPEN
+    assert row["stage"] == opp.STAGE_QUOTES_RECEIVED and row["status"] == opp.STATUS_OPEN
     assert row["insured_name"] == "Acme LLC"
     assert row["line_of_business"] == "General Liability"
     assert row["premium_estimate"] == 1200.0
@@ -89,6 +89,7 @@ def test_existing_opportunity_links_without_resetting_stage():
     ci = opp.make_client_identifier("Acme LLC", None)
     supa = FakeSupabase({opp.TABLE: [{
         "id": "opp-x", "client_identifier": ci, "line_of_business": "General Liability",
+        "opportunity_type": opp.TYPE_NEW_BUSINESS,
         "stage": opp.STAGE_BOUND, "status": opp.STATUS_WON,
     }]})
     nc = FakeNowCerts(policies=[nc_quote("Q1", name="Acme LLC", lob="General Liability")])
@@ -126,7 +127,7 @@ def test_dry_run_classifies_existing_as_linked():
     ci = opp.make_client_identifier("Acme LLC", None)
     supa = FakeSupabase({opp.TABLE: [{
         "id": "opp-x", "client_identifier": ci, "line_of_business": "General Liability",
-        "stage": opp.STAGE_QUOTING,
+        "stage": opp.STAGE_SENT_QUOTING,
     }]})
     nc = FakeNowCerts(policies=[nc_quote("Q1", name="Acme LLC", lob="General Liability")])
     res = run(supa, nc, dry_run=True)

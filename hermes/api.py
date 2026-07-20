@@ -616,16 +616,20 @@ class OpportunityCreateRequest(BaseModel):
     insured_name: str | None = None
     fein: str | None = None
     insured_id: str | None = None            # NowCerts insured guid
+    opportunity_type: str | None = None      # NowCerts type; defaults to New Business
     prospect_type: str | None = None
     insured_type: str | None = None
-    stage: str = "New"
+    stage: str | None = None                 # defaults to the type's first stage
     premium_estimate: float | None = None
     carrier: str | None = None
     lead_source: str | None = None
+    # referral_source is READ-ONLY — sourced from NowCerts by the sync, not set here.
     assigned_to: str | None = None
     next_action: str | None = None
     description: str | None = None
-    probability: int | None = None
+    probability: int | None = None           # win %; defaults from stage
+    likelihood: str | None = None            # NowCerts likelihood; defaults from probability
+    disposition: str | None = None           # NowCerts Disposition (outcome)
     source: str = "manual"
     created_by: str | None = None
 
@@ -646,14 +650,14 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
     from hermes.intake import opportunities as opp
 
     ci = req.client_identifier or opp.make_client_identifier(req.insured_name, req.fein)
-    stage = (req.stage or opp.STAGE_NEW).strip()
-    if stage not in opp.STAGES:
-        raise HTTPException(status_code=400, detail=f"Unknown stage '{stage}'; must be one of {list(opp.STAGES)}")
+    otype = (req.opportunity_type or opp.TYPE_NEW_BUSINESS).strip()
+    stage = req.stage.strip() if req.stage else None   # None → type's first stage
     try:
         row, created = opp.create_opportunity(
             _get_supa(),
             client_identifier=ci,
             line_of_business=req.line_of_business,
+            opportunity_type=otype,
             insured_name=req.insured_name,
             insured_id=req.insured_id,
             prospect_type=req.prospect_type,
@@ -666,6 +670,8 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
             next_action=req.next_action,
             description=req.description,
             probability=req.probability,
+            likelihood=req.likelihood,
+            disposition=req.disposition,
             source=req.source,
             created_by=req.created_by,
         )
