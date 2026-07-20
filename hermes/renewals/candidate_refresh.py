@@ -15,6 +15,7 @@ for the existing read consumers.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -30,6 +31,21 @@ log = logging.getLogger(__name__)
 CANDIDATES_TABLE = "renewal_candidates"
 P85_TABLE = "project_85_renewals"
 _ALIGN_TOLERANCE_DAYS = 3
+
+# Renewal floor: the pipeline only carries events on/after this date. Anything
+# with a renewal event before it (ancient past-due / stale lapses) is dropped —
+# "from June 1 going forward" (RSG). Override with HERMES_RENEWAL_FLOOR=YYYY-MM-DD.
+DEFAULT_RENEWAL_FLOOR = date(2026, 6, 1)
+
+
+def renewal_floor() -> date:
+    raw = os.environ.get("HERMES_RENEWAL_FLOOR", "").strip()
+    if raw:
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            log.warning("invalid HERMES_RENEWAL_FLOOR=%r; using default %s", raw, DEFAULT_RENEWAL_FLOOR)
+    return DEFAULT_RENEWAL_FLOOR
 
 # Ranking for identity dedup (higher wins).
 _STATE_RANK = {elig.STATE_ELIGIBLE: 3, elig.STATE_NEEDS_VERIFICATION: 2, elig.STATE_EXCLUDED: 1}
@@ -209,9 +225,16 @@ def build_candidates(
     *,
     today: date,
     now_iso: str | None = None,
+    floor: date | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate every policy and collapse to one row per renewal-event identity."""
+    """Evaluate every policy and collapse to one row per renewal-event identity.
+
+    Events whose renewal date falls before ``floor`` (default the June-1 renewal
+    floor) are dropped entirely — they never reach renewal_candidates, the
+    pipeline, or the lapse-check list.
+    """
     now_iso = now_iso or _utcnow_iso()
+    floor = floor or renewal_floor()
     by_number: dict[str, dict[str, Any]] = {}
     successors: dict[str, list[dict[str, Any]]] = {}
     for p in policies:
