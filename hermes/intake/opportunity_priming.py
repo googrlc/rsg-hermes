@@ -34,6 +34,8 @@ _SEGMENT_FIELDS: dict[str, tuple[str, ...]] = {
     "prospect_type": ("prospectType", "prospect_type"),
     "insured_type": ("insuredType", "insured_type"),
     "lead_source": ("leadSources", "leadSource", "referralSourceName"),
+    # referral_source mirrors the NowCerts Referral Source (read-only in the CRM).
+    "referral_source": ("referralSourceName", "referralSource"),
 }
 
 

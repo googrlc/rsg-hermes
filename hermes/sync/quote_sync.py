@@ -151,7 +151,7 @@ def _discover_columns(supa: Any) -> set[str]:
     fallback = {
         "insured_id", "insured_name", "carrier", "quote_number", "nowcerts_quote_guid",
         "premium_actual", "effective_date", "expiration_date", "policy_status",
-        "stage", "status", "synced_at", "sync_source",
+        "referral_source", "stage", "status", "synced_at", "sync_source",
     }
     try:
         rows = supa.select(opp.TABLE, columns="*", limit=1)
@@ -178,11 +178,14 @@ def _enrichment_payload(q: dict[str, Any], cols: set[str], *, now_iso: str) -> d
     }
     payload = {k: v for k, v in guaranteed.items() if v is not None}
     # Quote-terms columns (added by 20260720170000_opportunity_quote_terms) — gated.
+    # referral_source (from the opportunity-mirror migration) is READ-ONLY, pulled
+    # from NowCerts here; gated too so a pre-migration DB can't error.
     terms = {
         "premium_actual": _premium(q),
         "effective_date": _strip_date(q.get("effectiveDate") or q.get("EffectiveDate")),
         "expiration_date": _strip_date(q.get("expirationDate") or q.get("ExpirationDate")),
         "policy_status": _status(q),
+        "referral_source": q.get("referralSourceName") or q.get("referralSource") or None,
         "synced_at": now_iso,
         "sync_source": SYNC_SOURCE,
     }
