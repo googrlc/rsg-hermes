@@ -252,6 +252,10 @@ def advance_stage(
         "status": status_for_stage(stage),
         "probability": pct,
         "likelihood": likelihood_for_probability(pct),
+        # A CRM stage move claims the row — the inbound AMS sync must stop overwriting
+        # it (the CRM is now the persistent working copy). Pairs with the sync's
+        # sync_source='crm' skip.
+        "sync_source": "crm",
     }
     if status_for_stage(stage) == STATUS_LOST and lost_reason:
         payload["lost_reason"] = lost_reason
