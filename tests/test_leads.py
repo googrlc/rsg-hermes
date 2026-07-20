@@ -43,6 +43,22 @@ def test_lead_fields_mapped():
     assert lead["phone"] == "555-1212"
 
 
+def test_prospect_detected_by_type_code_without_prospect_type():
+    # A prospect created directly in NowCerts often has NO prospectType — it's a
+    # lead by the connector type code (1=prospect). It must still appear.
+    nc = FakeNC([
+        {"id": "t1", "commercialName": "Jarah Group LLC", "prospectType": None, "type": 1},
+        {"id": "t2", "commercialName": "Active Client", "prospectType": None, "type": 0},   # customer → excluded
+    ])
+    out = leads.list_prospects(nc)
+    assert {l["name"] for l in out["leads"]} == {"Jarah Group LLC"}
+
+
+def test_prospect_detected_by_boolean_flag():
+    nc = FakeNC([{"id": "b1", "commercialName": "Flagged Co", "prospectType": None, "prospect": True}])
+    assert leads.list_prospects(nc)["count"] == 1
+
+
 def test_personal_prospect_name_from_first_last():
     nc = FakeNC([{"id": "p1", "firstName": "Jane", "lastName": "Roe", "prospectType": "Prospect"}])
     assert leads.list_prospects(nc)["leads"][0]["name"] == "Jane Roe"

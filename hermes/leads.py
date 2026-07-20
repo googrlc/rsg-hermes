@@ -15,12 +15,21 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# NowCerts prospectType values that mark an insured as a lead (normalized).
-_PROSPECT_VALUES = {"prospect", "hot_prospect", "cold_prospect", "hot prospect", "cold prospect"}
+# prospectType (Hot/Cold/Prospect) is a lead TEMPERATURE and is often blank on a
+# NowCerts prospect. NowCerts actually marks prospect-vs-customer with the connector
+# ``type`` code (1 = prospect, 0 = insured) — see hermes/intake/nowcerts_map. Detect a
+# lead by EITHER signal so prospects created directly in the AMS (no temperature) show.
+_PROSPECT_TYPE_VALUES = {"prospect", "hot_prospect", "cold_prospect", "hot prospect", "cold prospect"}
+_PROSPECT_CODES = {"1", "prospect"}
 
 
 def _is_prospect(ins: dict[str, Any]) -> bool:
-    return str(ins.get("prospectType") or "").strip().lower() in _PROSPECT_VALUES
+    if str(ins.get("prospectType") or "").strip().lower() in _PROSPECT_TYPE_VALUES:
+        return True
+    if str(ins.get("type") or "").strip().lower() in _PROSPECT_CODES:
+        return True
+    p = ins.get("prospect")
+    return p is True or str(p or "").strip().lower() == "true"
 
 
 def _name(ins: dict[str, Any]) -> str:
