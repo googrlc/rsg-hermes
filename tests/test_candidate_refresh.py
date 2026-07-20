@@ -82,6 +82,34 @@ def test_medicare_mapd_eligible_annual():
     assert r["renewal_event_date"] == "2026-08-01"
 
 
+# --- June-1 renewal floor -----------------------------------------------------
+def test_event_before_june1_floor_is_dropped():
+    # Expired well before the floor (2026-05-26) → dropped entirely, no candidate.
+    before = build([cpol(policy_number="OLD", eff=-400, exp=-50, status="Active")])
+    assert before == []
+    # Expired but on/after the floor (2026-06-20) and past-due → kept for verification.
+    after = build([cpol(policy_number="RECENT", eff=-400, exp=-25, status="Active")])
+    assert len(after) == 1 and after[0]["eligibility_state"] == "needs_verification"
+
+
+# --- lapse-check list ---------------------------------------------------------
+def test_lapse_check_only_pastdue_in_window():
+    class LapseSupa:
+        def select(self, table, *, columns="*", params=None, limit=100):
+            assert table == "renewal_candidates"
+            assert params["eligibility_state"] == "eq.needs_verification"
+            return [
+                {"policy_number": "A", "expiration_date": "2026-06-20", "premium_current": 1000, "client_name": "Acme"},   # past-due, in window
+                {"policy_number": "B", "expiration_date": "2026-05-01", "premium_current": 500, "client_name": "Old"},     # before floor → out
+                {"policy_number": "C", "expiration_date": "2026-08-01", "premium_current": 700, "client_name": "Future"},  # not past-due → out
+            ]
+
+    out = cr.lapse_check(LapseSupa(), today=date(2026, 7, 15))
+    assert {i["policy_number"] for i in out["items"]} == {"A"}
+    assert out["count"] == 1 and out["premium_at_risk"] == 1000
+    assert out["floor"] == "2026-06-01" and out["as_of"] == "2026-07-15"
+
+
 # --- run_refresh --------------------------------------------------------------
 class FakeSupa:
     def __init__(self, policies):

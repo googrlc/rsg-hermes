@@ -259,6 +259,8 @@ def build_candidates(
         event_date = _event_date_for(result, p)
         if event_date is None:
             continue  # truly dateless — nothing to key an event on
+        if event_date < floor:
+            continue  # renewal event before the June-1 floor — drop entirely
         row = _candidate_row(
             p, result, lineage, event_date,
             client_name=ins.get("name"), insured_active=insured_active, now_iso=now_iso,
@@ -334,6 +336,48 @@ def _project_eligible(supa: SupabaseClient, eligible: list[dict[str, Any]]) -> d
             except SupabaseClientError:
                 log.exception("p85 prune failed for %s", r.get("id"))
     return {"projected": len(eligible_pns), "pruned": pruned}
+
+
+# ---------------------------------------------------------------------------
+# Lapse-check list (past-due-but-active, routed OFF the forward pipeline)
+# ---------------------------------------------------------------------------
+_LAPSE_FIELDS = (
+    "policy_number,client_name,expiration_date,premium_current,line_of_business,"
+    "normalized_status,eligibility_reason,insured_active,policy_active"
+)
+
+
+def lapse_check(supa: SupabaseClient, *, today: date | None = None) -> dict[str, Any]:
+    """The 'lapse check' list — past-due-but-still-active renewals kept OFF the
+    forward renewals pipeline (per RSG: renewals pipeline = forward window only).
+
+    These are ``needs_verification`` events whose expiration already passed but
+    sits on/after the June-1 floor — likely silent lapses to confirm in NowCerts.
+    Derived read of ``renewal_candidates``; no separate table.
+    """
+    today = today or date.today()
+    today_iso, floor_iso = today.isoformat(), renewal_floor().isoformat()
+    rows = supa.select(
+        CANDIDATES_TABLE,
+        columns=_LAPSE_FIELDS,
+        params={
+            "eligibility_state": f"eq.{elig.STATE_NEEDS_VERIFICATION}",
+            "order": "expiration_date.desc",
+        },
+        limit=5000,
+    )
+    items = [
+        r for r in rows
+        if (exp := r.get("expiration_date")) and floor_iso <= str(exp)[:10] < today_iso
+    ]
+    premium_at_risk = sum(_num(r.get("premium_current")) or 0.0 for r in items)
+    return {
+        "as_of": today_iso,
+        "floor": floor_iso,
+        "count": len(items),
+        "premium_at_risk": round(premium_at_risk),
+        "items": items,
+    }
 
 
 # ---------------------------------------------------------------------------
