@@ -5,26 +5,39 @@ In NowCerts a quote is a Policy row with ``isQuote=true`` (it carries a
 ``hermes/intake/opportunities.py``. This job pulls those quote rows from the AMS
 and upserts them into the ``opportunities`` pipeline via the idempotent
 ``create_opportunity`` API, so AMS-sourced quotes surface in the pipeline
-alongside the intake-created prospects.
+alongside the intake-created prospects — **with their live terms** (premium,
+carrier, effective/expiration, status), not just an identifier.
 
 Guarantees:
   * **Idempotent** per ``(client_identifier, line_of_business)`` — re-running
     never creates a duplicate opportunity.
-  * **Respects the human pipeline.** An existing opportunity's ``stage`` is NEVER
-    reset — a Bound or Lost deal is never dragged back to Quoted. Only the
-    NowCerts identifiers (insured/quote guid + number) are backfilled via
-    ``link_nowcerts``.
+  * **Never RESETS the human pipeline.** An existing opportunity's ``stage`` is
+    never dragged backward — a Bound or Lost deal is never pulled to Quoted. A
+    still-open row (New / Info Gathering / Quoting) IS promoted *forward* to
+    Quoted, since a live quote means it's now quoted.
+  * **Enriches with live terms.** premium_actual, carrier, effective_date,
+    expiration_date, policy_status + the NowCerts identifiers are stamped on both
+    new and existing rows. Schema-adaptive: term columns are written only if they
+    exist, so the sync can't error before the quote-terms migration is applied.
   * **Additive** — never deletes. ``dry_run`` reports counts with zero writes.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from hermes.intake import opportunities as opp
+from hermes.sync.field_mapper import _strip_date
 
 log = logging.getLogger(__name__)
+
+SYNC_SOURCE = "nowcerts_quote_sync"
+
+# Stages that mean "not yet quoted" — a live quote promotes these forward to
+# Quotes Received. Later stages (incl. Bound/Lost) are never reset backward.
+_PRE_QUOTE_STAGES = {opp.STAGE_PREP, opp.STAGE_SENT_QUOTING}
 
 
 @dataclass
@@ -32,6 +45,8 @@ class QuoteSyncResult:
     quotes_fetched: int = 0
     created: int = 0
     linked: int = 0
+    enriched: int = 0
+    promoted: int = 0
     skipped_incomplete: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -43,8 +58,9 @@ class QuoteSyncResult:
     def message(self) -> str:
         return (
             f"quotes → opportunities: quotes={self.quotes_fetched} "
-            f"created={self.created} linked={self.linked} "
-            f"skipped_incomplete={self.skipped_incomplete} errors={len(self.errors)}"
+            f"created={self.created} linked={self.linked} enriched={self.enriched} "
+            f"promoted={self.promoted} skipped_incomplete={self.skipped_incomplete} "
+            f"errors={len(self.errors)}"
         )
 
 
@@ -118,6 +134,62 @@ def _carrier(p: dict[str, Any]) -> str | None:
     return str(p.get("carrierName") or p.get("CarrierName") or p.get("carrier") or "").strip() or None
 
 
+def _status(p: dict[str, Any]) -> str | None:
+    return str(p.get("status") or p.get("Status") or "").strip() or None
+
+
+# ---------------------------------------------------------------------------
+# Enrichment helpers
+# ---------------------------------------------------------------------------
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _discover_columns(supa: Any) -> set[str]:
+    """Columns present on opportunities (from a sample row). Falls back to a
+    superset so a missing quote-terms column can never error the write."""
+    fallback = {
+        "insured_id", "insured_name", "carrier", "quote_number", "nowcerts_quote_guid",
+        "premium_actual", "effective_date", "expiration_date", "policy_status",
+        "stage", "status", "synced_at", "sync_source",
+    }
+    try:
+        rows = supa.select(opp.TABLE, columns="*", limit=1)
+    except Exception:  # noqa: BLE001 — discovery must never abort the sync
+        return fallback
+    if rows and isinstance(rows[0], dict):
+        return set(rows[0].keys())
+    return fallback
+
+
+def _enrichment_payload(q: dict[str, Any], cols: set[str], *, now_iso: str) -> dict[str, Any]:
+    """Live quote terms + NowCerts identifiers to stamp on the opportunity.
+
+    Identifier/carrier columns ship in the base pipeline migration, so they always
+    write (non-None). The quote-terms columns are newer, so they're gated on
+    ``cols`` (discovered live) — the sync can't error before that migration lands.
+    """
+    # Guaranteed columns (base opportunities schema).
+    guaranteed = {
+        "insured_id": _insured_guid(q),
+        "quote_number": _quote_number(q),
+        "nowcerts_quote_guid": _quote_guid(q),
+        "carrier": _carrier(q),
+    }
+    payload = {k: v for k, v in guaranteed.items() if v is not None}
+    # Quote-terms columns (added by 20260720170000_opportunity_quote_terms) — gated.
+    terms = {
+        "premium_actual": _premium(q),
+        "effective_date": _strip_date(q.get("effectiveDate") or q.get("EffectiveDate")),
+        "expiration_date": _strip_date(q.get("expirationDate") or q.get("ExpirationDate")),
+        "policy_status": _status(q),
+        "synced_at": now_iso,
+        "sync_source": SYNC_SOURCE,
+    }
+    payload.update({k: v for k, v in terms.items() if v is not None and k in cols})
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # Sync
 # ---------------------------------------------------------------------------
@@ -147,6 +219,9 @@ def run_quote_sync(
         quotes = quotes[:limit]
     result.quotes_fetched = len(quotes)
     log.info("quote sync: %d NowCerts quotes to process (dry_run=%s)", len(quotes), dry_run)
+
+    cols = _discover_columns(supa) if not dry_run else set()
+    now_iso = _utcnow_iso()
 
     for q in quotes:
         name, lob = _insured_name(q), _lob(q)
@@ -181,20 +256,25 @@ def run_quote_sync(
                 stage=opp.STAGE_QUOTES_RECEIVED,
                 premium_estimate=_premium(q),
                 carrier=_carrier(q),
-                source="nowcerts_quote_sync",
+                source=SYNC_SOURCE,
             )
-            # Backfill NowCerts identifiers on both new and existing rows. This
-            # never touches stage/status, so a human-advanced pipeline is safe.
-            opp.link_nowcerts(
-                supa, str(row.get("id")),
-                insured_id=_insured_guid(q),
-                quote_number=_quote_number(q),
-                nowcerts_quote_guid=_quote_guid(q),
-            )
+
+            # Stamp live terms + identifiers on both new and existing rows.
+            payload = _enrichment_payload(q, cols, now_iso=now_iso)
+            # Forward-only stage promotion: a still-open row becomes Quotes Received;
+            # any later stage (Sent Proposal … Bound / Lost) is never dragged backward.
+            if not created and row.get("stage") in _PRE_QUOTE_STAGES:
+                payload["stage"] = opp.STAGE_QUOTES_RECEIVED
+                payload["status"] = opp.status_for_stage(opp.STAGE_QUOTES_RECEIVED)
+                result.promoted += 1
+            if payload:
+                supa.update(opp.TABLE, str(row.get("id")), payload)
+
             if created:
                 result.created += 1
             else:
                 result.linked += 1
+                result.enriched += 1
         except Exception as exc:  # noqa: BLE001 — one bad quote shouldn't abort the run
             result.errors.append(f"quote {_quote_number(q) or _quote_guid(q)}: {exc}")
             log.warning("quote sync error on %s: %s", _quote_number(q) or _quote_guid(q), exc)
