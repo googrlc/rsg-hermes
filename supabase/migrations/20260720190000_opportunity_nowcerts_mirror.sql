@@ -11,9 +11,10 @@
 --                       side it's a stage-driven % (probability) mapped to this category,
 --                       defaulted to 'Good' so a NowCerts save never blocks. Editable in
 --                       the CRM; NOT synced back to the AMS.
---   disposition       — NowCerts Disposition; carries outcomes (Renewal Above %, Below %,
---                       lost reasons) — so those are NOT pipeline stages.
---   referral_source   — NowCerts Referral Source; syncs bidirectionally with the AMS.
+--   disposition       — NowCerts Disposition; free-text outcome (the AMS dropdown is
+--                       currently empty) — kept off the stage list.
+--   referral_source   — NowCerts Referral Source; READ-ONLY, pulled from the AMS by the
+--                       sync (not editable in the CRM).
 --   stage_due_date / closed_date — the NowCerts date fields.
 -- =====================================================================================
 
@@ -43,5 +44,5 @@ ALTER TABLE public.opportunities
 CREATE INDEX IF NOT EXISTS idx_opportunities_type ON public.opportunities (opportunity_type);
 
 COMMENT ON COLUMN public.opportunities.likelihood IS 'NowCerts win likelihood (Excellent..Not Likely). Stage-driven on our side, defaulted to Good so a NowCerts save never blocks; editable in the CRM, not synced back to the AMS.';
-COMMENT ON COLUMN public.opportunities.disposition IS 'NowCerts Disposition — carries outcomes (Renewal Above %, Renewal Below %, lost reasons); these are NOT pipeline stages.';
-COMMENT ON COLUMN public.opportunities.referral_source IS 'NowCerts Referral Source — syncs bidirectionally with the AMS.';
+COMMENT ON COLUMN public.opportunities.disposition IS 'NowCerts Disposition — free-text outcome (AMS dropdown currently empty); not a pipeline stage.';
+COMMENT ON COLUMN public.opportunities.referral_source IS 'NowCerts Referral Source — READ-ONLY, pulled from the AMS by the sync; not editable in the CRM.';

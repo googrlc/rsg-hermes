@@ -611,7 +611,7 @@ class OpportunityCreateRequest(BaseModel):
     premium_estimate: float | None = None
     carrier: str | None = None
     lead_source: str | None = None
-    referral_source: str | None = None       # NowCerts Referral Source (bidirectional)
+    # referral_source is READ-ONLY — sourced from NowCerts by the sync, not set here.
     assigned_to: str | None = None
     next_action: str | None = None
     description: str | None = None
@@ -654,7 +654,6 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
             premium_estimate=req.premium_estimate,
             carrier=req.carrier,
             lead_source=req.lead_source,
-            referral_source=req.referral_source,
             assigned_to=req.assigned_to,
             next_action=req.next_action,
             description=req.description,

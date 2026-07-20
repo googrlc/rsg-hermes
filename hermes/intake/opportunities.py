@@ -6,8 +6,9 @@ Stages and Opportunity Type come straight from NowCerts. There are TWO stage set
 them on separate boards). Win likelihood is a NowCerts-required categorical; on our
 side it's a stage-driven percentage (``probability``) mapped to that category,
 defaulted to ``Good`` so a NowCerts save never blocks, and editable in the CRM
-(not synced back to the AMS). ``disposition`` carries outcomes (Renewal Above/Below
-%, lost reasons) — those are not stages. ``referral_source`` mirrors the AMS field.
+(not synced back to the AMS). ``disposition`` is a free-text outcome (the NowCerts
+dropdown is currently empty) — not a stage. ``referral_source`` is READ-ONLY,
+pulled from NowCerts by the sync (not editable in the CRM).
 """
 
 from __future__ import annotations
