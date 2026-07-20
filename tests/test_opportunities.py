@@ -135,6 +135,13 @@ def test_advance_stage_to_lost_records_reason():
     assert row["status"] == "lost" and row["lost_reason"] == "price"
 
 
+def test_advance_stage_marks_crm_worked():
+    # A CRM stage move claims the row so the AMS sync won't overwrite it.
+    supa = _supa()
+    row = opp.advance_stage(supa, "opp-1", opp.STAGE_QUOTES_RECEIVED)
+    assert row["sync_source"] == "crm"
+
+
 def test_advance_accepts_any_nonempty_stage():
     # NowCerts owns the pipeline vocabulary — advance_stage takes any non-empty stage.
     supa = _supa()
