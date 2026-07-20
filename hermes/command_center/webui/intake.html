@@ -8,63 +8,72 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hermes — Intake</title>
+<title>Risk Solutions Group — Intake</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23142e37'/%3E%3Ctext x='32' y='46' font-family='Georgia,serif' font-size='40' font-weight='700' fill='%23fff' text-anchor='middle'%3ER%3C/text%3E%3C/svg%3E">
 <style>
   :root{
-    --bg:#1a1a2e; --panel:#1e2746; --border:#2b375e; --border-soft:#243156;
-    --text:#e7ecf6; --muted:#8b96b0; --muted-2:#5f6b8a; --teal:#2dd4bf; --teal-soft:#2dd4bf22;
-    --green:#22c55e; --red:#ef4444; --amber:#f5b942; --radius:11px;
-    --mono:ui-monospace,Menlo,monospace; --sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --bg:#faf8f2; --panel:#ffffff; --border:#eae6db; --border-soft:#f0ece2;
+    --text:#17271f; --ink-soft:#3b4a43; --muted:#8a938d; --muted-2:#9aa39d;
+    --teal:#1f7a5f; --teal-soft:#e9f1ec; --green:#2f7d5c; --red:#b0442f; --amber:#b6862a;
+    --radius:11px; --inset:#f6f3ea; --sidebar:#142e37;
+    --mono:ui-monospace,Menlo,monospace;
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:13px;min-height:100vh}
+  body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:13px;min-height:100vh;-webkit-font-smoothing:antialiased}
   .wrap{max-width:1100px;margin:0 auto;padding:22px 18px 60px}
   .top{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-  .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#2dd4bf,#0f6e56);display:grid;place-items:center;font-weight:700;color:#0e1526;font-size:18px}
-  .top h1{font-size:16px;font-weight:700}.top h1 small{display:block;font-size:11px;color:var(--muted);font-weight:400}
+  .logo{width:36px;height:36px;border-radius:9px;background:var(--sidebar);display:grid;place-items:center;font-weight:700;color:#fff;font-size:20px;font-family:var(--serif)}
+  .brandwrap{display:flex;flex-direction:column;gap:1px}
+  .brandname{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+  .top h1{font-family:var(--serif);font-size:20px;font-weight:600}.top h1 small{display:block;font-size:11px;color:var(--muted);font-weight:400;font-family:var(--sans)}
   .grid{display:grid;grid-template-columns:340px 1fr;gap:18px}
   @media(max-width:860px){.grid{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px}
   .lbl{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
   label{display:block;font-size:11px;color:var(--muted);margin:10px 0 4px}
-  input,select{width:100%;background:#0e1526;border:1px solid var(--border);border-radius:8px;color:var(--text);padding:9px 11px;font-family:var(--sans);font-size:13px}
-  input:focus,select:focus{outline:none;border-color:var(--teal)}
-  .drop{margin-top:12px;border:1.5px dashed var(--border);border-radius:10px;padding:22px 12px;text-align:center;color:var(--muted-2);cursor:pointer;font-size:12px}
+  input,select{width:100%;background:#fff;border:1px solid var(--border);border-radius:8px;color:var(--text);padding:9px 11px;font-family:var(--sans);font-size:13px}
+  input:focus,select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px #1f7a5f1a}
+  .drop{margin-top:12px;border:1.5px dashed var(--border);border-radius:10px;padding:22px 12px;text-align:center;color:var(--muted);cursor:pointer;font-size:12px}
   .drop.over{border-color:var(--teal);background:var(--teal-soft);color:var(--teal)}
   .files{margin-top:8px;font-size:11px;color:var(--muted);font-family:var(--mono)}
-  .btn{margin-top:14px;width:100%;padding:11px;border:none;border-radius:9px;font-weight:700;font-size:13px;cursor:pointer;font-family:var(--sans);background:var(--teal);color:#0e1526}
+  .btn{margin-top:14px;width:100%;padding:11px;border:none;border-radius:9px;font-weight:700;font-size:13px;cursor:pointer;font-family:var(--sans);background:var(--teal);color:#fff}
   .btn:disabled{opacity:.5;cursor:not-allowed}
-  .btn.ghost{background:#141d36;color:var(--muted);border:1px solid var(--border)}
-  .btn.go{background:var(--green);color:#0e1526}
+  .btn.ghost{background:#f1ede3;color:var(--ink-soft);border:1px solid var(--border)}
+  .btn.go{background:var(--green);color:#fff}
   .row{display:flex;gap:8px;align-items:center}
   .sub{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:12px}
   .sh{display:flex;align-items:center;gap:10px;margin-bottom:8px}
   .sh .nm{flex:1;font-weight:600;font-size:14px}
   .pill{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
-  .pill.building{background:#f5b94220;color:var(--amber)}
-  .pill.blocked{background:#ef444420;color:#ff6b78}
-  .pill.review{background:#4a9eff20;color:#7cc0ff}
-  .pill.ready{background:#22c55e20;color:#4ade80}
+  .pill.building{background:#b6862a1a;color:var(--amber)}
+  .pill.blocked{background:#b0442f14;color:var(--red)}
+  .pill.review{background:#2f6f8f14;color:#2f6f8f}
+  .pill.ready{background:#2f7d5c14;color:var(--green)}
   .meta{font-size:10px;color:var(--muted-2);font-family:var(--mono);margin-bottom:8px}
-  .flag{display:flex;gap:8px;align-items:center;background:#0e1526;border:1px solid var(--border);border-left:3px solid var(--red);border-radius:7px;padding:8px 10px;margin:6px 0}
+  .flag{display:flex;gap:8px;align-items:center;background:var(--inset);border:1px solid var(--border);border-left:3px solid var(--red);border-radius:7px;padding:8px 10px;margin:6px 0}
   .flag.warn{border-left-color:var(--amber)}
   .flag .fx{flex:1;font-size:12px}
   .flag .fx small{display:block;color:var(--muted-2);font-size:10px}
   .flag input{width:150px;padding:6px 8px}
   .delivs{margin-top:8px;font-size:11px;color:var(--muted)}
-  .delivs span{display:inline-block;background:#0e1526;border:1px solid var(--border);border-radius:5px;padding:2px 7px;margin:3px 4px 0 0;color:var(--teal)}
+  .delivs span{display:inline-block;background:#f1ede3;border:1px solid var(--border);border-radius:5px;padding:2px 7px;margin:3px 4px 0 0;color:var(--teal)}
   .actions{display:flex;gap:8px;margin-top:10px}
   .actions .btn{margin-top:0;flex:1}
-  .empty{color:var(--muted-2);text-align:center;padding:26px 0;font-size:12.5px}
+  .empty{color:var(--muted);text-align:center;padding:26px 0;font-size:12.5px}
   .note{font-size:10.5px;color:var(--muted-2);margin-top:8px;line-height:1.5}
-  .err{color:#ff9aa6;font-size:11.5px;margin-top:8px}
+  .err{color:var(--red);font-size:11.5px;margin-top:8px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top">
-    <div class="logo">H</div>
-    <h1>Intake<small id="lanesub">Gretchen · Personal lines</small></h1>
+    <div class="logo">R</div>
+    <div class="brandwrap">
+      <div class="brandname">Risk Solutions Group</div>
+      <h1>Intake<small id="lanesub">Gretchen · Personal lines</small></h1>
+    </div>
   </div>
 
   <div class="grid">
