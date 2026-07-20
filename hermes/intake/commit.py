@@ -15,6 +15,7 @@ the insert field casing before the first live write.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +26,8 @@ from hermes.renewals.executor import DESTINATION_NOWCERTS, QUEUE_QUEUED, QUEUE_T
 if TYPE_CHECKING:
     from hermes.integrations.nextcloud_client import NextcloudClient
     from hermes.integrations.supabase_client import SupabaseClient
+
+log = logging.getLogger(__name__)
 
 OBJECT_TYPE_INTAKE = "intake"
 INTAKE_ACTION_CREATE_INSURED = "create_insured"
@@ -123,6 +126,18 @@ def commit_intake(
         approved_by=approved_by,
     )
 
+    # 2b. Prompt AMS pull-back: link an existing insured now (and pull its segment
+    # fields onto the row), or kick the just-staged create/link job immediately —
+    # so the pipeline row is tied to NowCerts within seconds, not next scheduler
+    # cycle. Best-effort: never fails the commit.
+    prime: dict[str, Any] = {}
+    try:
+        from hermes.intake.opportunity_priming import prime_new_opportunities
+
+        prime = prime_new_opportunities(supa, opp_rows, kick_executor=True)
+    except Exception:
+        log.exception("intake commit: opportunity priming failed for %s", cid)
+
     # 3. Nextcloud client folder tree (best-effort).
     folder = None
     nc = nextcloud
@@ -145,6 +160,7 @@ def commit_intake(
         "nextcloud_folder": folder,
         "prospect_type": ptype,
         "insured_type": itype,
+        "prime": prime,
     }
 
 

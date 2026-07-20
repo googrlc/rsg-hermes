@@ -397,6 +397,41 @@ class NowCertsClient:
                 return str(rows[0]["id"])
         return None
 
+    def find_insured(
+        self,
+        *,
+        email: str | None = None,
+        commercial_name: str | None = None,
+        fein: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return an existing insured's full row (not just the GUID) by email, FEIN, or name.
+
+        Superset of ``find_insured_id`` — the returned InsuredList row carries the
+        ``id`` GUID plus segment fields (``prospectType``, ``insuredType``,
+        ``leadSources``) that opportunity priming pulls onto the pipeline row.
+        Tries the most reliable keys first (email, then FEIN, then commercial name).
+        Returns None if nothing matches.
+        """
+        def _q(val: str) -> str:
+            return val.replace("'", "''")  # OData single-quote escape
+
+        filters: list[str] = []
+        if email:
+            filters.append(f"eMail eq '{_q(email)}'")
+        if fein:
+            filters.append(f"fein eq '{_q(fein)}'")
+        if commercial_name:
+            filters.append(f"commercialName eq '{_q(commercial_name)}'")
+        for flt in filters:
+            try:
+                body = self._get("/api/InsuredList", params={"$filter": flt})
+            except NowCertsClientError:
+                continue
+            rows = body if isinstance(body, list) else body.get("value", [])
+            if rows and isinstance(rows[0], dict) and rows[0].get("id"):
+                return rows[0]
+        return None
+
     def find_policy_by_number(self, number: str) -> dict[str, Any] | None:
         """Return a single policy's current detail record by policy number.
 
