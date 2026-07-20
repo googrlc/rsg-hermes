@@ -174,7 +174,9 @@
       <a data-view="policies"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Policies</a>
       <a data-view="renewals"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2"/><path d="M18 4v5h-5M6 20v-5h5"/></svg>Renewals</a>
       <a data-view="commissions"><svg viewBox="0 0 24 24"><path d="M12 3v18M8 7h6a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6"/></svg>Commissions</a>
+      <a data-view="leads"><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-8 0"/><path d="M4 20c0-3 3-5 8-5s8 2 8 5"/><path d="M17 7h5M19.5 4.5v5"/></svg>Leads</a>
       <a data-view="pipeline"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Pipeline</a>
+      <a data-view="crosssell"><svg viewBox="0 0 24 24"><path d="M4 7h14M4 12h9M4 17h6"/><path d="M16 13l4 4-4 4"/></svg>Cross-sell</a>
       <a data-view="quotes"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>Quotes</a>
       <a data-view="proposals"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M9 12h6M9 16h4"/></svg>Proposals</a>
       <a data-view="cases"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Cases</a>
@@ -248,13 +250,15 @@ function chip(v){ if(!v)return '—'; const s=String(v).toLowerCase(); let cls='
 /* ---------- Router ---------- */
 async function show(view){
   document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
-  $('#viewTitle').textContent = view.charAt(0).toUpperCase()+view.slice(1);
+  $('#viewTitle').textContent = view==='crosssell'?'Cross-sell':view.charAt(0).toUpperCase()+view.slice(1);
   const host = $('#viewHost');
   if(view==='workspace') return renderWorkspace(host);
   if(view==='cases') return renderCases(host);
   if(view==='proposals') return renderProposals(host);
   if(view==='hermes') return renderAskHermes(host);
   if(view==='pipeline') return renderPipeline(host);
+  if(view==='leads') return renderLeads(host);
+  if(view==='crosssell') return renderCrossSell(host);
   if(view==='quotes') return renderQuotes(host);
   return renderTable(host, TABLES[view]);
 }
@@ -344,7 +348,8 @@ async function openCommTerms(){
 }
 
 /* ---------- Pipeline Kanban ---------- */
-const PIPE_STAGES=['New','Info Gathering','Quoting','Quoted','Bound','Lost'];
+const PIPE_STAGES=['Preparing Application','Sent For Quoting','Quotes Received','Sent Proposal','Request to Bind','Bound','Lost'];
+const OPP_TYPES=['New Business','Cross-selling','Bundling','Upselling','Remarket','Competitive Replacements (BOR)','Life Events','Seasonal / Event'];
 let PIPE={};
 async function renderPipeline(host){
   host.innerHTML=`<section class="view">
@@ -354,9 +359,10 @@ async function renderPipeline(host){
     <div class="kanban" id="kanban"><div class="loading">Loading…</div></div></section>`;
   $('#pipeNew').onclick=openNewOpp;
   try{
-    const opps=firstArray(await api('/api/opportunities'));
+    // New-business board only — renewals live on their own Renewals pipeline.
+    const opps=firstArray(await api('/api/opportunities')).filter(o=>o.opportunity_type!=='Renewals');
     PIPE={}; const byStage={}; PIPE_STAGES.forEach(s=>byStage[s]=[]);
-    opps.forEach(o=>{ PIPE[o.id]=o; const s=PIPE_STAGES.includes(o.stage)?o.stage:'New'; byStage[s].push(o); });
+    opps.forEach(o=>{ PIPE[o.id]=o; const s=PIPE_STAGES.includes(o.stage)?o.stage:'Preparing Application'; byStage[s].push(o); });
     const won=byStage['Bound'].length, lost=byStage['Lost'].length, decided=won+lost;
     const cr=decided?Math.round(won/decided*100):0;
     const cs=$('#closeStat'); if(cs) cs.textContent=`Close ratio ${decided?cr+'%':'—'} · ${won}W / ${lost}L`;
@@ -404,6 +410,54 @@ function wireKanban(){
       }catch(err){ toast(err.message,true); }
     });
   });
+}
+
+/* ---------- Leads (live NowCerts prospects) ---------- */
+async function renderLeads(host){
+  host.innerHTML=`<section class="view">
+    <div class="view-head"><div><div class="eyebrow">Live NowCerts prospects</div><h1 class="h1">Leads</h1>
+      <p class="lede">Prospects in NowCerts. Promote one to the pipeline to work it as a new-business opportunity — leads don't auto-populate the board.</p></div>
+      <span class="pill" id="leadCount">…</span></div>
+    <div class="panel table-wrap"><div class="loading">Loading leads…</div></div></section>`;
+  const wrap=host.querySelector('.table-wrap');
+  try{
+    const d=await api('/api/leads'); const rows=d.leads||[];
+    const lc=$('#leadCount'); if(lc) lc.textContent=`${d.count||0} leads`;
+    if(!rows.length){ wrap.innerHTML=`<div class="empty">No prospects in NowCerts.</div>`; return; }
+    wrap.innerHTML=`<table><thead><tr><th>Prospect</th><th>Type</th><th>Segment</th><th>Contact</th><th>Source</th><th></th></tr></thead>
+      <tbody>${rows.map((l,i)=>`<tr>
+        <td>${esc(l.name||'—')}</td><td>${chip(l.prospect_type)}</td><td>${l.insured_type?esc(l.insured_type):'<span class="muted">—</span>'}</td>
+        <td>${esc(l.email||l.phone||'—')}</td><td>${l.lead_source?esc(l.lead_source):'<span class="muted">—</span>'}</td>
+        <td class="num"><button class="btn primary" style="padding:6px 12px" data-i="${i}">Create opportunity</button></td></tr>`).join('')}</tbody></table>`;
+    wrap.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ const l=rows[+b.dataset.i]; openNewOpp({name:l.name,id:l.insured_id}); });
+  }catch(e){ wrap.innerHTML=`<div class="empty">Couldn’t load leads — ${esc(e.message)}</div>`; }
+}
+
+/* ---------- Cross-sell (search active clients) ---------- */
+async function renderCrossSell(host){
+  host.innerHTML=`<section class="view">
+    <div class="view-head"><div><div class="eyebrow">Active clients</div><h1 class="h1">Cross-sell</h1>
+      <p class="lede">Search a current client, see what they carry, and open a cross-sell opportunity on a gap.</p></div></div>
+    <div class="panel" style="padding:14px;margin-bottom:14px"><input id="csq" placeholder="Search a client by name…" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px"/></div>
+    <div class="table-wrap" id="csResults"><div class="empty">Type a client name and press Enter.</div></div></section>`;
+  const box=$('#csResults');
+  const run=async()=>{
+    const q=$('#csq').value.trim();
+    if(!q){ box.innerHTML=`<div class="empty">Type a client name and press Enter.</div>`; return; }
+    box.innerHTML=`<div class="loading">Searching…</div>`;
+    try{ const d=await api('/api/cross-sell?q='+encodeURIComponent(q)); const rows=d.clients||[];
+      if(!rows.length){ box.innerHTML=`<div class="empty">No active clients match “${esc(q)}”.</div>`; return; }
+      box.innerHTML=`<table><thead><tr><th>Client</th><th>Type</th><th>Current lines</th><th>Policies</th><th>Premium</th><th></th></tr></thead>
+        <tbody>${rows.map((c,i)=>`<tr>
+          <td>${esc(c.client_name||'—')}</td><td>${c.client_type?esc(c.client_type):'<span class="muted">—</span>'}</td>
+          <td>${c.current_lobs&&c.current_lobs.length?c.current_lobs.map(esc).join(', '):'<span class="muted">—</span>'}</td>
+          <td class="num">${c.active_policy_count||0}</td><td class="num">${money(c.active_premium)}</td>
+          <td class="num"><button class="btn primary" style="padding:6px 12px" data-i="${i}">Add cross-sell</button></td></tr>`).join('')}</tbody></table>`;
+      box.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ const c=rows[+b.dataset.i]; openNewOpp({name:c.client_name,id:c.insured_id,type:'Cross-selling'}); });
+    }catch(e){ box.innerHTML=`<div class="empty">Search failed — ${esc(e.message)}</div>`; }
+  };
+  $('#csq').addEventListener('keydown',e=>{ if(e.key==='Enter') run(); });
+  $('#csq').focus();
 }
 
 /* ---------- Client 360 ---------- */
@@ -578,12 +632,13 @@ async function openNewOpp(preClient){
   await loadUsers();
   openModal(`<div class="modal-head"><h3>New opportunity</h3><p>Any client — new, inactive, or a cross-sell in a new line.</p></div>
    <div class="modal-body">${clientPicker('opp')}
-     <div class="row2"><div class="field"><label>Line of business</label><input id="oppLob" placeholder="General Liability"/></div>
-       <div class="field"><label>Stage</label><select id="oppStage">${['New','Info Gathering','Quoting','Quoted','Bound','Lost'].map(s=>`<option>${s}</option>`).join('')}</select></div></div>
-     <div class="row2"><div class="field"><label>Est. premium</label><input id="oppPrem" type="number" placeholder="0"/></div>
-       <div class="field"><label>Carrier</label><input id="oppCarrier"/></div></div>
-     <div class="row2"><div class="field"><label>Probability (%)</label><input id="oppProb" type="number" min="0" max="100" placeholder="0–100"/></div>
-       <div class="field"><label>Created by</label><select id="oppBy">${userOptions()}</select></div></div>
+     <div class="row2"><div class="field"><label>Opportunity type</label><select id="oppType">${OPP_TYPES.map(t=>`<option>${t}</option>`).join('')}</select></div>
+       <div class="field"><label>Line of business</label><input id="oppLob" placeholder="General Liability"/></div></div>
+     <div class="row2"><div class="field"><label>Stage</label><select id="oppStage">${PIPE_STAGES.map(s=>`<option>${s}</option>`).join('')}</select></div>
+       <div class="field"><label>Est. premium</label><input id="oppPrem" type="number" placeholder="0"/></div></div>
+     <div class="row2"><div class="field"><label>Carrier</label><input id="oppCarrier"/></div>
+       <div class="field"><label>Win probability (%)</label><input id="oppProb" type="number" min="0" max="100" placeholder="auto from stage"/></div></div>
+     <div class="field"><label>Created by</label><select id="oppBy">${userOptions()}</select></div>
      <div class="field"><label>Description</label><textarea id="oppDesc" placeholder="Notes, context, what they need…"></textarea></div>
      <div style="border-top:1px solid var(--border-soft);padding-top:12px">
        <div class="eyebrow" style="margin-bottom:8px">Quote PDF (optional)</div>
@@ -595,11 +650,12 @@ async function openNewOpp(preClient){
    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="oppSave">Create opportunity</button></div>`);
   wireClientPicker('opp');
   if(preClient&&preClient.name){ $('#oppName').value=preClient.name; $('#oppId').value=preClient.id||''; $('#oppSearch').value=preClient.name; $('#oppPicked').textContent='✓ '+preClient.name; }
+  if(preClient&&preClient.type){ $('#oppType').value=preClient.type; }
   $('#oppSave').onclick=(e)=>submitBtn(e.target,async()=>{
     const name=$('#oppName').value||$('#oppSearch').value, lob=$('#oppLob').value.trim();
     if(!name){throw new Error('Pick a client first.')} if(!lob){throw new Error('Line of business is required.')}
     const carrier=$('#oppCarrier').value||null;
-    const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:carrier,description:$('#oppDesc').value||null,probability:parseInt($('#oppProb').value,10)||null,source:'cockpit',created_by:$('#oppBy').value})});
+    const r=await api('/api/opportunities',{method:'POST',body:JSON.stringify({insured_name:name,insured_id:$('#oppId').value||null,line_of_business:lob,opportunity_type:$('#oppType').value,stage:$('#oppStage').value,premium_estimate:parseFloat($('#oppPrem').value)||null,carrier:carrier,description:$('#oppDesc').value||null,probability:parseInt($('#oppProb').value,10)||null,source:'cockpit',created_by:$('#oppBy').value})});
     // If a quote PDF was attached, create the opportunity's first quote from the carrier/premium above.
     const pdf=$('#oppPdf').files[0];
     let warn='';
