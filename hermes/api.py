@@ -711,6 +711,58 @@ async def list_opportunities_endpoint(stage: str | None = None, status: str | No
     return {"opportunities": rows, "count": len(rows)}
 
 
+class OpportunityUpdateRequest(BaseModel):
+    """Editable opportunity fields. All optional — only provided fields are written.
+    Supabase-only: worked in the CRM, never pushed to the AMS here."""
+    insured_name: str | None = None
+    line_of_business: str | None = None
+    opportunity_type: str | None = None
+    stage: str | None = None
+    premium_estimate: float | None = None
+    carrier: str | None = None
+    likelihood: str | None = None
+    disposition: str | None = None
+    probability: int | None = None
+    next_action: str | None = None
+    next_action_date: str | None = None
+    description: str | None = None
+    assigned_to: str | None = None
+    prospect_type: str | None = None
+    needed_by: str | None = None
+    effective_date: str | None = None
+    expiration_date: str | None = None
+    lost_reason: str | None = None
+
+
+# Fields a user may edit in the CRM (referral_source / NowCerts ids / sync fields
+# are intentionally excluded — those mirror the AMS and stay read-only).
+_OPP_EDITABLE = set(OpportunityUpdateRequest.model_fields.keys())
+
+
+@app.patch("/api/opportunities/{opportunity_id}")
+async def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdateRequest):
+    """Edit an opportunity's fields in the CRM. Supabase-only — an opportunity is
+    worked in the CRM and does not write back to the AMS until it's Bound/Won or
+    Lost. Only the fields present in the request are changed; setting ``stage``
+    also re-derives ``status``."""
+    from hermes.intake import opportunities as opp
+
+    fields = {k: v for k, v in req.model_dump(exclude_unset=True).items() if k in _OPP_EDITABLE}
+    if not fields:
+        raise HTTPException(status_code=400, detail="no editable fields provided")
+    if fields.get("stage"):
+        fields["status"] = opp.status_for_stage(str(fields["stage"]).strip())
+    # Mark the row CRM-worked so the inbound AMS sync stops overwriting it — once
+    # a deal is being worked in the CRM it doesn't go back to the AMS until terminal.
+    fields["sync_source"] = "crm"
+    try:
+        row = _get_supa().update("opportunities", opportunity_id, fields)
+    except Exception as exc:
+        log.exception("update opportunity failed: %s", opportunity_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "opportunity": row}
+
+
 @app.get("/api/leads")
 async def list_leads_endpoint(limit: int = 200):
     """Leads = live NowCerts prospects (insureds with a prospectType). Read-only;

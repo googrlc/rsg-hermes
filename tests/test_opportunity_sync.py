@@ -137,6 +137,19 @@ def test_adopts_existing_row_by_client_lob_type():
     assert row["premium_estimate"] == 999                    # human estimate not clobbered
 
 
+def test_sync_does_not_clobber_a_crm_worked_row():
+    existing = {c: None for c in osync._COLS}
+    existing.update({
+        "id": "opp-x", "client_identifier": opp.make_client_identifier("Jarah Group LLC"),
+        "line_of_business": "General Liability", "opportunity_type": "New Business",
+        "nowcerts_opportunity_id": "NCO-1", "sync_source": "crm", "stage": "Sent For Quoting",
+    })
+    supa = FakeSupa(opps=[existing])
+    res = osync.run_opportunity_sync(FakeNC([nc_opp(opportunityStageName="Bound / Won")]), supa)
+    assert res.updated == 0 and res.skipped_worked == 1
+    assert supa.tables[opp.TABLE][0]["stage"] == "Sent For Quoting"   # CRM working copy preserved
+
+
 def test_skips_opportunity_without_client_or_lob():
     supa = FakeSupa()
     res = osync.run_opportunity_sync(FakeNC([nc_opp(insuredCommercialName="", insuredFirstName="", insuredLastName="")]), supa)
