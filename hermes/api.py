@@ -711,6 +711,33 @@ async def list_opportunities_endpoint(stage: str | None = None, status: str | No
     return {"opportunities": rows, "count": len(rows)}
 
 
+@app.get("/api/leads")
+async def list_leads_endpoint(limit: int = 200):
+    """Leads = live NowCerts prospects (insureds with a prospectType). Read-only;
+    a lead is promoted by creating an opportunity from it (POST /api/opportunities)."""
+    from hermes.leads import list_prospects
+
+    try:
+        return list_prospects(_get_nowcerts(), limit=limit)
+    except Exception as exc:
+        log.exception("leads list failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/cross-sell")
+async def cross_sell_search_endpoint(q: str = "", limit: int = 25):
+    """Search active clients (canonical mirror) to pull one into the pipeline as a
+    cross-sell. Returns each client's current LOBs + premium; opening the cross-sell
+    is a POST /api/opportunities with opportunity_type='Cross-selling'."""
+    from hermes.cross_sell import search_cross_sell
+
+    try:
+        return search_cross_sell(_get_supa(), query=q, limit=limit)
+    except Exception as exc:
+        log.exception("cross-sell search failed: %s", q)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 class SendQuoteRequest(BaseModel):
     approved_by: str
 
