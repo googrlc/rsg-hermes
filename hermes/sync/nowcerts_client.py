@@ -247,6 +247,17 @@ class NowCertsClient:
         log.info("NowCerts: total opportunities fetched = %d", len(all_records))
         return all_records
 
+    def find_opportunity(self, opportunity_id: str) -> dict[str, Any] | None:
+        """Return one Opportunity's current fields by its NowCerts id — the round-trip
+        source for the writeback (so required fields aren't blanked). Scans
+        ``OpportunitiesList`` (the opportunity book is small)."""
+        if not opportunity_id:
+            return None
+        for o in self.fetch_opportunities(page_size=100):
+            if str(o.get("id") or o.get("databaseId") or "") == str(opportunity_id):
+                return o
+        return None
+
     # ── Write methods ─────────────────────────────────────────────────────
 
     def _post(self, path: str, payload: dict[str, Any]) -> Any:
@@ -364,6 +375,21 @@ class NowCertsClient:
         """
         log.info("NowCerts: updating policy: %s", payload.get("DatabaseId", "?"))
         return self._patch("/api/Policy/PartialUpdate", payload)
+
+    def insert_opportunity(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Insert/update a NowCerts Opportunity — POST /api/Zapier/InsertOpportunity.
+
+        Upserts by ``databaseId`` (pass it to UPDATE an existing opportunity's stage
+        etc.). Body is ``OpportunityIntegrationModel``; required fields
+        (lineOfBusinessName, neededBy, opportunityStageName, winProbability,
+        agencyCommission, assignedTo) must be present, so the writeback round-trips
+        them from a fresh read and changes only the stage.
+        """
+        log.info(
+            "NowCerts: upsert opportunity %s → stage=%s",
+            payload.get("databaseId", "?"), payload.get("opportunityStageName"),
+        )
+        return self._post("/api/Zapier/InsertOpportunity", payload)
 
     def insert_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create or update a NowCerts Task — the AMS activity-ledger entry.

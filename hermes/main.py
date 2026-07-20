@@ -208,6 +208,22 @@ def main() -> int:
         help="Preview quote Policy/Insert payloads without claiming or writing to NowCerts",
     )
     parser.add_argument(
+        "--opportunity-writeback-executor",
+        action="store_true",
+        help="Process approved opportunity terminal-writeback jobs (CRM Bound/Won or Lost → NowCerts) from outbound_sync_queue",
+    )
+    parser.add_argument(
+        "--opportunity-writeback-limit",
+        type=int,
+        default=1,
+        help="Max approved opportunity-writeback jobs to process this run",
+    )
+    parser.add_argument(
+        "--opportunity-writeback-dry-run",
+        action="store_true",
+        help="Preview opportunity-writeback jobs without claiming or writing to NowCerts",
+    )
+    parser.add_argument(
         "--casework-executor",
         action="store_true",
         help="Process approved case/task jobs (agency_crm case/task → NowCerts task) from outbound_sync_queue",
@@ -1291,6 +1307,22 @@ def main() -> int:
             print(f"  PREVIEW opp={pv.get('opportunity_id')} policy_keys={sorted(pol.keys())} "
                   f"insured={pol.get('InsuredDatabaseId')} lob={pol.get('LineOfBusinessName')} "
                   f"carrier={pol.get('CarrierName')} premium={pol.get('Premium')} IsQuote={pol.get('IsQuote')}")
+        return 0 if summary["failed"] == 0 else 1
+
+    if args.opportunity_writeback_executor or args.opportunity_writeback_dry_run:
+        from hermes.sync.opportunity_writeback import run_opportunity_writeback_executor
+
+        summary = run_opportunity_writeback_executor(
+            limit=args.opportunity_writeback_limit,
+            dry_run=args.opportunity_writeback_dry_run,
+        )
+        mode = "dry-run" if args.opportunity_writeback_dry_run else "live"
+        print(
+            f"Opportunity writeback ({mode}): claimed={summary['claimed']} "
+            f"completed={summary['completed']} failed={summary['failed']}"
+        )
+        for pv in summary.get("previews", []):
+            print(f"  PREVIEW opp={pv.get('opportunity')} → {pv.get('target_stage')}")
         return 0 if summary["failed"] == 0 else 1
 
     if args.casework_executor or args.casework_executor_dry_run:
