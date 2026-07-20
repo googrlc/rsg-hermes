@@ -34,31 +34,34 @@ RENEWAL_TYPES = frozenset({TYPE_RENEWALS})
 # --- Stages (NowCerts vocab), per pipeline -----------------------------------
 # New business / acquisition (ordered).
 STAGE_PREP = "Preparing Application"
+STAGE_NOT_ASSIGNED = "Not Assigned"
 STAGE_SENT_QUOTING = "Sent For Quoting"
 STAGE_QUOTES_RECEIVED = "Quotes Received"
 STAGE_SENT_PROPOSAL = "Sent Proposal"
 STAGE_REQUEST_BIND = "Request to Bind"
-STAGE_BOUND = "Bound"
+STAGE_BOUND = "Bound / Won"   # NowCerts' terminal new-business win stage (verbatim)
 STAGE_LOST = "Lost"
 NEW_BUSINESS_STAGES = (
-    STAGE_PREP, STAGE_SENT_QUOTING, STAGE_QUOTES_RECEIVED, STAGE_SENT_PROPOSAL,
-    STAGE_REQUEST_BIND, STAGE_BOUND, STAGE_LOST,
+    STAGE_NOT_ASSIGNED, STAGE_PREP, STAGE_SENT_QUOTING, STAGE_QUOTES_RECEIVED,
+    STAGE_SENT_PROPOSAL, STAGE_REQUEST_BIND, STAGE_BOUND, STAGE_LOST,
 )
 # Renewal (ordered).
 STAGE_RENEWAL_90 = "Renewal in 90 days"
 STAGE_RENEWAL_60 = "Renewal in 60 days"
 STAGE_RENEWAL_30 = "Renewal in 30 days"
 STAGE_REQUOTE_RENEWAL = "Requote Renewal"
+STAGE_ANNUAL_REVIEW = "Annual Policy Review"
 STAGE_COMPLETE_RENEWAL = "Complete/Auto-Renewal"
 STAGE_NOT_RENEWED = "Not Renewed"
 RENEWAL_STAGES = (
     STAGE_RENEWAL_90, STAGE_RENEWAL_60, STAGE_RENEWAL_30, STAGE_REQUOTE_RENEWAL,
-    STAGE_COMPLETE_RENEWAL, STAGE_NOT_RENEWED,
+    STAGE_ANNUAL_REVIEW, STAGE_COMPLETE_RENEWAL, STAGE_BOUND, STAGE_NOT_RENEWED,
 )
 # All valid stages (dedup, order-preserving) — for loose, type-agnostic validation.
 STAGES = tuple(dict.fromkeys(NEW_BUSINESS_STAGES + RENEWAL_STAGES))
 
-WON_STAGES = frozenset({STAGE_BOUND, STAGE_COMPLETE_RENEWAL})
+# "Bound" (pre-alignment value) kept as a won synonym for already-migrated rows.
+WON_STAGES = frozenset({STAGE_BOUND, "Bound", STAGE_COMPLETE_RENEWAL})
 LOST_STAGES = frozenset({STAGE_LOST, STAGE_NOT_RENEWED})
 
 STATUS_OPEN = "open"
@@ -83,10 +86,10 @@ DEFAULT_LIKELIHOOD = LIKELIHOOD_GOOD  # keeps a NowCerts save from ever blocking
 
 # Stage → default win probability % (the pipeline drives the number).
 STAGE_PROBABILITY = {
-    STAGE_PREP: 10, STAGE_SENT_QUOTING: 25, STAGE_QUOTES_RECEIVED: 50,
+    STAGE_NOT_ASSIGNED: 5, STAGE_PREP: 10, STAGE_SENT_QUOTING: 25, STAGE_QUOTES_RECEIVED: 50,
     STAGE_SENT_PROPOSAL: 65, STAGE_REQUEST_BIND: 85, STAGE_BOUND: 100, STAGE_LOST: 0,
     STAGE_RENEWAL_90: 40, STAGE_RENEWAL_60: 55, STAGE_RENEWAL_30: 70,
-    STAGE_REQUOTE_RENEWAL: 60, STAGE_COMPLETE_RENEWAL: 100, STAGE_NOT_RENEWED: 0,
+    STAGE_REQUOTE_RENEWAL: 60, STAGE_ANNUAL_REVIEW: 50, STAGE_COMPLETE_RENEWAL: 100, STAGE_NOT_RENEWED: 0,
 }
 
 
@@ -96,7 +99,8 @@ def stages_for_type(opportunity_type: str) -> tuple[str, ...]:
 
 
 def default_stage_for_type(opportunity_type: str) -> str:
-    return stages_for_type(opportunity_type)[0]
+    # A manually-created opp opens at a working stage, not the 'Not Assigned' column.
+    return STAGE_RENEWAL_90 if opportunity_type in RENEWAL_TYPES else STAGE_PREP
 
 
 def probability_for_stage(stage: str) -> int:
@@ -119,9 +123,13 @@ def likelihood_for_probability(pct: int | None) -> str:
 
 
 def status_for_stage(stage: str) -> str:
-    if stage in WON_STAGES:
+    """Classify a stage as won/lost/open. Predicate-based so it works for any
+    NowCerts stage string (e.g. 'Bound / Won', 'Complete/Auto-Renewal', 'Not
+    Renewed'), not just our known enum."""
+    s = str(stage or "").strip().lower()
+    if stage in WON_STAGES or "won" in s or "bound" in s or s.startswith("complete"):
         return STATUS_WON
-    if stage in LOST_STAGES:
+    if stage in LOST_STAGES or "lost" in s or "not renewed" in s or "dead" in s:
         return STATUS_LOST
     return STATUS_OPEN
 
@@ -233,8 +241,11 @@ def advance_stage(
 ) -> dict[str, Any]:
     """Move an opportunity to *stage*, syncing status + the stage-driven win
     probability/likelihood (won = Bound/Complete·Auto-Renewal, lost = Lost/Not Renewed)."""
-    if stage not in STAGES:
-        raise ValueError(f"Unknown stage '{stage}'; must be one of {list(STAGES)}")
+    # Any non-empty stage is accepted — NowCerts is the source of truth for the
+    # pipeline vocabulary, so we don't gate drag-to-stage on our known enum.
+    stage = str(stage or "").strip()
+    if not stage:
+        raise ValueError("stage is required")
     pct = probability_for_stage(stage)
     payload: dict[str, Any] = {
         "stage": stage,
@@ -242,7 +253,7 @@ def advance_stage(
         "probability": pct,
         "likelihood": likelihood_for_probability(pct),
     }
-    if stage in LOST_STAGES and lost_reason:
+    if status_for_stage(stage) == STATUS_LOST and lost_reason:
         payload["lost_reason"] = lost_reason
     return supa.update(TABLE, opportunity_id, payload)
 

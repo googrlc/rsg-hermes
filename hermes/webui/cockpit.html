@@ -350,7 +350,8 @@ async function openCommTerms(){
 }
 
 /* ---------- Pipeline Kanban ---------- */
-const PIPE_STAGES=['Preparing Application','Sent For Quoting','Quotes Received','Sent Proposal','Request to Bind','Bound','Lost'];
+const PIPE_STAGES=['Not Assigned','Preparing Application','Sent For Quoting','Quotes Received','Sent Proposal','Request to Bind','Bound / Won','Lost'];
+const isWonStage=s=>/won|bound|complete/i.test(s||''); const isLostStage=s=>/lost|not renewed|dead/i.test(s||'');
 const OPP_TYPES=['New Business','Cross-selling','Bundling','Upselling','Remarket','Competitive Replacements (BOR)','Life Events','Seasonal / Event'];
 let PIPE={};
 async function renderPipeline(host){
@@ -363,14 +364,17 @@ async function renderPipeline(host){
   try{
     // New-business board only — renewals live on their own Renewals pipeline.
     const opps=firstArray(await api('/api/opportunities')).filter(o=>o.opportunity_type!=='Renewals');
-    PIPE={}; const byStage={}; PIPE_STAGES.forEach(s=>byStage[s]=[]);
-    opps.forEach(o=>{ PIPE[o.id]=o; const s=PIPE_STAGES.includes(o.stage)?o.stage:'Preparing Application'; byStage[s].push(o); });
-    const won=byStage['Bound'].length, lost=byStage['Lost'].length, decided=won+lost;
+    // Columns = our known order + any stage NowCerts actually uses (so nothing is lost).
+    const extra=[...new Set(opps.map(o=>o.stage).filter(s=>s&&!PIPE_STAGES.includes(s)))];
+    const STAGES=[...PIPE_STAGES, ...extra];
+    PIPE={}; const byStage={}; STAGES.forEach(s=>byStage[s]=[]);
+    opps.forEach(o=>{ PIPE[o.id]=o; const s=(o.stage&&byStage[o.stage])?o.stage:STAGES[0]; byStage[s].push(o); });
+    const won=opps.filter(o=>isWonStage(o.stage)).length, lost=opps.filter(o=>isLostStage(o.stage)).length, decided=won+lost;
     const cr=decided?Math.round(won/decided*100):0;
     const cs=$('#closeStat'); if(cs) cs.textContent=`Close ratio ${decided?cr+'%':'—'} · ${won}W / ${lost}L`;
     const stageTotal=s=>byStage[s].reduce((a,o)=>a+(Number(o.premium_estimate)||0),0);
     const stageWtd=s=>byStage[s].reduce((a,o)=>a+((Number(o.premium_estimate)||0)*(Number(o.probability)||0)/100),0);
-    $('#kanban').innerHTML=PIPE_STAGES.map(s=>`
+    $('#kanban').innerHTML=STAGES.map(s=>`
       <div class="kcol">
         <div class="kcol-head">
           <div class="kh-top"><span>${esc(s)}</span><span class="badge">${byStage[s].length}</span></div>

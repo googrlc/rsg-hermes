@@ -125,8 +125,8 @@ def test_create_requires_client_and_lob():
 
 def test_advance_stage_to_bound_is_won():
     supa = _supa()
-    row = opp.advance_stage(supa, "opp-1", opp.STAGE_BOUND)
-    assert row["stage"] == "Bound" and row["status"] == "won"
+    row = opp.advance_stage(supa, "opp-1", opp.STAGE_BOUND)   # 'Bound / Won'
+    assert row["stage"] == opp.STAGE_BOUND and row["status"] == "won"
 
 
 def test_advance_stage_to_lost_records_reason():
@@ -135,9 +135,16 @@ def test_advance_stage_to_lost_records_reason():
     assert row["status"] == "lost" and row["lost_reason"] == "price"
 
 
-def test_advance_unknown_stage_raises():
+def test_advance_accepts_any_nonempty_stage():
+    # NowCerts owns the pipeline vocabulary — advance_stage takes any non-empty stage.
+    supa = _supa()
+    row = opp.advance_stage(supa, "opp-1", "Annual Policy Review")
+    assert row["stage"] == "Annual Policy Review"
+
+
+def test_advance_empty_stage_raises():
     with pytest.raises(ValueError):
-        opp.advance_stage(MagicMock(), "opp-1", "Bogus")
+        opp.advance_stage(MagicMock(), "opp-1", "   ")
 
 
 def test_link_nowcerts_backfills_ids():

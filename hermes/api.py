@@ -780,10 +780,11 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
     from hermes.intake import opportunities as opp
 
     stage = (req.stage or "").strip()
-    if stage not in opp.STAGES:
-        raise HTTPException(status_code=400, detail=f"Unknown stage '{stage}'; must be one of {list(opp.STAGES)}")
     try:
+        # advance_stage accepts any non-empty stage (NowCerts owns the vocabulary).
         row = opp.advance_stage(_get_supa(), opportunity_id, stage, lost_reason=req.lost_reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         log.exception("stage update failed: %s", opportunity_id)
         raise HTTPException(status_code=502, detail=str(exc))
