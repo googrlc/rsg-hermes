@@ -173,6 +173,7 @@
       <a data-view="clients"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>Clients</a>
       <a data-view="policies"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Policies</a>
       <a data-view="renewals"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2"/><path d="M18 4v5h-5M6 20v-5h5"/></svg>Renewals</a>
+      <a data-view="lapses"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Lapse check</a>
       <a data-view="commissions"><svg viewBox="0 0 24 24"><path d="M12 3v18M8 7h6a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6"/></svg>Commissions</a>
       <a data-view="leads"><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-8 0"/><path d="M4 20c0-3 3-5 8-5s8 2 8 5"/><path d="M17 7h5M19.5 4.5v5"/></svg>Leads</a>
       <a data-view="pipeline"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Pipeline</a>
@@ -250,7 +251,7 @@ function chip(v){ if(!v)return '—'; const s=String(v).toLowerCase(); let cls='
 /* ---------- Router ---------- */
 async function show(view){
   document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
-  $('#viewTitle').textContent = view==='crosssell'?'Cross-sell':view.charAt(0).toUpperCase()+view.slice(1);
+  $('#viewTitle').textContent = view==='crosssell'?'Cross-sell':view==='lapses'?'Lapse check':view.charAt(0).toUpperCase()+view.slice(1);
   const host = $('#viewHost');
   if(view==='workspace') return renderWorkspace(host);
   if(view==='cases') return renderCases(host);
@@ -259,6 +260,7 @@ async function show(view){
   if(view==='pipeline') return renderPipeline(host);
   if(view==='leads') return renderLeads(host);
   if(view==='crosssell') return renderCrossSell(host);
+  if(view==='lapses') return renderLapses(host);
   if(view==='quotes') return renderQuotes(host);
   return renderTable(host, TABLES[view]);
 }
@@ -458,6 +460,25 @@ async function renderCrossSell(host){
   };
   $('#csq').addEventListener('keydown',e=>{ if(e.key==='Enter') run(); });
   $('#csq').focus();
+}
+
+/* ---------- Lapse check (past-due-but-active) ---------- */
+async function renderLapses(host){
+  host.innerHTML=`<section class="view">
+    <div class="view-head"><div><div class="eyebrow">Past-due · verify in NowCerts</div><h1 class="h1">Lapse check</h1>
+      <p class="lede">Policies whose term already expired but are still marked active in the AMS — likely silent lapses. Kept off the renewals board; confirm each in NowCerts.</p></div>
+      <span class="pill" id="lapseStat">…</span></div>
+    <div class="panel table-wrap"><div class="loading">Loading…</div></div></section>`;
+  const wrap=host.querySelector('.table-wrap');
+  try{
+    const d=await api('/api/command-center/lapse-check'); const rows=d.items||[];
+    const st=$('#lapseStat'); if(st) st.textContent=`${d.count||0} to verify · ${money(d.premium_at_risk)} at risk`;
+    if(!rows.length){ wrap.innerHTML=`<div class="empty">No past-due-but-active policies since ${esc(d.floor||'the floor')}. 🎉</div>`; return; }
+    wrap.innerHTML=`<table><thead><tr><th>Client</th><th>Policy #</th><th>LOB</th><th>Expired</th><th>Status</th><th>Premium</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td>${esc(r.client_name||'—')}</td><td>${esc(r.policy_number||'—')}</td><td>${r.line_of_business?esc(r.line_of_business):'<span class="muted">—</span>'}</td>
+        <td>${esc(r.expiration_date||'—')}</td><td>${chip(r.normalized_status||'verify')}</td><td class="num">${money(r.premium_current)}</td></tr>`).join('')}</tbody></table>`;
+  }catch(e){ wrap.innerHTML=`<div class="empty">Couldn’t load — ${esc(e.message)}</div>`; }
 }
 
 /* ---------- Client 360 ---------- */
