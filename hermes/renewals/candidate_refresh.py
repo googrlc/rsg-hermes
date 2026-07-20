@@ -15,6 +15,7 @@ for the existing read consumers.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -30,6 +31,21 @@ log = logging.getLogger(__name__)
 CANDIDATES_TABLE = "renewal_candidates"
 P85_TABLE = "project_85_renewals"
 _ALIGN_TOLERANCE_DAYS = 3
+
+# Renewal floor: the pipeline only carries events on/after this date. Anything
+# with a renewal event before it (ancient past-due / stale lapses) is dropped —
+# "from June 1 going forward" (RSG). Override with HERMES_RENEWAL_FLOOR=YYYY-MM-DD.
+DEFAULT_RENEWAL_FLOOR = date(2026, 6, 1)
+
+
+def renewal_floor() -> date:
+    raw = os.environ.get("HERMES_RENEWAL_FLOOR", "").strip()
+    if raw:
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            log.warning("invalid HERMES_RENEWAL_FLOOR=%r; using default %s", raw, DEFAULT_RENEWAL_FLOOR)
+    return DEFAULT_RENEWAL_FLOOR
 
 # Ranking for identity dedup (higher wins).
 _STATE_RANK = {elig.STATE_ELIGIBLE: 3, elig.STATE_NEEDS_VERIFICATION: 2, elig.STATE_EXCLUDED: 1}
@@ -209,9 +225,16 @@ def build_candidates(
     *,
     today: date,
     now_iso: str | None = None,
+    floor: date | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate every policy and collapse to one row per renewal-event identity."""
+    """Evaluate every policy and collapse to one row per renewal-event identity.
+
+    Events whose renewal date falls before ``floor`` (default the June-1 renewal
+    floor) are dropped entirely — they never reach renewal_candidates, the
+    pipeline, or the lapse-check list.
+    """
     now_iso = now_iso or _utcnow_iso()
+    floor = floor or renewal_floor()
     by_number: dict[str, dict[str, Any]] = {}
     successors: dict[str, list[dict[str, Any]]] = {}
     for p in policies:
@@ -236,6 +259,8 @@ def build_candidates(
         event_date = _event_date_for(result, p)
         if event_date is None:
             continue  # truly dateless — nothing to key an event on
+        if event_date < floor:
+            continue  # renewal event before the June-1 floor — drop entirely
         row = _candidate_row(
             p, result, lineage, event_date,
             client_name=ins.get("name"), insured_active=insured_active, now_iso=now_iso,
@@ -311,6 +336,48 @@ def _project_eligible(supa: SupabaseClient, eligible: list[dict[str, Any]]) -> d
             except SupabaseClientError:
                 log.exception("p85 prune failed for %s", r.get("id"))
     return {"projected": len(eligible_pns), "pruned": pruned}
+
+
+# ---------------------------------------------------------------------------
+# Lapse-check list (past-due-but-active, routed OFF the forward pipeline)
+# ---------------------------------------------------------------------------
+_LAPSE_FIELDS = (
+    "policy_number,client_name,expiration_date,premium_current,line_of_business,"
+    "normalized_status,eligibility_reason,insured_active,policy_active"
+)
+
+
+def lapse_check(supa: SupabaseClient, *, today: date | None = None) -> dict[str, Any]:
+    """The 'lapse check' list — past-due-but-still-active renewals kept OFF the
+    forward renewals pipeline (per RSG: renewals pipeline = forward window only).
+
+    These are ``needs_verification`` events whose expiration already passed but
+    sits on/after the June-1 floor — likely silent lapses to confirm in NowCerts.
+    Derived read of ``renewal_candidates``; no separate table.
+    """
+    today = today or date.today()
+    today_iso, floor_iso = today.isoformat(), renewal_floor().isoformat()
+    rows = supa.select(
+        CANDIDATES_TABLE,
+        columns=_LAPSE_FIELDS,
+        params={
+            "eligibility_state": f"eq.{elig.STATE_NEEDS_VERIFICATION}",
+            "order": "expiration_date.desc",
+        },
+        limit=5000,
+    )
+    items = [
+        r for r in rows
+        if (exp := r.get("expiration_date")) and floor_iso <= str(exp)[:10] < today_iso
+    ]
+    premium_at_risk = sum(_num(r.get("premium_current")) or 0.0 for r in items)
+    return {
+        "as_of": today_iso,
+        "floor": floor_iso,
+        "count": len(items),
+        "premium_at_risk": round(premium_at_risk),
+        "items": items,
+    }
 
 
 # ---------------------------------------------------------------------------

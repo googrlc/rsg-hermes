@@ -426,6 +426,18 @@ async def command_center_renewals():
     return summarize_renewals(rows)
 
 
+@app.get("/api/command-center/lapse-check")
+async def command_center_lapse_check():
+    """Past-due-but-still-active renewals, kept OFF the forward renewals pipeline.
+
+    The renewals board only carries the forward window (June-1 floor → +120 days);
+    expired-but-active policies route here instead — likely silent lapses to
+    confirm in NowCerts. Derived from ``renewal_candidates`` (needs_verification)."""
+    from hermes.renewals.candidate_refresh import lapse_check
+
+    return lapse_check(_get_supa())
+
+
 @app.get("/api/command-center/tasks")
 async def command_center_tasks():
     """Open team tasks (Gretchen/Lamar) in plain English, most urgent first."""
