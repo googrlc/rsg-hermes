@@ -625,7 +625,7 @@ class OpportunityCreateRequest(BaseModel):
 
 
 @app.post("/api/opportunities")
-async def create_opportunity_endpoint(req: OpportunityCreateRequest):
+async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_tasks: BackgroundTasks):
     """Create (or return existing) a pipeline opportunity for ANY client — new,
     inactive, or a cross-sell on a current client. Idempotent per
     (client_identifier, line_of_business); the smart create logic (identifier,
@@ -662,6 +662,21 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest):
     except Exception as exc:
         log.exception("create opportunity failed: %s / %s", ci, req.line_of_business)
         raise HTTPException(status_code=502, detail=str(exc))
+
+    # Prompt AMS pull-back (only for a freshly created, unlinked row): look up an
+    # existing NowCerts insured and link + enrich it. Runs in the background so the
+    # cockpit's create returns instantly; the row fills in a moment later. No
+    # kick_executor here — a cockpit opportunity stages no create_insured job.
+    if created and not row.get("insured_id"):
+        def _prime(opp_row: dict) -> None:
+            try:
+                from hermes.intake.opportunity_priming import prime_new_opportunities
+
+                prime_new_opportunities(_get_supa(), [opp_row], kick_executor=False)
+            except Exception:
+                log.exception("prime opportunity failed: %s", opp_row.get("id"))
+
+        background_tasks.add_task(_prime, row)
     return {"ok": True, "created": created, "opportunity": row}
 
 
