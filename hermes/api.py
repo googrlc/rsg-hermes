@@ -1384,6 +1384,16 @@ async def run_casework_writebacks(req: CaseworkRunRequest):
     return {"ok": True, **summary}
 
 
+@app.post("/api/intake/run")
+async def run_intake_writebacks(req: CaseworkRunRequest):
+    """Drain approved intake routing intents to CRM (opportunities) + NowCerts (insured)
+    on command (opt-in, no cron). ``dry_run`` previews without writing."""
+    from hermes.command_center.intake_executor import run_intake_executor
+
+    summary = run_intake_executor(supa=_get_supa(), limit=req.limit, dry_run=req.dry_run)
+    return {"ok": True, **summary}
+
+
 @app.get("/api/cases/{case_id}/documents")
 async def case_documents_endpoint(case_id: str):
     """Nextcloud document links filed against a case (agency_crm_document_links)."""
