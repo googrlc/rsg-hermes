@@ -140,3 +140,53 @@ def test_no_id_fails():
     res = cw.run_casework_executor(supa=supa, nowcerts=FakeNowCerts(resp={}), limit=1)
     assert res["failed"] == 1
     assert supa.tables["outbound_sync_queue"][0]["status"] == "failed"
+
+
+# --- retriable on command (requeue) ---
+def _failed_q(object_type="task", status="failed", **o):
+    row = {"id": "q-fail", "object_type": object_type, "destination_system": "nowcerts",
+           "status": status, "attempt_count": 1, "last_error": "boom", "scheduled_for": "2999-01-01T00:00:00Z",
+           "payload": {"action": "insert_task", "target_table": "agency_crm_tasks",
+                       "target_id": "task-1", "task": {"title": "X", "insured_database_id": "ins-1"}}}
+    row.update(o)
+    return row
+
+
+def test_requeue_reopens_failed_job():
+    supa = FakeSupa(queue=[_failed_q(status="failed")])
+    job = cw.requeue_job(supa, queue_id="q-fail")
+    assert job["status"] == "queued"
+    assert job["attempt_count"] == 2          # bumped
+    assert job["last_error"] is None          # cleared
+    assert job["scheduled_for"] is None       # backoff cleared
+
+
+def test_requeue_reopens_dead_job():
+    supa = FakeSupa(queue=[_failed_q(status="dead")])
+    job = cw.requeue_job(supa, queue_id="q-fail")
+    assert job["status"] == "queued"
+
+
+def test_requeue_rejects_completed():
+    supa = FakeSupa(queue=[_failed_q(status="completed")])
+    with pytest.raises(ValueError):
+        cw.requeue_job(supa, queue_id="q-fail")
+
+
+def test_requeue_rejects_non_casework_object():
+    supa = FakeSupa(queue=[_failed_q(object_type="renewal")])
+    with pytest.raises(ValueError):
+        cw.requeue_job(supa, queue_id="q-fail")
+
+
+def test_requeue_missing_row():
+    with pytest.raises(ValueError):
+        cw.requeue_job(FakeSupa(), queue_id="nope")
+
+
+def test_requeue_then_executor_completes():
+    supa = FakeSupa(queue=[_failed_q(status="failed")], extra={"agency_crm_tasks": [{"id": "task-1"}]})
+    cw.requeue_job(supa, queue_id="q-fail")
+    res = cw.run_casework_executor(supa=supa, nowcerts=FakeNowCerts(), limit=5)
+    assert res["completed"] == 1
+    assert supa.tables["outbound_sync_queue"][0]["status"] == "completed"

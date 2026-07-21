@@ -1272,6 +1272,16 @@ class PushToAmsRequest(BaseModel):
     approved_by: str
 
 
+class QueueRetryRequest(BaseModel):
+    requeued_by: str
+    run_now: bool = True
+
+
+class CaseworkRunRequest(BaseModel):
+    limit: int = 5
+    dry_run: bool = False
+
+
 @app.post("/api/cases/{case_id}/push-to-ams")
 async def push_case_to_ams(case_id: str, req: PushToAmsRequest):
     """Approved push: log this case in the NowCerts task ledger. approved_by must be a user."""
@@ -1330,6 +1340,47 @@ async def push_task_to_ams(task_id: str, req: PushToAmsRequest):
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "queued": True, "queue_id": job.get("id"),
             "note": "Task queued to NowCerts (approved). Writes when the casework executor runs."}
+
+
+@app.get("/api/queue/failed")
+async def list_failed_ams_writebacks(limit: int = 100):
+    """Service-request/client-task write-backs that failed or exhausted retries —
+    the retry queue surfaced in the cockpit."""
+    rows = _get_supa().select(
+        "outbound_sync_queue", columns="*",
+        params={"object_type": "in.(case,task)", "status": "in.(failed,dead)",
+                "order": "updated_at.desc"}, limit=limit,
+    )
+    return {"jobs": rows, "count": len(rows)}
+
+
+@app.post("/api/queue/{queue_id}/retry")
+async def retry_ams_writeback(queue_id: str, req: QueueRetryRequest):
+    """Retriable on command: re-open a failed/dead case or task write-back and
+    (by default) run the executor now so it relays to NowCerts immediately."""
+    from hermes.casework.executor import requeue_job, run_casework_executor
+
+    supa = _get_supa()
+    _require_users(supa, [("requeued_by", req.requeued_by)])
+    try:
+        job = requeue_job(supa, queue_id=queue_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        log.exception("requeue failed: %s", queue_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    run = run_casework_executor(supa=supa, limit=5) if req.run_now else {}
+    return {"ok": True, "requeued": True, "queue_id": queue_id, "job": job, "run": run}
+
+
+@app.post("/api/casework/run")
+async def run_casework_writebacks(req: CaseworkRunRequest):
+    """Run the case/task → NowCerts write-back executor on command (opt-in, no cron).
+    ``dry_run`` previews without writing."""
+    from hermes.casework.executor import run_casework_executor
+
+    summary = run_casework_executor(supa=_get_supa(), limit=req.limit, dry_run=req.dry_run)
+    return {"ok": True, **summary}
 
 
 @app.get("/api/cases/{case_id}/documents")
