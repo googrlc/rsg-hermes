@@ -387,6 +387,41 @@ _TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "commission_summary",
+            "description": (
+                "Summarize RSG's commissions from the reconciled ledger — total expected vs "
+                "received and what's still outstanding, optionally for one carrier. Use for "
+                "'how are commissions', 'what are we owed', 'commission shortfall'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "carrier": {"type": "string", "description": "Optional carrier name filter."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "commission_shortfalls",
+            "description": (
+                "List the specific policies where RSG was underpaid or is missing a carrier "
+                "statement — ranked by dollars outstanding. Use for 'what are we chasing', "
+                "'which carriers underpaid us', 'commission discrepancies'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "carrier": {"type": "string", "description": "Optional carrier name filter."},
+                    "limit": {"type": "integer", "description": "Max rows (default 15)."},
+                },
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -657,6 +692,90 @@ def _exec_carrier_appetite(client: "EspoClient", args: dict[str, Any]) -> Dispat
                           {"matches": rows})
 
 
+def _num(v: Any) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# reconciliation_status values on commission_ledger that mean RSG is still owed money
+_OWED_STATUSES = {"underpaid", "missing_statement", "pending"}
+
+
+def _exec_commission_summary(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """Commissions hub tool — expected vs received vs outstanding from commission_ledger."""
+    from collections import Counter
+
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Commission data unavailable: {exc}")
+    params: dict[str, str] = {"order": "statement_date.desc"}
+    carrier = (args.get("carrier") or "").strip()
+    if carrier:
+        params["carrier_name"] = f"ilike.*{carrier}*"
+    try:
+        rows = supa.select(
+            "commission_ledger",
+            columns="carrier_name,expected_commission,actual_commission,reconciliation_status,payment_received",
+            params=params, limit=1000,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Commission lookup failed: {exc}")
+    if not rows:
+        return DispatchResult(True, "No commission ledger rows for that filter.")
+    exp = sum(_num(r.get("expected_commission")) for r in rows)
+    act = sum(_num(r.get("actual_commission")) for r in rows)
+    by_status = Counter(str(r.get("reconciliation_status") or "unknown") for r in rows)
+    scope = f" for {carrier}" if carrier else ""
+    status_line = ", ".join(f"{k}: {v}" for k, v in by_status.most_common())
+    msg = (f"Commissions{scope}: expected ${exp:,.0f}, received ${act:,.0f}, "
+           f"outstanding ${exp - act:,.0f} across {len(rows)} ledger rows.\nBy status — {status_line}.")
+    return DispatchResult(True, msg,
+                          {"expected": exp, "received": act, "outstanding": exp - act, "rows": len(rows)})
+
+
+def _exec_commission_shortfalls(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """Commissions hub tool — the specific underpaid/missing-statement policies RSG is chasing."""
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Commission data unavailable: {exc}")
+    params: dict[str, str] = {"order": "statement_date.desc"}
+    carrier = (args.get("carrier") or "").strip()
+    if carrier:
+        params["carrier_name"] = f"ilike.*{carrier}*"
+    try:
+        rows = supa.select(
+            "commission_ledger",
+            columns="client_name,carrier_name,policy_number,expected_commission,actual_commission,reconciliation_status",
+            params=params, limit=1000,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Commission lookup failed: {exc}")
+    limit = int(args.get("limit") or 15)
+    owed: list[tuple[float, dict[str, Any]]] = []
+    for r in rows:
+        status = str(r.get("reconciliation_status") or "").lower()
+        short = _num(r.get("expected_commission")) - _num(r.get("actual_commission"))
+        if status in _OWED_STATUSES and short > 0.5:
+            owed.append((short, r))
+    owed.sort(key=lambda x: x[0], reverse=True)
+    owed = owed[:limit]
+    if not owed:
+        return DispatchResult(True, "No outstanding commission shortfalls on file — everything reconciled or paid.")
+    total = sum(s for s, _ in owed)
+    lines = [f"{r.get('client_name') or r.get('policy_number') or '?'} · {r.get('carrier_name') or ''} — "
+             f"${s:,.0f} ({r.get('reconciliation_status')})" for s, r in owed]
+    return DispatchResult(True, f"{len(owed)} shortfalls, ${total:,.0f} outstanding:\n" + "\n".join(f"• {ln}" for ln in lines),
+                          {"total": total, "count": len(owed)})
+
+
 def _exec_create(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
     entity = args["entity"]
     fields = args.get("fields", {})
@@ -802,6 +921,8 @@ _EXECUTORS: dict[str, Any] = {
     "merge_records": _exec_merge,
     "list_carriers": _exec_list_carriers,
     "match_carrier_appetite": _exec_carrier_appetite,
+    "commission_summary": _exec_commission_summary,
+    "commission_shortfalls": _exec_commission_shortfalls,
 }
 
 _WRITE_TOOLS = {"create_record", "update_record", "intake_lead", "merge_records"}
@@ -813,9 +934,11 @@ _WRITE_TOOLS = {"create_record", "update_record", "intake_lead", "merge_records"
 # ---------------------------------------------------------------------------
 _HUB_TOOLS: dict[str, set[str]] = {
     "carrier": {"list_carriers", "match_carrier_appetite", "web_research"},
+    "commissions": {"commission_summary", "commission_shortfalls"},
 }
 _HUB_PERSONA: dict[str, str] = {
     "carrier": "carrier",
+    "commissions": "commissions",
 }
 
 

@@ -80,3 +80,48 @@ def test_carrier_appetite_empty_is_honest(monkeypatch):
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa([]))
     res = A._exec_carrier_appetite(None, {"line_of_business": "Aviation"})
     assert res.ok and "No carriers" in res.message
+
+
+# --- commissions hub ---
+def test_commissions_hub_scoped_and_registered():
+    names = {t["function"]["name"] for t in A._scoped_tools(A._TOOLS, "commissions")}
+    assert names == A._HUB_TOOLS["commissions"]
+    for name in A._HUB_TOOLS["commissions"]:
+        assert name in A._EXECUTORS
+    assert not (A._HUB_TOOLS["commissions"] & A._WRITE_TOOLS)
+
+
+def test_commission_summary(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+    rows = [
+        {"carrier_name": "Travelers", "expected_commission": "1000", "actual_commission": "400", "reconciliation_status": "underpaid"},
+        {"carrier_name": "Progressive", "expected_commission": "500", "actual_commission": "500", "reconciliation_status": "paid"},
+    ]
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
+    res = A._exec_commission_summary(None, {})
+    assert res.ok
+    assert res.data["expected"] == 1500 and res.data["received"] == 900 and res.data["outstanding"] == 600
+    assert "underpaid: 1" in res.message
+
+
+def test_commission_shortfalls_ranks_owed(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+    rows = [
+        {"client_name": "Acme", "carrier_name": "Travelers", "expected_commission": "1000", "actual_commission": "400", "reconciliation_status": "underpaid"},
+        {"client_name": "Beta", "carrier_name": "Hartford", "expected_commission": "800", "actual_commission": "0", "reconciliation_status": "missing_statement"},
+        {"client_name": "Gamma", "carrier_name": "Progressive", "expected_commission": "500", "actual_commission": "500", "reconciliation_status": "paid"},
+    ]
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
+    res = A._exec_commission_shortfalls(None, {})
+    # Beta (missing $800) ranks above Acme (underpaid $600); Gamma (paid) excluded
+    assert res.data["count"] == 2 and res.data["total"] == 1400
+    assert res.message.index("Beta") < res.message.index("Acme")
+    assert "Gamma" not in res.message
+
+
+def test_commission_shortfalls_none(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+    rows = [{"client_name": "Ok", "carrier_name": "X", "expected_commission": "100", "actual_commission": "100", "reconciliation_status": "paid"}]
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
+    res = A._exec_commission_shortfalls(None, {})
+    assert res.ok and "No outstanding commission shortfalls" in res.message
