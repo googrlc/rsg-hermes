@@ -523,6 +523,7 @@ async def command_center_download_file(file_id: str):
 class AskRequest(BaseModel):
     prompt: str
     persona: str | None = None
+    hub: str | None = None
 
 
 @app.post("/api/command-center/ask")
@@ -541,7 +542,7 @@ async def command_center_ask(req: AskRequest):
     # week" as a name search.
     from hermes.operations.command_center_qa import answer_question, is_renewal_intent
 
-    if is_renewal_intent(prompt):
+    if not req.hub and is_renewal_intent(prompt):
         try:
             cc_answer = answer_question(_get_supa(), prompt)
             if cc_answer is not None:
@@ -556,7 +557,7 @@ async def command_center_ask(req: AskRequest):
     from hermes.core.nl_agent import ask as nl_ask
 
     try:
-        result = nl_ask(_get_espo(), prompt, confirmed=False, persona=(req.persona or None))
+        result = nl_ask(_get_espo(), prompt, confirmed=False, persona=(req.persona or None), hub=(req.hub or None))
     except Exception as exc:
         log.exception("command-center ask failed: %s", prompt)
         raise HTTPException(status_code=502, detail=str(exc))
