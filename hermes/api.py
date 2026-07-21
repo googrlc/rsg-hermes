@@ -320,6 +320,14 @@ async def cockpit(request: Request):
     return RedirectResponse(url="/command-center/cockpit.html" + (f"?{q}" if q else ""), status_code=307)
 
 
+@app.get("/workspace")
+async def workspace(request: Request):
+    """RSG Master Workspace — the unified shell: every hub as a lane, each with its own
+    scoped AI assistant (served from hermes/webui/workspace.html)."""
+    q = request.url.query
+    return RedirectResponse(url="/command-center/workspace.html" + (f"?{q}" if q else ""), status_code=307)
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "hermes"}

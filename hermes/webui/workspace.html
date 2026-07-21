@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>RSG Master Workspace</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23163a70'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='34' font-weight='700' fill='%23fff' text-anchor='middle'%3ER%3C/text%3E%3Crect x='22' y='50' width='20' height='3' rx='1.5' fill='%23f4c430'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#f6f5f1; --surface:#fbfaf7; --surface-2:#efece6; --border:#dcd8cf; --divider:#e6e2da;
+    --ink:#1b2230; --muted:#6b6f78; --faint:#a4a29a;
+    --navy:#163a70; --navy-soft:#2b558f; --gold:#f4c430; --gold-ink:#7a5c00;
+    --good:#2e7d46; --warn:#b4531f;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --serif:"Iowan Old Style",Palatino,Georgia,ui-serif,serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f131a; --surface:#161b23; --surface-2:#1e242e; --border:#2f3743; --divider:#262d38;
+      --ink:#dde0e7; --muted:#8b909b; --faint:#5c6270;
+      --navy:#7ba3da; --navy-soft:#5f86bd; --gold-ink:#f4c430; --good:#5fb277; --warn:#dd8a53;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f131a; --surface:#161b23; --surface-2:#1e242e; --border:#2f3743; --divider:#262d38;
+    --ink:#dde0e7; --muted:#8b909b; --faint:#5c6270;
+    --navy:#7ba3da; --navy-soft:#5f86bd; --gold-ink:#f4c430; --good:#5fb277; --warn:#dd8a53;
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f5f1; --surface:#fbfaf7; --surface-2:#efece6; --border:#dcd8cf; --divider:#e6e2da;
+    --ink:#1b2230; --muted:#6b6f78; --faint:#a4a29a; --navy:#163a70; --gold-ink:#7a5c00;
+    --good:#2e7d46; --warn:#b4531f;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;
+    display:grid;grid-template-columns:76px minmax(0,1fr) 360px;height:100vh;overflow:hidden}
+  @media(max-width:900px){body{grid-template-columns:64px 1fr}.dock{display:none}}
+
+  /* ── rail ── */
+  .rail{background:var(--surface);border-right:1px solid var(--divider);display:flex;flex-direction:column;
+    align-items:center;gap:8px;padding:14px 10px}
+  .brand{width:46px;height:46px;border-radius:13px;background:var(--navy);color:#fff;display:grid;place-items:center;
+    font-family:var(--serif);font-weight:700;font-size:18px;position:relative;margin-bottom:6px}
+  .brand::after{content:"";position:absolute;bottom:7px;width:18px;height:3px;border-radius:2px;background:var(--gold)}
+  .hubs{display:flex;flex-direction:column;gap:6px;width:100%;align-items:center;margin-top:4px}
+  .hub{width:52px;height:52px;border:none;border-radius:14px;background:transparent;color:var(--muted);cursor:pointer;
+    display:grid;place-items:center;gap:2px;font-family:var(--mono);font-weight:600;font-size:11px;transition:background .12s,color .12s}
+  .hub .g{font-size:16px;font-family:var(--serif);font-weight:700}
+  .hub:hover{background:var(--surface-2)}
+  .hub.on{background:var(--navy);color:#fff}
+  .rail .foot{margin-top:auto;display:flex;flex-direction:column;gap:8px;align-items:center}
+  .icon-btn{width:40px;height:40px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);
+    color:var(--muted);cursor:pointer;font-size:15px}
+
+  /* ── main lane ── */
+  .lane{display:grid;grid-template-rows:auto 1fr;min-width:0;min-height:0}
+  .lanebar{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--divider);
+    background:var(--surface)}
+  .lanebar h1{font-family:var(--serif);font-size:1.15rem;margin:0;font-weight:600}
+  .lanebar .role{font-size:.82rem;color:var(--muted)}
+  .lanebar .spacer{flex:1}
+  .lanebar a.open{font-size:.82rem;font-weight:600;color:var(--navy);text-decoration:none;border:1px solid var(--border);
+    padding:7px 12px;border-radius:9px;background:var(--surface-2)}
+  .frameWrap{position:relative;min-height:0;background:var(--surface-2)}
+  iframe{width:100%;height:100%;border:0;display:block;background:#fff}
+  .blocked{position:absolute;inset:0;display:none;place-items:center;padding:24px;text-align:center}
+  .blocked .card{max-width:420px;display:grid;gap:12px;justify-items:center}
+  .blocked h2{font-family:var(--serif);margin:0;font-size:1.2rem}
+  .blocked p{margin:0;color:var(--muted);font-size:.92rem;line-height:1.5}
+  .blocked a{background:var(--navy);color:#fff;text-decoration:none;padding:11px 18px;border-radius:11px;font-weight:600}
+
+  /* ── AI dock ── */
+  .dock{background:var(--surface);border-left:1px solid var(--divider);display:grid;grid-template-rows:auto 1fr auto;
+    min-height:0}
+  .dock-head{padding:15px 18px;border-bottom:1px solid var(--divider)}
+  .dock-head .eyebrow{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .dock-head h3{margin:3px 0 2px;font-family:var(--serif);font-size:1.05rem}
+  .dock-head .scope{font-size:.8rem;color:var(--gold-ink)}
+  .msgs{overflow:auto;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+  .msg{font-size:.9rem;line-height:1.5;max-width:100%}
+  .msg .who{font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+  .msg.you .bubble{background:var(--navy);color:#fff;padding:9px 12px;border-radius:12px 12px 3px 12px;display:inline-block}
+  .msg.ai .bubble{background:var(--surface-2);border:1px solid var(--border);padding:10px 13px;border-radius:12px 12px 12px 3px;white-space:pre-wrap}
+  .msg.you{align-items:flex-end;display:flex;flex-direction:column}
+  .hint{color:var(--faint);font-size:.84rem;text-align:center;margin:auto 0;padding:20px;line-height:1.6}
+  .composer{border-top:1px solid var(--divider);padding:12px;display:flex;gap:8px}
+  .composer textarea{flex:1;resize:none;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);
+    color:var(--ink);padding:10px 12px;font:inherit;font-size:.9rem;max-height:120px;min-height:44px}
+  .composer button{border:none;border-radius:11px;background:var(--navy);color:#fff;font-weight:600;padding:0 16px;cursor:pointer}
+  .composer button:disabled{opacity:.5;cursor:default}
+</style>
+</head>
+<body>
+  <nav class="rail">
+    <div class="brand">R</div>
+    <div class="hubs" id="hubs"></div>
+    <div class="foot">
+      <button class="icon-btn" id="themeBtn" title="Toggle theme">☾</button>
+    </div>
+  </nav>
+
+  <main class="lane">
+    <div class="lanebar">
+      <div><h1 id="laneTitle">CRM</h1><div class="role" id="laneRole"></div></div>
+      <div class="spacer"></div>
+      <a class="open" id="openTab" target="_blank" rel="noopener">Open in new tab ↗</a>
+    </div>
+    <div class="frameWrap">
+      <iframe id="frame" title="hub"></iframe>
+      <div class="blocked" id="blocked">
+        <div class="card">
+          <h2 id="blockedTitle">This hub opens in its own app</h2>
+          <p id="blockedMsg">It couldn't embed here (the app blocks framing). Open it in a new tab — your hub assistant on the right still works.</p>
+          <a id="blockedLink" target="_blank" rel="noopener">Open hub ↗</a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="dock">
+    <div class="dock-head">
+      <div class="eyebrow">Hub assistant</div>
+      <h3 id="dockTitle">CRM Desk</h3>
+      <div class="scope" id="dockScope">Scoped to the CRM hub</div>
+    </div>
+    <div class="msgs" id="msgs"><div class="hint" id="hint"></div></div>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="Ask this hub…"></textarea>
+      <button id="send">Ask</button>
+    </div>
+  </aside>
+
+<script>
+const HUBS = {
+  crm:        { name:"CRM",         mono:"CR", desk:"CRM Desk",         role:"Client book — accounts, policies, renewals, cases",
+                url:"/command-center/cockpit.html", frameable:true,
+                hint:"Ask about a client or their book.\nTry: “what does Integrity Construction have?” or “who’s renewing in 30 days?”" },
+  carrier:    { name:"Carrier",     mono:"CH", desk:"Carrier Desk",     role:"Appetite, appointments, submissions",
+                url:"http://100.75.67.72:3200/", frameable:false,
+                hint:"Ask where a risk should go.\nTry: “who writes commercial auto for a GA trucking risk?”" },
+  intake:     { name:"Intake",      mono:"IG", desk:"Intake Desk",      role:"Submission queue + review gate",
+                url:"/command-center/cockpit.html#cases", frameable:true,
+                hint:"Ask about the intake queue.\nTry: “what’s waiting for approval?” or “what intake failed?”" },
+  commissions:{ name:"Finance",     mono:"CT", desk:"Commissions Desk", role:"Expected vs received, what we’re owed",
+                url:"https://rsg-commission-tracker-339396843209.us-east1.run.app/", frameable:false,
+                hint:"Ask about commission money.\nTry: “what are we owed?” or “which carriers underpaid us?”" },
+};
+
+const $ = (s)=>document.querySelector(s);
+let active = "crm";
+const convos = {};  // per-hub message history
+
+// build rail
+const railEl = $("#hubs");
+Object.entries(HUBS).forEach(([id,h])=>{
+  const b = document.createElement("button");
+  b.className = "hub"; b.dataset.hub = id; b.title = h.name;
+  b.innerHTML = `<span class="g">${h.mono}</span><span>${h.name}</span>`;
+  b.onclick = ()=>setHub(id);
+  railEl.appendChild(b);
+});
+
+function setHub(id){
+  active = id; const h = HUBS[id];
+  document.querySelectorAll(".hub").forEach(x=>x.classList.toggle("on", x.dataset.hub===id));
+  $("#laneTitle").textContent = h.name;
+  $("#laneRole").textContent = h.role;
+  $("#openTab").href = h.url;
+  $("#dockTitle").textContent = h.desk;
+  $("#dockScope").textContent = "Scoped to the "+h.name.toLowerCase()+" hub";
+  $("#input").placeholder = "Ask "+h.desk+"…";
+  // frame vs blocked-fallback (cross-origin apps often refuse framing)
+  const frame = $("#frame"), blocked = $("#blocked");
+  if (h.frameable){ frame.style.display="block"; blocked.style.display="none"; frame.src = h.url; }
+  else { frame.style.display="none"; frame.removeAttribute("src"); blocked.style.display="grid";
+         $("#blockedTitle").textContent = h.name+" opens in its own app";
+         $("#blockedLink").href = h.url; }
+  renderMsgs();
+}
+
+function renderMsgs(){
+  const box = $("#msgs"); const msgs = convos[active] || [];
+  if (!msgs.length){ box.innerHTML = `<div class="hint">${HUBS[active].hint}</div>`; return; }
+  box.innerHTML = msgs.map(m=>`<div class="msg ${m.who}">
+      <div class="who">${m.who==="you"?"You":HUBS[active].desk}</div>
+      <div class="bubble">${escapeHtml(m.text)}</div></div>`).join("");
+  box.scrollTop = box.scrollHeight;
+}
+function escapeHtml(s){ return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+async function ask(){
+  const inp = $("#input"); const prompt = inp.value.trim(); if(!prompt) return;
+  (convos[active] ||= []).push({who:"you", text:prompt});
+  inp.value=""; renderMsgs();
+  const btn = $("#send"); btn.disabled=true; btn.textContent="…";
+  convos[active].push({who:"ai", text:"Thinking…"}); renderMsgs();
+  try{
+    const r = await fetch("/api/command-center/ask", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ prompt, hub: active }),
+    });
+    const d = await r.json();
+    convos[active].pop();
+    convos[active].push({who:"ai", text: d.message || d.detail || "(no answer)"});
+  }catch(e){
+    convos[active].pop();
+    convos[active].push({who:"ai", text:"Couldn’t reach the assistant — "+e.message});
+  }
+  renderMsgs(); btn.disabled=false; btn.textContent="Ask";
+}
+
+$("#send").onclick = ask;
+$("#input").addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); ask(); } });
+$("#input").addEventListener("input", e=>{ e.target.style.height="44px"; e.target.style.height=Math.min(e.target.scrollHeight,120)+"px"; });
+
+$("#themeBtn").onclick = ()=>{
+  const cur = document.documentElement.getAttribute("data-theme")
+    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur==="dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  $("#themeBtn").textContent = next==="dark" ? "☀" : "☾";
+};
+
+setHub("crm");
+</script>
+</body>
+</html>
