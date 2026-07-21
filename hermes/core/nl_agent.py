@@ -422,6 +422,60 @@ _TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_client",
+            "description": (
+                "Search the canonical client book (NowCerts insureds) by name. Returns "
+                "matching clients with type, location, and contact info. Use for "
+                "'look up <client>', 'find <name>', 'contact info for X'."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string", "description": "Client/business name or partial name."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "client_policies",
+            "description": (
+                "Show a client's book — their policies (with active count) from the canonical "
+                "book. Accepts a client name or a NowCerts insured GUID. Use for "
+                "'what does X have', 'X's policies', 'coverage for X'."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["client"],
+                "properties": {
+                    "client": {"type": "string", "description": "Client name or nowcerts_insured_guid."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_intake_submissions",
+            "description": (
+                "List recent intake submissions and their status (awaiting_approval, failed, "
+                "completed). Use for 'what's waiting for approval', 'what intake failed', "
+                "'the intake queue'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Optional status filter, e.g. awaiting_approval or failed."},
+                    "limit": {"type": "integer", "description": "Max rows (default 15)."},
+                },
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -776,6 +830,105 @@ def _exec_commission_shortfalls(client: "EspoClient", args: dict[str, Any]) -> D
                           {"total": total, "count": len(owed)})
 
 
+def _exec_find_client(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """CRM hub tool — search the canonical client book (Supabase, NowCerts-sourced)."""
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    q = (args.get("query") or "").strip()
+    if not q:
+        return DispatchResult(False, "Tell me the client name to look up.")
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Client book unavailable: {exc}")
+    try:
+        rows = supa.select(
+            "canonical_clients",
+            columns="nowcerts_insured_guid,insured_name,client_type,city,state,email,phone,active",
+            params={"insured_name": f"ilike.*{q}*", "order": "insured_name.asc"}, limit=25,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Client lookup failed: {exc}")
+    if not rows:
+        return DispatchResult(True, f"No clients matching '{q}'.")
+    lines = []
+    for r in rows:
+        loc = ", ".join(x for x in (r.get("city"), r.get("state")) if x)
+        tail = " · ".join(x for x in (r.get("client_type"), loc) if x)
+        lines.append(f"{r.get('insured_name')}" + (f" — {tail}" if tail else ""))
+    return DispatchResult(True, f"{len(rows)} client(s):\n" + "\n".join(f"• {ln}" for ln in lines),
+                          {"clients": rows})
+
+
+def _exec_client_policies(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """CRM hub tool — a client's policies from the canonical book (Supabase)."""
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    who = (args.get("client") or "").strip()
+    if not who:
+        return DispatchResult(False, "Tell me which client.")
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Book unavailable: {exc}")
+    guid, name = who, who
+    looks_like_guid = who.count("-") >= 4 and len(who) >= 30
+    if not looks_like_guid:
+        try:
+            cs = supa.select("canonical_clients", columns="nowcerts_insured_guid,insured_name",
+                             params={"insured_name": f"ilike.*{who}*", "order": "insured_name.asc"}, limit=1)
+        except Exception as exc:  # noqa: BLE001
+            return DispatchResult(False, f"Client lookup failed: {exc}")
+        if not cs:
+            return DispatchResult(True, f"No client matching '{who}'.")
+        guid, name = cs[0].get("nowcerts_insured_guid"), cs[0].get("insured_name")
+    try:
+        pols = supa.select(
+            "canonical_policies",
+            columns="policy_number,carrier,lines_of_business,premium_amount,status,expiration_date,active",
+            params={"nowcerts_insured_guid": f"eq.{guid}", "order": "expiration_date.desc"}, limit=50,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Policy lookup failed: {exc}")
+    if not pols:
+        return DispatchResult(True, f"{name}: no policies on file.")
+    active = sum(1 for p in pols if p.get("active"))
+    lines = [
+        f"{p.get('lines_of_business') or '?'} · {p.get('carrier') or ''} — ${_num(p.get('premium_amount')):,.0f} "
+        f"({p.get('status') or ''}, exp {str(p.get('expiration_date') or '')[:10]})"
+        for p in pols
+    ]
+    return DispatchResult(True, f"{name} — {active} active of {len(pols)} policies:\n" + "\n".join(f"• {ln}" for ln in lines),
+                          {"policies": pols})
+
+
+def _exec_list_intake(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """Intake hub tool — the intake submission queue and its statuses (Supabase)."""
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Intake data unavailable: {exc}")
+    params: dict[str, str] = {"order": "captured_at.desc"}
+    status = (args.get("status") or "").strip()
+    if status:
+        params["status"] = f"eq.{status}"
+    try:
+        rows = supa.select(
+            "intake_submissions",
+            columns="intake_kind,client_identifier,lob_code,status,draft_summary,captured_at",
+            params=params, limit=int(args.get("limit") or 15),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Intake lookup failed: {exc}")
+    if not rows:
+        return DispatchResult(True, "No intake submissions match.")
+    lines = [f"{r.get('client_identifier') or '?'} · {r.get('intake_kind') or ''} — {r.get('status')}" for r in rows]
+    return DispatchResult(True, f"{len(rows)} submission(s):\n" + "\n".join(f"• {ln}" for ln in lines),
+                          {"submissions": rows})
+
+
 def _exec_create(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
     entity = args["entity"]
     fields = args.get("fields", {})
@@ -923,6 +1076,9 @@ _EXECUTORS: dict[str, Any] = {
     "match_carrier_appetite": _exec_carrier_appetite,
     "commission_summary": _exec_commission_summary,
     "commission_shortfalls": _exec_commission_shortfalls,
+    "find_client": _exec_find_client,
+    "client_policies": _exec_client_policies,
+    "list_intake_submissions": _exec_list_intake,
 }
 
 _WRITE_TOOLS = {"create_record", "update_record", "intake_lead", "merge_records"}
@@ -935,10 +1091,14 @@ _WRITE_TOOLS = {"create_record", "update_record", "intake_lead", "merge_records"
 _HUB_TOOLS: dict[str, set[str]] = {
     "carrier": {"list_carriers", "match_carrier_appetite", "web_research"},
     "commissions": {"commission_summary", "commission_shortfalls"},
+    "crm": {"find_client", "client_policies", "renewals_overview"},
+    "intake": {"list_intake_submissions"},
 }
 _HUB_PERSONA: dict[str, str] = {
     "carrier": "carrier",
     "commissions": "commissions",
+    "crm": "crm",
+    "intake": "intake",
 }
 
 
