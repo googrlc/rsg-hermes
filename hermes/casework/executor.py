@@ -192,3 +192,39 @@ def run_casework_executor(
             summary["failed"] += 1
 
     return summary
+
+
+# Statuses a case/task job can be retried from. 'dead' = retries exhausted by an
+# automated backoff; both are re-openable on command.
+RETRYABLE_STATUSES = (QUEUE_FAILED, "dead")
+
+
+def requeue_job(supa: "SupabaseClient", *, queue_id: str) -> dict[str, Any]:
+    """Re-open a failed/dead case or task write-back so the executor retries it.
+
+    This is the "retriable on command" path: it flips the row back to ``queued``,
+    bumps ``attempt_count``, clears the backoff (``scheduled_for``) and the stale
+    ``last_error``. Guarded to case/task jobs in a retryable status only — never
+    touches a completed or in-flight row.
+    """
+    rows = supa.select(QUEUE_TABLE, columns="*", params={"id": f"eq.{queue_id}"}, limit=1)
+    if not rows:
+        raise ValueError(f"queue row {queue_id} not found")
+    job = rows[0]
+    if job.get("object_type") not in (OBJECT_TYPE_CASE, OBJECT_TYPE_TASK):
+        raise ValueError("only service-request (case) and client-task jobs are retriable here")
+    if job.get("status") not in RETRYABLE_STATUSES:
+        raise ValueError(
+            f"job status is {job.get('status')!r}; only {'/'.join(RETRYABLE_STATUSES)} jobs can be retried"
+        )
+    return supa.update(
+        QUEUE_TABLE,
+        queue_id,
+        {
+            "status": QUEUE_QUEUED,
+            "attempt_count": int(job.get("attempt_count") or 0) + 1,
+            "scheduled_for": None,
+            "last_error": None,
+            "updated_at": _utcnow().isoformat(),
+        },
+    )
