@@ -125,3 +125,64 @@ def test_commission_shortfalls_none(monkeypatch):
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
     res = A._exec_commission_shortfalls(None, {})
     assert res.ok and "No outstanding commission shortfalls" in res.message
+
+
+# --- crm + intake hubs ---
+def test_crm_and_intake_hubs_scoped_and_registered():
+    for hub in ("crm", "intake"):
+        names = {t["function"]["name"] for t in A._scoped_tools(A._TOOLS, hub)}
+        assert names == A._HUB_TOOLS[hub]
+        for name in A._HUB_TOOLS[hub]:
+            assert name in A._EXECUTORS
+        assert not (A._HUB_TOOLS[hub] & A._WRITE_TOOLS)  # read-only hubs
+
+
+def test_find_client(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+    fake = FakeSupa([{"insured_name": "Dream Chaser Trucking", "client_type": "Commercial",
+                      "city": "Atlanta", "state": "Georgia", "nowcerts_insured_guid": "g1"}])
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
+    res = A._exec_find_client(None, {"query": "dream"})
+    assert res.ok and "Dream Chaser Trucking" in res.message
+    assert fake.last[0] == "canonical_clients"
+    assert fake.last[1].get("insured_name") == "ilike.*dream*"
+
+
+def test_client_policies_resolves_name(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+
+    class TwoStep:
+        def __init__(self):
+            self.calls = []
+
+        def select(self, table, *, columns="*", params=None, limit=100):
+            self.calls.append(table)
+            if table == "canonical_clients":
+                return [{"nowcerts_insured_guid": "g1", "insured_name": "Dream Chaser Trucking"}]
+            return [{"policy_number": "P1", "carrier": "Progressive", "lines_of_business": "Commercial Auto",
+                     "premium_amount": "8888", "status": "Active", "expiration_date": "2027-05-18", "active": True}]
+
+    two = TwoStep()
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: two)
+    res = A._exec_client_policies(None, {"client": "Dream Chaser"})
+    assert res.ok and "Dream Chaser Trucking" in res.message and "Commercial Auto" in res.message
+    assert "1 active of 1" in res.message
+    assert two.calls == ["canonical_clients", "canonical_policies"]
+
+
+def test_list_intake_filters_status(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+    fake = FakeSupa([{"client_identifier": "Acme", "intake_kind": "commercial", "status": "awaiting_approval"}])
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
+    res = A._exec_list_intake(None, {"status": "awaiting_approval"})
+    assert res.ok and "Acme" in res.message
+    assert fake.last[0] == "intake_submissions"
+    assert fake.last[1].get("status") == "eq.awaiting_approval"
+
+
+def test_all_hub_tools_resolve():
+    # every tool named in any hub must exist as a schema and an executor
+    for hub, names in A._HUB_TOOLS.items():
+        for name in names:
+            assert name in A._EXECUTORS, f"{hub}:{name} not in _EXECUTORS"
+            assert any(t["function"]["name"] == name for t in A._TOOLS), f"{hub}:{name} not in _TOOLS"
