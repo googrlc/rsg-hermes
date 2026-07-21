@@ -349,6 +349,44 @@ _TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_carriers",
+            "description": (
+                "List the carriers RSG has appointments/data on, optionally filtered "
+                "by name or line of business. Use for 'which carriers do we work with', "
+                "'who's our GA for X', a carrier's lines, or its underwriting contact."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Optional carrier name / text filter."},
+                    "line_of_business": {"type": "string", "description": "Optional LOB filter, e.g. 'Commercial Auto'."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "match_carrier_appetite",
+            "description": (
+                "Find carriers whose appetite matches a risk — by line of business, state, "
+                "and/or class/NAICS. Use for 'who writes this?', 'carrier fit for X', "
+                "'where do we submit this risk?'. Returns candidates with premium bands, "
+                "requirements, and exclusions. Never invents appetite — only what's on file."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "line_of_business": {"type": "string", "description": "Line of business, e.g. 'General Liability'."},
+                    "state": {"type": "string", "description": "2-letter or full state name."},
+                    "class_or_naics": {"type": "string", "description": "Class code, NAICS, or an operations keyword."},
+                },
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -531,6 +569,94 @@ def _exec_renewals(client: "EspoClient", args: dict[str, Any]) -> DispatchResult
     return DispatchResult(True, renewals_facts(supa, scope=scope, within_days=within))
 
 
+def _exec_list_carriers(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """Carrier hub tool — list carriers from the Supabase carrier book (read-only)."""
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Carrier book unavailable: {exc}")
+    params: dict[str, str] = {"order": "name.asc", "is_active": "eq.true"}
+    q = (args.get("query") or "").strip()
+    lob = (args.get("line_of_business") or "").strip()
+    if q:
+        params["name"] = f"ilike.*{q}*"
+    if lob:
+        params["lines_of_business"] = f"ilike.*{lob}*"
+    try:
+        rows = supa.select(
+            "carriers",
+            columns="name,segment,lines_of_business,general_agent,appetite_notes,underwriting_hotline",
+            params=params, limit=60,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Carrier lookup failed: {exc}")
+    if not rows:
+        return DispatchResult(True, "No carriers matched that filter.")
+    lines = []
+    for r in rows:
+        bits = [r.get("name") or "?"]
+        tail = " · ".join(x for x in (r.get("segment"), r.get("lines_of_business")) if x)
+        if tail:
+            bits.append(tail)
+        lines.append(" — ".join(bits))
+    return DispatchResult(True, f"{len(rows)} carriers:\n" + "\n".join(f"• {ln}" for ln in lines),
+                          {"carriers": rows})
+
+
+def _exec_carrier_appetite(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """Carrier hub tool — match carriers to a risk via the carrier_appetite table."""
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Appetite data unavailable: {exc}")
+    params: dict[str, str] = {"order": "carrier_name.asc", "active": "eq.true"}
+    lob = (args.get("line_of_business") or "").strip()
+    state = (args.get("state") or "").strip()
+    cls = (args.get("class_or_naics") or "").strip()
+    if lob:
+        params["lob"] = f"ilike.*{lob}*"
+    try:
+        rows = supa.select(
+            "carrier_appetite",
+            columns="carrier_name,lob,appetite_level,min_premium,max_premium,states_approved,key_requirements,exclusions,notes",
+            params=params, limit=40,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Appetite lookup failed: {exc}")
+    if state:
+        # states_approved is a text[] (e.g. ["GA"] or ["ALL"]) — filter in Python.
+        su = state.strip().upper()
+
+        def _writes_state(r: dict[str, Any]) -> bool:
+            arr = r.get("states_approved") or []
+            if not isinstance(arr, list):
+                arr = [arr]
+            up = [str(x).upper() for x in arr if x]
+            return "ALL" in up or any(su == x or su in x or x in su for x in up)
+
+        rows = [r for r in rows if _writes_state(r)]
+    if cls:
+        needle = cls.lower()
+        narrowed = [r for r in rows if needle in " ".join(
+            str(r.get(k) or "") for k in ("key_requirements", "notes", "exclusions", "lob")).lower()]
+        rows = narrowed or rows  # fall back to the LOB/state set if the class filter is too tight
+    if not rows:
+        return DispatchResult(True, "No carriers with matching appetite on file. This reflects only the "
+                                    "appetite table — confirm directly with the carrier before relying on it.")
+    out = []
+    for r in rows:
+        prem = ""
+        if r.get("min_premium") or r.get("max_premium"):
+            prem = f" · ${r.get('min_premium') or 0}–${r.get('max_premium') or '?'}"
+        out.append(f"{r.get('carrier_name')} — {r.get('lob')} ({r.get('appetite_level') or 'appetite'}){prem}")
+    return DispatchResult(True, f"{len(rows)} carrier appetite matches:\n" + "\n".join(f"• {x}" for x in out),
+                          {"matches": rows})
+
+
 def _exec_create(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
     entity = args["entity"]
     fields = args.get("fields", {})
@@ -674,9 +800,31 @@ _EXECUTORS: dict[str, Any] = {
     "update_record": _exec_update,
     "intake_lead": _exec_intake,
     "merge_records": _exec_merge,
+    "list_carriers": _exec_list_carriers,
+    "match_carrier_appetite": _exec_carrier_appetite,
 }
 
 _WRITE_TOOLS = {"create_record", "update_record", "intake_lead", "merge_records"}
+
+# ---------------------------------------------------------------------------
+# Per-hub AI scoping — each hub gets its own assistant that only carries that
+# hub's tools + a hub persona overlay. hub=None → the full CRM assistant.
+# Add a hub by adding a tool set here (and, optionally, a persona file).
+# ---------------------------------------------------------------------------
+_HUB_TOOLS: dict[str, set[str]] = {
+    "carrier": {"list_carriers", "match_carrier_appetite", "web_research"},
+}
+_HUB_PERSONA: dict[str, str] = {
+    "carrier": "carrier",
+}
+
+
+def _scoped_tools(tools: list[dict[str, Any]], hub: str | None) -> list[dict[str, Any]]:
+    """Filter a tool list to a hub's allowed set. Unknown/None hub → unchanged."""
+    allowed = _HUB_TOOLS.get(hub or "")
+    if allowed is None:
+        return tools
+    return [t for t in tools if t["function"]["name"] in allowed]
 
 _report_dispatcher: Any = None
 
@@ -701,6 +849,7 @@ def ask(
     confirmed: bool = False,
     conversation: list[dict[str, str]] | None = None,
     persona: str | None = None,
+    hub: str | None = None,
 ) -> DispatchResult:
     """Process a natural language CRM request using the OpenAI agent.
 
@@ -724,7 +873,8 @@ def ask(
 
     model = resolve_model(None)
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": _compose_system_prompt(persona)}]
+    persona_key = persona or _HUB_PERSONA.get(hub or "")
+    messages: list[dict[str, Any]] = [{"role": "system", "content": _compose_system_prompt(persona_key)}]
     if conversation:
         messages.extend(conversation)
     messages.append({"role": "user", "content": text})
@@ -733,7 +883,7 @@ def ask(
     from hermes.core.identity import disabled_tools
 
     disabled = disabled_tools()
-    active_tools = [t for t in _TOOLS if t["function"]["name"] not in disabled]
+    active_tools = _scoped_tools([t for t in _TOOLS if t["function"]["name"] not in disabled], hub)
 
     try:
         response = oai.chat.completions.create(
