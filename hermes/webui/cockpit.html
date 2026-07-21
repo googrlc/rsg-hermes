@@ -579,10 +579,12 @@ async function renderCases(host){
     <div class="view-head"><div><div class="eyebrow">agency_crm_cases · read/write</div><h1 class="h1">Cases</h1>
       <p class="lede">Create cases, update ownership, and manage their tasks.</p></div>
       <div class="btns"><button class="btn" id="newTaskBtn">+ New task</button><button class="btn primary" id="openCaseBtn">+ Open case</button></div></div>
+    <div id="retryStrip" style="margin-bottom:16px"></div>
     <div class="split"><div class="panel"><div class="panel-head"><h4>All cases</h4><span class="badge" id="caseCount">…</span></div><div class="caselist" id="caselist"><div class="loading">Loading…</div></div></div>
     <div class="panel detail" id="caseDetail"><div class="empty">Select a case.</div></div></div></section>`;
   $('#openCaseBtn').onclick=openNewCase;
   $('#newTaskBtn').onclick=()=>openNewTask(activeCase);
+  loadRetryQueue();
   try{
     CASES = firstArray(await api('/api/cases'));
     $('#caseCount').textContent = CASES.length;
@@ -707,6 +709,33 @@ async function openPushToAms(kind, id, label){
     await api('/api/'+(kind==='case'?'cases':'tasks')+'/'+encodeURIComponent(id)+'/push-to-ams',{method:'POST',body:JSON.stringify({approved_by:$('#pushBy').value})});
     closeModal(); toast(kind.charAt(0).toUpperCase()+kind.slice(1)+' queued to NowCerts — writes when the casework executor runs.');
     if(activeCase) selectCase(CASES.indexOf(activeCase));
+  });
+}
+async function loadRetryQueue(){
+  const host=$('#retryStrip'); if(!host) return;
+  let jobs=[]; try{ jobs=firstArray(await api('/api/queue/failed')); }catch{ jobs=[]; }
+  if(!jobs.length){ host.innerHTML=''; return; }
+  host.innerHTML=`<div class="panel" style="border-color:var(--crit)">
+    <div class="panel-head"><h4>Failed AMS syncs</h4><span class="badge" style="background:var(--crit);color:#fff">${jobs.length}</span></div>
+    <div>${jobs.map(j=>{ const p=j.payload||{}; const t=(p.task&&p.task.title)||p.target_id||j.object_id||'';
+      return `<div class="task"><div><div class="t-title">${esc(j.object_type)} · ${esc(t)}</div>
+        <div class="t-meta">${esc(String(j.status||'').toUpperCase())} · attempt ${esc(String(j.attempt_count||0))}${j.last_error?' · '+esc(String(j.last_error).slice(0,90)):''}</div></div>
+        <div class="t-status"><a data-retry="${esc(j.id)}" data-label="${esc(t)}" style="color:var(--accent);font-weight:600;cursor:pointer">Retry →</a></div></div>`;
+    }).join('')}</div></div>`;
+  host.querySelectorAll('[data-retry]').forEach(a=>a.onclick=()=>openRetry(a.dataset.retry, a.dataset.label));
+}
+async function openRetry(queueId, label){
+  await loadUsers();
+  openModal(`<div class="modal-head"><h3>Retry AMS write-back</h3><p>${esc(label||'')}</p></div>
+   <div class="modal-body"><div class="t-meta">Re-opens this failed service-request/task write-back and relays it to NowCerts now.</div>
+     <div class="field"><label>Requeued by</label><select id="rqBy">${userOptions()}</select></div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="rqGo">Retry now</button></div>`);
+  $('#rqGo').onclick=(e)=>submitBtn(e.target,async()=>{
+    const r=await api('/api/queue/'+encodeURIComponent(queueId)+'/retry',{method:'POST',body:JSON.stringify({requeued_by:$('#rqBy').value,run_now:true})});
+    closeModal();
+    const done=r&&r.run&&r.run.completed;
+    toast(done?'Retried — relayed to NowCerts.':'Re-queued — will relay on the next executor run.');
+    loadRetryQueue(); if(activeCase) selectCase(CASES.indexOf(activeCase));
   });
 }
 function openPolicy(p){
