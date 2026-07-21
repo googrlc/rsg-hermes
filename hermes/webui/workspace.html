@@ -65,11 +65,22 @@
     padding:7px 12px;border-radius:9px;background:var(--surface-2)}
   .frameWrap{position:relative;min-height:0;background:var(--surface-2)}
   iframe{width:100%;height:100%;border:0;display:block;background:#fff}
-  .blocked{position:absolute;inset:0;display:none;place-items:center;padding:24px;text-align:center}
+  .blocked{position:absolute;inset:0;display:none;place-items:center;padding:24px;text-align:center;
+    background:var(--surface-2)}
   .blocked .card{max-width:420px;display:grid;gap:12px;justify-items:center}
   .blocked h2{font-family:var(--serif);margin:0;font-size:1.2rem}
   .blocked p{margin:0;color:var(--muted);font-size:.92rem;line-height:1.5}
+  .blocked .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
   .blocked a{background:var(--navy);color:#fff;text-decoration:none;padding:11px 18px;border-radius:11px;font-weight:600}
+  .blocked button.retry{background:var(--surface);color:var(--ink);border:1px solid var(--border);
+    padding:11px 18px;border-radius:11px;font-weight:600;cursor:pointer}
+  /* loading veil — covers the iframe while we find out whether it will embed,
+     so the browser's own "refused to connect" page never flashes through */
+  .loading{position:absolute;inset:0;display:none;place-items:center;background:var(--surface-2);gap:14px}
+  .loading .spin{width:26px;height:26px;border-radius:50%;border:3px solid var(--border);
+    border-top-color:var(--navy);animation:spin .8s linear infinite}
+  .loading .lbl{position:absolute;top:calc(50% + 30px);color:var(--muted);font-size:.85rem}
+  @keyframes spin{to{transform:rotate(360deg)}}
 
   /* ── AI dock ── */
   .dock{background:var(--surface);border-left:1px solid var(--divider);display:grid;grid-template-rows:auto 1fr auto;
@@ -108,12 +119,19 @@
       <a class="open" id="openTab" target="_blank" rel="noopener">Open in new tab ↗</a>
     </div>
     <div class="frameWrap">
-      <iframe id="frame" title="hub"></iframe>
+      <iframe id="frame" title="hub" referrerpolicy="no-referrer"></iframe>
+      <div class="loading" id="loading">
+        <div class="spin"></div>
+        <div class="lbl" id="loadingLbl">Loading…</div>
+      </div>
       <div class="blocked" id="blocked">
         <div class="card">
           <h2 id="blockedTitle">This hub opens in its own app</h2>
           <p id="blockedMsg">It couldn't embed here (the app blocks framing). Open it in a new tab — your hub assistant on the right still works.</p>
-          <a id="blockedLink" target="_blank" rel="noopener">Open hub ↗</a>
+          <div class="actions">
+            <a id="blockedLink" target="_blank" rel="noopener">Open hub ↗</a>
+            <button class="retry" id="blockedRetry" type="button">Try embedding again</button>
+          </div>
         </div>
       </div>
     </div>
@@ -145,18 +163,28 @@ window.onerror = function(msg, src, line){
   }catch(e){}
   return false;
 };
+// Every hub is embedded first; if the app refuses framing we fall back to the
+// "open in its own tab" card (see attemptEmbed). `frameable` is only a hint:
+//   true  → known to embed (skip the loading probe, show it straight away)
+//   false → known to refuse framing OR served over http while we're on https
+//           (mixed content can never embed) → go straight to the fallback card
+//   undefined → try to embed, decide from what actually loads
 const HUBS = {
   crm:        { name:"CRM",         mono:"CR", desk:"CRM Desk",         role:"Client book — accounts, policies, renewals, cases",
                 url:"/command-center/cockpit.html", frameable:true,
                 hint:"Ask about a client or their book.\nTry: “what does Integrity Construction have?” or “who’s renewing in 30 days?”" },
   carrier:    { name:"Carrier",     mono:"CH", desk:"Carrier Desk",     role:"Appetite, appointments, submissions",
-                url:"http://100.75.67.72:3200/", frameable:false,
+                // Served over https via Tailscale Serve on hermes-gretch (roots the
+                // SPA so its absolute /assets paths resolve). The raw app is
+                // http://127.0.0.1:3200 on the same box; the serve mapping is:
+                //   tailscale serve --bg --https=8445 http://127.0.0.1:3200
+                url:"https://hermes-gretch.tail1cbc83.ts.net:8445/",
                 hint:"Ask where a risk should go.\nTry: “who writes commercial auto for a GA trucking risk?”" },
   intake:     { name:"Intake",      mono:"IG", desk:"Intake Desk",      role:"Intake Gate — evidence, review & synthesis",
-                url:"https://hermes-gretch.tail1cbc83.ts.net/app", frameable:false,
+                url:"https://hermes-gretch.tail1cbc83.ts.net/app",
                 hint:"Ask about the intake queue.\nTry: “what’s waiting for approval?” or “what intake failed?”" },
   commissions:{ name:"Finance",     mono:"CT", desk:"Commissions Desk", role:"Expected vs received, what we’re owed",
-                url:"https://rsg-commission-tracker-339396843209.us-east1.run.app/", frameable:false,
+                url:"https://rsg-commission-tracker-339396843209.us-east1.run.app/",
                 hint:"Ask about commission money.\nTry: “what are we owed?” or “which carriers underpaid us?”" },
 };
 
@@ -183,14 +211,63 @@ function setHub(id){
   $("#dockTitle").textContent = h.desk;
   $("#dockScope").textContent = "Scoped to the "+h.name.toLowerCase()+" hub";
   $("#input").placeholder = "Ask "+h.desk+"…";
-  // frame vs blocked-fallback (cross-origin apps often refuse framing)
-  const frame = $("#frame"), blocked = $("#blocked");
-  if (h.frameable){ frame.style.display="block"; blocked.style.display="none"; frame.src = h.url; }
-  else { frame.style.display="none"; frame.removeAttribute("src"); blocked.style.display="grid";
-         $("#blockedTitle").textContent = h.name+" opens in its own app";
-         $("#blockedLink").href = h.url; }
+  attemptEmbed(h);
   renderMsgs();
 }
+
+// ── embed-with-fallback ─────────────────────────────────────────────────────
+// Every hub tries to embed. A same-origin/framable app fires the iframe's
+// `load` event; an app that refuses framing (X-Frame-Options / CSP
+// frame-ancestors) never does — so if no load lands within the grace window we
+// show the "open in its own tab" card. A loading veil covers the frame in the
+// meantime so the browser's raw error page never flashes through.
+let embedTimer = null;
+const EMBED_GRACE_MS = 4000;
+
+function attemptEmbed(h){
+  const frame = $("#frame"), blocked = $("#blocked"), loading = $("#loading");
+  clearTimeout(embedTimer);
+  $("#blockedTitle").textContent = h.name+" opens in its own app";
+  $("#blockedLink").href = h.url;
+
+  // Mixed content: an https workspace can never frame an http app — don't even
+  // spin, go straight to the fallback.
+  const mixed = location.protocol === "https:" && /^http:\/\//i.test(h.url);
+  if (h.frameable === false || mixed){
+    frame.style.display="none"; frame.removeAttribute("src");
+    loading.style.display="none"; blocked.style.display="grid";
+    return;
+  }
+
+  // Optimistically embed. Reset src first so re-selecting a hub reloads it.
+  blocked.style.display="none";
+  frame.style.display="block";
+  loading.style.display = h.frameable === true ? "none" : "grid";
+  $("#loadingLbl").textContent = "Loading "+h.name+"…";
+  frame.removeAttribute("src");
+  frame.src = h.url;
+
+  if (h.frameable === true) return;   // trusted to embed, no probe needed
+  const probingFor = active;
+  embedTimer = setTimeout(()=>{
+    if (active !== probingFor) return;          // user switched hubs — ignore
+    // load never fired → the app refused framing. Show the fallback card.
+    frame.style.display="none"; frame.removeAttribute("src");
+    loading.style.display="none"; blocked.style.display="grid";
+  }, EMBED_GRACE_MS);
+}
+
+// A load event means the frame rendered (same- or cross-origin) → it embeds.
+$("#frame").addEventListener("load", ()=>{
+  const frame = $("#frame");
+  if (!frame.getAttribute("src")) return;       // blank reset, not a real load
+  clearTimeout(embedTimer);
+  $("#loading").style.display="none";
+  $("#blocked").style.display="none";
+  frame.style.display="block";
+});
+
+$("#blockedRetry").onclick = ()=> attemptEmbed(HUBS[active]);
 
 function renderMsgs(){
   const box = $("#msgs"); const msgs = convos[active] || [];
