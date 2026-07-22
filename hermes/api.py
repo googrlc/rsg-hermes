@@ -772,6 +772,19 @@ async def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdat
     return {"ok": True, "opportunity": row}
 
 
+@app.delete("/api/opportunities/{opportunity_id}")
+async def delete_opportunity_endpoint(opportunity_id: str):
+    """Delete an opportunity from the CRM. Supabase-only — opportunities never write
+    to the AMS, so there's nothing to unwind in NowCerts. Any attached quotes are
+    removed automatically (opportunity_quotes FK is ON DELETE CASCADE)."""
+    try:
+        _get_supa().delete("opportunities", opportunity_id)
+    except Exception as exc:
+        log.exception("delete opportunity failed: %s", opportunity_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "deleted": opportunity_id}
+
+
 @app.get("/api/leads")
 async def list_leads_endpoint(limit: int = 200):
     """Leads = live NowCerts prospects (insureds with a prospectType). Read-only;
