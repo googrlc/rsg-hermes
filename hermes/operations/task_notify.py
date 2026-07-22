@@ -18,9 +18,28 @@ log = logging.getLogger(__name__)
 
 _DONE_STATUSES = {"completed", "done", "cancelled", "canceled", "closed"}
 
+# Priority → emoji, so urgency reads at a glance in the chat line.
+_PRIORITY_EMOJI = {"urgent": "🔴", "high": "🔴", "medium": "🟡", "normal": "🟡", "low": "🟢"}
+
 
 def talk_token() -> str:
     return os.environ.get("NEXTCLOUD_TALK_TOKEN", "").strip()
+
+
+def _crm_link(view: str = "tasks") -> str:
+    """A markdown link back into the CRM (Tasks view), or "" if no base URL is set.
+
+    ``HERMES_PUBLIC_BASE_URL`` is the tailnet workspace origin
+    (e.g. https://hermes-gretch.tail1cbc83.ts.net:8444)."""
+    base = os.environ.get("HERMES_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if not base:
+        return ""
+    return f"[open in CRM ↗]({base}/cockpit#{view})"
+
+
+def _priority_badge(priority: Any) -> str:
+    p = str(priority or "").lower()
+    return f"{_PRIORITY_EMOJI.get(p, '⚪')} {p}" if p else ""
 
 
 def _post(message: str) -> bool:
@@ -44,10 +63,19 @@ def notify_task_created(task: dict[str, Any], *, kind: str = "task") -> bool:
     who = (task.get("assigned_to_email") or task.get("assigned_to")
            or task.get("owner_email") or "unassigned")
     client = task.get("insured_name") or task.get("client_identifier") or ""
-    due = task.get("due_at") or task.get("due_date") or ""
-    head = f"🆕 New {kind}: **{title}**" + (f" · {client}" if client else "")
-    meta = f"→ {who}" + (f" · due {str(due)[:10]}" if due else "")
-    return _post(f"{head}\n{meta}")
+    due = str(task.get("due_at") or task.get("due_date") or "")[:10]
+    desc = str(task.get("description") or "").strip()
+
+    lines = [f"🆕 **New {kind}:** {title}"]
+    facts = [f"🏢 {client}" if client else "", f"👤 {who}",
+             f"📅 due {due}" if due else "", _priority_badge(task.get("priority"))]
+    lines.append(" · ".join(f for f in facts if f))
+    if desc:
+        lines.append(f"📝 {desc[:280]}")
+    link = _crm_link("tasks")
+    if link:
+        lines.append(f"🔗 {link}")
+    return _post("\n".join(lines))
 
 
 def daily_task_digest(supa: Any = None) -> dict[str, Any]:
@@ -68,13 +96,16 @@ def daily_task_digest(supa: Any = None) -> dict[str, Any]:
 
     open_rows = [r for r in rows if str(r.get("status") or "").lower() not in _DONE_STATUSES]
     if not open_rows:
-        return {"ok": True, "count": 0, "posted": _post("📋 Task digest — no open tasks. Nice.")}
+        return {"ok": True, "count": 0, "posted": _post("📋 **Task digest** — no open tasks. Nice. 🎉")}
 
-    lines = [f"📋 Open tasks ({len(open_rows)}):"]
+    link = _crm_link("tasks")
+    lines = [f"📋 **Open tasks ({len(open_rows)})**" + (f"  ·  {link}" if link else ""), ""]
     for r in open_rows[:20]:
         due = str(r.get("due_at") or "")[:10]
-        lines.append(f"• {r.get('title') or '(untitled)'} — "
-                     f"{r.get('assigned_to_email') or 'unassigned'}" + (f" (due {due})" if due else ""))
+        facts = [f"👤 {r.get('assigned_to_email') or 'unassigned'}",
+                 f"📅 {due}" if due else "", _priority_badge(r.get("priority"))]
+        lines.append(f"🔹 **{r.get('title') or '(untitled)'}**")
+        lines.append("    " + " · ".join(f for f in facts if f))
     if len(open_rows) > 20:
         lines.append(f"…and {len(open_rows) - 20} more.")
     return {"ok": True, "count": len(open_rows), "posted": _post("\n".join(lines))}

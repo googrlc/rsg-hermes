@@ -1076,7 +1076,11 @@ document.getElementById('nav').addEventListener('click',e=>{const a=e.target.clo
 (function(){ const who=(new URLSearchParams(location.search).get('u')||'').toLowerCase();
   if(who==='gretchen'){ document.body.classList.add('theme-gretchen'); const s=document.getElementById('brandSub'); if(s) s.textContent="Gretchen's Desk"; }
 })();
-show('workspace');
+// Deep-link support: /cockpit#tasks lands on the Tasks view (used by team-chat
+// task links). Falls back to the workspace overview when no/unknown hash.
+const _viewFromHash=()=>{const v=(location.hash||'').replace(/^#/,'').trim().toLowerCase();return v||'workspace';};
+show(_viewFromHash());
+window.addEventListener('hashchange',()=>show(_viewFromHash()));
 </script>
 </body>
 </html>

@@ -43,6 +43,26 @@ def test_swallows_errors(monkeypatch):
     assert T.notify_task_created({"title": "X"}) is False  # never raises
 
 
+def test_includes_crm_link_and_priority(monkeypatch):
+    monkeypatch.setenv("NEXTCLOUD_TALK_TOKEN", "tok1")
+    monkeypatch.setenv("HERMES_PUBLIC_BASE_URL", "https://ws.ts.net:8444")
+    posts: list = []
+    _fake_nc(monkeypatch, posts)
+    T.notify_task_created({"title": "Bind policy", "priority": "high"})
+    msg = posts[0][1]
+    assert "https://ws.ts.net:8444/cockpit#tasks" in msg  # link back to open
+    assert "🔴 high" in msg                                # priority badge
+
+
+def test_no_link_without_base_url(monkeypatch):
+    monkeypatch.setenv("NEXTCLOUD_TALK_TOKEN", "tok1")
+    monkeypatch.delenv("HERMES_PUBLIC_BASE_URL", raising=False)
+    posts: list = []
+    _fake_nc(monkeypatch, posts)
+    T.notify_task_created({"title": "X"})
+    assert "cockpit#" not in posts[0][1]  # gracefully omits the link
+
+
 def test_digest_excludes_done(monkeypatch):
     monkeypatch.setenv("NEXTCLOUD_TALK_TOKEN", "tok1")
     posts: list = []

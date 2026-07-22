@@ -1272,7 +1272,8 @@ async def create_task_endpoint(req: TaskCreateRequest):
         created = C.create_tasks(
             supa, case_id=req.case_id,
             tasks=[{"title": req.title, "description": req.description,
-                    "assigned_to_email": req.assigned_to_email}],
+                    "assigned_to_email": req.assigned_to_email,
+                    "priority": req.priority, "due_at": req.due_at}],
             created_by_email=creator,
         )
     except Exception as exc:
