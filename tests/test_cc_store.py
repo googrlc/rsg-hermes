@@ -72,7 +72,7 @@ def test_files_and_deliverables_scoped_to_submission():
 def test_replace_deliverables_is_idempotent():
     supa = FakeSupa()
     s = store.create_submission(supa, lane="l", client_name="A")
-    built = [{"kind": "crm_blocks", "title": "CRM", "content": "x"}]
+    built = [{"kind": "quote_worksheet", "title": "Quote", "content": "x"}]
     store.replace_deliverables(supa, s["id"], built)
     store.replace_deliverables(supa, s["id"], built)   # rebuild, not duplicate
     assert len(store.list_deliverables(supa, s["id"])) == 1

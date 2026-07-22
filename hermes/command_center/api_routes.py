@@ -57,10 +57,6 @@ class ApproveReq(BaseModel):
     actor: str = "gretchen"
 
 
-class PushReq(BaseModel):
-    confirm: bool = False
-    actor: str = "lamar"
-
 
 @router.get("/lanes")
 async def list_lanes():
@@ -145,14 +141,6 @@ async def download(submission_id: str):
         raise _http(exc)
     return Response(content=blob, media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{submission_id}.zip"'})
-
-
-@router.post("/submissions/{submission_id}/crm-push")
-async def crm_push(submission_id: str, req: PushReq):
-    try:
-        return service.crm_push(_get_supa(), submission_id, req.confirm, LANES, actor=req.actor)
-    except ReviewError as exc:
-        raise _http(exc)
 
 
 @router.get("/page", response_class=HTMLResponse)

@@ -30,5 +30,3 @@ deliverables:
     title: "ACORD 125/126/140 data"
   - kind: carrier_shortlist
     title: "Carrier shortlist"
-  - kind: crm_blocks
-    title: "CRM entry blocks"

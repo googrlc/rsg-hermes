@@ -4,23 +4,21 @@ The endpoints are thin wrappers over these functions; the gate rules live in
 review.py and are enforced here. Everything takes the Supabase client injected,
 so the full flow is testable end-to-end against a fake (see test_cc_service.py).
 
-    create -> ingest_files (extract+validate) -> [apply_fixes] -> approve -> download / crm_push
+    create -> ingest_files (extract+validate) -> [apply_fixes] -> approve -> download
 """
 from __future__ import annotations
 
 import io
 import re
 import zipfile
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from . import store
 from .deliverables import _canonical, build_all
-from .espo_fieldmap import account_write_payload
 from .extract import apply_extraction, classify_doc, extract_fields, read_document_text
 from .review import (
     ReviewError,
     assert_can_approve,
-    assert_can_crm_push,
     assert_can_download,
 )
 from .submission import (
@@ -146,20 +144,3 @@ def download_bundle(supa, submission_id: str) -> bytes:
     return buf.getvalue()
 
 
-def crm_push(supa, submission_id: str, confirm: bool, lanes: dict,
-             enqueue: Optional[Callable] = None, actor: str = "lamar") -> dict:
-    """Queue the approved CRM write — never writes Espo directly; it goes through
-    crm_write_queue (the existing gated worker)."""
-    row = store.get_submission(supa, submission_id)
-    if row is None:
-        raise ReviewError("submission not found", 404)
-    assert_can_crm_push(row["status"], confirm)                 # 403 / 422
-    lane_cfg = lanes[row["lane"]]
-    sub = _load_or_new(row, lane_cfg)
-    body = account_write_payload(_canonical(sub))
-    if enqueue is None:
-        from hermes.operations.crm_queue_worker import enqueue_crm_write as enqueue
-    queue_row = enqueue(supa, entity_type="Account", entity_id=sub.espocrm_account_id,
-                        payload=body, created_by_role="command_center", priority=1)
-    store.log_event(supa, submission_id, actor, "crm_pushed", {"queue_id": str(queue_row.get("id"))})
-    return queue_row

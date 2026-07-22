@@ -27,5 +27,3 @@ deliverables:
     title: "Quote worksheet"
   - kind: carrier_shortlist
     title: "Carrier shortlist"
-  - kind: crm_blocks
-    title: "CRM entry blocks"

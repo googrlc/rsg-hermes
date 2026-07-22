@@ -23,5 +23,3 @@ validators:
 deliverables:
   - kind: peo_worksheet
     title: "PEO submission worksheet"
-  - kind: crm_blocks
-    title: "CRM entry blocks"

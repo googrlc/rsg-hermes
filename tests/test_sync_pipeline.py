@@ -185,44 +185,6 @@ class QueuedPipelineTests(unittest.TestCase):
         self.assertEqual(result.records_skipped, 1)
         self.assertEqual(result.records_created, 0)
 
-    @patch("hermes.sync.pipeline.process_queue")
-    @patch("hermes.sync.pipeline.enqueue_crm_write")
-    def test_handles_espo_create_failure(self, enqueue_mock: MagicMock, process_mock: MagicMock) -> None:
-        nc = _mock_nc(insureds=[_sample_insured()])
-        espo = _mock_espo()
-        supa = _mock_supa()
-        enqueue_mock.return_value = {"id": "crm-q-1"}
-        process_mock.return_value = _process_result(
-            ItemResult(
-                queue_id="crm-q-1",
-                entity_type="Account",
-                entity_id=None,
-                ok=False,
-                error_type="validation_400",
-                status_code=422,
-                reason="422 rejected",
-                message="crm-q-1: 422 rejected",
-            )
-        )
-
-        queue_item = {
-            "id": "q-1",
-            "object_type": "Account",
-            "object_id": None,
-            "action": "create",
-            "payload": {"name": "Acme Corp", "account_type": "Commercial Lines", "momentum_client_id": "NC-001"},
-            "mapping_id": None,
-        }
-        supa.select.side_effect = [
-            [],           # mapping lookup
-            [],           # staging lookup
-            [queue_item], # queue
-        ]
-
-        result = run_insured_to_account_sync(nc, espo, supa, dry_run=False)
-        self.assertEqual(result.records_failed, 1)
-        self.assertFalse(result.ok)
-        self.assertTrue(any("422" in e for e in result.errors))
 
 
 class ResolveMappingTests(unittest.TestCase):

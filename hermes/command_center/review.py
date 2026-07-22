@@ -11,11 +11,10 @@ State machine (spec §6):
                               +---+  (fixing flagged fields keeps it in_review)
 
 Hard rules (proved in tests/test_cc_review_gate.py):
-  1. ``download`` and ``crm_push`` raise 403 for any status other than approved.
+  1. ``download`` raises 403 for any status other than approved.
   2. ``approve`` raises 422 if any blocking-severity flag remains.
   3. State can never skip — ``draft`` cannot jump to ``approved``.
   4. Every transition appends a ``review_events`` row (actor + timestamp).
-  5. ``crm_push`` additionally requires ``confirm=true`` (two-step: approve, push).
 """
 from __future__ import annotations
 
@@ -113,14 +112,6 @@ def assert_can_download(status: Any) -> None:
     """Download is locked until approved."""
     if _coerce_state(status) not in _RELEASED:
         raise ReviewError("download locked: submission is not approved", 403)
-
-
-def assert_can_crm_push(status: Any, confirm: bool) -> None:
-    """CRM push needs approved status AND an explicit confirm (two-step)."""
-    if _coerce_state(status) not in _RELEASED:
-        raise ReviewError("CRM push locked: submission is not approved", 403)
-    if not confirm:
-        raise ReviewError("CRM push requires confirm=true", 422)
 
 
 def review_event(submission_id: str, actor: str, action: str,

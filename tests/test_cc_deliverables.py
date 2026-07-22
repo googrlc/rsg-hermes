@@ -1,7 +1,7 @@
-"""Deliverables build from the spine; crm_blocks uses the Espo field-map."""
+"""Deliverables build from the spine."""
 from datetime import date
 
-from hermes.command_center.deliverables import build_all, crm_blocks, quote_worksheet
+from hermes.command_center.deliverables import build_all, quote_worksheet
 from hermes.command_center.lanes import load_all_lanes
 from hermes.command_center.submission import (
     Applicant,
@@ -34,16 +34,9 @@ def test_quote_worksheet_has_xdate_and_no_fabrication():
     assert "—" in md  # missing fields render as a dash, never invented
 
 
-def test_crm_blocks_uses_espo_casing_and_xdate_field():
-    md = crm_blocks(_filled())
-    assert "x_date" in md           # custom snake_case Espo field
-    assert "2025-10-16" in md
-    assert "Personal Lines" in md   # client_type -> account_type mapping
-
-
 def test_build_all_for_gretchen_lane():
     lane = load_all_lanes()["gretchen-personal-lines"]
     built = build_all(lane, _filled())
     kinds = {d["kind"] for d in built}
-    assert kinds == {"quote_worksheet", "carrier_shortlist", "crm_blocks"}
+    assert kinds == {"quote_worksheet", "carrier_shortlist"}
     assert all(d["content"] for d in built)

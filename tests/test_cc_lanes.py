@@ -13,7 +13,7 @@ def test_gretchen_lane_loads_and_validates():
     assert g.theme == "teal"
     assert "xdate" in g.extraction_fields          # XDATE-first rule satisfied
     assert {d.kind for d in g.deliverables} == {
-        "quote_worksheet", "carrier_shortlist", "crm_blocks"
+        "quote_worksheet", "carrier_shortlist"
     }
 
 

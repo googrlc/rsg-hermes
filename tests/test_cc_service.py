@@ -93,7 +93,7 @@ def test_missing_xdate_blocks_approval_then_fix_unblocks():
     assert store.get_submission(supa, sub["id"])["status"] == "approved"
 
 
-def test_download_and_push_locked_until_approved():
+def test_download_locked_until_approved():
     supa = FakeSupa()
     sub = service.create(supa, "gretchen-personal-lines", "Jane Roe", "gretchen", LANES)
     _ingest(supa, sub["id"], FULL_DEC)               # now in_review, not approved
@@ -101,28 +101,3 @@ def test_download_and_push_locked_until_approved():
     with pytest.raises(ReviewError) as d:
         service.download_bundle(supa, sub["id"])
     assert d.value.status_code == 403
-
-    with pytest.raises(ReviewError) as p:
-        service.crm_push(supa, sub["id"], confirm=True, lanes=LANES, enqueue=lambda *a, **k: {"id": "q1"})
-    assert p.value.status_code == 403
-
-
-def test_crm_push_goes_through_the_queue_after_approval():
-    supa = FakeSupa()
-    enqueued = {}
-
-    def fake_enqueue(_supa, **kw):
-        enqueued.update(kw)
-        return {"id": "queue-123"}
-
-    sub = service.create(supa, "gretchen-personal-lines", "Acme LLC", "lamar", LANES)
-    _ingest(supa, sub["id"], FULL_DEC)
-    service.approve(supa, sub["id"], "lamar", LANES)
-
-    with pytest.raises(ReviewError):                 # confirm required
-        service.crm_push(supa, sub["id"], confirm=False, lanes=LANES, enqueue=fake_enqueue)
-
-    row = service.crm_push(supa, sub["id"], confirm=True, lanes=LANES, enqueue=fake_enqueue)
-    assert row["id"] == "queue-123"
-    assert enqueued["entity_type"] == "Account"      # never writes Espo directly
-    assert "x_date" in enqueued["payload"]           # correct Espo field mapping carried through
