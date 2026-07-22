@@ -1281,7 +1281,25 @@ async def create_task_endpoint(req: TaskCreateRequest):
     if not created:
         # Title already exists under this case (idempotent no-op).
         return {"ok": True, "created": False, "task": None}
+    # Best-effort: ping the team chat (Nextcloud Talk) about the new task. Never
+    # let a chat hiccup fail the task create — it's fire-and-forget.
+    try:
+        from hermes.operations.task_notify import notify_task_created
+
+        notify_task_created(created[0], kind="task")
+    except Exception:  # noqa: BLE001
+        log.exception("task_notify failed for %s", req.title)
     return {"ok": True, "created": True, "task": created[0]}
+
+
+@app.post("/api/tasks/digest")
+async def post_task_digest():
+    """Post the open-task digest to the team chat (Nextcloud Talk). Meant to be
+    hit on a daily schedule (pg_cron / scheduler). No-op if NEXTCLOUD_TALK_TOKEN
+    is unset."""
+    from hermes.operations.task_notify import daily_task_digest
+
+    return daily_task_digest(_get_supa())
 
 
 @app.get("/api/tasks")
