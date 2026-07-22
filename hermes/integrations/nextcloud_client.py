@@ -117,6 +117,28 @@ class NextcloudClient:
             if resp.status_code not in (201, 405, 301, 302):
                 raise NextcloudError(f"MKCOL {acc} failed: {resp.status_code} {resp.text[:200]}")
 
+    # -- Talk (chat) --------------------------------------------------------
+
+    def post_talk_message(self, token: str, message: str) -> None:
+        """Post a message to a Nextcloud Talk conversation (spreed OCS API).
+
+        ``token`` is the conversation token (from the room URL …/call/<token>).
+        The service user must be a participant of that room.
+        """
+        self._require_configured()
+        if not token:
+            raise NextcloudError("Talk conversation token is required (set NEXTCLOUD_TALK_TOKEN).")
+        url = f"{self.url}/ocs/v2.php/apps/spreed/api/v1/chat/{quote(token)}"
+        resp = self.session.post(
+            url,
+            headers={"OCS-APIRequest": "true", "Accept": "application/json"},
+            data={"message": message},
+            verify=self.verify_tls,
+            timeout=30,
+        )
+        if resp.status_code not in (200, 201):
+            raise NextcloudError(f"Talk post to {token} failed: {resp.status_code} {resp.text[:200]}")
+
     def put_file(self, rel_path: str, content: bytes, *, content_type: str = "application/octet-stream") -> str:
         """Upload bytes to *rel_path* (creating parent dirs). Returns the stored path."""
         self._require_configured()
