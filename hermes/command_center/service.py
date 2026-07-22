@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 from . import store
 from .deliverables import _canonical, build_all
 from .espo_fieldmap import account_write_payload
-from .extract import apply_extraction, classify_doc, extract_fields, read_text
+from .extract import apply_extraction, classify_doc, extract_fields, read_document_text
 from .review import (
     ReviewError,
     assert_can_approve,
@@ -94,7 +94,7 @@ def ingest_files(supa, submission_id: str, files: list[dict], lanes: dict, actor
                        storage_path=f["storage_path"], size_bytes=f.get("size_bytes"))
         text = f.get("text")
         if text is None and f.get("local_path"):
-            text = read_text(f["local_path"])
+            text = read_document_text(f["local_path"])
         fields = extract_fields(text or "", doc_type)
         apply_extraction(sub, fields, source=doc_type)
         store.log_event(supa, submission_id, actor, "extracted",
