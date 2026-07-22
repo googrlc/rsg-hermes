@@ -97,6 +97,14 @@ try:
 except Exception:  # pragma: no cover - surfaced in logs, never fatal
     log.exception("command_center routes unavailable")
 
+# General document extractor (OCR-aware quote-field extraction) — POST /api/extract.
+try:
+    from hermes.command_center.extract_api import router as _extract_router
+
+    app.include_router(_extract_router)
+except Exception:  # pragma: no cover - surfaced in logs, never fatal
+    log.exception("extract routes unavailable")
+
 # Walker on-demand renewal API (no scheduler, no timers).
 try:
     from hermes.walker.router import router as _walker_router

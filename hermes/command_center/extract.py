@@ -69,6 +69,28 @@ def read_text(path: str | Path) -> str:
     return ""
 
 
+# Below this many characters we treat a PDF's text layer as empty/thin (a
+# scanned or image-only page) and hand it to the OCR tier.
+_THIN_TEXT_CHARS = 40
+
+
+def read_document_text(path: str | Path, *, ocr: bool = True) -> str:
+    """OCR-aware text read. Tries the deterministic text layer first; if a PDF
+    comes back empty/thin (scanned page), falls back to the vision OCR tier.
+
+    This is the reader intake and the general extractor use so image-only quotes
+    and dec pages stop coming back blank. ``read_text`` stays the pure text-layer
+    path for callers that must not spend an LLM call."""
+    text = read_text(path)
+    if not ocr or Path(path).suffix.lower() != ".pdf":
+        return text
+    if len(text.strip()) >= _THIN_TEXT_CHARS:
+        return text
+    from .ocr import ocr_pdf
+
+    return ocr_pdf(path) or text
+
+
 # ---- field extraction ----------------------------------------------------
 
 _DATE_RX = re.compile(
