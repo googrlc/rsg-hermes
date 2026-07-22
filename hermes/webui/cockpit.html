@@ -794,6 +794,16 @@ async function openEditOpp(o){
     if(document.querySelector('.nav a.active')?.dataset.view==='pipeline') show('pipeline');
   });
 }
+function openDeleteOpp(o){
+  openModal(`<div class="modal-head"><h3>Delete opportunity?</h3><p>${esc(o.insured_name||'')}${o.line_of_business?' · '+esc(o.line_of_business):''}</p></div>
+   <div class="modal-body"><div class="chip crit" style="display:block;padding:11px 13px;line-height:1.5">Permanently removes this opportunity — and any quotes attached to it — from the CRM. This can't be undone.</div></div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="delGo" style="background:var(--crit);border-color:var(--crit)">Delete opportunity</button></div>`);
+  $('#delGo').onclick=(e)=>submitBtn(e.target,async()=>{
+    await api('/api/opportunities/'+encodeURIComponent(o.id),{method:'DELETE'});
+    closeModal(); toast('Opportunity deleted.');
+    if(document.querySelector('.nav a.active')?.dataset.view==='pipeline') show('pipeline');
+  });
+}
 async function openOpportunity(o){
   await loadUsers(); const linked=!!o.insured_id;
   openModal(`<div class="modal-head"><h3>${esc(o.insured_name||'Opportunity')}</h3><p>${esc(o.line_of_business||'')} · ${esc(o.stage||'')}</p></div>
@@ -824,8 +834,9 @@ async function openOpportunity(o){
        ${linked?'':`<div class="chip warn" style="margin-bottom:10px">Not linked to a NowCerts insured — you can still attach quotes and PDFs, but sending to the AMS needs the insured linked via Intake.</div>`}
        <div id="oppQuotes"><div class="loading">Loading quotes…</div></div>
      </div></div>
-   <div class="modal-foot"><button class="btn" id="editOpp">✎ Edit</button><button class="btn primary" onclick="closeModal()">Close</button></div>`);
+   <div class="modal-foot"><button class="btn" id="deleteOpp" style="color:var(--crit);border-color:#e6c9c0;margin-right:auto">🗑 Delete</button><button class="btn" id="editOpp">✎ Edit</button><button class="btn primary" onclick="closeModal()">Close</button></div>`);
   $('#editOpp').onclick=()=>openEditOpp(o);
+  $('#deleteOpp').onclick=()=>openDeleteOpp(o);
   $('#addQuote').onclick=()=>openNewQuote(o);
   const bp=$('#buildProp'); if(bp) bp.onclick=()=>openProposalBuilder({insured_id:o.insured_id,insured_name:o.insured_name,opportunity_id:o.id,preselectOpp:o.id});
   loadOppQuotes(o);
