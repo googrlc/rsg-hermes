@@ -215,6 +215,70 @@ don't repeat)
 
 ---
 
+## 7. Team comms hub — Nextcloud Talk embed
+
+**Source:** Team communication portal request, 2026-07-22.
+
+**Done (desktop + tailnet):** The workspace rail has a **Team** hub
+(`hermes/webui/workspace.html`, `HUBS.team`, `frameable:true`) that renders
+the general **RSG Team** Talk channel (`token 835smm5t`) *inline* in the lane.
+
+What made it embed, applied on the Nextcloud/Elestio box in
+`/opt/elestio/nginx/conf.d/nextcloud-x6wle-u69864.vm.elestio.app.conf`
+(the `listen 443` block's `location /`, right after `proxy_pass …:21000`;
+backup at `…​.conf.bak-hermes-embed`):
+
+```nginx
+proxy_hide_header X-Frame-Options;
+proxy_cookie_flags ~ samesite=none secure;
+header_filter_by_lua_block {
+  local csp = ngx.header["Content-Security-Policy"]
+  if csp then
+    if type(csp) == "table" then csp = table.concat(csp, ", ") end
+    if csp:find("frame%-ancestors") then
+      csp = csp:gsub("(frame%-ancestors[^;]*)", "%1 https://*.tail1cbc83.ts.net:*")
+    else
+      csp = csp .. ";frame-ancestors 'self' https://*.tail1cbc83.ts.net:*"
+    end
+    ngx.header["Content-Security-Policy"] = csp
+  end
+}
+```
+
+Key lessons if this ever needs redoing:
+- Nextcloud **already emits its own `frame-ancestors`**, so a *second*
+  `add_header` CSP does NOT work (browser enforces every CSP header;
+  the restrictive NC one still blocks). You must **rewrite** NC's CSP —
+  hence the Lua `gsub`, which leaves the nonce'd `script-src` etc. intact.
+- Use a `:*` **port wildcard** — the workspace can be served on a non-443
+  tailnet port (e.g. `:8445`), and CSP host-sources don't match a
+  non-default port unless the port is given.
+- `SameSite=None; Secure` on the session cookie is required because the
+  workspace host and `…vm.elestio.app` are different sites → the frame is
+  cross-site → a `SameSite=Lax` cookie would be dropped and Talk shows
+  logged-out.
+- Elestio may regenerate this conf on a stack update/redeploy; if the embed
+  breaks after an Elestio change, re-apply the block (patch script is in the
+  session scratchpad / this file).
+
+**Still pending — mobile.** Mobile browsers (iOS Safari especially) block
+cross-site cookies outright, so `SameSite=None` isn't enough there. Making it
+render inline on phones needs the two services to be **same-site** — either
+put both under one registrable domain (e.g. `app.` + `cloud.risksolutionsgroup.net`)
+or reverse-proxy Talk under the workspace's own origin. Deferred by decision
+on 2026-07-22 (desktop-first).
+
+**Still pending — per-client channels.** Deep-link a Talk room per
+insured/policy from the CRM cockpit (a "Discuss" action opening
+`…/call/<token>`, auto-creating the room the first time via the NC Talk API,
+keyed by a stable external id). The general channel is proven; this is the
+next build.
+
+**Estimate:** mobile same-site ≈ 2-4 hrs (DNS + certs + NC overwrite config);
+per-client deep-link ≈ a few hrs.
+
+---
+
 ## Closed
 
 _(none yet)_

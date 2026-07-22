@@ -186,6 +186,18 @@ const HUBS = {
   commissions:{ name:"Finance",     mono:"CT", desk:"Commissions Desk", role:"Expected vs received, what we’re owed",
                 url:"https://rsg-commission-tracker-339396843209.us-east1.run.app/", frameable:true,
                 hint:"Ask about commission money.\nTry: “what are we owed?” or “which carriers underpaid us?”" },
+  // Team comms — Nextcloud Talk (chat, files, calls) for the internal team.
+  // Renders inline: the Elestio nginx in front of Nextcloud strips
+  // X-Frame-Options and appends this tailnet to Talk's own CSP frame-ancestors
+  // (https://*.tail1cbc83.ts.net:*), and flips its session cookies to
+  // SameSite=None; Secure so the login survives inside the cross-site frame.
+  // Desktop + tailnet only for now — FOLLOWUPS #7 has the mobile (same-site) path.
+  // Lands directly in the general "RSG Team" channel (token 835smm5t); Talk's
+  // sidebar still exposes every other conversation. Per-client rooms come later
+  // as their own /call/<token> deep-links.
+  team:       { name:"Team",        mono:"TM", desk:"Team Desk",        role:"Chat, questions & document sharing across the agency",
+                url:"https://nextcloud-x6wle-u69864.vm.elestio.app/index.php/call/835smm5t", frameable:true,
+                hint:"Team chat, files and calls in Nextcloud Talk.\nAsk this desk about shared docs or who to loop in." },
 };
 
 const $ = (s)=>document.querySelector(s);
