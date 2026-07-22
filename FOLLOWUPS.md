@@ -215,6 +215,50 @@ don't repeat)
 
 ---
 
+## 7. Team comms hub — make Nextcloud Talk embed inline
+
+**Source:** Team communication portal request, 2026-07-22.
+
+**Current state:** The workspace rail now has a **Team** hub
+(`hermes/webui/workspace.html`, `HUBS.team`) pointing at Nextcloud Talk
+(`https://nextcloud-x6wle-u69864.vm.elestio.app/apps/spreed`). It ships as
+`frameable:false`, so it renders the "opens in its own app" launcher card
+(one click → Talk in a new tab) rather than an inline frame. Reason:
+Nextcloud currently returns `X-Frame-Options: SAMEORIGIN` and no CSP
+`frame-ancestors`, so any cross-origin frame is refused.
+
+**Goal:** Let Talk render *inside* the workspace lane like CRM/Finance do.
+
+**Fix outline:**
+
+1. On the Elestio Nextcloud reverse proxy (openresty/nginx in front of the
+   NC container), for the Talk/Files routes:
+   - `proxy_hide_header X-Frame-Options;` (strip the SAMEORIGIN header), and
+   - append `frame-ancestors 'self' https://hermes-gretch.tail1cbc83.ts.net`
+     to the Content-Security-Policy. NC builds its CSP per-request with a
+     nonce, so don't blindly `add_header` a second CSP — either use
+     `headers-more` (`more_set_headers`) to rewrite, or set NC's own
+     `overwrite*`/reverse-proxy config so it emits the frame-ancestors.
+   - Scope the allow-list to the workspace origin only; do **not** open
+     `frame-ancestors *`.
+2. Nextcloud may also need `'trusted_domains'` / `overwritehost` correct so
+   session cookies work in the frame; set `SameSite=None; Secure` on the
+   session cookie if the browser drops it inside the iframe.
+3. Once the header change is live, flip `HUBS.team.frameable` to `true` (or
+   remove it and let the auto-probe decide) and confirm the lane renders.
+
+**Also pending (product, not infra):**
+- Create the general team channel in Talk so the hub lands somewhere useful.
+- Per-client conversations: deep-link a Talk room per insured/policy from the
+  CRM cockpit (a "Discuss" action that opens `…/call/<token>` for that client,
+  auto-creating the room the first time). Needs a small NC Talk API call from
+  the Hermes side to create/lookup the room by a stable external key.
+
+**Estimate:** 1-2 hrs infra (proxy header + cookie), + a few hrs for the
+per-client deep-link once the general channel is proven.
+
+---
+
 ## Closed
 
 _(none yet)_
