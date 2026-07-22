@@ -39,10 +39,13 @@ def render_pdf_to_images(path: str | Path, *, max_pages: int = _MAX_OCR_PAGES,
     """Render up to *max_pages* of a PDF to PNG bytes. ``[]`` if PyMuPDF is
     missing or the file can't be opened."""
     try:
-        import fitz  # PyMuPDF
+        import pymupdf as fitz  # PyMuPDF 1.24+ primary name
     except Exception:  # noqa: BLE001
-        log.info("OCR skipped — PyMuPDF (pymupdf) not installed")
-        return []
+        try:
+            import fitz  # legacy import name
+        except Exception:  # noqa: BLE001
+            log.info("OCR skipped — PyMuPDF (pymupdf) not installed")
+            return []
     images: list[bytes] = []
     try:
         with fitz.open(str(path)) as doc:
