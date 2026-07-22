@@ -776,6 +776,8 @@ async function openEditOpp(o){
        <div class="field"><label>Assigned to</label><select id="eBy">${userOptions(o.assigned_to)}</select></div></div>
      <div class="field"><label>Disposition (close reason)</label><select id="eDisp">${OPP_DISPOSITIONS.map(d=>`<option value="${esc(d)}"${sel(d,o.disposition||'')}>${d||'—'}</option>`).join('')}</select></div>
      <div class="field"><label>Next action</label><input id="eNext" value="${esc(o.next_action||'')}"/></div>
+     <div class="row2"><div class="field"><label>Referral source</label><input id="eRef" value="${esc(o.referral_source||'')}"/></div>
+       <div class="field"><label>Lead source</label><input id="eLead" value="${esc(o.lead_source||'')}"/></div></div>
      <div class="field"><label>Notes</label><textarea id="eDesc">${esc(o.description||'')}</textarea></div>
      <div class="err" id="eErr"></div></div>
    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="eSave">Save changes</button></div>`);
@@ -787,6 +789,7 @@ async function openEditOpp(o){
       carrier:$('#eCarrier').value.trim()||null, likelihood:$('#eLike').value,
       disposition:$('#eDisp').value||null, assigned_to:$('#eBy').value||null,
       next_action:$('#eNext').value.trim()||null, description:$('#eDesc').value.trim()||null,
+      referral_source:$('#eRef').value.trim()||null, lead_source:$('#eLead').value.trim()||null,
     };
     if(!Number.isNaN(prob)) body.probability=prob;
     await api('/api/opportunities/'+encodeURIComponent(o.id),{method:'PATCH',body:JSON.stringify(body)});

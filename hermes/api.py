@@ -741,10 +741,14 @@ class OpportunityUpdateRequest(BaseModel):
     effective_date: str | None = None
     expiration_date: str | None = None
     lost_reason: str | None = None
+    referral_source: str | None = None
+    lead_source: str | None = None
 
 
-# Fields a user may edit in the CRM (referral_source / NowCerts ids / sync fields
-# are intentionally excluded — those mirror the AMS and stay read-only).
+# Fields a user may edit in the CRM. NowCerts ids and sync-control fields stay
+# excluded (they mirror the AMS). referral_source / lead_source ARE editable — the
+# first CRM edit flips sync_source='crm', after which the inbound AMS sync skips
+# the row (see opportunity_sync), so a manual correction here sticks.
 _OPP_EDITABLE = set(OpportunityUpdateRequest.model_fields.keys())
 
 
