@@ -39,6 +39,11 @@ Return ONLY valid JSON with these keys:
 - sources: list of objects with title, url, note
 
 Rules:
+- Base NAICS/SIC classification on the business' OPERATIONS — what it actually does
+  (its services and how it earns revenue) — not on its name or location. Read the
+  operations from, in priority order: an explicit "operations:" clause in the
+  request, the business' own website, then claimed_services. State the operations
+  you relied on in insurance_notes.
 - Treat the provided internal Supabase classification candidates as preferred options when they fit the business evidence.
 - Prefer the business' own website and public profile pages over directories.
 - Distinguish what the business claims from what third-party directories say.
@@ -106,25 +111,33 @@ def _research_business(query: str) -> dict[str, Any] | None:
         return None
     research = _extract_json(getattr(response, "output_text", "") or "")
     if research is not None:
+        # Re-rank the spine now that we know what the business actually does — the
+        # researched operations are stronger class-code signal than the raw name.
+        operations = _operations_text(query, research)
+        if operations:
+            spine = _classification_spine(query, operations)
         research["classification_spine"] = spine
         _apply_spine_defaults(research, spine)
     return research
 
 
-def _keywords(query: str) -> list[str]:
+def _keywords(*texts: str) -> list[str]:
+    """Extract ranked keywords from one or more text sources, in the order given.
+    Callers pass operations text FIRST so what the business *does* takes priority
+    over its name/location when only the first 8 keywords survive the cap."""
     stop = {
         "the", "and", "for", "with", "company", "business", "llc", "inc", "corp", "co",
         "atlanta", "georgia", "ga", "research", "service", "services",
     }
-    tokens = re.findall(r"[a-zA-Z][a-zA-Z0-9&-]{2,}", query.lower())
     seen: set[str] = set()
     result: list[str] = []
-    for token in tokens:
-        token = token.strip("-")
-        if token in stop or token in seen:
-            continue
-        seen.add(token)
-        result.append(token)
+    for text in texts:
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9&-]{2,}", (text or "").lower()):
+            token = token.strip("-")
+            if token in stop or token in seen:
+                continue
+            seen.add(token)
+            result.append(token)
     return result[:8]
 
 
@@ -133,56 +146,140 @@ def _ilike_any(columns: list[str], keyword: str) -> str:
     return "(" + ",".join(f"{column}.ilike.*{escaped}*" for column in columns) + ")"
 
 
-def _classification_spine(query: str) -> dict[str, Any]:
+# Text columns searched (recall) and their scoring weight (precision). Higher weight
+# = a match there is stronger evidence the row fits the business.
+_NAICS_FIELDS: list[tuple[str, int]] = [
+    ("naics_title", 3), ("description", 2), ("industry_group", 1), ("notes", 1),
+]
+_SIC_FIELDS: list[tuple[str, int]] = [
+    ("sic_description", 3), ("subcategory", 2), ("subcategory_2", 2), ("level_3_term", 1),
+]
+# Minimum relevance for a candidate to be auto-written as the default code. One
+# whole-word match on a title (weight 3) clears it; loose/notes-only matches do not.
+_CONFIDENT_SCORE = 3
+
+_WORD_RE = re.compile(r"[a-z0-9&]+")
+
+# The designated place operations keywords are read from. Operations describe what
+# the business DOES ("installs and services HVAC systems"), which is what actually
+# drives class-code selection — far more than the company name or city. Priority:
+#   1. an explicit `operations:` / `ops:` / `does:` clause in the request, then
+#   2. the researched claimed_services, then
+#   3. the researched short_summary.
+_OPERATIONS_RE = re.compile(r"\b(?:operations|ops|does|business\s+is)\s*[:\-]\s*(.+)$", re.I | re.S)
+
+
+def _operations_text(query: str, research: dict[str, Any] | None = None) -> str:
+    parts: list[str] = []
+    explicit = _OPERATIONS_RE.search(query or "")
+    if explicit:
+        parts.append(explicit.group(1))
+    if research:
+        parts.extend(str(s) for s in (research.get("claimed_services") or []))
+        if research.get("short_summary"):
+            parts.append(str(research["short_summary"]))
+    return " ".join(parts).strip()
+
+
+def _tokens(text: str) -> set[str]:
+    return set(_WORD_RE.findall((text or "").lower()))
+
+
+def _score_row(row: dict[str, Any], keywords: list[str], weighted_fields: list[tuple[str, int]]) -> tuple[int, set[str]]:
+    """Rank a candidate by how many distinct query keywords it matches, weighted by
+    which field they land in. Whole-word matching (not substring) so 'air' matches
+    'Air-Conditioning' but a token can't ride along inside an unrelated word."""
+    kws = [k for k in keywords if len(k) >= 3] or keywords
+    total = 0
+    matched: set[str] = set()
+    for column, weight in weighted_fields:
+        field_tokens = _tokens(str(row.get(column) or ""))
+        if not field_tokens:
+            continue
+        for kw in kws:
+            if kw in field_tokens:
+                total += weight
+                matched.add(kw)
+    # Phrase bonus: adjacent query keywords appearing together (e.g. "air conditioning")
+    # are far stronger evidence than the same two words scattered apart.
+    full = " ".join(str(row.get(c) or "") for c, _ in weighted_fields).lower()
+    for a, b in zip(kws, kws[1:]):
+        if f"{a} {b}" in full or f"{a}-{b}" in full:
+            total += 2
+    return total, matched
+
+
+def _fetch_pool(supa: SupabaseClient, table: str, columns: str, search_cols: list[str], code_col: str, keywords: list[str]) -> list[dict[str, Any]]:
+    """Gather a de-duplicated candidate pool via broad substring recall. A numeric
+    keyword is matched against the code column; word keywords against text columns."""
+    pool: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        cols = [code_col] if keyword.isdigit() else search_cols
+        try:
+            rows = supa.select(table, columns=columns, params={"or": _ilike_any(cols, keyword)}, limit=8)
+        except SupabaseClientError:
+            log.info("Supabase %s candidate lookup failed", table, exc_info=True)
+            continue
+        for row in rows:
+            key = str(row.get(code_col))
+            if key and key not in seen:
+                seen.add(key)
+                pool.append(row)
+    return pool
+
+
+def _rank(pool: list[dict[str, Any]], keywords: list[str], weighted_fields: list[tuple[str, int]]) -> list[dict[str, Any]]:
+    """Score the pool and return the top candidates. Rows that match no query
+    keyword on any text field (score 0) are dropped rather than surfaced as noise."""
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    for row in pool:
+        score, matched = _score_row(row, keywords, weighted_fields)
+        if score <= 0:
+            continue
+        enriched = dict(row)
+        enriched["_relevance"] = score
+        enriched["_matched_keywords"] = sorted(matched)
+        scored.append((score, len(matched), enriched))
+    scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    return [row for _, _, row in scored[:5]]
+
+
+def _classification_spine(query: str, operations: str = "") -> dict[str, Any]:
     try:
         supa = SupabaseClient()
     except SupabaseClientError:
         return {}
 
-    candidates: dict[str, Any] = {"naics": [], "sic": []}
-    for keyword in _keywords(query):
-        if len(candidates["naics"]) < 5:
-            try:
-                rows = supa.select(
-                    "naics_codes",
-                    columns="id,naics_code,naics_title,description,industry_group,allowed,notes",
-                    params={"or": _ilike_any(["naics_code", "naics_title", "description", "industry_group", "notes"], keyword)},
-                    limit=5,
-                )
-                _extend_unique(candidates["naics"], rows, "naics_code")
-            except SupabaseClientError:
-                log.info("Supabase NAICS candidate lookup failed", exc_info=True)
-        if len(candidates["sic"]) < 5:
-            try:
-                rows = supa.select(
-                    "sic_codes",
-                    columns="id,sic_code,sic_description,subcategory,subcategory_2,level_3_term,mapped_naics_id",
-                    params={"or": _ilike_any(["sic_code", "sic_description", "subcategory", "subcategory_2", "level_3_term"], keyword)},
-                    limit=5,
-                )
-                _extend_unique(candidates["sic"], rows, "sic_code")
-            except SupabaseClientError:
-                log.info("Supabase SIC candidate lookup failed", exc_info=True)
+    # Operations keywords lead so what the business does drives the ranking.
+    keywords = _keywords(operations, query)
+    naics_pool = _fetch_pool(
+        supa, "naics_codes",
+        "id,naics_code,naics_title,description,industry_group,allowed,notes",
+        [col for col, _ in _NAICS_FIELDS], "naics_code", keywords,
+    )
+    sic_pool = _fetch_pool(
+        supa, "sic_codes",
+        "id,sic_code,sic_description,subcategory,subcategory_2,level_3_term,mapped_naics_id",
+        [col for col, _ in _SIC_FIELDS], "sic_code", keywords,
+    )
+    candidates = {
+        "naics": _rank(naics_pool, keywords, _NAICS_FIELDS),
+        "sic": _rank(sic_pool, keywords, _SIC_FIELDS),
+    }
     return {k: v for k, v in candidates.items() if v}
 
 
-def _extend_unique(target: list[dict[str, Any]], rows: list[dict[str, Any]], key: str) -> None:
-    seen = {str(row.get(key)) for row in target}
-    for row in rows:
-        value = str(row.get(key))
-        if value and value not in seen:
-            target.append(row)
-            seen.add(value)
-
-
 def _apply_spine_defaults(research: dict[str, Any], spine: dict[str, Any]) -> None:
+    """Fill a missing code from the top candidate only when it is a confident match.
+    A weak/loose top candidate is left for human confirmation, not silently written."""
     if not research.get("naics"):
         naics = (spine.get("naics") or [{}])[0]
-        if isinstance(naics, dict) and naics.get("naics_code"):
+        if isinstance(naics, dict) and naics.get("naics_code") and naics.get("_relevance", 0) >= _CONFIDENT_SCORE:
             research["naics"] = naics["naics_code"]
     if not research.get("sic"):
         sic = (spine.get("sic") or [{}])[0]
-        if isinstance(sic, dict) and sic.get("sic_code"):
+        if isinstance(sic, dict) and sic.get("sic_code") and sic.get("_relevance", 0) >= _CONFIDENT_SCORE:
             research["sic"] = sic["sic_code"]
 
 
