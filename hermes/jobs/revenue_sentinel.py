@@ -11,10 +11,17 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from hermes.core.client import EspoClient, EspoClientError
+from hermes.core.client import EspoClient
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
+# Data source: the custom CRM (Command Center) — read directly from its Supabase
+# tables via SupabaseClient, the same in-process path renewal-refresh / canonical-book
+# use. EspoCRM is decommissioned; the sentinel no longer reads from it.
 STALE_STATUSES = ("Prospecting", "Quoting", "Gathering Info")
+# Owner-facing briefing → #the-boss. team_notify.resolve_room maps this id to
+# HERMES_TALK_ROOM_BOSS (Nextcloud Talk). Override via HERMES_SENTINEL_REPORT_CHANNEL.
+SENTINEL_REPORT_CHANNEL = "C0ANQUENX4P"
 WHALE_MARKER = "🐳"
 DEFAULT_RENEWAL_CHECKPOINTS = (90, 60, 30)
 
@@ -44,18 +51,23 @@ class SentinelHealthStatus:
 
 
 def run(
-    client: EspoClient,
+    client: EspoClient | None = None,
     *,
+    supa: SupabaseClient | None = None,
     notifier: SlackNotifier | None = None,
     now: datetime | None = None,
     dry_run: bool = False,
     force: bool = False,
 ) -> SentinelRunResult:
+    # `client` (EspoCRM) is retained only for signature compatibility with the CLI
+    # dispatcher and the Slack action handler; the daily briefing reads exclusively
+    # from the custom CRM's Supabase tables.
     local_now = _now_in_timezone(now)
     target_day = local_now.date()
-    stale = _query_stale_opportunities(client=client, now_local=local_now)
-    renewals = _query_renewals(client=client, now_local=local_now)
-    x_dates = _query_x_dates(client=client, now_local=local_now)
+    supa = supa or SupabaseClient()
+    stale = _query_stale_opportunities(supa=supa, now_local=local_now)
+    renewals = _query_renewals(supa=supa, now_local=local_now)
+    x_dates = _query_x_dates(supa=supa, now_local=local_now)
     results = [stale, renewals, x_dates]
     warnings = [f"{r.label}: {r.error}" for r in results if r.error]
     sections = {
@@ -82,7 +94,9 @@ def run(
             sections=sections,
             warnings=warnings,
         )
-    active_notifier = notifier or SlackNotifier()
+    active_notifier = notifier or SlackNotifier(
+        channel=os.environ.get("HERMES_SENTINEL_REPORT_CHANNEL", SENTINEL_REPORT_CHANNEL)
+    )
     try:
         active_notifier.post_message(text=text, blocks=blocks)
     except SlackNotifierError as e:
@@ -217,141 +231,128 @@ def handle_slack_action(
     return "Unknown sentinel action."
 
 
-def _query_stale_opportunities(*, client: EspoClient, now_local: datetime) -> SentinelQueryResult:
-    cutoff = now_local - timedelta(days=int(os.environ.get("HERMES_SENTINEL_STALE_DAYS", "14")))
+def _query_stale_opportunities(*, supa: SupabaseClient, now_local: datetime) -> SentinelQueryResult:
+    """Open opportunities in the custom CRM not touched in HERMES_SENTINEL_STALE_DAYS."""
+    stale_days = int(os.environ.get("HERMES_SENTINEL_STALE_DAYS", "14"))
+    cutoff = now_local.date() - timedelta(days=stale_days)
     try:
-        body = client.get("Opportunity", params={"maxSize": 200})
-    except EspoClientError as e:
+        rows = supa.select(
+            "opportunities",
+            params={"status": "eq.open", "order": "updated_at.asc"},
+            limit=200,
+        )
+    except SupabaseClientError as e:
         return SentinelQueryResult(label="STALE LEADS", rows=[], error=str(e))
-    rows = _list_rows(body)
     filtered: list[dict[str, Any]] = []
     for row in rows:
-        pipeline_state = _pick(row, "status", "stage")
-        if pipeline_state not in STALE_STATUSES:
-            continue
-        modified = _parse_datetime(_pick(row, "modifiedAt"), now_local)
-        if not modified or modified >= cutoff:
+        touched = _parse_iso_date(str(_pick(row, "updated_at", "synced_at") or ""))
+        # No timestamp -> treat as stale (open but never worked); else stale if older than cutoff.
+        if touched and touched >= cutoff:
             continue
         filtered.append(
             {
                 "entity": "Opportunity",
                 "record_id": str(row.get("id") or ""),
-                "name": str(row.get("name") or "Unknown"),
-                "lob": _pick(row, "lineOfBusiness", "line_of_business") or "Unknown",
-                "date_label": _format_datetime(_pick(row, "modifiedAt")),
+                "name": str(_pick(row, "insured_name") or "Unknown"),
+                "lob": _pick(row, "line_of_business") or "Unknown",
+                "date_label": _format_datetime(_pick(row, "updated_at", "synced_at")),
                 "date_prefix": "Last touched",
                 "category": "STALE LEADS",
-                "premium": _as_money(_pick(row, "premium_amount", "amount")),
+                "premium": _as_money(_pick(row, "premium_estimate", "premium_actual")),
             }
         )
     return SentinelQueryResult(label="STALE LEADS", rows=filtered)
 
 
-def _query_renewals(*, client: EspoClient, now_local: datetime) -> SentinelQueryResult:
+def _query_renewals(*, supa: SupabaseClient, now_local: datetime) -> SentinelQueryResult:
+    """Active, eligible renewal candidates expiring within the checkpoint window.
+
+    Each upcoming renewal is bucketed into the tightest checkpoint tier it falls in
+    (≤30d / 31-60d / 61-90d), so every renewal inside the window surfaces, ranked by
+    urgency — not only ones landing exactly on a checkpoint day.
+    """
     checkpoints = _renewal_checkpoints()
+    max_checkpoint = max(checkpoints)
     try:
-        body = client.get("Policy", params={"maxSize": 200})
-    except EspoClientError as e:
-        return SentinelQueryResult(label="PROJECT 85 RENEWALS", rows=[], error=str(e))
-    rows = _list_rows(body)
-    filtered: list[dict[str, Any]] = []
-    for row in rows:
-        if str(row.get("status") or "").lower() != "active":
-            continue
-        expiration = _parse_iso_date(str(_pick(row, "expirationDate", "expiration_date") or ""))
-        if not expiration:
-            continue
-        days_left = (expiration - now_local.date()).days
-        if days_left not in checkpoints:
-            continue
-        filtered.append(
-            {
-                **row,
-                "_expiration": expiration.isoformat(),
-                "_days_left": days_left,
-            }
+        rows = supa.select(
+            "renewal_candidates",
+            params={
+                "policy_active": "eq.true",
+                "eligibility_state": "neq.excluded",
+                "order": "renewal_event_date.asc",
+            },
+            limit=1000,
         )
-    account_stage = _account_renewal_stages(client=client, account_ids=[str(r.get("accountId") or "") for r in filtered])
-    mapped = []
-    for row in filtered:
-        account_id = str(row.get("accountId") or "")
-        pipeline_stage = account_stage.get(account_id, "")
-        in_pipeline = _is_in_pipeline(pipeline_stage)
-        checkpoint_days = int(row.get("_days_left") or 0)
+    except SupabaseClientError as e:
+        return SentinelQueryResult(label="PROJECT 85 RENEWALS", rows=[], error=str(e))
+    mapped: list[dict[str, Any]] = []
+    for row in rows:
+        renewal = _parse_iso_date(str(_pick(row, "renewal_event_date", "expiration_date") or ""))
+        if not renewal:
+            continue
+        days_left = (renewal - now_local.date()).days
+        if days_left < 0 or days_left > max_checkpoint:
+            continue
+        tier = _renewal_tier(days_left, checkpoints)
+        # `in_working_queue` on the custom CRM replaces the dead Espo Account.renewalOutreachStage.
+        in_pipeline = bool(row.get("in_working_queue"))
+        risk = str(_pick(row, "risk_status") or "").strip()
+        pipeline_stage = "In working queue" if in_pipeline else (risk or "Not in pipeline")
         mapped.append(
             {
-            "entity": "Policy",
-            "record_id": str(row.get("id") or ""),
-            "name": str(row.get("accountName") or row.get("name") or "Unknown"),
-            "lob": _pick(row, "lineOfBusiness", "line_of_business") or "Unknown",
-            "date_label": _format_date(_pick(row, "expirationDate", "expiration_date")),
-            "date_prefix": "Exp",
-            "category": "PROJECT 85 RENEWALS",
-            "premium": _as_money(_pick(row, "premium_amount", "amount")),
-            "action": _renewal_action_for_checkpoint(checkpoint_days, in_pipeline=in_pipeline),
-            "checkpoint_days": checkpoint_days,
-            "pipeline_stage": pipeline_stage or "Not in pipeline",
-            "in_pipeline": in_pipeline,
-        }
+                "entity": "Policy",
+                "record_id": str(_pick(row, "policy_number", "id") or ""),
+                "name": str(_pick(row, "client_name") or "Unknown"),
+                "lob": _pick(row, "line_of_business") or "Unknown",
+                # Same date field that days_left is computed from, so "Exp: <date> [Nd]" is consistent.
+                "date_label": _format_date(_pick(row, "renewal_event_date", "expiration_date")),
+                "date_prefix": "Renews",
+                "category": "PROJECT 85 RENEWALS",
+                "premium": _as_money(_pick(row, "premium_current", "premium_renewal")),
+                "action": _renewal_action_for_checkpoint(tier, in_pipeline=in_pipeline),
+                "checkpoint_days": tier,
+                "days_left": days_left,
+                "pipeline_stage": pipeline_stage,
+                "in_pipeline": in_pipeline,
+            }
         )
-    mapped.sort(key=lambda row: (-int(row.get("checkpoint_days") or 0), not bool(row.get("in_pipeline"))))
+    mapped.sort(key=lambda row: (int(row.get("days_left") or 0), not bool(row.get("in_pipeline"))))
     return SentinelQueryResult(label="PROJECT 85 RENEWALS", rows=mapped)
 
 
-def _query_x_dates(*, client: EspoClient, now_local: datetime) -> SentinelQueryResult:
-    x_days = int(os.environ.get("HERMES_SENTINEL_XDATE_DAYS", "60"))
-    target = (now_local.date() + timedelta(days=x_days)).isoformat()
-    errors: list[str] = []
-    rows: list[dict[str, Any]] = []
-    lead_rows, lead_err = _query_x_date_entity(client=client, entity="Lead", target_date=target)
-    rows.extend(lead_rows)
-    if lead_err:
-        errors.append(f"Lead {lead_err}")
-    opportunity_rows, opp_err = _query_x_date_entity(client=client, entity="Opportunity", target_date=target)
-    for row in opportunity_rows:
-        stage = str(_pick(row, "stage", "status")).lower()
-        if "closed" in stage and "lost" in stage:
-            rows.append(row)
-    if opp_err:
-        errors.append(f"Opportunity {opp_err}")
-    return SentinelQueryResult(
-        label="X-DATE OPPORTUNITIES",
-        rows=rows,
-        error="; ".join(errors) if errors else None,
-    )
+def _query_x_dates(*, supa: SupabaseClient, now_local: datetime) -> SentinelQueryResult:
+    """Re-quote pipeline: opportunities the agency lost — chase them back.
 
-
-def _query_x_date_entity(
-    *,
-    client: EspoClient,
-    entity: str,
-    target_date: str,
-) -> tuple[list[dict[str, Any]], str | None]:
+    EspoCRM's Lead.xDate (competitor-renewal date) is gone with the decommission;
+    lost opportunities in the custom CRM are the live re-quote signal.
+    """
     try:
-        body = client.get(entity, params={"maxSize": 200})
-    except EspoClientError as e:
-        return [], str(e)
+        rows = supa.select(
+            "opportunities",
+            params={"status": "eq.lost", "order": "updated_at.desc"},
+            limit=200,
+        )
+    except SupabaseClientError as e:
+        return SentinelQueryResult(label="X-DATE OPPORTUNITIES", rows=[], error=str(e))
     mapped: list[dict[str, Any]] = []
-    for row in _list_rows(body):
-        x_date = _format_date(_pick(row, "xDate", "x_date"))
-        if x_date != target_date:
-            continue
+    for row in rows:
+        xdate = _pick(row, "expiration_date", "closed_date", "updated_at")
         mapped.append(
             {
-            "entity": entity,
-            "record_id": str(row.get("id") or ""),
-            "name": str(row.get("name") or "Unknown"),
-            "lob": _pick(row, "lineOfBusiness", "line_of_business") or "Unknown",
-            "date_label": _format_date(_pick(row, "xDate", "x_date")),
-            "date_prefix": "X-Date",
-            "category": "X-DATE OPPORTUNITIES",
-            "premium": _as_money(_pick(row, "premium_amount", "amount")),
-            "action": "Re-quote",
-            "carrier": _pick(row, "lostToCarrier", "carrier"),
-            "stage": _pick(row, "stage", "status"),
-        }
+                "entity": "Opportunity",
+                "record_id": str(row.get("id") or ""),
+                "name": str(_pick(row, "insured_name") or "Unknown"),
+                "lob": _pick(row, "line_of_business") or "Unknown",
+                "date_label": _format_date(xdate),
+                "date_prefix": "X-Date",
+                "category": "X-DATE OPPORTUNITIES",
+                "premium": _as_money(_pick(row, "premium_estimate", "premium_actual")),
+                "action": "Re-quote",
+                "carrier": _pick(row, "carrier"),
+                "stage": _pick(row, "stage", "status"),
+            }
         )
-    return mapped, None
+    return SentinelQueryResult(label="X-DATE OPPORTUNITIES", rows=mapped)
 
 
 def _build_slack_payload(
@@ -371,7 +372,7 @@ def _build_slack_payload(
         f"⚠️ STALE LEADS (14+ Days No Contact) — {len(stale)}",
         *_format_section_lines(stale),
         "",
-        f"🔄 PROJECT 85: RENEWALS (90/60/30 Day Checkpoints) — {len(renewals)}",
+        f"🔄 PROJECT 85: RENEWALS (next 90 days by urgency) — {len(renewals)}",
         *_format_renewal_checkpoint_lines(renewal_buckets),
         "",
         f"📅 X-DATE PIPELINE (60 Days Out) — {len(x_dates)}",
@@ -453,11 +454,28 @@ def _format_section_lines(rows: list[dict[str, Any]]) -> list[str]:
 
 def _format_renewal_checkpoint_lines(buckets: dict[int, list[dict[str, Any]]]) -> list[str]:
     lines: list[str] = []
-    for checkpoint in _renewal_checkpoints():
+    for checkpoint in sorted(_renewal_checkpoints()):
         rows = buckets.get(checkpoint, [])
-        lines.append(f"{checkpoint}d checkpoint — {len(rows)}")
+        lines.append(f"{_checkpoint_label(checkpoint)} — {len(rows)}")
         lines.extend(_format_section_lines(rows))
     return lines
+
+
+def _renewal_tier(days_left: int, checkpoints: list[int]) -> int:
+    """Smallest checkpoint tier this renewal falls within (e.g. 11 days -> 30)."""
+    for checkpoint in sorted(checkpoints):
+        if days_left <= checkpoint:
+            return checkpoint
+    return max(checkpoints)
+
+
+def _checkpoint_label(checkpoint: int, checkpoints: list[int] | None = None) -> str:
+    """Human range label for a checkpoint tier: '≤30d', '31-60d', '61-90d'."""
+    ordered = sorted(checkpoints or _renewal_checkpoints())
+    idx = ordered.index(checkpoint) if checkpoint in ordered else 0
+    if idx == 0:
+        return f"≤{checkpoint}d"
+    return f"{ordered[idx - 1] + 1}-{checkpoint}d"
 
 
 def _format_line(row: dict[str, Any]) -> str:
@@ -468,7 +486,8 @@ def _format_line(row: dict[str, Any]) -> str:
     date_label = str(row.get("date_label") or "?")
     action = str(row.get("action") or "").strip()
     carrier = str(row.get("carrier") or "").strip()
-    checkpoint = row.get("checkpoint_days")
+    # Prefer the true days-to-expiration for display; fall back to the tier value.
+    checkpoint = row.get("days_left", row.get("checkpoint_days"))
     checkpoint_note = f" [{checkpoint}d]" if checkpoint is not None else ""
     pipeline_stage = str(row.get("pipeline_stage") or "").strip()
     pipeline_note = f" Pipeline: {pipeline_stage}." if pipeline_stage else ""
@@ -478,13 +497,13 @@ def _format_line(row: dict[str, Any]) -> str:
 
 
 def _renewal_section_blocks(buckets: dict[int, list[dict[str, Any]]]) -> list[dict[str, Any]]:
-    output = [{"type": "section", "text": {"type": "mrkdwn", "text": "*🔄 PROJECT 85: RENEWALS (90/60/30 Day Checkpoints)*"}}]
-    for checkpoint in _renewal_checkpoints():
+    output = [{"type": "section", "text": {"type": "mrkdwn", "text": "*🔄 PROJECT 85: RENEWALS (next 90 days by urgency)*"}}]
+    for checkpoint in sorted(_renewal_checkpoints()):
         rows = buckets.get(checkpoint, [])
         output.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*{checkpoint}d checkpoint* — {len(rows)}"},
+                "text": {"type": "mrkdwn", "text": f"*{_checkpoint_label(checkpoint)}* — {len(rows)}"},
             }
         )
         if not rows:
@@ -692,24 +711,6 @@ def _renewal_checkpoints() -> list[int]:
     if not values:
         values = list(DEFAULT_RENEWAL_CHECKPOINTS)
     return sorted(set(values), reverse=True)
-
-
-def _account_renewal_stages(*, client: EspoClient, account_ids: list[str]) -> dict[str, str]:
-    unique_ids = sorted({account_id for account_id in account_ids if account_id})
-    if not unique_ids:
-        return {}
-    try:
-        body = client.get("Account", params={"maxSize": 200})
-    except EspoClientError:
-        return {}
-    rows = _list_rows(body)
-    result: dict[str, str] = {}
-    for row in rows:
-        account_id = str(row.get("id") or "")
-        if not account_id:
-            continue
-        result[account_id] = str(row.get("renewalOutreachStage") or "").strip()
-    return result
 
 
 def _is_in_pipeline(stage: str) -> bool:
