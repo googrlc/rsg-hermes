@@ -7,7 +7,6 @@ from hermes.command_center.review import (
     ReviewState,
     Severity,
     assert_can_approve,
-    assert_can_crm_push,
     assert_can_download,
     assert_transition,
     has_blocking_flags,
@@ -45,20 +44,6 @@ def test_approve_only_from_in_review():
     assert ei.value.status_code == 409
 
 
-def test_crm_push_requires_confirm():
-    with pytest.raises(ReviewError) as ei:
-        assert_can_crm_push(ReviewState.APPROVED, confirm=False)
-    assert ei.value.status_code == 422
-
-
-def test_crm_push_blocked_until_approved():
-    with pytest.raises(ReviewError) as ei:
-        assert_can_crm_push(ReviewState.IN_REVIEW, confirm=True)
-    assert ei.value.status_code == 403
-
-
-def test_crm_push_ok_when_approved_and_confirmed():
-    assert_can_crm_push(ReviewState.APPROVED, confirm=True)      # no raise
 
 
 def test_state_cannot_skip():

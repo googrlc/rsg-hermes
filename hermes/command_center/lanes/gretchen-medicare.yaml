@@ -21,5 +21,3 @@ validators:
 deliverables:
   - kind: medicare_checklist
     title: "Medicare intake checklist"
-  - kind: crm_blocks
-    title: "CRM entry blocks"

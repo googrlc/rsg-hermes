@@ -7,17 +7,13 @@ produces text/markdown:
   - ``quote_worksheet``   — the rater-ready field sheet (real, from the spine)
   - ``carrier_shortlist`` — appetite-matched carriers (honest placeholder until
                             the live carrier_appetite lookup is wired)
-  - ``crm_blocks``        — the EspoCRM-ready Account payload (uses espo_fieldmap,
-                            so the casing/enum mapping is correct)
 
 Never fabricate: missing fields render as "—", not invented values.
 """
 from __future__ import annotations
 
-import json
 from typing import Any, Optional
 
-from .espo_fieldmap import account_write_payload
 from .submission import Lane, SubmissionObject
 
 
@@ -82,18 +78,6 @@ def carrier_shortlist(sub: SubmissionObject) -> str:
         "_Appetite match pending — wire to the live `carrier_appetite` table to "
         "rank carriers by LOB/state/class. No carriers are listed until that "
         "lookup runs (no fabrication)._\n"
-    )
-
-
-def crm_blocks(sub: SubmissionObject) -> str:
-    body = account_write_payload(_canonical(sub))
-    pretty = "\n".join(f"- `{k}`: {v}" for k, v in sorted(body.items())) or "- (nothing to write yet)"
-    return (
-        f"# CRM Entry Blocks — {_dash(sub.client_name)}\n\n"
-        "EspoCRM Account fields (correct casing + enum mapping), ready for the "
-        "gated push:\n\n"
-        f"{pretty}\n\n"
-        "```json\n" + json.dumps(body, indent=2, default=str) + "\n```\n"
     )
 
 
@@ -166,7 +150,6 @@ def peo_worksheet(sub: SubmissionObject) -> str:
 GENERATORS = {
     "quote_worksheet": quote_worksheet,
     "carrier_shortlist": carrier_shortlist,
-    "crm_blocks": crm_blocks,
     "acord_data": acord_data,
     "benefits_worksheet": benefits_worksheet,
     "medicare_checklist": medicare_checklist,
