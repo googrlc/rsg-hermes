@@ -272,9 +272,9 @@ def _build_eom_summary(
     try:
         policies = supa.select(
             "canonical_policies",
-            columns="policy_number,carrier,lines_of_business,status,transaction_type,"
-            "business_type,effective_date,expiration_date,premium_amount,"
-            "annualized_premium,agency_commission_amount",
+            columns="policy_number,carrier,lines_of_business,status,business_type,"
+            "business_sub_type,renewed_policy,effective_date,expiration_date,"
+            "premium_amount,annualized_premium,agency_commission_amount",
             params={"order": "effective_date.desc"},
             limit=5000,
         )
@@ -293,7 +293,10 @@ def _build_eom_summary(
         }, [str(e)]
     month_rows: list[dict[str, Any]] = []
     for row in policies:
-        bound = _parse_date(_pick(row, "effective_date", "expiration_date"))
+        # Bucket strictly by effective (bind) date — expiration is a year out, so
+        # it would misattribute the month. Rows with no effective_date can't be
+        # tied to a bind month and are skipped (matches the pre-Espo behavior).
+        bound = _parse_date(_pick(row, "effective_date"))
         if not bound or bound < month_start or bound > month_end:
             continue
         month_rows.append(row)
@@ -535,14 +538,16 @@ def _previous_month_window(today: date) -> tuple[date, date]:
 
 
 def _is_renewal_policy(row: dict[str, Any]) -> bool:
-    if _pick(row, "renewedFrom"):
+    # canonical_policies.renewed_policy holds the prior policy number on a
+    # renewal (the post-Espo analog of Espo's renewedFrom); business_type is
+    # "New Business" vs "Renewal".
+    if _pick(row, "renewed_policy", "renewedFrom"):
         return True
     marker = str(
         _pick(
             row,
-            "transaction_type",
             "business_type",
-            "status",
+            "business_sub_type",
             "businessType",
             "policyType",
             "type",
