@@ -15,10 +15,13 @@
 #
 # >>> hermes automations (managed by deploy/cron/install-cron.sh) >>>
 CRON_TZ=America/New_York
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --sync-nowcerts writes EspoCRM Accounts
+# (nightly 400 PUT / 409 POST "EspoCRM request failed"). Disabled; no valid target.
 # Account Sync v2 — daily 2:00am ET (NowCerts Insured → EspoCRM Account)
-0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
+# 0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --sync-policies writes EspoCRM Policies. Disabled.
 # Policy Sync v2  — daily 2:10am ET (NowCerts Policy → EspoCRM Policy; no Account writes)
-10 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-policies >> /root/hermes-cron.log 2>&1
+# 10 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-policies >> /root/hermes-cron.log 2>&1
 # OPT-IN 2026-07-16 — Canonical book sync — daily 2:20am ET (BEFORE renewal refresh).
 # Pulls live NowCerts insureds+policies into canonical_clients (key nowcerts_insured_guid)
 # and canonical_policies (key policy_guid) — the book --renewal-refresh reads. This
@@ -44,8 +47,12 @@ CRON_TZ=America/New_York
 # client+LOB; never resets a human-advanced stage; additive. Full pull each run
 # (safe — re-runs just backfill NowCerts ids on existing rows, no duplicates).
 35 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-quotes >> /root/hermes-cron.log 2>&1
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --email-triage was removed from the CLI in
+# commit 967e8c5 ("remove ... --email-triage (dead Espo jobs)"); the current image errors with
+# "unrecognized arguments: --email-triage". Outlook->intake now runs in the rsg-hermes-intake-worker
+# service (hermes --run-intake-worker), not via cron. Disabled to stop 48 failed runs/day.
 # Outlook -> intake triage — every 30 min, 2h lookback (idempotent via Hermes Triaged category)
-*/30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
+# */30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
 # Dashboard KPI history — daily 6:00am ET (Supabase dashboard_kpis, no Slack)
 0 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --snapshot-kpis >> /root/hermes-cron.log 2>&1
 # OPT-IN 2026-07-15 — Renewal Executor (Job Contract v2). Processes human-approved
@@ -66,8 +73,13 @@ CRON_TZ=America/New_York
 0 7 * * 1 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-audit >> /root/hermes-cron.log 2>&1
 # End-of-month revenue scorecard — 1st of month 7:00am ET -> Slack
 0 7 1 * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --eom-scorecard >> /root/hermes-cron.log 2>&1
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --changelog QUERIES EspoCRM for 24h changes
+# and logs an EspoCRM Task (nightly 400 POST Task "validationFailure"). Both read + write are
+# Espo-only, so the job has no valid target. Disabled.
 # Nightly CRM changelog -> #the-boss — 8:00pm ET
-0 20 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --changelog >> /root/hermes-cron.log 2>&1
+# 0 20 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --changelog >> /root/hermes-cron.log 2>&1
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --espo-writeback reads EspoCRM Cases/Tasks
+# (also "unrecognized arguments" since the 07-14 build dropped the flag). Disabled.
 # Cases -> NowCerts task ledger write-back — daily 7:00pm ET (AMS = source of truth; additive, idempotent via Case.momentumTaskId)
-0 19 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --espo-writeback >> /root/hermes-cron.log 2>&1
+# 0 19 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --espo-writeback >> /root/hermes-cron.log 2>&1
 # <<< hermes automations <<<
