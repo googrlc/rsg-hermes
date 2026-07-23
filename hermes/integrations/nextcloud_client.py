@@ -20,13 +20,21 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 if TYPE_CHECKING:
     import requests
 
 # The confirmed per-client document categories.
 CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Quotes", "Correspondence")
+
+# PROPFIND body — ask only for the props list_dir surfaces (keeps the response small).
+_PROPFIND_BODY = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<d:propfind xmlns:d="DAV:"><d:prop>'
+    "<d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:displayname/>"
+    "</d:prop></d:propfind>"
+)
 DEFAULT_CATEGORY = "Renewal Reviews"
 QUOTES_CATEGORY = "Quotes"
 
@@ -163,6 +171,83 @@ class NextcloudClient:
         for category in CLIENT_CATEGORIES:
             self.ensure_dirs(f"{base}/{category}")
         return self._rel_with_base(base)
+
+    # -- read operations (client-360) ---------------------------------------
+    # The CRM Desk assistant reads client documents here. Read-only: PROPFIND to
+    # list a folder, GET to fetch a file's bytes. Neither creates or mutates.
+
+    def list_dir(self, rel_path: str) -> list[dict[str, Any]]:
+        """List the immediate children of a folder via WebDAV PROPFIND (Depth 1).
+
+        Returns ``[{name, path, is_dir, size, modified}]`` for each child (the
+        folder itself is omitted). ``path`` is relative to ``base_path`` — the
+        same form ``read_file``/``put_file`` accept. Returns ``[]`` if the folder
+        is missing (404). Read-only.
+        """
+        self._require_configured()
+        import xml.etree.ElementTree as ET
+
+        url = self._dav_url(rel_path)
+        resp = self.session.request(
+            "PROPFIND", url,
+            headers={"Depth": "1", "Content-Type": "application/xml"},
+            data=_PROPFIND_BODY,
+            verify=self.verify_tls, timeout=30,
+        )
+        if resp.status_code == 404:
+            return []
+        if resp.status_code not in (207, 200):
+            raise NextcloudError(f"PROPFIND {rel_path} failed: {resp.status_code} {resp.text[:200]}")
+
+        # The requested folder's own DAV path (used to drop the self entry).
+        # Compare on the UNencoded path — hrefs are unquoted below.
+        parent_rel = self._rel_with_base(rel_path).strip("/")
+        self_dav = "/" + parent_rel
+        try:
+            root = ET.fromstring(resp.content)
+        except ET.ParseError as exc:  # noqa: BLE001
+            raise NextcloudError(f"PROPFIND {rel_path}: bad XML ({exc})")
+
+        ns = {"d": "DAV:"}
+        out: list[dict[str, Any]] = []
+        for resp_el in root.findall("d:response", ns):
+            href_el = resp_el.find("d:href", ns)
+            if href_el is None or not href_el.text:
+                continue
+            href = unquote(href_el.text)
+            # strip the DAV base so we compare on the files path only
+            dav_path = href.split("/remote.php/dav/files/", 1)[-1]
+            # dav_path is "<user>/<...>"; drop the leading user segment
+            dav_path = "/" + dav_path.split("/", 1)[-1].strip("/") if "/" in dav_path else "/"
+            if dav_path.rstrip("/") == self_dav.rstrip("/"):
+                continue  # the folder itself
+            prop = resp_el.find("d:propstat/d:prop", ns)
+            is_dir = prop is not None and prop.find("d:resourcetype/d:collection", ns) is not None
+            name = href.rstrip("/").rsplit("/", 1)[-1]
+            child_full = dav_path.strip("/")
+            child_rel = child_full[len(parent_rel):].strip("/") if parent_rel and child_full.startswith(parent_rel) else name
+            rel_out = f"{rel_path.strip('/')}/{child_rel}".strip("/")
+            size_el = prop.find("d:getcontentlength", ns) if prop is not None else None
+            mod_el = prop.find("d:getlastmodified", ns) if prop is not None else None
+            out.append({
+                "name": name,
+                "path": rel_out,
+                "is_dir": bool(is_dir),
+                "size": int(size_el.text) if (size_el is not None and (size_el.text or "").isdigit()) else None,
+                "modified": mod_el.text if mod_el is not None else None,
+            })
+        return out
+
+    def read_file(self, rel_path: str) -> bytes:
+        """Download a file's bytes via WebDAV GET. Read-only. Raises
+        ``NextcloudError`` on 404 or any non-2xx."""
+        self._require_configured()
+        resp = self.session.get(self._dav_url(rel_path), verify=self.verify_tls, timeout=60)
+        if resp.status_code == 404:
+            raise NextcloudError(f"Not found: {rel_path}")
+        if not resp.ok:
+            raise NextcloudError(f"GET {rel_path} failed: {resp.status_code} {resp.text[:200]}")
+        return resp.content
 
     def file_document(
         self,
