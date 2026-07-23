@@ -542,34 +542,6 @@ def main() -> int:
         help="Lookback window in hours for sync (default: 24)",
     )
     # --- Hermes Operations Center commands ---
-    # --- Email triage (Microsoft 365 first; reads inbox, routes mail) ---
-    parser.add_argument(
-        "--email-triage",
-        action="store_true",
-        help="LIVE: triage mailbox(es) — actionable mail -> intake_submissions, noise -> quarantine folder",
-    )
-    parser.add_argument(
-        "--email-triage-dry-run",
-        action="store_true",
-        help="Preview email triage: classify and log per-message actions without inserting or moving anything",
-    )
-    parser.add_argument(
-        "--email-provider",
-        default="ms365",
-        choices=["ms365", "gmail"],
-        help="Mail provider to triage (default: ms365)",
-    )
-    parser.add_argument(
-        "--email-mailboxes",
-        default="",
-        help="Comma-separated mailbox UPNs to triage (default: MS365_MAILBOXES env)",
-    )
-    parser.add_argument(
-        "--email-since-hours",
-        type=int,
-        default=24,
-        help="Lookback window in hours for email triage (default: 24)",
-    )
     # --- Document library (Supermemory + index; freeform internal refs) ---
     parser.add_argument(
         "--doc-add",
@@ -645,11 +617,6 @@ def main() -> int:
         "--curate-skills",
         action="store_true",
         help="Report-only age audit of .claude/skills (flags stale/review candidates; never deletes)",
-    )
-    parser.add_argument(
-        "--espo-db-doctor",
-        action="store_true",
-        help="Check the read-only direct-Postgres lane to EspoCRM (connectivity, read-only guard, pg_trgm, schema)",
     )
     parser.add_argument(
         "--repair-policy-accounts",
@@ -933,74 +900,6 @@ def main() -> int:
         return 0 if bidi_result.ok else 1
 
     # --- Email triage (requires the provider client + Supabase) ---
-    if args.email_triage or args.email_triage_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-
-        dry_run = args.email_triage_dry_run
-        provider = args.email_provider
-        default_mailboxes_env = (
-            "GMAIL_MAILBOXES" if provider == "gmail" else "MS365_MAILBOXES"
-        )
-        mailboxes = [
-            m.strip()
-            for m in (args.email_mailboxes or os.environ.get(default_mailboxes_env, "")).split(",")
-            if m.strip()
-        ]
-        if not mailboxes:
-            print(
-                f"No mailboxes to triage. Pass --email-mailboxes or set {default_mailboxes_env}.",
-                file=sys.stderr,
-            )
-            return 2
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-
-        if provider == "ms365":
-            from hermes.integrations.ms365_client import MS365Client, MS365ClientError
-            from hermes.sync.email_triage import run_ms365_triage
-
-            try:
-                ms = MS365Client()
-            except MS365ClientError as e:
-                print(f"Microsoft 365 connection failed: {e}", file=sys.stderr)
-                return 2
-            triage_result = run_ms365_triage(
-                ms, supa,
-                mailboxes=mailboxes,
-                since_hours=args.email_since_hours,
-                dry_run=dry_run,
-            )
-        elif provider == "gmail":
-            from hermes.integrations.gmail_client import GmailClient, GmailClientError
-            from hermes.sync.email_triage import run_gmail_triage
-
-            try:
-                gm = GmailClient()
-            except GmailClientError as e:
-                print(f"Gmail connection failed: {e}", file=sys.stderr)
-                return 2
-            triage_result = run_gmail_triage(
-                gm, supa,
-                mailboxes=mailboxes,
-                since_hours=args.email_since_hours,
-                dry_run=dry_run,
-            )
-        else:
-            print(f"Unsupported email provider: {provider}", file=sys.stderr)
-            return 2
-
-        print(triage_result.message)
-        if triage_result.errors:
-            print("Errors:")
-            for err in triage_result.errors:
-                print(f"- {err}")
-        return 0 if triage_result.ok else 1
-
-    # --- Document library (Supabase + Supermemory; no EspoCRM required) ---
     if args.doc_folders:
         from hermes.documents.store import list_folders
         for f in list_folders():
@@ -1056,30 +955,6 @@ def main() -> int:
         report = skill_curator.run()
         print("\n".join(report.format_lines()))
         return 0 if report.ok else 1
-
-    if args.espo_db_doctor:
-        from hermes.integrations import espo_db
-
-        if not espo_db.is_configured():
-            print(
-                "Read lane not configured. Set ESPO_DB_HOST, ESPO_DB_NAME, ESPO_DB_USER "
-                "(and ESPO_DB_PASSWORD) to enable direct-Postgres reads.",
-                file=sys.stderr,
-            )
-            return 2
-        try:
-            db = espo_db.EspoDb()
-            health = db.check_health()
-        except espo_db.EspoDbError as e:
-            print(f"Read lane error: {e}", file=sys.stderr)
-            return 2
-        finally:
-            try:
-                db.close()  # type: ignore[possibly-undefined]
-            except Exception:
-                pass
-        print("\n".join(health.format_lines()))
-        return 0 if health.ok else 1
 
     if args.snapshot_kpis:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
