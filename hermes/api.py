@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 import uvicorn
@@ -1607,20 +1607,58 @@ def _renewal_outcome(r: dict) -> str:
     return "Open"
 
 
+# Personal-lines LOBs get a tight 30-day renewal window; everything else
+# (commercial) gets 120 days. Keyed off line_of_business because the `segment`
+# column mislabels every personal policy as commercial.
+_PERSONAL_LOB_RE = re.compile(
+    r"(personal auto|personalauto|personsl auto|homeowner|dwelling fire|"
+    r"motorcycle|personal umbrella|condo owners)",
+    re.I,
+)
+_PERSONAL_WINDOW_DAYS = 30
+_COMMERCIAL_WINDOW_DAYS = 120
+
+
+def _renewal_window_days(lob: str | None) -> int:
+    """Forward-look window for a renewal, by line of business."""
+    return _PERSONAL_WINDOW_DAYS if _PERSONAL_LOB_RE.search(lob or "") else _COMMERCIAL_WINDOW_DAYS
+
+
 @app.get("/api/renewals")
 async def list_renewals_endpoint(limit: int = 1000):
-    """Renewal worklist from renewal_candidates — carries the NowCerts insured GUID
-    (for the AMS deep-link) and a derived Won/Lost/Open outcome per renewal."""
+    """Upcoming renewal worklist from renewal_candidates.
+
+    Forward window only: personal lines +30 days, commercial +120 days. Rows on
+    expired/inactive policies and non-events (eligibility_state='excluded') are
+    dropped, so dead AMS deep-links and already-renewed future-dated rows never
+    appear. Carries the NowCerts insured GUID (AMS deep-link) and a derived
+    Won/Lost/Open outcome per renewal."""
     rows = _get_supa().select(
         "renewal_candidates",
         columns="insured_id,policy_number,client_name,line_of_business,renewal_event_date,"
                 "expiration_date,normalized_status,successor_policy_number,risk_status,segment,"
-                "in_working_queue,eligibility_state,premium_current,premium_renewal",
-        params={"order": "renewal_event_date.desc"}, limit=limit,
+                "in_working_queue,eligibility_state,premium_current,premium_renewal,policy_active",
+        params={"order": "expiration_date.asc"}, limit=limit,
     )
+    today = date.today()
+    out: list[dict[str, Any]] = []
     for r in rows:
+        if not r.get("policy_active"):
+            continue
+        if str(r.get("eligibility_state") or "").strip().lower() == "excluded":
+            continue
+        raw_exp = r.get("expiration_date")
+        if not raw_exp:
+            continue
+        try:
+            exp = date.fromisoformat(str(raw_exp)[:10])
+        except ValueError:
+            continue
+        if exp < today or exp > today + timedelta(days=_renewal_window_days(r.get("line_of_business"))):
+            continue
         r["outcome"] = _renewal_outcome(r)
-    return {"renewals": rows, "count": len(rows)}
+        out.append(r)
+    return {"renewals": out, "count": len(out)}
 
 
 @app.get("/api/workspace-stats")
