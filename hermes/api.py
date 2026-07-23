@@ -1483,9 +1483,11 @@ async def client_360_endpoint(insured_guid: str):
     client = sel("canonical_clients", "*", {"nowcerts_insured_guid": f"eq.{insured_guid}"})
     policies = sel(
         "canonical_policies",
-        "policy_number,carrier,lines_of_business,status,effective_date,expiration_date,annualized_premium,premium_amount",
+        "policy_guid,policy_number,renewed_policy,nowcerts_insured_guid,carrier,lines_of_business,status,"
+        "effective_date,expiration_date,annualized_premium,premium_amount",
         {"nowcerts_insured_guid": f"eq.{insured_guid}", "order": "expiration_date.asc"},
     )
+    policies, _policy_prior_terms = _collapse_to_current_terms(policies)
     opportunities = sel(
         "opportunities", "id,line_of_business,stage,status,premium_estimate,carrier,quote_number,next_action",
         {"insured_id": f"eq.{insured_guid}", "order": "updated_at.desc"},
@@ -1501,19 +1503,69 @@ async def client_360_endpoint(insured_guid: str):
     }
 
 
+def _term_sort_key(p: dict[str, Any]) -> tuple:
+    """Latest term first: by effective, then expiration, then guid. Nulls sort oldest."""
+    def _d(v: Any) -> date:
+        try:
+            return date.fromisoformat(str(v)[:10])
+        except (ValueError, TypeError):
+            return date.min
+    return (_d(p.get("effective_date")), _d(p.get("expiration_date")), str(p.get("policy_guid") or ""))
+
+
+def _collapse_to_current_terms(policies: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Collapse renewal-overlap pairs and duplicate imports to one current term per coverage.
+
+    A renewal is a lineage: the expiring term and its successor briefly coexist
+    (two "active" policies until the old one drops off), and the same policy can
+    also appear twice from dual-source imports. Group by
+    (insured, normalized LOB, lineage root) where the lineage root is
+    ``renewed_policy`` (NowCerts' predecessor link) or the policy's own number —
+    so a successor groups with its predecessor without ever merging two distinct
+    policies. Keep the latest-effective term; stamp it with ``prior_terms``.
+    Returns (current_terms, folded_count).
+    """
+    from collections import defaultdict
+
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for p in policies:
+        insured = str(p.get("nowcerts_insured_guid") or "")
+        lob = str(p.get("lines_of_business") or p.get("line_of_business") or "").strip().lower()
+        number = str(p.get("policy_number") or "").strip()
+        root = str(p.get("renewed_policy") or "").strip() or number
+        groups[(insured, lob, root)].append(p)
+
+    current: list[dict[str, Any]] = []
+    folded = 0
+    for members in groups.values():
+        members.sort(key=_term_sort_key, reverse=True)
+        head = members[0]
+        head["prior_terms"] = len(members) - 1
+        current.append(head)
+        folded += len(members) - 1
+    current.sort(key=lambda p: (str(p.get("expiration_date") or "9999-12-31")))
+    return current, folded
+
+
 @app.get("/api/policies")
-async def list_policies_endpoint(limit: int = 1000):
+async def list_policies_endpoint(limit: int = 1000, include_history: bool = False):
     """Canonical policy book (read-only mirror), soonest-expiring first.
 
-    Each policy is stamped with the account/insured name it belongs to
-    (looked up from canonical_clients by NowCerts insured GUID)."""
+    By default, renewal-overlap pairs and duplicate imports are collapsed to one
+    current term per coverage (see ``_collapse_to_current_terms``) so a renewing
+    policy shows once, not as two "active" rows. Pass ``include_history=true`` for
+    the raw, uncollapsed book. Each policy is stamped with the account/insured
+    name it belongs to (looked up from canonical_clients by NowCerts insured GUID)."""
     supa = _get_supa()
     rows = supa.select(
         "canonical_policies",
-        columns="policy_guid,policy_number,nowcerts_insured_guid,carrier,lines_of_business,status,"
+        columns="policy_guid,policy_number,renewed_policy,nowcerts_insured_guid,carrier,lines_of_business,status,"
                 "effective_date,expiration_date,premium_amount,annualized_premium,agency_commission_amount,state",
         params={"order": "expiration_date.asc"}, limit=limit,
     )
+    folded = 0
+    if not include_history:
+        rows, folded = _collapse_to_current_terms(rows)
     # Attach the account name via a single lookup on the client mirror.
     try:
         clients = supa.select(
@@ -1529,7 +1581,8 @@ async def list_policies_endpoint(limit: int = 1000):
         name_by_guid = {}
     for r in rows:
         r["insured_name"] = name_by_guid.get(r.get("nowcerts_insured_guid"))
-    return {"policies": rows, "count": len(rows)}
+    return {"policies": rows, "count": len(rows), "folded_prior_terms": folded,
+            "collapsed": not include_history}
 
 
 class CommissionRuleRequest(BaseModel):
