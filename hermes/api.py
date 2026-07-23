@@ -2159,162 +2159,22 @@ async def command(req: DispatchRequest):
     return await dispatch(req)
 
 
-# ---------------------------------------------------------------------------
-# Slack Events API webhook — Slack#crm-entry → n8n (Hermes Trigger) → here
-# ---------------------------------------------------------------------------
-
-_slack_signature_verifier = None
+# Slack Web client — retained only for the TTS audio-upload endpoint below; the
+# inbound Slack command webhook was removed. (Outbound Slack removal is a later step.)
 _slack_web_client = None
-
-
-def _get_slack_signature_verifier():
-    global _slack_signature_verifier
-    if _slack_signature_verifier is None:
-        secret = os.environ.get("SLACK_EVENTS_SIGNING_SECRET", "").strip()
-        if not secret:
-            return None
-        from slack_sdk.signature import SignatureVerifier
-
-        _slack_signature_verifier = SignatureVerifier(signing_secret=secret)
-    return _slack_signature_verifier
 
 
 def _get_slack_web_client():
     global _slack_web_client
     if _slack_web_client is None:
         token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
-        if not token:
-            return None
         from slack_sdk import WebClient
 
         _slack_web_client = WebClient(token=token)
     return _slack_web_client
 
 
-def _process_crm_entry_text(text: str, *, channel_id: str, user_id: str | None, message_ts: str | None, thread_ts: str | None) -> None:
-    """Run dispatcher and post the ack back to #crm-entry.
-
-    Mirrors the Socket Mode handler's behavior: when the dispatcher returns
-    `result.data["slack_blocks"]`, those interactive blocks (e.g. the agency
-    intake approve buttons) are attached to the LAST message chunk so users
-    can click rather than retype the approval token.
-    """
-    blocks: list[dict[str, Any]] | None = None
-    try:
-        espo = _get_espo()
-        dispatcher = _get_dispatcher()
-        dispatcher.set_slack_context(channel_id=channel_id, user_id=user_id, message_ts=message_ts)
-        result = dispatcher.dispatch(espo, _strip_leading_slack_mention(text))
-        ack = ("" if result.ok else ":warning: ") + (result.message or "")
-        if isinstance(result.data, dict):
-            candidate = result.data.get("slack_blocks")
-            if isinstance(candidate, list) and candidate:
-                blocks = candidate
-    except Exception as exc:
-        log.exception("Slack webhook dispatch failed channel=%s ts=%s", channel_id, message_ts)
-        ack = f":warning: Hermes command failed: {exc}"
-    web = _get_slack_web_client()
-    if web is None:
-        log.error("SLACK_BOT_TOKEN unset; cannot post ack to %s", channel_id)
-        return
-    chunks = _chunk_slack(ack)
-    for idx, chunk in enumerate(chunks):
-        # Only attach blocks to the final chunk so buttons aren't duplicated.
-        post_kwargs: dict[str, Any] = {"channel": channel_id, "text": chunk, "thread_ts": thread_ts}
-        if blocks and idx == len(chunks) - 1:
-            post_kwargs["blocks"] = blocks
-        try:
-            web.chat_postMessage(**post_kwargs)
-        except Exception:
-            log.exception("Slack webhook ack post failed channel=%s ts=%s", channel_id, message_ts)
-            return
-
-
-def _strip_leading_slack_mention(text: str) -> str:
-    return re.sub(r"^<@[^>]+>\s*", "", (text or "").strip()).strip()
-
-
-def _chunk_slack(text: str, limit: int = 3500) -> list[str]:
-    if len(text) <= limit:
-        return [text]
-    parts: list[str] = []
-    rest = text
-    while rest:
-        parts.append(rest[:limit])
-        rest = rest[limit:]
-    return parts
-
-
-@app.post("/api/hermes/slack/crm-entry")
-async def slack_crm_entry_webhook(request: Request, background_tasks: BackgroundTasks):
-    """Receive Slack Events API payload (forwarded by n8n) for the #crm-entry channel.
-
-    n8n must forward the raw Slack request body and the `X-Slack-Signature` /
-    `X-Slack-Request-Timestamp` headers verbatim so Hermes can verify the
-    signature against `SLACK_EVENTS_SIGNING_SECRET`.
-    """
-    from hermes.integrations.slack_dedupe import CRM_ENTRY_CHANNEL, claim_event
-
-    raw_body = await request.body()
-    signature = request.headers.get("x-slack-signature", "")
-    timestamp = request.headers.get("x-slack-request-timestamp", "")
-
-    verifier = _get_slack_signature_verifier()
-    if verifier is None:
-        log.error("SLACK_EVENTS_SIGNING_SECRET not configured; refusing webhook")
-        raise HTTPException(status_code=503, detail="Slack webhook not configured")
-    if not signature or not timestamp or not timestamp.isdigit():
-        raise HTTPException(status_code=401, detail="Missing Slack signature headers")
-    if not verifier.is_valid(body=raw_body, timestamp=timestamp, signature=signature):
-        raise HTTPException(status_code=401, detail="Invalid Slack signature")
-
-    try:
-        payload = json.loads(raw_body.decode("utf-8") or "{}")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Malformed JSON")
-
-    if payload.get("type") == "url_verification":
-        return PlainTextResponse(payload.get("challenge", ""))
-
-    if payload.get("type") != "event_callback":
-        return {"ok": True, "ignored": "non-event-callback"}
-
-    event_id = payload.get("event_id") or ""
-    if event_id and not claim_event(f"slack_event_id:{event_id}"):
-        log.info("slack webhook Slack-retry of event_id=%s — skipping", event_id)
-        return {"ok": True, "ignored": "slack-retry"}
-
-    event = payload.get("event") or {}
-    if event.get("type") != "message":
-        return {"ok": True, "ignored": "non-message"}
-    if event.get("bot_id") or event.get("subtype") in ("bot_message", "message_changed", "message_deleted"):
-        return {"ok": True, "ignored": "bot-or-subtype"}
-    hermes_bot_user_id = os.environ.get("HERMES_BOT_USER_ID", "")
-    if hermes_bot_user_id and event.get("user") == hermes_bot_user_id:
-        return {"ok": True, "ignored": "self-post"}
-    if event.get("channel") != CRM_ENTRY_CHANNEL:
-        return {"ok": True, "ignored": "wrong-channel"}
-    text = event.get("text") or ""
-    if "Hermes:" not in text or "MODULE:" not in text:
-        return {"ok": True, "ignored": "no-hermes-block"}
-
-    event_ts = event.get("ts") or ""
-    if not claim_event(f"crm_entry_ts:{event_ts}"):
-        log.info("crm_entry_ts=%s already handled by other transport — skipping", event_ts)
-        return {"ok": True, "ignored": "cross-transport-duplicate"}
-
-    thread_ts = event.get("thread_ts") or event.get("ts")
-    background_tasks.add_task(
-        _process_crm_entry_text,
-        text,
-        channel_id=event.get("channel"),
-        user_id=event.get("user"),
-        message_ts=event.get("ts"),
-        thread_ts=thread_ts,
-    )
-    return {"ok": True, "queued": True, "event_id": event_id}
-
-
+# ---------------------------------------------------------------------------
 @app.post("/renewals/complete")
 async def renewals_complete_webhook(request: Request):
     """EspoCRM service.task_completed webhook for Renewal tasks.

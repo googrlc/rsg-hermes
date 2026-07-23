@@ -328,11 +328,6 @@ def main() -> int:
         help="Run reconciliation without posting Slack alert",
     )
     parser.add_argument(
-        "--slack",
-        action="store_true",
-        help="Run Slack Socket Mode bot (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)",
-    )
-    parser.add_argument(
         "--api",
         action="store_true",
         help="Run Hermes REST API server (default port 8484)",
@@ -1148,16 +1143,6 @@ def main() -> int:
         schema = SchemaAuditor(client).run_live_metadata_inventory()
         print(f"Metadata inventory wrote {os.environ.get('HERMES_SCHEMA_MAP', 'schema_map.json')}")
         print(f"Entity count: {schema.get('entity_count', 0)}")
-        return 0
-
-    if args.slack:
-        from hermes.integrations.slack_socket import run_slack_socket
-
-        try:
-            run_slack_socket(espo=client)
-        except RuntimeError as e:
-            print(e, file=sys.stderr)
-            return 2
         return 0
 
     if args.ping:
