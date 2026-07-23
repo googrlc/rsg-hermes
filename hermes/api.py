@@ -1615,8 +1615,18 @@ _PERSONAL_LOB_RE = re.compile(
     r"motorcycle|personal umbrella|condo owners)",
     re.I,
 )
-_PERSONAL_WINDOW_DAYS = 30
-_COMMERCIAL_WINDOW_DAYS = 120
+def _env_int(name: str, default: int) -> int:
+    """Read an int from env, falling back to default on unset/blank/garbage."""
+    try:
+        return int((os.getenv(name) or "").strip() or default)
+    except ValueError:
+        log.warning("invalid int for %s=%r; using %d", name, os.getenv(name), default)
+        return default
+
+
+# Forward-look windows, tunable via env (set in the box .env, then restart).
+_PERSONAL_WINDOW_DAYS = _env_int("RENEWAL_WINDOW_PERSONAL_DAYS", 30)
+_COMMERCIAL_WINDOW_DAYS = _env_int("RENEWAL_WINDOW_COMMERCIAL_DAYS", 120)
 
 
 def _renewal_window_days(lob: str | None) -> int:
