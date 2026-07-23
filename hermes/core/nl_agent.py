@@ -461,6 +461,73 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "ams_client_snapshot",
+            "description": (
+                "Live AMS (NowCerts) snapshot for one client, pulled straight from NowCerts "
+                "(not the nightly mirror): the insured's current identity/status, in-force "
+                "policies (carrier, line, premium, effective/expiration), and open opportunities. "
+                "Use for 'what's going on with X in the AMS', 'X's live policies', 'is X active', "
+                "'X's pipeline'. Read-only."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["client"],
+                "properties": {
+                    "client": {"type": "string", "description": "Client / insured name, or a NowCerts insured GUID."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "crm_client_activity",
+            "description": (
+                "Open cases and their tasks for a client from the agency CRM (the custom cockpit "
+                "CRM: agency_crm_cases / agency_crm_tasks) — renewal, service, marketing, and claims "
+                "work in flight plus the to-dos on each. Use for 'what's open on X', 'any cases for "
+                "X', 'what's the team working on for X'. Read-only."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["client"],
+                "properties": {
+                    "client": {"type": "string", "description": "Client / insured name."},
+                    "status": {"type": "string", "description": "Optional case status filter, e.g. 'open'."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "client_documents",
+            "description": (
+                "A client's documents in Nextcloud (COIs, policies, proposals, quotes, "
+                "correspondence, renewal reviews). Without 'path' it lists what's on file for the "
+                "client; with 'path' it reads that one document's text so you can answer from its "
+                "contents. Use for 'what documents do we have for X', 'pull X's COI', 'what does X's "
+                "renewal review say'. Read-only, scoped to the client's folder."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["client"],
+                "properties": {
+                    "client": {"type": "string", "description": "Client name (matches the Nextcloud Clients/<name> folder)."},
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Optional path under the client's folder to read, e.g. 'COIs/acme-2026.pdf'. "
+                            "Omit to list the client's documents."
+                        ),
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_intake_submissions",
             "description": (
                 "List recent intake submissions and their status (awaiting_approval, failed, "
@@ -902,6 +969,208 @@ def _exec_client_policies(client: "EspoClient", args: dict[str, Any]) -> Dispatc
                           {"policies": pols})
 
 
+def _first(d: dict[str, Any], *keys: str) -> Any:
+    """First non-empty value among *keys — NowCerts field names vary by endpoint."""
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def _exec_ams_snapshot(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """CRM hub tool — LIVE NowCerts snapshot for one client (insured + policies +
+    opportunities), read straight from the AMS rather than the nightly mirror."""
+    who = (args.get("client") or "").strip()
+    if not who:
+        return DispatchResult(False, "Tell me which client to pull from the AMS.")
+    try:
+        from hermes.sync.nowcerts_client import NowCertsClient
+        nc = NowCertsClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"AMS (NowCerts) unavailable: {exc}")
+
+    looks_like_guid = who.count("-") >= 4 and len(who) >= 30
+    guid, name, others = who, who, []
+    if not looks_like_guid:
+        try:
+            matches = nc.search_insureds(who, top=5)
+        except Exception as exc:  # noqa: BLE001
+            return DispatchResult(False, f"AMS lookup failed: {exc}")
+        if not matches:
+            return DispatchResult(True, f"No AMS insured matching '{who}'.")
+        top = matches[0]
+        guid = str(_first(top, "databaseId", "id", "insuredDatabaseId") or "")
+        name = _first(top, "commercialName", "name") or who
+        others = [(_first(m, "commercialName", "name") or "?") for m in matches[1:4]]
+    if not guid:
+        return DispatchResult(True, f"Found '{name}' in the AMS but it has no insured id to pull the book.")
+
+    try:
+        pols = nc.policies_for_insured(guid, top=100)
+    except Exception:  # noqa: BLE001
+        pols = []
+    try:
+        opps = nc.opportunities_for_insured(guid)
+    except Exception:  # noqa: BLE001
+        opps = []
+
+    active = sum(1 for p in pols if _first(p, "active", "isActive"))
+    plines = [
+        f"{_first(p, 'lineOfBusiness', 'lineOfBusinessName', 'businessLine') or '?'} · "
+        f"{_first(p, 'carrierName', 'carrier', 'writingCompanyName') or ''} — "
+        f"${_num(_first(p, 'premium', 'totalPremium', 'annualPremium')):,.0f} "
+        f"(exp {str(_first(p, 'expirationDate', 'expiration') or '')[:10]})"
+        for p in pols
+    ]
+    olines = [
+        f"{_first(o, 'lineOfBusinessName', 'lineOfBusiness') or '?'} — "
+        f"{_first(o, 'opportunityStageName', 'stage') or ''}"
+        f"{(' (needed ' + str(_first(o, 'neededBy'))[:10] + ')') if _first(o, 'neededBy') else ''}"
+        for o in opps
+    ]
+    parts = [f"{name} (AMS/NowCerts) — {active} active of {len(pols)} policies:"]
+    parts += [f"• {ln}" for ln in plines] or ["• no policies on file"]
+    if olines:
+        parts.append(f"Open opportunities ({len(olines)}):")
+        parts += [f"• {ln}" for ln in olines]
+    if others:
+        parts.append("Other AMS matches: " + ", ".join(others))
+    return DispatchResult(True, "\n".join(parts),
+                          {"insured": name, "insured_guid": guid, "policies": pols, "opportunities": opps})
+
+
+def _exec_crm_activity(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """CRM hub tool — a client's open cases + tasks from the custom agency CRM
+    (agency_crm_cases / agency_crm_tasks in Supabase)."""
+    who = (args.get("client") or "").strip()
+    if not who:
+        return DispatchResult(False, "Tell me which client.")
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Agency CRM unavailable: {exc}")
+    params = {"insured_name": f"ilike.*{who}*", "order": "created_at.desc"}
+    status = (args.get("status") or "").strip()
+    if status:
+        params["status"] = f"eq.{status}"
+    try:
+        cases = supa.select(
+            "agency_crm_cases",
+            columns="id,case_number,case_type,title,status,priority,insured_name,created_at",
+            params=params, limit=25,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Case lookup failed: {exc}")
+    if not cases:
+        return DispatchResult(True, f"No agency-CRM cases on file for '{who}'.")
+
+    tasks_by_case: dict[str, list[dict[str, Any]]] = {}
+    case_ids = [str(c.get("id")) for c in cases if c.get("id")]
+    if case_ids:
+        try:
+            trows = supa.select(
+                "agency_crm_tasks",
+                columns="case_id,title,status,due_at,assigned_to_email",
+                params={"case_id": f"in.({','.join(case_ids)})", "order": "due_at.asc"}, limit=100,
+            )
+        except Exception:  # noqa: BLE001
+            trows = []
+        for t in trows:
+            tasks_by_case.setdefault(str(t.get("case_id")), []).append(t)
+
+    lines: list[str] = []
+    for c in cases:
+        head = f"{c.get('case_type') or 'case'} · {c.get('title') or c.get('case_number') or ''} — {c.get('status') or ''}"
+        lines.append(f"• {head}")
+        for t in tasks_by_case.get(str(c.get("id")), []):
+            due = str(t.get("due_at") or "")[:10]
+            lines.append(f"    – {t.get('title') or 'task'} ({t.get('status') or ''}{', due ' + due if due else ''})")
+    name = cases[0].get("insured_name") or who
+    return DispatchResult(True, f"{name} — {len(cases)} case(s) in the agency CRM:\n" + "\n".join(lines),
+                          {"cases": cases})
+
+
+# Text files we can hand back inline; other extensions get metadata only.
+_DOC_MAX_CHARS = 6000
+
+
+def _exec_client_documents(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+    """CRM hub tool — list or read a client's Nextcloud documents. Read-only and
+    hard-scoped to Clients/{client}/ (no path traversal outside the client)."""
+    who = (args.get("client") or "").strip()
+    if not who:
+        return DispatchResult(False, "Which client's documents?")
+    from hermes.integrations.nextcloud_client import NextcloudClient, _sanitize_segment
+
+    nc = NextcloudClient()
+    if not nc.is_configured():
+        return DispatchResult(False, "Nextcloud isn't configured on this instance.")
+    base = f"Clients/{_sanitize_segment(who)}"
+
+    sub = (args.get("path") or "").strip().strip("/")
+    if sub:
+        # Scope guard: never let a path escape the client's own folder.
+        if ".." in sub.split("/") or sub.startswith("/") or "\\" in sub:
+            return DispatchResult(False, "That path isn't allowed — I can only read inside the client's folder.")
+        rel = f"{base}/{sub}"
+        try:
+            raw = nc.read_file(rel)
+        except Exception as exc:  # noqa: BLE001
+            return DispatchResult(True, f"Couldn't read {sub} for {who}: {exc}")
+        import os as _os
+        import tempfile
+
+        suffix = _os.path.splitext(sub)[1] or ".bin"
+        text = ""
+        try:
+            from hermes.command_center.extract import read_document_text
+
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+                tmp.write(raw)
+                tmp.flush()
+                text = read_document_text(tmp.name, ocr=True) or ""
+        except Exception:  # noqa: BLE001
+            text = ""
+        if not text.strip():
+            return DispatchResult(True, f"{sub} ({len(raw):,} bytes) — no readable text extracted.",
+                                  {"path": rel, "bytes": len(raw)})
+        clipped = text.strip()[:_DOC_MAX_CHARS]
+        more = "\n…(truncated)" if len(text.strip()) > _DOC_MAX_CHARS else ""
+        return DispatchResult(True, f"{sub} for {who}:\n{clipped}{more}", {"path": rel, "text_chars": len(text)})
+
+    # No path → list the client's documents (categories + their files).
+    try:
+        top = nc.list_dir(base)
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Couldn't list {who}'s documents: {exc}")
+    if not top:
+        return DispatchResult(True, f"No document folder on file for '{who}'.")
+    lines: list[str] = []
+    files: list[dict[str, Any]] = []
+    for entry in sorted(top, key=lambda e: (not e["is_dir"], e["name"].lower())):
+        if entry["is_dir"]:
+            try:
+                kids = nc.list_dir(entry["path"])
+            except Exception:  # noqa: BLE001
+                kids = []
+            docs = [k for k in kids if not k["is_dir"]]
+            if docs:
+                lines.append(f"• {entry['name']}/")
+                for k in docs:
+                    lines.append(f"    – {k['name']}")
+                    files.append(k)
+        else:
+            lines.append(f"• {entry['name']}")
+            files.append(entry)
+    if not files:
+        return DispatchResult(True, f"'{who}' has a folder but no documents on file yet.")
+    return DispatchResult(True, f"{who} — documents on file:\n" + "\n".join(lines),
+                          {"files": files, "base": base})
+
+
 def _exec_list_intake(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
     """Intake hub tool — the intake submission queue and its statuses (Supabase)."""
     from hermes.integrations.supabase_client import SupabaseClient
@@ -1078,6 +1347,9 @@ _EXECUTORS: dict[str, Any] = {
     "commission_shortfalls": _exec_commission_shortfalls,
     "find_client": _exec_find_client,
     "client_policies": _exec_client_policies,
+    "ams_client_snapshot": _exec_ams_snapshot,
+    "crm_client_activity": _exec_crm_activity,
+    "client_documents": _exec_client_documents,
     "list_intake_submissions": _exec_list_intake,
 }
 
@@ -1091,7 +1363,13 @@ _WRITE_TOOLS = {"create_record", "update_record", "intake_lead", "merge_records"
 _HUB_TOOLS: dict[str, set[str]] = {
     "carrier": {"list_carriers", "match_carrier_appetite", "web_research"},
     "commissions": {"commission_summary", "commission_shortfalls"},
-    "crm": {"find_client", "client_policies", "renewals_overview"},
+    # CRM Desk sees the whole client: the canonical book, live AMS (NowCerts),
+    # the custom agency CRM's cases/tasks, and the client's Nextcloud documents —
+    # all read-only. Carrier appetite, commissions, and intake stay out of its lane.
+    "crm": {
+        "find_client", "client_policies", "renewals_overview",
+        "ams_client_snapshot", "crm_client_activity", "client_documents",
+    },
     "intake": {"list_intake_submissions"},
 }
 _HUB_PERSONA: dict[str, str] = {

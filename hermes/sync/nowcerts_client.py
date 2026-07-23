@@ -258,6 +258,80 @@ class NowCertsClient:
                 return o
         return None
 
+    # ── Client-360 read helpers (live single-client lookups) ──────────────
+    # These power the CRM Desk assistant's live AMS reads. Unlike fetch_* (bulk
+    # backfill of the whole book), each targets one insured so a chat question
+    # doesn't pull 100k rows. All read-only.
+
+    def search_insureds(self, name: str, *, top: int = 10) -> list[dict[str, Any]]:
+        """Live fuzzy search of the AMS insured book by commercial name.
+
+        GET /api/InsuredDetailList with an OData ``contains()`` filter — returns
+        the rich insured shape (``databaseId``/``id``, ``commercialName``,
+        ``active``, contact + address fields). Read-only. Returns ``[]`` on no
+        match or an unfilterable/error response.
+        """
+        q = (name or "").strip()
+        if not q:
+            return []
+        esc = q.replace("'", "''")  # OData single-quote escape
+        try:
+            body = self._get(
+                "/api/InsuredDetailList",
+                params={
+                    "$filter": f"contains(commercialName,'{esc}')",
+                    "$orderby": "changeDate desc",
+                    "$skip": "0",
+                    "$top": str(max(1, min(int(top), 50))),
+                },
+            )
+        except NowCertsClientError:
+            return []
+        rows = body if isinstance(body, list) else body.get("value", body.get("items", []))
+        return [r for r in rows if isinstance(r, dict)]
+
+    def policies_for_insured(self, insured_database_id: str, *, top: int = 100) -> list[dict[str, Any]]:
+        """Live policies for one insured GUID.
+
+        GET /api/PolicyDetailList filtered on ``insuredDatabaseId`` — the same
+        rich shape ``fetch_policies`` returns. Read-only. Returns ``[]`` on no
+        match or an error.
+        """
+        guid = (insured_database_id or "").strip()
+        if not guid:
+            return []
+        esc = guid.replace("'", "''")  # OData single-quote escape
+        try:
+            body = self._get(
+                "/api/PolicyDetailList",
+                params={
+                    "$filter": f"insuredDatabaseId eq '{esc}'",
+                    "$orderby": "changeDate desc",
+                    "$skip": "0",
+                    "$top": str(max(1, min(int(top), 200))),
+                },
+            )
+        except NowCertsClientError:
+            return []
+        rows = body if isinstance(body, list) else body.get("value", body.get("items", []))
+        return [r for r in rows if isinstance(r, dict)]
+
+    def opportunities_for_insured(self, insured_database_id: str) -> list[dict[str, Any]]:
+        """Live opportunities for one insured GUID.
+
+        Client-side filter of the (small) opportunity book — see
+        ``fetch_opportunities``. Read-only.
+        """
+        guid = (insured_database_id or "").strip()
+        if not guid:
+            return []
+        out: list[dict[str, Any]] = []
+        for o in self.fetch_opportunities(page_size=100):
+            oid = str(o.get("insuredDatabaseId") or o.get("InsuredDatabaseId") or "")
+            if oid and oid == guid:
+                out.append(o)
+        return out
+
     # ── Write methods ─────────────────────────────────────────────────────
 
     def _post(self, path: str, payload: dict[str, Any]) -> Any:

@@ -186,3 +186,150 @@ def test_all_hub_tools_resolve():
         for name in names:
             assert name in A._EXECUTORS, f"{hub}:{name} not in _EXECUTORS"
             assert any(t["function"]["name"] == name for t in A._TOOLS), f"{hub}:{name} not in _TOOLS"
+
+
+# --- CRM Desk client-360 expansion (#194): CRM + live AMS + agency CRM + docs ---
+def test_crm_hub_carries_client360_tools_read_only():
+    crm = A._HUB_TOOLS["crm"]
+    assert {"ams_client_snapshot", "crm_client_activity", "client_documents"} <= crm
+    # stays read-only and out of the carrier/commissions/intake lanes
+    assert not (crm & A._WRITE_TOOLS)
+    assert not (crm & A._HUB_TOOLS["carrier"])
+    assert not (crm & A._HUB_TOOLS["commissions"])
+    assert "list_intake_submissions" not in crm
+
+
+class FakeNowCerts:
+    def __init__(self, *, insureds=None, policies=None, opps=None):
+        self._insureds = insureds or []
+        self._policies = policies or []
+        self._opps = opps or []
+        self.searched = None
+        self.policies_guid = None
+
+    def search_insureds(self, name, *, top=10):
+        self.searched = name
+        return self._insureds
+
+    def policies_for_insured(self, guid, *, top=100):
+        self.policies_guid = guid
+        return self._policies
+
+    def opportunities_for_insured(self, guid):
+        return self._opps
+
+
+def test_ams_client_snapshot_live(monkeypatch):
+    import hermes.sync.nowcerts_client as ncmod
+    fake = FakeNowCerts(
+        insureds=[{"databaseId": "g-123", "commercialName": "Acme Trucking", "active": True}],
+        policies=[{"lineOfBusiness": "Commercial Auto", "carrierName": "Progressive",
+                   "premium": "8888", "expirationDate": "2027-05-18T00:00:00", "active": True}],
+        opps=[{"lineOfBusinessName": "General Liability", "opportunityStageName": "Quoting",
+               "neededBy": "2026-09-01T00:00:00"}],
+    )
+    monkeypatch.setattr(ncmod, "NowCertsClient", lambda *a, **k: fake)
+    res = A._exec_ams_snapshot(None, {"client": "acme"})
+    assert res.ok
+    assert fake.searched == "acme" and fake.policies_guid == "g-123"
+    assert "Acme Trucking" in res.message and "Commercial Auto" in res.message
+    assert "General Liability" in res.message  # open opportunity surfaced
+    assert res.data["insured_guid"] == "g-123"
+
+
+def test_ams_client_snapshot_no_match(monkeypatch):
+    import hermes.sync.nowcerts_client as ncmod
+    monkeypatch.setattr(ncmod, "NowCertsClient", lambda *a, **k: FakeNowCerts(insureds=[]))
+    res = A._exec_ams_snapshot(None, {"client": "nobody"})
+    assert res.ok and "No AMS insured" in res.message
+
+
+def test_crm_client_activity(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+
+    class CasesThenTasks:
+        def __init__(self):
+            self.calls = []
+
+        def select(self, table, *, columns="*", params=None, limit=100):
+            self.calls.append((table, params or {}))
+            if table == "agency_crm_cases":
+                return [{"id": "c1", "case_type": "renewal", "title": "Renewal — Acme",
+                         "status": "open", "insured_name": "Acme Trucking"}]
+            return [{"case_id": "c1", "title": "Build option comparison",
+                     "status": "not_started", "due_at": "2026-08-01"}]
+
+    two = CasesThenTasks()
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: two)
+    res = A._exec_crm_activity(None, {"client": "acme"})
+    assert res.ok and "Acme Trucking" in res.message and "Renewal — Acme" in res.message
+    assert "Build option comparison" in res.message  # task nested under its case
+    assert two.calls[0][0] == "agency_crm_cases"
+    assert two.calls[0][1].get("insured_name") == "ilike.*acme*"
+    assert two.calls[1][0] == "agency_crm_tasks"
+
+
+class FakeNextcloud:
+    def __init__(self, *, tree=None, files=None, configured=True):
+        self._tree = tree or {}
+        self._files = files or {}
+        self.configured = configured
+        self.read_calls = []
+
+    def is_configured(self):
+        return self.configured
+
+    def list_dir(self, rel_path):
+        return self._tree.get(rel_path.strip("/"), [])
+
+    def read_file(self, rel_path):
+        self.read_calls.append(rel_path)
+        if rel_path not in self._files:
+            from hermes.integrations.nextcloud_client import NextcloudError
+            raise NextcloudError(f"Not found: {rel_path}")
+        return self._files[rel_path]
+
+
+def _patch_nextcloud(monkeypatch, fake):
+    import hermes.integrations.nextcloud_client as ncmod
+    monkeypatch.setattr(ncmod, "NextcloudClient", lambda *a, **k: fake)
+
+
+def test_client_documents_lists(monkeypatch):
+    fake = FakeNextcloud(tree={
+        "Clients/Acme Trucking": [
+            {"name": "COIs", "path": "Clients/Acme Trucking/COIs", "is_dir": True},
+            {"name": "readme.txt", "path": "Clients/Acme Trucking/readme.txt", "is_dir": False},
+        ],
+        "Clients/Acme Trucking/COIs": [
+            {"name": "acme-2026.pdf", "path": "Clients/Acme Trucking/COIs/acme-2026.pdf", "is_dir": False},
+        ],
+    })
+    _patch_nextcloud(monkeypatch, fake)
+    res = A._exec_client_documents(None, {"client": "Acme Trucking"})
+    assert res.ok and "acme-2026.pdf" in res.message and "COIs/" in res.message
+    assert "readme.txt" in res.message
+
+
+def test_client_documents_scope_guard_blocks_traversal(monkeypatch):
+    fake = FakeNextcloud(files={})
+    _patch_nextcloud(monkeypatch, fake)
+    res = A._exec_client_documents(None, {"client": "Acme", "path": "../Other/secret.pdf"})
+    assert not res.ok and "isn't allowed" in res.message
+    assert fake.read_calls == []  # never touched Nextcloud
+
+
+def test_client_documents_reads_file(monkeypatch):
+    fake = FakeNextcloud(files={"Clients/Acme/COIs/acme.txt": b"hello world"})
+    _patch_nextcloud(monkeypatch, fake)
+    import hermes.command_center.extract as ex
+    monkeypatch.setattr(ex, "read_document_text", lambda p, ocr=True: "COI for Acme — active")
+    res = A._exec_client_documents(None, {"client": "Acme", "path": "COIs/acme.txt"})
+    assert res.ok and "COI for Acme — active" in res.message
+    assert fake.read_calls == ["Clients/Acme/COIs/acme.txt"]
+
+
+def test_client_documents_unconfigured_is_honest(monkeypatch):
+    _patch_nextcloud(monkeypatch, FakeNextcloud(configured=False))
+    res = A._exec_client_documents(None, {"client": "Acme"})
+    assert not res.ok and "isn't configured" in res.message
