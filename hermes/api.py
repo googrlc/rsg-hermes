@@ -1594,6 +1594,37 @@ async def list_commissions_endpoint(limit: int = 1000, status: str = "reconciled
     return {"commissions": rows, "count": len(rows)}
 
 
+@app.get("/api/carriers")
+async def list_carrier_appetite(
+    limit: int = 500,
+    carrier: str | None = None,
+    state: str | None = None,
+    lob: str | None = None,
+    naics: str | None = None,
+):
+    """Carrier appetite reference — which carriers RSG can place a risk with, by
+    line of business, state, and class code (read-only). Backs the Carrier Hub.
+    Filter by carrier (partial), state (2-letter), lob (line_of_business,
+    partial), or naics (exact NAICS code)."""
+    params: dict[str, str] = {"order": "carrier.asc"}
+    if carrier:
+        params["carrier"] = f"ilike.*{carrier}*"
+    if state:
+        params["state"] = f"eq.{state.upper()}"
+    if lob:
+        params["line_of_business"] = f"ilike.*{lob}*"
+    if naics:
+        params["naics_code"] = f"eq.{naics}"
+    rows = _get_supa().select(
+        "carrier_appetite",
+        columns="carrier,state,line_of_business,class_description,naics_code,sic_code,"
+                "gl_class_code,wc_class_code,appetite_level,commission_percent,notes,"
+                "source,last_verified",
+        params=params, limit=limit,
+    )
+    return {"carriers": rows, "count": len(rows)}
+
+
 _RENEWAL_LOST = {"cancelled", "non-renewed", "non-renewal", "lapsed", "expired", "flat cancel", "rewritten"}
 
 
@@ -1700,28 +1731,49 @@ async def workspace_stats_endpoint():
 
 @app.get("/api/hermes/sync-health")
 async def sync_health():
-    """Queue-centric health snapshot for dashboard SyncHealthCheck component."""
+    """Queue-centric health snapshot for dashboard SyncHealthCheck component.
+
+    Defensive: a missing or renamed table degrades that section to 'unavailable'
+    and reports status='degraded' instead of 500-ing the whole health check."""
     supa = _get_supa()
-    crm_pending = supa.select("crm_write_queue", columns="id", params={"status": "eq.PENDING"}, limit=1000)
-    crm_processing = supa.select("crm_write_queue", columns="id", params={"status": "eq.PROCESSING"}, limit=1000)
-    crm_failed = supa.select("crm_write_queue", columns="id", params={"status": "eq.FAILED"}, limit=1000)
+    status = "ok"
 
-    latest_run = supa.select("sync_runs", params={"order": "created_at.desc"}, limit=1)
-    latest = latest_run[0] if latest_run else {}
+    def _count(table: str, state: str) -> int | None:
+        try:
+            return len(supa.select(table, columns="id", params={"status": f"eq.{state}"}, limit=1000))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("sync-health: %s (%s) unavailable: %s", table, state, exc)
+            return None
 
-    return {
-        "status": "ok",
-        "crm_write_queue": {
-            "pending": len(crm_pending),
-            "processing": len(crm_processing),
-            "failed": len(crm_failed),
-        },
-        "latest_sync_run": {
+    pending = _count("crm_write_queue", "PENDING")
+    if pending is None:
+        status = "degraded"
+        queue = {"unavailable": "crm_write_queue not found in schema"}
+    else:
+        queue = {
+            "pending": pending,
+            "processing": _count("crm_write_queue", "PROCESSING"),
+            "failed": _count("crm_write_queue", "FAILED"),
+        }
+
+    try:
+        latest_run = supa.select("sync_runs", params={"order": "created_at.desc"}, limit=1)
+        latest = latest_run[0] if latest_run else {}
+        latest_sync_run = {
             "id": latest.get("id"),
             "status": latest.get("status"),
             "workflow_name": latest.get("workflow_name"),
             "finished_at": latest.get("finished_at"),
-        },
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.warning("sync-health: sync_runs unavailable: %s", exc)
+        status = "degraded"
+        latest_sync_run = {"unavailable": str(exc)[:200]}
+
+    return {
+        "status": status,
+        "crm_write_queue": queue,
+        "latest_sync_run": latest_sync_run,
     }
 
 
