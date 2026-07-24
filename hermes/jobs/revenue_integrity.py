@@ -1,4 +1,27 @@
-"""Revenue Integrity jobs (commission audit)."""
+"""Revenue Integrity jobs (commission audit + EOM scorecard).
+
+Data source: the custom CRM (Command Center). EspoCRM is decommissioned, so both
+the commission audit and the EOM scorecard read directly from the custom CRM's
+Supabase tables via the in-process SupabaseClient — the same path the revenue
+sentinel (see hermes/jobs/revenue_sentinel.py) and canonical-book jobs use:
+
+  - COMMISSION AUDIT (revenue blind spot) -> commission_ledger. A blind spot is a
+    ledgered, commissionable policy with no expected commission recorded
+    (expected_commission NULL or <= 0), i.e. we track the policy but never
+    captured a commission %. Chargebacks (negative/clawback rows) are excluded.
+  - EOM SCORECARD -> canonical_policies (the read-only NowCerts book mirror),
+    aggregated over the prior month by effective_date. Agency revenue comes from
+    canonical_policies.agency_commission_amount.
+
+The emitted row/summary shapes are preserved so the Slack/Talk rendering is
+unchanged; delivery is already Slack-free (SlackNotifier is a shim onto
+Nextcloud Talk team_notify).
+
+`client` (EspoClient) is retained only for CLI/dispatcher signature
+compatibility; the scheduled runs never touch it. FOLLOW-UP: handle_commission_action
+still creates an EspoCRM Task on a Slack button press — reroute to the custom CRM
+task API (mirrors the sentinel's handle_slack_action follow-up).
+"""
 
 from __future__ import annotations
 
@@ -10,10 +33,12 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from hermes.core.client import EspoClient, EspoClientError
+from hermes.core.client import EspoClient
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
-AUDIT_STATUSES = {"bound", "active"}
+# Chargeback / clawback ledger rows are not commission blind spots — exclude them.
+_CHARGEBACK_STATUSES = {"chargeback"}
 
 
 @dataclass
@@ -37,15 +62,17 @@ class EomScorecardResult:
 
 
 def run_commission_audit(
-    client: EspoClient,
+    client: EspoClient | None = None,
     *,
+    supa: SupabaseClient | None = None,
     notifier: SlackNotifier | None = None,
     now: datetime | None = None,
     dry_run: bool = False,
     force: bool = False,
 ) -> CommissionAuditResult:
-    _ = now
-    rows, warnings = _query_commission_blind_spots(client)
+    _ = (client, now)
+    supa = supa or SupabaseClient()
+    rows, warnings = _query_commission_blind_spots(supa)
     text, blocks = _build_slack_payload(rows)
     if dry_run:
         return CommissionAuditResult(
@@ -90,17 +117,20 @@ def run_commission_audit(
 
 
 def run_eom_scorecard(
-    client: EspoClient,
+    client: EspoClient | None = None,
     *,
+    supa: SupabaseClient | None = None,
     notifier: SlackNotifier | None = None,
     now: datetime | None = None,
     dry_run: bool = False,
     force: bool = False,
 ) -> EomScorecardResult:
+    _ = client
+    supa = supa or SupabaseClient()
     ref = now or datetime.now()
     target_month_start, target_month_end = _previous_month_window(ref.date())
     summary, warnings = _build_eom_summary(
-        client=client,
+        supa=supa,
         month_start=target_month_start,
         month_end=target_month_end,
     )
@@ -185,27 +215,41 @@ def handle_commission_action(*, client: EspoClient, action: str, action_value: s
     return "Commission update task created."
 
 
-def _query_commission_blind_spots(client: EspoClient) -> tuple[list[dict[str, Any]], list[str]]:
+def _query_commission_blind_spots(supa: SupabaseClient) -> tuple[list[dict[str, Any]], list[str]]:
+    """Ledgered, commissionable policies with no commission % recorded.
+
+    Reads the custom CRM's ``commission_ledger`` and flags rows whose
+    ``expected_commission`` is missing or non-positive — the money table knows
+    about the policy but never captured a commission, our post-Espo analog of
+    "we bound this policy but have no commission % recorded." Chargeback rows
+    (clawbacks, ingested with a negative/`chargeback` marker) are not blind
+    spots and are excluded.
+    """
     warnings: list[str] = []
     try:
-        body = client.get("Policy", params={"maxSize": 200})
-    except EspoClientError as e:
+        rows = supa.select(
+            "commission_ledger",
+            columns="policy_number,client_name,carrier_name,lob,gross_premium,"
+            "expected_commission,reconciliation_status",
+            params={"order": "gross_premium.desc"},
+            limit=2000,
+        )
+    except SupabaseClientError as e:
         return [], [str(e)]
-    rows = _list_rows(body)
     blind_spots: list[dict[str, Any]] = []
     for row in rows:
-        status = str(_pick(row, "status") or "").strip().lower()
-        if status not in AUDIT_STATUSES:
+        recon = str(_pick(row, "reconciliation_status") or "").strip().lower()
+        if recon in _CHARGEBACK_STATUSES:
             continue
-        commission = _as_decimal(_pick(row, "commissionRate", "commission_rate", "commissionPercentage", "commission_percentage"))
-        if commission is not None and commission > Decimal("0"):
+        expected = _as_decimal(_pick(row, "expected_commission"))
+        if expected is not None and expected > Decimal("0"):
             continue
         blind_spots.append(
             {
-                "policy_id": str(row.get("id") or ""),
-                "name": str(_pick(row, "accountName", "name") or "Unknown account"),
-                "lob": str(_pick(row, "lineOfBusiness", "line_of_business") or "Unknown"),
-                "premium": _as_money(_pick(row, "premiumAmount", "premium_amount", "amount")),
+                "policy_id": str(_pick(row, "policy_number") or ""),
+                "name": str(_pick(row, "client_name") or "Unknown account"),
+                "lob": str(_pick(row, "lob", "line_of_business") or "Unknown"),
+                "premium": _as_money(_pick(row, "gross_premium", "premium")),
             }
         )
     blind_spots.sort(key=lambda r: -r["premium"])
@@ -214,14 +258,27 @@ def _query_commission_blind_spots(client: EspoClient) -> tuple[list[dict[str, An
 
 def _build_eom_summary(
     *,
-    client: EspoClient,
+    supa: SupabaseClient,
     month_start: date,
     month_end: date,
 ) -> tuple[dict[str, Any], list[str]]:
+    """Aggregate the prior month's book from the custom CRM's canonical policies.
+
+    Reads ``canonical_policies`` (the read-only NowCerts book mirror) and buckets
+    every policy whose effective_date lands in the target month, summing premium,
+    agency revenue (agency_commission_amount), and new-vs-renewal split.
+    """
     warnings: list[str] = []
     try:
-        body = client.get("Policy", params={"maxSize": 500})
-    except EspoClientError as e:
+        policies = supa.select(
+            "canonical_policies",
+            columns="policy_number,carrier,lines_of_business,status,business_type,"
+            "business_sub_type,renewed_policy,effective_date,expiration_date,"
+            "premium_amount,annualized_premium,agency_commission_amount",
+            params={"order": "effective_date.desc"},
+            limit=5000,
+        )
+    except SupabaseClientError as e:
         return {
             "month_label": month_start.strftime("%B %Y").upper(),
             "month_key": month_start.strftime("%Y-%m"),
@@ -234,10 +291,12 @@ def _build_eom_summary(
             "primary_lob": "Unknown",
             "count": 0,
         }, [str(e)]
-    policies = _list_rows(body)
     month_rows: list[dict[str, Any]] = []
     for row in policies:
-        bound = _parse_date(_pick(row, "boundDate", "bindDate", "effectiveDate", "createdAt"))
+        # Bucket strictly by effective (bind) date — expiration is a year out, so
+        # it would misattribute the month. Rows with no effective_date can't be
+        # tied to a bind month and are skipped (matches the pre-Espo behavior).
+        bound = _parse_date(_pick(row, "effective_date"))
         if not bound or bound < month_start or bound > month_end:
             continue
         month_rows.append(row)
@@ -247,13 +306,9 @@ def _build_eom_summary(
     renewals_premium = Decimal("0")
     lob_totals: dict[str, Decimal] = {}
     for row in month_rows:
-        premium = _as_money(_pick(row, "premiumAmount", "premium_amount", "amount"))
-        commission_rate = _as_decimal(_pick(row, "commissionRate", "commission_rate"))
-        commission_amount = _as_money(_pick(row, "commissionAmount", "commission_amount"))
-        revenue = commission_amount
-        if revenue <= 0 and commission_rate is not None and commission_rate > 0:
-            revenue = (premium * commission_rate) / Decimal("100")
-        lob = str(_pick(row, "lineOfBusiness", "line_of_business") or "Unknown")
+        premium = _as_money(_pick(row, "premium_amount", "annualized_premium"))
+        revenue = _as_money(_pick(row, "agency_commission_amount"))
+        lob = str(_pick(row, "lines_of_business", "line_of_business") or "Unknown")
         is_renewal = _is_renewal_policy(row)
         total_premium += premium
         total_revenue += revenue
@@ -443,12 +498,6 @@ def _pick(row: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _list_rows(body: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
-    if isinstance(body, dict) and isinstance(body.get("list"), list):
-        return [x for x in body["list"] if isinstance(x, dict)]
-    return []
-
-
 def _as_decimal(value: Any) -> Decimal | None:
     if value in ("", None):
         return None
@@ -489,8 +538,22 @@ def _previous_month_window(today: date) -> tuple[date, date]:
 
 
 def _is_renewal_policy(row: dict[str, Any]) -> bool:
-    if _pick(row, "renewedFrom"):
+    # canonical_policies.renewed_policy holds the prior policy number on a
+    # renewal (the post-Espo analog of Espo's renewedFrom); business_type is
+    # "New Business" vs "Renewal".
+    if _pick(row, "renewed_policy", "renewedFrom"):
         return True
-    marker = str(_pick(row, "businessType", "policyType", "type", "name") or "").lower()
+    marker = str(
+        _pick(
+            row,
+            "business_type",
+            "business_sub_type",
+            "businessType",
+            "policyType",
+            "type",
+            "name",
+        )
+        or ""
+    ).lower()
     return "renew" in marker
 
