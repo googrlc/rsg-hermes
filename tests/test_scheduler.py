@@ -3,6 +3,7 @@ stalled reclaim, and one locked cycle. Supabase mocked."""
 
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
 from unittest.mock import MagicMock, patch
 
 from hermes.scheduler import retry
@@ -87,12 +88,34 @@ def _lock(acquired=True):
     return lk
 
 
+@contextmanager
+def _nowcerts_group(**overrides):
+    """Patch the NowCerts client + its three executors. Yields the executor mocks.
+
+    NowCertsClient() raises without credentials, so every cycle test has to stub it.
+    """
+    clean = {"claimed": 0, "completed": 0, "failed": 0, "previews": []}
+    targets = {
+        "quote": "hermes.quotes.executor.run_quote_executor",
+        "casework": "hermes.casework.executor.run_casework_executor",
+        "opportunity_writeback": "hermes.sync.opportunity_writeback.run_opportunity_writeback_executor",
+    }
+    with ExitStack() as stack:
+        stack.enter_context(patch("hermes.sync.nowcerts_client.NowCertsClient"))
+        yield {
+            name: stack.enter_context(
+                patch(target, return_value=overrides.get(name, dict(clean)))
+            )
+            for name, target in targets.items()
+        }
+
+
 def test_cycle_skips_when_lock_not_acquired():
     m = run_one_cycle(MagicMock(), lock=_lock(acquired=False))
     assert m == {"acquired": False}
 
 
-def test_cycle_runs_both_executors_and_releases_lock():
+def test_cycle_runs_all_executors_and_releases_lock():
     supa = MagicMock()
     supa.select.return_value = []          # no failed/stalled jobs
     lk = _lock()
@@ -100,12 +123,57 @@ def test_cycle_runs_both_executors_and_releases_lock():
                return_value={"claimed": 1, "completed": 1, "failed": 0, "blocked": 0}) as rex, \
          patch("hermes.intake.executor.run_intake_executor",
                return_value={"claimed": 0, "completed": 0, "failed": 0, "previews": []}) as iex, \
+         _nowcerts_group() as nc, \
          patch("hermes.scheduler.runner._alert") as alert:
         m = run_one_cycle(supa, lock=lk)
     rex.assert_called_once(); iex.assert_called_once()
+    # The NowCerts-bound executors are the only path off outbound_sync_queue for
+    # these job types — the Espo drain is guarded off NowCerts rows.
+    for name, mock in nc.items():
+        mock.assert_called_once()
+        assert name in m
     lk.release.assert_called_once()
     assert m["acquired"] is True and m["problems"] == []
     alert.assert_not_called()
+
+
+def test_nowcerts_executors_share_one_client():
+    """One client per cycle so we authenticate to NowCerts once, not three times."""
+    supa = MagicMock()
+    supa.select.return_value = []
+    with patch("hermes.renewals.executor.run_executor", return_value={"failed": 0}), \
+         patch("hermes.intake.executor.run_intake_executor", return_value={"failed": 0}), \
+         _nowcerts_group() as nc, \
+         patch("hermes.scheduler.runner._alert"):
+        run_one_cycle(supa, lock=_lock())
+    clients = {mock.call_args.kwargs["nowcerts"] for mock in nc.values()}
+    assert len(clients) == 1
+
+
+def test_cycle_alerts_on_nowcerts_executor_failure():
+    supa = MagicMock()
+    supa.select.return_value = []
+    with patch("hermes.renewals.executor.run_executor", return_value={"failed": 0}), \
+         patch("hermes.intake.executor.run_intake_executor", return_value={"failed": 0}), \
+         _nowcerts_group(quote={"claimed": 2, "completed": 1, "failed": 1}), \
+         patch("hermes.scheduler.runner._alert") as alert:
+        m = run_one_cycle(supa, lock=_lock())
+    assert any("quote executor: 1 failed" in p for p in m["problems"])
+    alert.assert_called_once()
+
+
+def test_missing_nowcerts_credentials_does_not_hide_renewal_problems():
+    """NowCertsClient() raises without creds; renewal/intake alerting must survive."""
+    supa = MagicMock()
+    supa.select.return_value = []
+    with patch("hermes.renewals.executor.run_executor", return_value={"failed": 3}), \
+         patch("hermes.intake.executor.run_intake_executor", return_value={"failed": 0}), \
+         patch("hermes.sync.nowcerts_client.NowCertsClient", side_effect=RuntimeError("no creds")), \
+         patch("hermes.scheduler.runner._alert") as alert:
+        m = run_one_cycle(supa, lock=_lock())
+    assert any("NowCerts executors aborted" in p for p in m["problems"])
+    assert any("renewal executor: 3 failed" in p for p in m["problems"])
+    alert.assert_called_once()
 
 
 def test_cycle_alerts_on_deadletter():
@@ -113,6 +181,7 @@ def test_cycle_alerts_on_deadletter():
     lk = _lock()
     with patch("hermes.renewals.executor.run_executor", return_value={"failed": 0}), \
          patch("hermes.intake.executor.run_intake_executor", return_value={"failed": 0}), \
+         _nowcerts_group(), \
          patch("hermes.scheduler.runner.reclaim_stalled", return_value={"reclaimed": 0, "reclaimed_ids": []}), \
          patch("hermes.scheduler.runner.requeue_or_deadletter", return_value={"requeued": 0, "dead": 1, "dead_ids": ["d1"]}), \
          patch("hermes.scheduler.runner._alert") as alert:

@@ -2,7 +2,8 @@
 
 Every ``interval`` seconds, ONE lease holder runs a cycle:
   reclaim stalled → requeue/dead-letter failed (backoff) → renewal executor →
-  intake executor → emit structured metrics → alert #systems-check on problems.
+  intake executor → quote / casework / opportunity-writeback executors →
+  emit structured metrics → alert #systems-check on problems.
 
 Graceful shutdown: SIGTERM/SIGINT stop the loop AFTER the current cycle finishes,
 so no claimed job is abandoned mid-flight. Disabled unless SCHEDULER_ENABLED is set.
@@ -67,8 +68,11 @@ def run_one_cycle(
     batch: int = DEFAULT_BATCH,
 ) -> dict[str, Any]:
     """One locked cycle. Returns structured metrics (also emitted to the audit log)."""
+    from hermes.casework.executor import run_casework_executor
     from hermes.intake.executor import run_intake_executor
+    from hermes.quotes.executor import run_quote_executor
     from hermes.renewals.executor import run_executor
+    from hermes.sync.opportunity_writeback import run_opportunity_writeback_executor
 
     if not lock.acquire():
         log.info("scheduler: lock held by another replica; skipping cycle")
@@ -85,6 +89,28 @@ def run_one_cycle(
         metrics["renewal"] = run_executor(supa=supa, limit=batch)
         lock.renew()
         metrics["intake"] = run_intake_executor(supa=supa, limit=batch)
+        lock.renew()
+
+        # NowCerts-bound executors. The Espo drain is guarded off NowCerts rows
+        # (_ESPO_OUTBOUND_GUARD), so these are the ONLY thing that moves quote /
+        # casework / opportunity-writeback jobs to the AMS. One shared client so
+        # a cycle authenticates to NowCerts once. Guarded as a group: NowCertsClient()
+        # raises when credentials are absent, and that must not cost us the
+        # renewal/intake problem detection below.
+        try:
+            from hermes.sync.nowcerts_client import NowCertsClient
+
+            nc = NowCertsClient()
+            metrics["quote"] = run_quote_executor(supa=supa, nowcerts=nc, limit=batch)
+            lock.renew()
+            metrics["casework"] = run_casework_executor(supa=supa, nowcerts=nc, limit=batch)
+            lock.renew()
+            metrics["opportunity_writeback"] = run_opportunity_writeback_executor(
+                supa=supa, nowcerts=nc, limit=batch
+            )
+        except Exception as exc:  # noqa: BLE001 — keep the rest of the cycle's reporting
+            log.exception("scheduler: NowCerts executor group failed")
+            problems.append(f"NowCerts executors aborted: {exc}")
 
         # Problem detection -> alerts.
         if metrics["retry"]["dead"]:
@@ -95,6 +121,9 @@ def run_one_cycle(
             problems.append(f"renewal executor: {metrics['renewal']['failed']} failed this pass")
         if metrics["intake"].get("failed"):
             problems.append(f"intake executor: {metrics['intake']['failed']} failed this pass")
+        for name in ("quote", "casework", "opportunity_writeback"):
+            if metrics.get(name, {}).get("failed"):
+                problems.append(f"{name} executor: {metrics[name]['failed']} failed this pass")
     except Exception as exc:  # noqa: BLE001 — a bad cycle must not kill the loop
         log.exception("scheduler: cycle crashed")
         problems.append(f"scheduler cycle crashed: {exc}")
