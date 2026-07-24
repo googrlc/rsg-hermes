@@ -20,6 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from hermes.ams import book as ams_book
+
 log = logging.getLogger(__name__)
 
 def _model_dict(model: BaseModel) -> dict[str, Any]:
@@ -1481,11 +1483,15 @@ async def client_360_endpoint(insured_guid: str):
             return []
 
     client = sel("canonical_clients", "*", {"nowcerts_insured_guid": f"eq.{insured_guid}"})
-    policies = sel(
-        "canonical_policies",
-        "policy_number,carrier,lines_of_business,status,effective_date,expiration_date,annualized_premium,premium_amount",
-        {"nowcerts_insured_guid": f"eq.{insured_guid}", "order": "expiration_date.asc"},
-    )
+    try:
+        policies = ams_book.select_policies(
+            supa,
+            columns="policy_number,carrier,lines_of_business,status,effective_date,expiration_date,annualized_premium,premium_amount",
+            params={"nowcerts_insured_guid": f"eq.{insured_guid}", "order": "expiration_date.asc"},
+            limit=500,
+        )
+    except Exception:  # noqa: BLE001 — a 360 view degrades rather than 500s
+        policies = []
     opportunities = sel(
         "opportunities", "id,line_of_business,stage,status,premium_estimate,carrier,quote_number,next_action",
         {"insured_id": f"eq.{insured_guid}", "order": "updated_at.desc"},
@@ -1508,8 +1514,8 @@ async def list_policies_endpoint(limit: int = 1000):
     Each policy is stamped with the account/insured name it belongs to
     (looked up from canonical_clients by NowCerts insured GUID)."""
     supa = _get_supa()
-    rows = supa.select(
-        "canonical_policies",
+    rows = ams_book.select_policies(
+        supa,
         columns="policy_guid,policy_number,nowcerts_insured_guid,carrier,lines_of_business,status,"
                 "effective_date,expiration_date,premium_amount,annualized_premium,agency_commission_amount,state",
         params={"order": "expiration_date.asc"}, limit=limit,
@@ -1713,7 +1719,12 @@ async def workspace_stats_endpoint():
         except Exception:
             return []
 
-    policies = _rows("canonical_policies", "annualized_premium,premium_amount")
+    try:
+        policies = ams_book.select_policies(
+            supa, columns="annualized_premium,premium_amount", limit=100000
+        )
+    except Exception:  # noqa: BLE001 — a KPI tile degrades rather than 500s
+        policies = []
     annualized = sum(
         float(p.get("annualized_premium") or p.get("premium_amount") or 0) for p in policies
     )

@@ -29,6 +29,8 @@ from typing import Any
 from hermes.intake import opportunities as opp
 from hermes.sync.field_mapper import _strip_date
 
+from hermes.ams import book as ams_book
+
 log = logging.getLogger(__name__)
 
 SYNC_SOURCE = "nowcerts-opportunity-sync"
@@ -77,8 +79,8 @@ def _premium_lookup(supa: Any, guids: list[str]) -> dict[tuple[str, str], float]
     for i in range(0, len(uniq), 50):
         batch = uniq[i:i + 50]
         try:
-            rows = supa.select(
-                "canonical_policies",
+            rows = ams_book.select_policies(
+                supa,
                 columns="nowcerts_insured_guid,lines_of_business,active,annualized_premium,premium_amount",
                 params={"nowcerts_insured_guid": f"in.({','.join(batch)})"},
                 limit=5000,
@@ -99,8 +101,8 @@ def _lob_averages(supa: Any) -> dict[str, float]:
     """Agency-wide average active premium per LOB — the estimate for a NEW-business
     opportunity (the client has no policy in that line yet)."""
     try:
-        rows = supa.select(
-            "canonical_policies",
+        rows = ams_book.select_policies(
+            supa,
             columns="lines_of_business,active,annualized_premium,premium_amount",
             limit=20000,
         )
