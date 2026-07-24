@@ -115,7 +115,6 @@ class Dispatcher:
             # --- Core operational commands (#108: restored after the PR #107 de-dup
             # dropped them). All specific/anchored, so none intercept renewal routes. ---
             (re.compile(r"^\s*(ping|health|status)\s*$", re.I), "ping"),
-            (re.compile(r"\b(changelog|crm\s+changes|nightly\s+report|daily\s+changes|what\s+changed)\b", re.I), "changelog"),
             (re.compile(r"\bsync\b.*\b(nowcerts|status|conflicts?|errors?|runs?)\b", re.I), "sync"),
             (re.compile(r"^\s*sync\s", re.I), "sync"),
             (
@@ -378,9 +377,6 @@ class Dispatcher:
         if handler == "sync":
             from hermes.commands.sync import handle as sync_handle
             return sync_handle(client, text, supa=self.supa)
-        if handler == "changelog":
-            from hermes.commands.changelog import handle as changelog_handle
-            return changelog_handle(client, text)
         if handler == "policy_repair":
             from hermes.commands.policy_repair import handle as policy_repair_handle
             return policy_repair_handle(client, text)
