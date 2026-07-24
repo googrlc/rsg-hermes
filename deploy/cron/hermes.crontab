@@ -30,7 +30,15 @@ CRON_TZ=America/New_York
 # deletes; preserves the renewed_policy lineage pointer. Uncommenting is the deliberate
 # go-live step. Dry-run to preview with zero writes: hermes --sync-canonical-book-dry-run
 # ENABLED 2026-07-16 after a verified full run (+249 clients / +157 policies, 0 errors).
-20 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-canonical-book >> /root/hermes-cron.log 2>&1
+# DISABLED 2026-07-24 — this job does NOT only add: when a fetch comes back short it
+# marks every policy it failed to see as "Inactive: not in NowCerts <date>", and
+# candidate_refresh drops active=false rows. The 2026-07-24 run tombstoned 47 policies
+# that were verified present in the live AMS by policy_guid — 26 of them inside the
+# 120-day renewal window, $136,849.98 of premium made invisible to the renewal desk.
+# (07-21 tombstoned 43 and 07-23 tombstoned 5; those 48 are genuinely gone.)
+# Do NOT re-enable until the sync aborts instead of tombstoning when the fetched count
+# is short of the NowCerts @odata.count. Repair for the 47: scripts/repair_tombstones.sql
+# 20 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-canonical-book >> /root/hermes-cron.log 2>&1
 # Commission ledger seed — daily 2:25am ET (after the book sync). Writes EXPECTED
 # commission per commissionable policy into commission_ledger (NowCerts agency
 # commission, rule fallback). Preserves statement-sourced actuals/reconciliation —
