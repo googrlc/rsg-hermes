@@ -8,8 +8,6 @@ from unittest.mock import MagicMock, patch
 from hermes.commands.renewal_worksheet import _candidates_by_name, escape_ilike
 from hermes.core.dispatcher import Dispatcher
 from hermes.operations import intake_worker as w
-from hermes.sync import pipeline
-from hermes.sync.pipeline import SyncRunResult
 
 
 # ------------------------------------------------- #109: escape ilike metachars
@@ -30,14 +28,8 @@ def test_candidates_by_name_uses_escaped_needle():
     assert params["eligibility_state"] == "neq.excluded"
 
 
-# ------------------------------------------------- #111: nowcerts guard on the outbound processor
-
-def test_run_specific_processor_guards_nowcerts():
-    supa = MagicMock()
-    supa.select.return_value = []
-    pipeline._process_outbound_queue(supa, MagicMock(), run_id="r1", result=SyncRunResult())
-    assert supa.select.call_args.kwargs["params"]["destination_system"] == "neq.nowcerts"
-
+# (#111 covered the outbound processor's nowcerts guard in hermes/sync/pipeline.py,
+# deleted with the NowCerts → EspoCRM pipeline.)
 
 # ------------------------------------------------- #112: no success log after failed transition
 

@@ -45,8 +45,7 @@ def _utcnow() -> datetime:
 def map_opportunity_to_quote(o: dict[str, Any]) -> dict[str, Any]:
     """Build a NowCerts Policy/Insert payload (IsQuote=true) from an opportunity.
 
-    Field names match field_mapper.map_commission_to_nowcerts_policy (the proven
-    Policy/Insert shape): InsuredDatabaseId, Number, CarrierName,
+    Uses the proven Policy/Insert shape: InsuredDatabaseId, Number, CarrierName,
     LineOfBusinessName, Premium, EffectiveDate, ExpirationDate.
     """
     payload: dict[str, Any] = {"IsQuote": True}

@@ -111,8 +111,6 @@ class Dispatcher:
             # --- Core operational commands (#108: restored after the PR #107 de-dup
             # dropped them). All specific/anchored, so none intercept renewal routes. ---
             (re.compile(r"^\s*(ping|health|status)\s*$", re.I), "ping"),
-            (re.compile(r"\bsync\b.*\b(nowcerts|status|conflicts?|errors?|runs?)\b", re.I), "sync"),
-            (re.compile(r"^\s*sync\s", re.I), "sync"),
             # CRM change proposal approval — must precede research/intake.
             (
                 re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+(?P<id>\S+)\s*$", re.I),
@@ -330,9 +328,6 @@ class Dispatcher:
             )
         if handler == "ping":
             return DispatchResult(True, "Hermes is online and connected to CRM.")
-        if handler == "sync":
-            from hermes.commands.sync import handle as sync_handle
-            return sync_handle(client, text, supa=self.supa)
         if handler == "agency_intake":
             from hermes.commands.agency_intake import handle as ai_handle
             return ai_handle(client, text, supa=self.supa, **self._slack_ctx)

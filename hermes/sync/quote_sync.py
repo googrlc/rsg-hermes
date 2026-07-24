@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hermes.intake import opportunities as opp
-from hermes.sync.field_mapper import _strip_date
+from hermes.core.field_utils import strip_date
 
 log = logging.getLogger(__name__)
 
@@ -182,8 +182,8 @@ def _enrichment_payload(q: dict[str, Any], cols: set[str], *, now_iso: str) -> d
     # from NowCerts here; gated too so a pre-migration DB can't error.
     terms = {
         "premium_actual": _premium(q),
-        "effective_date": _strip_date(q.get("effectiveDate") or q.get("EffectiveDate")),
-        "expiration_date": _strip_date(q.get("expirationDate") or q.get("ExpirationDate")),
+        "effective_date": strip_date(q.get("effectiveDate") or q.get("EffectiveDate")),
+        "expiration_date": strip_date(q.get("expirationDate") or q.get("ExpirationDate")),
         "policy_status": _status(q),
         "referral_source": q.get("referralSourceName") or q.get("referralSource") or None,
         "synced_at": now_iso,

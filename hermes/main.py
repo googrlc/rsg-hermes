@@ -320,45 +320,7 @@ def main() -> int:
         default=8484,
         help="Port for the REST API server (default: 8484)",
     )
-    # --- NowCerts ↔ EspoCRM Sync commands ---
-    parser.add_argument(
-        "--sync-nowcerts",
-        action="store_true",
-        help="Run NowCerts → EspoCRM sync pipeline (Insured → Account)",
-    )
-    parser.add_argument(
-        "--sync-nowcerts-dry-run",
-        action="store_true",
-        help="Preview NowCerts sync without writing to EspoCRM",
-    )
-    parser.add_argument(
-        "--sync-nowcerts-since",
-        type=str,
-        default=None,
-        help="Only sync records changed since this ISO datetime (e.g. 2026-05-01T00:00:00)",
-    )
-    parser.add_argument(
-        "--sync-policies",
-        action="store_true",
-        help="Run NowCerts → EspoCRM POLICIES-ONLY sync (upsert Policy by policy_number; never touches Accounts/Contacts)",
-    )
-    parser.add_argument(
-        "--sync-policies-dry-run",
-        action="store_true",
-        help="Preview the policies-only sync without writing to EspoCRM",
-    )
-    parser.add_argument(
-        "--sync-policies-since",
-        type=str,
-        default=None,
-        help="Only sync policies changed since this ISO datetime (e.g. 2026-06-01T00:00:00)",
-    )
-    parser.add_argument(
-        "--sync-policies-limit",
-        type=int,
-        default=None,
-        help="Cap the number of policies processed (useful for a first dry-run)",
-    )
+    # --- NowCerts → Supabase sync commands ---
     parser.add_argument(
         "--sync-canonical-book",
         action="store_true",
@@ -447,56 +409,6 @@ def main() -> int:
         help="Earliest policy effective_date to ledger (YYYY-MM-DD; default 2026-01-01). "
              "Excludes future-effective + older-than-since business.",
     )
-    parser.add_argument(
-        "--enrich-nowcerts",
-        type=str,
-        default=None,
-        metavar="ACCOUNT_ID",
-        help="Syncback: enrich the linked NowCerts insured from one ACTIVE EspoCRM account (upsert by DatabaseId)",
-    )
-    parser.add_argument(
-        "--enrich-nowcerts-dry-run",
-        action="store_true",
-        help="Preview the NowCerts enrichment payload for --enrich-nowcerts without writing to the AMS",
-    )
-    # --- Nightly CRM Changelog ---
-    # --- Bidirectional Sync ---
-    parser.add_argument(
-        "--sync-bidirectional",
-        action="store_true",
-        help="Run full bidirectional sync: NowCerts↔Supabase↔EspoCRM",
-    )
-    parser.add_argument(
-        "--sync-bidirectional-dry-run",
-        action="store_true",
-        help="Preview bidirectional sync without writing to any system",
-    )
-    parser.add_argument(
-        "--sync-crm-to-hub",
-        action="store_true",
-        help="Mirror EspoCRM changes to Supabase golden record",
-    )
-    parser.add_argument(
-        "--sync-crm-to-hub-dry-run",
-        action="store_true",
-        help="Preview CRM-to-hub mirror without writing",
-    )
-    parser.add_argument(
-        "--sync-hub-to-nowcerts",
-        action="store_true",
-        help="Push Supabase outbound queue to NowCerts AMS",
-    )
-    parser.add_argument(
-        "--sync-hub-to-nowcerts-dry-run",
-        action="store_true",
-        help="Preview hub-to-NowCerts push without writing",
-    )
-    parser.add_argument(
-        "--sync-hours",
-        type=int,
-        default=24,
-        help="Lookback window in hours for sync (default: 24)",
-    )
     # --- Hermes Operations Center commands ---
     # --- Document library (Supermemory + index; freeform internal refs) ---
     parser.add_argument(
@@ -569,77 +481,6 @@ def main() -> int:
         print(COMMAND_CATALOG)
         return 0
 
-    # --- NowCerts sync (requires NowCerts + Supabase + EspoCRM) ---
-    if args.sync_nowcerts or args.sync_nowcerts_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-        from hermes.sync.pipeline import run_insured_to_account_sync
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-        try:
-            nc = NowCertsClient()
-        except NowCertsClientError as e:
-            print(f"NowCerts connection failed: {e}", file=sys.stderr)
-            return 2
-        try:
-            espo = EspoClient()
-        except EspoClientError as e:
-            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
-            return 2
-
-        sync_result = run_insured_to_account_sync(
-            nc,
-            espo,
-            supa,
-            dry_run=args.sync_nowcerts_dry_run,
-            since=args.sync_nowcerts_since,
-        )
-        print(sync_result.message)
-        if sync_result.errors:
-            print("Errors:")
-            for err in sync_result.errors:
-                print(f"- {err}")
-        return 0 if sync_result.ok else 1
-
-    # --- NowCerts → EspoCRM policies-only sync (no Supabase, no account writes) ---
-    if args.sync_policies or args.sync_policies_dry_run:
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-        from hermes.sync.policy_sync import run_policy_sync
-
-        try:
-            nc = NowCertsClient()
-        except NowCertsClientError as e:
-            print(f"NowCerts connection failed: {e}", file=sys.stderr)
-            return 2
-        try:
-            espo = EspoClient()
-        except EspoClientError as e:
-            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
-            return 2
-
-        pol_result = run_policy_sync(
-            nc,
-            espo,
-            since=args.sync_policies_since,
-            dry_run=args.sync_policies_dry_run,
-            limit=args.sync_policies_limit,
-        )
-        print(pol_result.message)
-        if pol_result.skipped_accounts:
-            print(f"\nSkipped — no EspoCRM account ({len(pol_result.skipped_accounts)} insureds):")
-            for nm in pol_result.skipped_accounts[:50]:
-                print(f"- {nm}")
-            if len(pol_result.skipped_accounts) > 50:
-                print(f"... +{len(pol_result.skipped_accounts) - 50} more")
-        if pol_result.errors:
-            print("\nErrors:")
-            for err in pol_result.errors[:50]:
-                print(f"- {err}")
-        return 0 if pol_result.ok else 1
 
     # --- NowCerts → Supabase canonical book sync (feeds --renewal-refresh) ---
     if args.sync_canonical_book or args.sync_canonical_book_dry_run:
@@ -759,81 +600,6 @@ def main() -> int:
         return 0 if comm_result.ok else 1
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
-    if args.enrich_nowcerts:
-        import json as _json
-
-        from hermes.sync.enrich import enrich_insured_from_account
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-
-        try:
-            espo = EspoClient()
-            nc = NowCertsClient()
-        except (EspoClientError, NowCertsClientError) as e:
-            print(f"connection failed: {e}", file=sys.stderr)
-            return 2
-        res = enrich_insured_from_account(
-            espo, nc, args.enrich_nowcerts, dry_run=args.enrich_nowcerts_dry_run,
-        )
-        print(_json.dumps(res, indent=2, default=str))
-        return 0 if res.get("ok") or res.get("action") == "skip" else 1
-
-    # --- Bidirectional sync (requires NowCerts + Supabase + EspoCRM) ---
-    _bidi = args.sync_bidirectional or args.sync_bidirectional_dry_run
-    _crm_hub = args.sync_crm_to_hub or args.sync_crm_to_hub_dry_run
-    _hub_nc = args.sync_hub_to_nowcerts or args.sync_hub_to_nowcerts_dry_run
-    if _bidi or _crm_hub or _hub_nc:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-        try:
-            espo = EspoClient()
-        except EspoClientError as e:
-            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
-            return 2
-
-        if _crm_hub:
-            from hermes.sync.bidirectional import run_crm_to_hub
-            bidi_result = run_crm_to_hub(
-                espo, supa,
-                dry_run=args.sync_crm_to_hub_dry_run,
-                since_hours=args.sync_hours,
-            )
-        elif _hub_nc:
-            from hermes.sync.bidirectional import run_hub_to_nowcerts
-            from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-            try:
-                nc = NowCertsClient()
-            except NowCertsClientError as e:
-                print(f"NowCerts connection failed: {e}", file=sys.stderr)
-                return 2
-            bidi_result = run_hub_to_nowcerts(
-                nc, supa,
-                dry_run=args.sync_hub_to_nowcerts_dry_run,
-            )
-        else:
-            from hermes.sync.bidirectional import run_bidirectional
-            from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-            try:
-                nc = NowCertsClient()
-            except NowCertsClientError as e:
-                print(f"NowCerts connection failed: {e}", file=sys.stderr)
-                return 2
-            bidi_result = run_bidirectional(
-                nc, espo, supa,
-                dry_run=args.sync_bidirectional_dry_run,
-                since_hours=args.sync_hours,
-            )
-        print(bidi_result.message)
-        if bidi_result.errors:
-            print("Errors:")
-            for err in bidi_result.errors:
-                print(f"- {err}")
-        return 0 if bidi_result.ok else 1
-
     # --- Email triage (requires the provider client + Supabase) ---
     if args.doc_folders:
         from hermes.documents.store import list_folders

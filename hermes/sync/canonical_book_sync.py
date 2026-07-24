@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hermes.renewals import eligibility as elig
-from hermes.sync.field_mapper import _strip_date
+from hermes.core.field_utils import strip_date
 
 log = logging.getLogger(__name__)
 
@@ -160,8 +160,8 @@ def _map_policy_volatile(p: dict[str, Any]) -> dict[str, Any]:
         "carrier": p.get("carrierName") or p.get("CarrierName") or p.get("carrier") or None,
         "status": status,
         "active": _policy_active(p, status),
-        "effective_date": _strip_date(p.get("effectiveDate") or p.get("EffectiveDate")),
-        "expiration_date": _strip_date(p.get("expirationDate") or p.get("ExpirationDate")),
+        "effective_date": strip_date(p.get("effectiveDate") or p.get("EffectiveDate")),
+        "expiration_date": strip_date(p.get("expirationDate") or p.get("ExpirationDate")),
         "current_term_amount": premium,
         "premium_amount": premium,
         "annualized_premium": premium,
