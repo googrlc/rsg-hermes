@@ -1,6 +1,6 @@
 # Project 85 Sentinel
 
-Project 85 Sentinel is a Hermes-native revenue guardrail that posts a daily Slack briefing built from EspoCRM data.
+Project 85 Sentinel is a Hermes-native revenue guardrail that posts a daily Slack briefing built from the CRM data.
 
 ## What It Checks
 
@@ -17,7 +17,7 @@ Project 85 Sentinel is a Hermes-native revenue guardrail that posts a daily Slac
 
 ## Reliability Controls
 
-- **Retries:** Espo reads use `EspoClient` read retries; Slack posting uses `HERMES_SLACK_RETRIES` and `HERMES_SLACK_RETRY_SLEEP`.
+- **Retries:** the CRM reads use `EspoClient` read retries; Slack posting uses `HERMES_SLACK_RETRIES` and `HERMES_SLACK_RETRY_SLEEP`.
 - **Idempotency:** last successful post date is stored in `HERMES_SENTINEL_STATE_FILE`.
 - **Partial output:** if one query fails, Sentinel still posts available sections and includes warnings.
 - **Timezone consistency:** all date windows use `HERMES_SENTINEL_TIMEZONE` (default `America/New_York`).
@@ -30,8 +30,8 @@ If `HERMES_SENTINEL_SLACK_CHANNEL` is not set, Sentinel defaults to Slack channe
 
 The briefing includes buttons handled by Hermes Socket Mode (`hermes --slack`):
 
-- `Remind me in 2 days`: creates an Espo `Task` due in 2 days.
-- `Assign to Gretchen`: creates an Espo `Task` assigned to `HERMES_SENTINEL_GRETCHEN_USER_ID`.
+- `Remind me in 2 days`: creates an the CRM `Task` due in 2 days.
+- `Assign to Gretchen`: creates an the CRM `Task` assigned to `HERMES_SENTINEL_GRETCHEN_USER_ID`.
 - `Dismiss`: acknowledges without CRM write.
 
 To use interactive actions, ensure Slack Interactivity is enabled for the app and the Socket Mode bot is running.

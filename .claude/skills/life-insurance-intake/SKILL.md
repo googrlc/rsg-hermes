@@ -195,7 +195,6 @@ detail is included.
 
 - `docs/agency-memory-plan.md`
 - `docs/hermes-builder-spec.md` — Life workflow rules
-- `hermes-training/espocrm/field_dictionary.md` — Contact / Account life
   insurance fields (`policyLifeType`, `lifeAnnualPremium`,
   `dateOfBirth`)
 - `crm-intake-writer`

@@ -71,10 +71,10 @@ creating.
       "entity": "Account",
       "decision": "CREATE_NEW",
       "reason": "No FEIN match, no name match, no address match.",
-      "payload": { "...": "Espo Account fields" },
+      "payload": { "...": "the CRM Account fields" },
       "transport": {
         "type": "crm_write_queue",
-        "target_system": "EspoCRM",
+        "target_system": "the CRM",
         "entity_type": "Account",
         "operation": "POST"
       },
@@ -183,7 +183,7 @@ The planner emits transport hints but does not execute. Allowed targets:
 - `n8n_webhook` — `/search-account`, `/search-contact`,
   `/search-opportunity`, `/upsert-account`, `/upsert-contact`,
   `/upsert-opportunity`, `/create-note`, `/create-fact`, `/search-facts`.
-- `crm_write_queue` — Supabase queue row (`target_system="EspoCRM"`,
+- `crm_write_queue` — Supabase queue row (`target_system="the CRM"`,
   `entity_type`, `payload`, `created_by_role`). Worker dequeues and POSTs.
 - `supabase_insert` — direct insert into the retrieval tables
   (`client_facts`, `client_notes`, `client_documents`, `quote_facts`,
@@ -213,7 +213,6 @@ CRM mutations and `supabase_insert` for retrieval rows.
 6. **Never invent IDs.** Reference IDs by `from_step` rather than guessing
    a UUID. The worker fills them in from receipts.
 7. **Stage enum only.** Opportunity / Renewal stages must come from the
-   canonical enum (`hermes-training/espocrm/guardrails.md`).
 
 ## Post-write confirmation
 
@@ -244,7 +243,6 @@ step IDs and the receipt error so a human can intervene.
 
 - `docs/agency-memory-plan.md`
 - `docs/hermes-operating-constitution.md` — queue + receipt contract
-- `hermes-training/espocrm/guardrails.md`
 - `hermes/operations/crm_queue_worker.py` — the worker that consumes queue rows
 - `crm-intake-writer` — produces the input payload
 - `crm-fact-retriever` — reads the facts this planner stages

@@ -13,13 +13,13 @@ system.
 
 - A new client is signed and needs to be set up.
 - "Create an onboarding checklist for this new client."
-- "Create separate EspoCRM opportunities for each line of business."
+- "Create separate CRM opportunities for each line of business."
 - "Create the file folder structure for this client."
 - "Draft the welcome email."
 
 ## Onboarding checklist
 
-### 1. EspoCRM Account
+### 1. CRM Account
 
 - Search for duplicates first.
 - Create Account: Personal Household or Commercial Business.
@@ -27,7 +27,7 @@ system.
   (Gretchen for personal lines, Lamar for commercial), annual_premium.
 - Save the account.
 
-### 2. EspoCRM Contacts
+### 2. CRM Contacts
 
 - Create a Contact for the primary client.
 - Create Contacts for spouse, business owner, office manager, or other
@@ -35,7 +35,7 @@ system.
 - Link each to the Account.
 - Fill in emailAddress, phoneNumber, householdRole.
 
-### 3. EspoCRM Opportunities
+### 3. CRM Opportunities
 
 Create one opportunity per line of business:
 
@@ -93,11 +93,11 @@ Risk Solutions Group
 
 ### 6. First-touch follow-up
 
-- Create an EspoCRM task: "Welcome call to [Client]" due in 3 business
+- Create an CRM task: "Welcome call to [Client]" due in 3 business
   days.
-- Create an EspoCRM task: "Check policy bind confirmation" due in 5
+- Create an CRM task: "Check policy bind confirmation" due in 5
   business days.
-- Create an EspoCRM task: "30-day check-in" due in 30 days.
+- Create an CRM task: "30-day check-in" due in 30 days.
 
 All task creations go through the CRM write queue — Hermes will ask for
 an approval token (APPROVE ALL or APPROVE TASKS ONLY) before writing.

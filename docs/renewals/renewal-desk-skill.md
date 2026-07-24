@@ -39,7 +39,7 @@ One system, four roles (v3):
 - **RSG Renewal Walker GPT (ChatGPT Business) = the workstation.** Gretchen and
   Lamar work renewals there. It pulls the queue, walks one step at a time, renders
   the worksheet, and posts outcomes back. It is **read + draft only** — it never
-  writes to NowCerts or EspoCRM, and it knows nothing except what Hermes returns.
+  writes to NowCerts or the CRM, and it knows nothing except what Hermes returns.
 - **Hermes — this skill — is the only thing that writes.** Every mutation goes
   through the sanctioned MCP path: additive-only, queued, human-approved. **Hermes
   never talks to a client.**
@@ -56,7 +56,7 @@ Renewal Walker GPT (ChatGPT)   →   asks Hermes   →   Hermes (this skill)
 The v3 target is the Walker GPT hitting Hermes over an Action wired to a
 `/walker/*` HTTPS API (scoped key, `GET /walker/queue`, `POST /walker/.../touch`,
 etc. — see the brief). **This does not exist yet.** Do not assume the endpoints,
-the scoped key, or the EspoCRM Opportunity field additions are live. Phase 1 does
+the scoped key, or the CRM Opportunity field additions are live. Phase 1 does
 not start until Phase 0 is green AND Lamar explicitly says go.
 
 **2. The live path — what runs TODAY (and the permanent FALLBACK MODE).**
@@ -71,14 +71,14 @@ This skill composes with:
 - **`retention-risk-scout`** — finds who's at risk and why (scoring model, buckets).
 - **`gretchen-daily-queue`** — surfaces the day's renewal actions to Gretchen.
 - **`nowcerts-skill`** — renewal buckets + policy facts from the AMS.
-- **`crm-manager`** — EspoCRM write mechanics + field-casing rules.
+- **`crm-manager`** — the CRM write mechanics + field-casing rules.
 
 ---
 
 ## The one-door rules (do not violate — silent data loss lives here)
 
 1. **AMS (NowCerts/Momentum) is the source of truth.** Data is authored in the AMS
-   and syncs DOWN to EspoCRM. Never invert this.
+   and syncs DOWN to the CRM. Never invert this.
 2. **CRM → AMS is additive ONLY**, via four narrow channels: (a) new-client stub on
    Opportunity *Closed Won*, (b) Tasks, (c) Cases, (d) fill-blank of an *empty* AMS
    field. Nothing else writes up.
@@ -87,7 +87,7 @@ This skill composes with:
 4. **Never create or edit a policy from the CRM side.** Policies arrive by carrier
    download or are entered manually in the AMS. Renewal ≠ Hermes writing a policy.
 5. **Search before insert.** Before creating any insured/account, `search_insureds`
-   (NowCerts) and `search_accounts` (Espo) by name / email / FEIN and link to the
+   (NowCerts) and `search_accounts` (the CRM) by name / email / FEIN and link to the
    existing record. Never spawn a duplicate.
 6. **Writes go through MCP tools, not raw REST/DB.** Prefer `espocrm`, `nowcerts`,
    `supabase` MCP tools. Legacy skills show REST bodies — treat those as *reference
@@ -95,7 +95,7 @@ This skill composes with:
 7. **Field casing is per-entity:** `Account` = snake_case, `Contact` = camelCase,
    `Task`/`Opportunity` = camelCase, `Policy` = mixed. Wrong casing is dropped with
    NO error. Confirm casing before every write.
-8. **The workstation talks to Hermes only.** Never NowCerts direct, never EspoCRM
+8. **The workstation talks to Hermes only.** Never NowCerts direct, never the CRM
    direct. One door, one owner of writes.
 
 ---
@@ -174,8 +174,8 @@ default), then perform the additive writes. Report each write.
 > "Lamar approves everything").
 
 **AUTO (state intent, then do it):**
-- Create a renewal **Opportunity** in Espo (stage = Identified/pipeline).
-- Create / update / complete a renewal **Task** in Espo.
+- Create a renewal **Opportunity** in the CRM (stage = Identified/pipeline).
+- Create / update / complete a renewal **Task** in the CRM.
 - Log an activity **Note** on the Account (`espocrm.create_note`) — e.g. "Called
   client, left voicemail" / "Sent renewal quote".
 - Open a **Case** for a renewal service issue — *not yet tooled.* The espocrm MCP has
@@ -214,18 +214,18 @@ Omit `stage` to accept the install default rather than risk a dropped enum value
 > The v3 worksheet is **structured state on the renewal Opportunity**, not a file.
 > The proposed Opportunity field additions (`cRenewalSegment`, `cRenewalOwner`,
 > `cComplexityFlags`, `cTouchLog`, `cDay1SentAt`, `cNextTouchCode`, etc.) are in the
-> brief and are **Phase 1 — NOT yet added to live Espo.** Do not write fields that
-> don't exist yet; Espo silently drops unknown fields.
+> brief and are **Phase 1 — NOT yet added to live the CRM.** Do not write fields that
+> don't exist yet; the CRM silently drops unknown fields.
 
 ### Create / complete a renewal Task  →  AUTO
 Dedup with `espocrm.list_open_tasks` for the Account. If none open, `espocrm.create_task`;
 complete/reassign/re-date with `espocrm.update_task`. **Task fields = camelCase**
 (`name`, `status`, `priority`, `assignedUserId`, `dateStart`, `dateEnd`,
 `description`, `parentType`, `parentId`). Leave `status`/`priority` off to use the
-install default (this install customizes them — e.g. `Inbox`, `Cancelled`). An Espo
+install default (this install customizes them — e.g. `Inbox`, `Cancelled`). An the CRM
 Task/Case writes back to NowCerts as ONE `Tasks` entity — carry the linking keys
 (`insured_database_id` / `policy_number`, `momentum_client_id`).
-**`assignedUserId` is REQUIRED** — this Espo install rejects a task create with no
+**`assignedUserId` is REQUIRED** — this the CRM install rejects a task create with no
 assignee. Default personal-lines renewal tasks to **Gretchen**; use **Lamar**
 (`69bdad92458da2204`) otherwise. Never the api/Hermes identity (assignment guardrail).
 The server also falls back to `ESPO_DEFAULT_TASK_ASSIGNEE_ID` (env) if set — point
@@ -247,7 +247,7 @@ sanctioned CRM-initiated AMS *creation*.
 > `create_insured`, `insert_policy`, `update_policy` (fill-blank). If a needed write
 > tool is ever *unavailable* (server down, tool missing), **stage the request, tell
 > Gretchen it's queued for Hermes/Lamar, and do NOT fall back to raw REST, the DB, or
-> the web UI** (fail-closed, per contract §6). Espo server source:
+> the web UI** (fail-closed, per contract §6). the CRM server source:
 > `rsg-hermes/mcp/espo/src/server.js` (LaunchAgent `com.rsg.espo-mcp`,
 > `launchctl kickstart -k` to reload after edits).
 
@@ -293,7 +293,7 @@ note, `flag:` → escalate to `#lamar-alerts`, `handoff` → 📋 to Lamar, `ren
 | AMS field already populated (would overwrite) | Do NOT write. Flag the conflict to a human. |
 | Duplicate account / insured found | Resolve to the master record before any write; if unsure, flag. |
 | Asked to change a policy from CRM | Refuse — out of scope. Explain it must be done in the AMS. |
-| Asked to write a Phase-1 field/endpoint not yet built | STOP. Say it's Phase 1, not live. Don't write unknown Espo fields (silent drop). |
+| Asked to write a Phase-1 field/endpoint not yet built | STOP. Say it's Phase 1, not live. Don't write unknown the CRM fields (silent drop). |
 
 ---
 

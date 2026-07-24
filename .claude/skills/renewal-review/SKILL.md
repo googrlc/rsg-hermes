@@ -1,6 +1,6 @@
 ---
 name: renewal-review
-description: Triage an upcoming renewal — pull the Policy + Renewal + Account context, compute the increase math, classify risk, recommend remarket vs. retain, and propose the next action (call, email, remarket submission, escalation). Operates against EspoCRM Renewal + Policy + Account data and the Supabase `project_85_renewals` + `renewal_actions` tables. Produces a renewal-review payload + drafted `renewal_actions` rows and (when appropriate) a Cross-Sell / Remarket Opportunity draft for `crm-intake-writer`. Use whenever the user asks "review this renewal," "what should we do about X's renewal," "remarket Y," or when `revenue-sentinel` flags a 90/60/30-day checkpoint.
+description: Triage an upcoming renewal — pull the Policy + Renewal + Account context, compute the increase math, classify risk, recommend remarket vs. retain, and propose the next action (call, email, remarket submission, escalation). Operates against CRM Renewal + Policy + Account data and the Supabase `project_85_renewals` + `renewal_actions` tables. Produces a renewal-review payload + drafted `renewal_actions` rows and (when appropriate) a Cross-Sell / Remarket Opportunity draft for `crm-intake-writer`. Use whenever the user asks "review this renewal," "what should we do about X's renewal," "remarket Y," or when `revenue-sentinel` flags a 90/60/30-day checkpoint.
 ---
 
 # Renewal Review
@@ -45,12 +45,12 @@ Do **not** use this skill for:
 
 1. **Pull context** (use `crm-fact-retriever` semantics — but you may
    gather the full bundle, not just one fact):
-   - EspoCRM Policy: `policy_number`, `carrier`, `effective_date`,
+   - CRM Policy: `policy_number`, `carrier`, `effective_date`,
      `expiration_date`, `premium`, `line_of_business`, `status`,
      `amsLockState`.
-   - EspoCRM Renewal: current `stage`, `current_premium`,
+   - CRM Renewal: current `stage`, `current_premium`,
      `urgency`, `risk_status`.
-   - EspoCRM Account: `account_status`, `annual_premium`,
+   - CRM Account: `account_status`, `annual_premium`,
      `last_contact_*`, `referral_source`.
    - Supabase `project_85_renewals` row (if it exists):
      `premium_current`, `premium_renewal`, `increase_percentage`,
@@ -197,7 +197,6 @@ Do **not** use this skill for:
    Opportunity rather than retrofitting the Renewal row.
 6. **Slack escalation honors registry** — only post to
    `#rsg-hermes-project85-renewals` unless `slack_registry` says
-   otherwise. See `espocrm-developer` and
    `hermes/operations/slack_router.py`.
 7. **`renewal_actions` rows are append-only.** This skill drafts new rows;
    it never edits or deletes prior actions.
@@ -211,8 +210,6 @@ Do **not** use this skill for:
 - `docs/agency-memory-plan.md`
 - `docs/hermes-operating-constitution.md` — Project 85 contract
 - `docs/revenue-sentinel.md` — checkpoint cadence
-- `hermes-training/espocrm/workflows.md` — renewal stage enum
-- `hermes-training/espocrm/guardrails.md` — risk status enum
 - `crm-fact-retriever` — context gathering
 - `crm-intake-writer` — cross-sell Opportunity drafting
 - `proposal-builder` — remarket submission packet
@@ -226,7 +223,7 @@ Documents** (under the client's folder) + Holographic Memory:
 ```bash
 hermes --doc-add \
   --doc-title "<client> — <policy/LOB> Renewal Review" \
-  --doc-account "<EspoCRM account name>" \
+  --doc-account "<CRM account name>" \
   --doc-type renewal \
   --doc-file <path>          # or pipe the review via stdin
 ```

@@ -71,7 +71,7 @@ tool routes to:
 |---|---|
 | "Review my service desk for today." | Shows open tasks, due items, and priorities. |
 | "Show my renewals due in the next 30 days." | Lists upcoming renewals with risk level and action needed. |
-| "Create an EspoCRM note from this." | Turns rough notes into a clean CRM activity note. |
+| "Create an CRM note from this." | Turns rough notes into a clean CRM activity note. |
 | "Create a task for me from this client request." | Creates a follow-up task linked to the account. |
 | "Draft a client reply." | Drafts a warm, professional email for Gretchen to review. |
 | "What information is missing?" | Reviews a request and lists what is needed. |
@@ -84,7 +84,7 @@ tool routes to:
 |---|---|
 | "Review this renewal and tell me whether to renew as-is, review, or remarket." | Full renewal triage with recommendation. |
 | "Draft a premium increase explanation." | Plain-English explanation for the client. |
-| "Create the EspoCRM note and task for this renewal." | Note + task in one step. |
+| "Create the CRM note and task for this renewal." | Note + task in one step. |
 | "Create a 30-day renewal follow-up message." | Client message for the 30-day checkpoint. |
 
 ## Onboarding commands
@@ -92,7 +92,7 @@ tool routes to:
 | Command | What it does |
 |---|---|
 | "Create an onboarding checklist for this new client." | Full checklist by line of business. |
-| "Create separate EspoCRM opportunities for each line of business." | One opportunity per LOB. |
+| "Create separate CRM opportunities for each line of business." | One opportunity per LOB. |
 | "Create the file folder structure for this client." | Nextcloud folder plan. |
 | "Draft the welcome email." | Warm welcome message for the new client. |
 
@@ -103,7 +103,7 @@ tool routes to:
 | "Review this COI request and tell me what is missing." | Checks for required fields and flags gaps. |
 | "Create a COI processing checklist." | Step-by-step COI process. |
 | "Draft a response asking for missing certificate information." | Client-facing email requesting missing info. |
-| "Create an EspoCRM note for this COI request." | Logs the COI request to the account. |
+| "Create an CRM note for this COI request." | Logs the COI request to the account. |
 
 ## Tips for Gretchen
 

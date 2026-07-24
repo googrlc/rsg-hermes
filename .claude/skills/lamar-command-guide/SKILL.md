@@ -50,7 +50,7 @@ renewal, or client follow-up that should be handled first?"
 | "Start a new intake from messy notes." | Converts pasted notes into structured intake data. |
 | "Create one opportunity for each line of business." | Splits a multi-LOB intake into separate opportunities. |
 | "Identify missing information from this intake." | Lists what is needed to move forward. |
-| "Create an EspoCRM note and follow-up task." | Drafts a CRM note + task through the write queue. |
+| "Create an CRM note and follow-up task." | Drafts a CRM note + task through the write queue. |
 | "Create client folder structure and file storage recommendation." | Plans the Nextcloud folder layout. |
 
 ## Quote commands
@@ -115,6 +115,6 @@ Every request should push toward:
 5. What is the next action?
 6. When is the follow-up?
 7. Where is it stored?
-8. Is EspoCRM updated?
+8. Is the CRM updated?
 
 Not motivation. Not memory. Not "I'll circle back." A real loop.

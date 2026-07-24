@@ -1,6 +1,6 @@
 ---
 name: crm-fact-retriever
-description: Answer direct retrieval questions about RSG clients, prospects, contacts, policies, quotes, renewals, and notes — sourced from EspoCRM, the `client_facts` / `client_notes` / `quote_facts` retrieval tables, and indexed documents. Cites the source and confidence for every answer. Never invents data. Trigger for questions like "what is JB Noble's EIN?", "what is Joseph Washington's phone?", "what is 3D Pumps's renewal date?", "who is the principal for X?", "what quotes are pending on X?", "what policies does Y have?".
+description: Answer direct retrieval questions about RSG clients, prospects, contacts, policies, quotes, renewals, and notes — sourced from the CRM, the `client_facts` / `client_notes` / `quote_facts` retrieval tables, and indexed documents. Cites the source and confidence for every answer. Never invents data. Trigger for questions like "what is JB Noble's EIN?", "what is Joseph Washington's phone?", "what is 3D Pumps's renewal date?", "who is the principal for X?", "what quotes are pending on X?", "what policies does Y have?".
 ---
 
 # CRM Fact Retriever
@@ -38,9 +38,8 @@ Do **not** use this skill for:
 Search sources in this order. Stop at the first confident answer; never
 skip ahead.
 
-1. **CRM canonical field** — direct lookup via EspoCRM MCP (`get_crm_record`,
+1. **CRM canonical field** — direct lookup via the CRM MCP (`get_crm_record`,
    search-by-FEIN, search-by-email) for Account/Contact/Opportunity/Policy
-   /Renewal fields. Use `espocrm-field-reference` to resolve field names.
 2. **`client_facts`** — structured key/value facts indexed by entity.
 3. **`client_notes`** — structured narrative notes (titles + summaries
    indexed; full body on demand).
@@ -71,11 +70,11 @@ Source: client_facts (underwriting summary, 2026-05-19)
 Confidence: high
 
 Joseph Washington's phone is (xxx) xxx-xxxx.
-Source: EspoCRM Contact.phoneNumber
+Source: CRM Contact.phoneNumber
 Confidence: high
 
 3D Pumps LLC's renewal date for General Liability is 2027-05-19.
-Source: EspoCRM Policy.expiration_date (carrier: Shield Commercial)
+Source: CRM Policy.expiration_date (carrier: Shield Commercial)
 Confidence: high
 ```
 
@@ -129,7 +128,6 @@ field may have been OCR'd").
 4. **Read-only.** This skill never writes. If a fact is missing and the
    user wants to add it, hand off to `crm-intake-writer`.
 5. **Page list calls.** Honor `MAX_LIST_SIZE = 200` from
-   `espocrm-developer`.
 6. **Walk relationships explicitly.** A Contact may belong to multiple
    Accounts; verify before answering ownership questions.
 7. **Resolve fields via `SchemaRegistry.find_field()`** or the MCP
@@ -149,7 +147,5 @@ When CRM and `client_facts` disagree:
 ## References
 
 - `docs/agency-memory-plan.md` — retrieval architecture
-- `hermes-training/espocrm/field_dictionary.md` — field names and enums
-- `hermes-training/espocrm/relationships.md` — Account/Contact/Policy graph
 - `mcp/espo/` — read-only MCP sidecar for CRM lookups
 - `crm-intake-writer` — handoff target when a missing fact should be added

@@ -1,15 +1,15 @@
-# NowCerts / Momentum → EspoCRM CSV Import Mapping
+# NowCerts / Momentum → the CRM CSV Import Mapping
 
 **Source AMS:** NowCerts / Momentum
-**Target:** EspoCRM at `rrespocrm-rsg-u69864.vm.elestio.app`
+**Target:** the CRM at `rrespocrm-rsg-u69864.vm.elestio.app`
 **Mode:** Upsert (insert if new, merge if matched) with AMS-lock awareness
-**Generated from:** live `/api/v1/Metadata?key=entityDefs.{Entity}` (Espo Metadata API)
+**Generated from:** live `/api/v1/Metadata?key=entityDefs.{Entity}` (the CRM Metadata API)
 
 ---
 
-## 0. EspoCRM Metadata API quirk
+## 0. the CRM Metadata API quirk
 
-When working against this Espo build, fetch metadata via the **`key=` query parameter**, not as a path. The path form falls through to Espo's related-records router and returns a misleading `Action GET 'listLinked' does not exist in controller 'Metadata'` 404.
+When working against this the CRM build, fetch metadata via the **`key=` query parameter**, not as a path. The path form falls through to the CRM's related-records router and returns a misleading `Action GET 'listLinked' does not exist in controller 'Metadata'` 404.
 
 ```
 ❌ GET /api/v1/Metadata/entityDefs/Policy        → 404 listLinked
@@ -31,11 +31,11 @@ Useful keys:
 
 ---
 
-## 1. Policy mapping (NowCerts column → Espo `Policy` field)
+## 1. Policy mapping (NowCerts column → the CRM `Policy` field)
 
-| NowCerts CSV column | Espo field | Type | Notes |
+| NowCerts CSV column | the CRM field | Type | Notes |
 |---|---|---|---|
-| `databaseId` *(or `id`)* | `momentumPolicyId` | varchar | **DEDUP KEY** — unique index, READONLY in Espo, never overwrite once set |
+| `databaseId` *(or `id`)* | `momentumPolicyId` | varchar | **DEDUP KEY** — unique index, READONLY in the CRM, never overwrite once set |
 | `insuredDatabaseId` | `insuredMomentumId` | varchar | **INSURED LOOKUP KEY** — used to resolve `account` / `contact` link, READONLY |
 | `policyNumber` | `policy_number` | varchar | |
 | `carrierName` | `carrier` | varchar(255) | |
@@ -60,7 +60,7 @@ Useful keys:
 | `vin` | `vin` | varchar(100) | Auto policies only |
 | `propertyAddress` | `propertyAddress` | text | Home policies only |
 
-### Do NOT write to (READONLY / Espo-managed)
+### Do NOT write to (READONLY / the CRM-managed)
 
 - `commissionAmount`, `premiumAtRisk` — computed by `beforeSaveScript`
 - `momentum_last_synced`, `sync_status` — set by sync workflow
@@ -79,9 +79,9 @@ Useful keys:
 "Cancelled" | "Flat Cancel" | "Pending Cancel" | "Non-Renewed" | "Lapsed"
 ```
 
-**NowCerts → Espo normalization** (case-insensitive, trim whitespace):
+**NowCerts → the CRM normalization** (case-insensitive, trim whitespace):
 
-| NowCerts value | Espo `status` |
+| NowCerts value | the CRM `status` |
 |---|---|
 | `active`, `in force`, `inforce`, `bound` | `Active` |
 | `up for renewal`, `renewal pending` | `Up for Renewal` |
@@ -101,7 +101,7 @@ Useful keys:
 "" | "Direct Bill" | "Agency Bill" | "Direct Bill 100" | "Agency Bill 100"
 ```
 
-| NowCerts value | Espo `billing_type` |
+| NowCerts value | the CRM `billing_type` |
 |---|---|
 | `direct bill`, `direct`, `db` | `Direct Bill` |
 | `agency bill`, `agency`, `ab` | `Agency Bill` |
@@ -162,7 +162,7 @@ FOR each CSV row:
 
 ### Dedup invariants
 
-- `momentumPolicyId` and `insuredMomentumId` are `readOnly: true` in defs — Espo will reject changes once set. Only send them on **create (POST)**, never on **update (PUT)**.
+- `momentumPolicyId` and `insuredMomentumId` are `readOnly: true` in defs — the CRM will reject changes once set. Only send them on **create (POST)**, never on **update (PUT)**.
 - Indexes confirm uniqueness intent: `indexes.momentumPolicyId` and `indexes.insuredMomentumId` exist on Policy.
 
 ---
@@ -256,20 +256,20 @@ function applyLockFilter(payload, amsLockState) {
 
 ---
 
-## 5. Account mapping (NowCerts insured → Espo `Account`)
+## 5. Account mapping (NowCerts insured → the CRM `Account`)
 
 Same dedup pattern — `momentum_client_id` is the unique key, READONLY post-create.
 
-| NowCerts CSV column | Espo field | Type | Notes |
+| NowCerts CSV column | the CRM field | Type | Notes |
 |---|---|---|---|
 | `databaseId` *(insured)* | `momentum_client_id` | text | **DEDUP KEY**, READONLY |
-| `commercialName` *or* `firstName + lastName` | `name` | varchar | Standard Espo field |
+| `commercialName` *or* `firstName + lastName` | `name` | varchar | Standard the CRM field |
 | `fein` | `fein` | varchar | |
 | `csrName` | `csrName` | text | |
 | `agentOfRecordDate` | `agent_of_record_date` | date | READONLY (set once, AMS-driven) |
 | `agentOfAgencyCode` | `agent_of_agency_code` | text | |
 | `accountType` *(commercial/personal/etc)* | `account_type` | **enum** | See enum below |
-| `industry` | `industry` | enum | Standard Espo industry list — 51 options, must match exactly |
+| `industry` | `industry` | enum | Standard the CRM industry list — 51 options, must match exactly |
 | `sicCode` | `sic_code` | text | |
 | `naics` | `intel_naics` | text | |
 | `website` | `websiteUrl` | url | |
@@ -289,14 +289,14 @@ Same dedup pattern — `momentum_client_id` is the unique key, READONLY post-cre
 
 - **`account_type`**: `"" | "Prospect" | "Commercial Lines" | "Personal Lines" | "Group Benefits" | "Medicare" | "Life Insurance" | "Carrier" | "MGA"`
 - **`account_status`**: `"" | "Active" | "Urgent" | "Renewing" | "At Risk" | "Inactive"`
-- **`type`** *(standard Espo)*: `"" | "Commercial Lines" | "Personal Lines" | "Group Benefits" | "Prospect"`
+- **`type`** *(standard the CRM)*: `"" | "Commercial Lines" | "Personal Lines" | "Group Benefits" | "Prospect"`
 - **`stage`**: `"" | "New" | "Qualified" | "Proposal" | "Negotiation" | "Closed Won" | "Closed Lost"`
 - **`businessEntity`**: `"" | "Sole Proprietor" | "LLC" | "Corporation" | "S-Corp" | "Partnership" | "Non-Profit" | "Other"`
 - **`referral_source`**: `"" | "Referral" | "Google" | "Social Media" | "Cold Outreach" | "Walk-in" | "NowCerts Import" | "Other"` → **use `"NowCerts Import"` for catch-up rows**
 - **`preferred_contact`**: `"" | "Phone" | "Email" | "Text"`
 - **`accountCategory`**: `"" | "Personal" | "Commercial" | "Carrier" | "MGA"`
 
-### Do NOT write to (READONLY / Espo-managed)
+### Do NOT write to (READONLY / the CRM-managed)
 
 - `total_carrier_premium`, `totalAnnualPremium`, `total_active_premium`, `activePolicyCount`, `policyCountActive`
 - `account_score`, `score_breakdown`, `score_total`, `score_tier`, `days_to_renewal`, `gapCount`
@@ -308,13 +308,13 @@ There is **no `amsLockState` on Account** — Account writes are always allowed.
 
 ---
 
-## 6. Contact mapping (NowCerts contact → Espo `Contact`)
+## 6. Contact mapping (NowCerts contact → the CRM `Contact`)
 
 > **Naming inconsistency to watch out for:** the dedup field is `momentumClientId` (**camelCase**) on Contact, but `momentum_client_id` (**snake_case**) on Account. They are separate fields — don't reuse the same value across both entities. A NowCerts "insured" becomes an Account, while NowCerts "contacts" become Contacts with their own NowCerts contact IDs.
 
 ### Field mapping
 
-| NowCerts CSV column | Espo field | Type | Notes |
+| NowCerts CSV column | the CRM field | Type | Notes |
 |---|---|---|---|
 | `databaseId` *(contact-level)* | `momentumClientId` | varchar | **DEDUP KEY**, READONLY — note: no DB-level unique index, enforce in workflow |
 | `firstName` | `firstName` | varchar | Standard field |
@@ -325,7 +325,7 @@ There is **no `amsLockState` on Account** — Account writes are always allowed.
 | `dateOfBirth` | `dateOfBirth` | date | YYYY-MM-DD |
 | `phone` *(primary)* | `phoneNumber` | phone | |
 | `email` | `emailAddress` | email | |
-| `mobilePhone` | `phoneNumberData` *(typed)* | phoneData | Use Espo's multi-phone format; see below |
+| `mobilePhone` | `phoneNumberData` *(typed)* | phoneData | Use the CRM's multi-phone format; see below |
 | `addressStreet` | `addressStreet` | varchar | Standard |
 | `addressCity` | `addressCity` | varchar | |
 | `addressState` | `addressState` | varchar | |

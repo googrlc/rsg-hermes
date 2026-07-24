@@ -2,7 +2,7 @@
 
 > Goal: turn every insurance-related summary, document, transcript,
 > quote, email, or Slack message into structured CRM records **and**
-> retrievable knowledge — so Hermes can both keep EspoCRM tidy and
+> retrievable knowledge — so Hermes can both keep the CRM tidy and
 > answer "what is JB Noble's EIN?" later without inventing data.
 
 This document is the index for the agency-memory skill family. The
@@ -27,7 +27,7 @@ What underwriting concerns were identified?
 
 …across **commercial, personal, life, benefits, service, renewal**, and
 **claims** work — while also writing the corresponding records into
-EspoCRM with no duplicates, no fabricated data, and no skipped pipeline
+the CRM with no duplicates, no fabricated data, and no skipped pipeline
 stages.
 
 ---
@@ -109,7 +109,7 @@ crm-upsert-planner
    └──► Transport: n8n webhook OR crm_write_queue OR supabase_insert
    │
    ▼
-crm_write_queue worker  →  EspoCRM API  →  crm_receipts
+crm_write_queue worker  →  the CRM API  →  crm_receipts
 Supabase insert         →  client_facts / client_notes / quote_facts / client_documents
    │
    ▼
@@ -179,7 +179,6 @@ reporting back into a junk drawer.
 ### Stage discipline
 
 Use only the canonical enums in
-`hermes-training/espocrm/guardrails.md`:
 
 - Opportunity: `Discovery → Quoting → Markets Out / Shopping →
   Proposal Presented → Negotiation → Closed Won | Closed Lost`
@@ -292,9 +291,9 @@ The skills are tool-agnostic; the actual write path will be one of:
 
 - **Option A — n8n webhook layer.** Hermes posts JSON to n8n
   (`/search-account`, `/upsert-account`, `/create-fact`, …); n8n
-  talks to EspoCRM and Supabase. Best near-term option;
+  talks to the CRM and Supabase. Best near-term option;
   see `n8n-developer`.
-- **Option B — direct EspoCRM API.** Faster but riskier; guardrails
+- **Option B — direct the CRM API.** Faster but riskier; guardrails
   must be strict.
 - **Option C — `rsg-crm-mcp` MCP server.** Cleanest long-term
   architecture once tools stabilize:
@@ -339,4 +338,3 @@ only the `transport.type` value changes.
 - `docs/hermes-builder-spec.md`
 - `docs/hermes-router-contract.md`
 - `docs/hermes-supabase-domain-map.md`
-- `hermes-training/espocrm/`

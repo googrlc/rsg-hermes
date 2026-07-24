@@ -287,22 +287,6 @@ def main() -> int:
         help="Preview commission ingest without writing to commission_ledger",
     )
     parser.add_argument(
-        "--espo-writeback",
-        action="store_true",
-        help="Write EspoCRM service Cases back to the NowCerts task ledger (AMS)",
-    )
-    parser.add_argument(
-        "--espo-writeback-dry-run",
-        action="store_true",
-        help="Preview Cases->NowCerts write-back without writing to NowCerts/Espo",
-    )
-    parser.add_argument(
-        "--espo-writeback-hours",
-        type=int,
-        default=24,
-        help="Look-back window (hours) for modified Cases in --espo-writeback",
-    )
-    parser.add_argument(
         "--eom-scorecard",
         action="store_true",
         help="Post end-of-month revenue scorecard for previous month",
@@ -478,27 +462,6 @@ def main() -> int:
         help="Preview the NowCerts enrichment payload for --enrich-nowcerts without writing to the AMS",
     )
     # --- Nightly CRM Changelog ---
-    parser.add_argument(
-        "--changelog",
-        action="store_true",
-        help="Run nightly CRM changelog: post changes to Slack + log in EspoCRM",
-    )
-    parser.add_argument(
-        "--changelog-dry-run",
-        action="store_true",
-        help="Render CRM changelog without posting to Slack or logging to CRM",
-    )
-    parser.add_argument(
-        "--changelog-force",
-        action="store_true",
-        help="Bypass daily idempotency guard for changelog",
-    )
-    parser.add_argument(
-        "--changelog-hours",
-        type=int,
-        default=None,
-        help="Lookback window in hours (default: 24)",
-    )
     # --- Bidirectional Sync ---
     parser.add_argument(
         "--sync-bidirectional",
@@ -970,28 +933,6 @@ def main() -> int:
         print(f"Recorded {len(results)} KPI data points.")
         return 0
 
-    # --- Nightly CRM Changelog (requires EspoCRM + Slack) ---
-    if args.changelog or args.changelog_dry_run:
-        from hermes.jobs import nightly_changelog
-
-        try:
-            espo = EspoClient()
-        except EspoClientError as e:
-            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
-            return 2
-
-        result = nightly_changelog.run(
-            espo,
-            dry_run=args.changelog_dry_run,
-            force=getattr(args, "changelog_force", False),
-            lookback_hours=args.changelog_hours,
-        )
-        print(result.message)
-        if result.warnings:
-            print("Warnings:")
-            for w in result.warnings:
-                print(f"- {w}")
-        return 0 if result.ok else 1
 
     # --- API server (manages its own clients lazily) ---
     if args.api:
@@ -1256,22 +1197,6 @@ def main() -> int:
                 print(f"- {err}")
         return 0 if result.ok else 1
 
-    if args.espo_writeback or args.espo_writeback_dry_run:
-        from hermes.jobs.espo_to_nowcerts_writeback import run_writeback
-        from hermes.jobs.espo_account_writeback import run_account_writeback
-
-        dry = args.espo_writeback_dry_run
-        hours = args.espo_writeback_hours
-        r_tasks = run_writeback(dry_run=dry, since_hours=hours)
-        r_accts = run_account_writeback(dry_run=dry, since_hours=hours)
-        print(r_tasks.message)
-        print(r_accts.message)
-        errors = r_tasks.errors + r_accts.errors
-        if errors:
-            print("Errors:")
-            for err in errors[:10]:
-                print(f"- {err}")
-        return 0 if (r_tasks.ok and r_accts.ok) else 1
 
     if args.eom_scorecard or args.eom_scorecard_dry_run:
         from hermes.jobs import revenue_integrity

@@ -151,7 +151,9 @@ def _get_espo():
     if _espo is None:
         from hermes.core.client import EspoClient
 
-        _espo = EspoClient()
+        # Fail-fast: Espo is decommissioned; a dead-host call must not hang the
+        # worker pool. 5s timeout, no connect retries (was 60s x 3 = ~180s).
+        _espo = EspoClient(timeout=5, max_retries=0)
     return _espo
 
 
@@ -459,10 +461,30 @@ async def command_center_lapse_check():
 @app.get("/api/command-center/tasks")
 async def command_center_tasks():
     """Open team tasks (Gretchen/Lamar) in plain English, most urgent first."""
-    from hermes.operations.team_queue import group_by_assignee, list_open_tasks
+    # EspoCRM decommissioned 2026-07-23. Team tasks now live in Supabase
+    # (agency_crm_tasks); read open tasks there, grouped by assignee, most urgent
+    # first. No Espo call, so this polled endpoint can never hang the pool.
+    supa = _get_supa()
+    rows = supa.select(
+        "agency_crm_tasks",
+        columns="id,title,status,priority,due_at,assigned_to_email,case_id",
+        params={"status": "not.in.(completed,cancelled,canceled,done)", "order": "due_at.asc.nullslast"},
+        limit=200,
+    )
 
-    tasks = list_open_tasks(_get_espo())
-    return {"tasks": tasks, "count": len(tasks), "by_assignee": group_by_assignee(tasks)}
+    def _who(email):
+        e = (email or "").lower()
+        if "lamar" in e:
+            return "Lamar"
+        if "gretchen" in e:
+            return "Gretchen"
+        return (e.split("@")[0] or "Unassigned").title()
+
+    tasks = [{**r, "assignee": _who(r.get("assigned_to_email"))} for r in rows]
+    by_assignee: dict[str, list] = {}
+    for t in tasks:
+        by_assignee.setdefault(t["assignee"], []).append(t)
+    return {"tasks": tasks, "count": len(tasks), "by_assignee": by_assignee, "source": "agency_crm_tasks"}
 
 
 @app.post("/api/command-center/tasks/{task_id}/complete")

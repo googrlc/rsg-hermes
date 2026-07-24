@@ -130,7 +130,7 @@
         <label>
           Destination
           <select id="destinationSystem">
-            <option>EspoCRM</option>
+            <option>the CRM</option>
             <option>Supabase</option>
           </select>
         </label>
@@ -428,7 +428,7 @@
       const repoConfig = resolveRepoConfig();
 
       const state = {
-        destinationSystem: "EspoCRM",
+        destinationSystem: "the CRM",
         objectType: "contact",
         operation: "upsert",
         transportMode: "proxy",
@@ -856,7 +856,7 @@
 
       function setExamples() {
         state.objectType = "contact";
-        state.destinationSystem = "EspoCRM";
+        state.destinationSystem = "the CRM";
         state.operation = "upsert";
         state.contactFullName = "Shelly D'Amico";
         state.contactCompany = "Pie Insurance";
@@ -891,7 +891,7 @@
 
       function clearAll() {
         for (const k of Object.keys(state)) {
-          if (k === "destinationSystem") state[k] = "EspoCRM";
+          if (k === "destinationSystem") state[k] = "the CRM";
           else if (k === "objectType") state[k] = "contact";
           else if (k === "operation") state[k] = "upsert";
           else if (k === "transportMode") state[k] = "proxy";
