@@ -1,0 +1,203 @@
+"""Live policy book — read the AMS instead of the ``canonical_policies`` mirror.
+
+``canonical_policies`` is a mirror of the NowCerts book maintained by nightly
+importers. Mirroring it is what allowed the 2026-07-24 incident: two importers
+wrote the table with different scopes, and the narrower one flagged everything
+outside its scope as deleted, hiding live renewals from the desk. Reading the
+book from the AMS removes that failure mode rather than guarding against it.
+The whole book is ~440 policies (~1.5MB), so a full pull is cheap.
+
+WHAT STAYS IN SUPABASE. ``renewed_policy`` is a lineage pointer the NowCerts API
+does not expose (see ``canonical_book_sync`` and ``candidate_refresh``), and
+eligibility root-walking depends on it. It is not an AMS fact — it is derived
+work state — so it keeps living in Supabase and is joined onto the live rows
+here. Everything else (premium, dates, carrier, status, active) comes from the AMS.
+
+USAGE. ``select_policies`` is a drop-in for
+``supa.select("canonical_policies", columns=..., params=..., limit=...)`` and
+supports the PostgREST filters the call sites actually use: ``eq.``, ``in.(...)``
+and ``order``. With ``HERMES_AMS_LIVE_READS`` unset it delegates straight to
+Supabase, so the cutover is reversible per-deploy.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+import time
+from typing import TYPE_CHECKING, Any
+
+from hermes.sync.canonical_book_sync import (
+    POLICIES_TABLE,
+    POLICY_KEY,
+    _map_policy_volatile,
+    _num,
+    _policy_guid,
+)
+
+if TYPE_CHECKING:
+    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes.sync.nowcerts_client import NowCertsClient
+
+log = logging.getLogger(__name__)
+
+LINEAGE_TABLE = "policy_lineage"
+LINEAGE_FIELD = "renewed_policy"
+
+DEFAULT_TTL_SECONDS = 300
+_PAGE_SIZE = 100
+_MAX_PAGES = 50  # 50 * 100 = 5000, ~11x the current book
+
+_cache: dict[str, Any] = {"rows": None, "at": 0.0}
+_lock = threading.Lock()
+
+
+def live_reads_enabled() -> bool:
+    """True when policy reads should hit the AMS instead of the mirror."""
+    return os.environ.get("HERMES_AMS_LIVE_READS", "").lower() in ("1", "true", "yes")
+
+
+def _ttl() -> int:
+    try:
+        return max(0, int(os.environ.get("HERMES_AMS_BOOK_TTL", DEFAULT_TTL_SECONDS)))
+    except (TypeError, ValueError):
+        return DEFAULT_TTL_SECONDS
+
+
+def invalidate_cache() -> None:
+    """Drop the cached book (call after a write that should be visible now)."""
+    with _lock:
+        _cache["rows"], _cache["at"] = None, 0.0
+
+
+def _lineage_index(supa: "SupabaseClient") -> dict[str, str]:
+    """policy_guid -> renewed_policy. Best-effort: lineage is an enrichment, and
+    losing it must not take the whole book read down with it."""
+    try:
+        rows = supa.select(
+            LINEAGE_TABLE, columns=f"{POLICY_KEY},{LINEAGE_FIELD}", limit=20000
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("ams.book: lineage lookup failed; serving without lineage")
+        return {}
+    return {
+        str(r.get(POLICY_KEY)): r[LINEAGE_FIELD]
+        for r in rows
+        if r.get(POLICY_KEY) and r.get(LINEAGE_FIELD)
+    }
+
+
+def fetch_book(
+    supa: "SupabaseClient",
+    *,
+    nowcerts: "NowCertsClient | None" = None,
+    force: bool = False,
+) -> list[dict[str, Any]]:
+    """The whole live book, shaped like ``canonical_policies`` rows.
+
+    Cached for ``HERMES_AMS_BOOK_TTL`` seconds so a dashboard render doesn't
+    re-pull the AMS per widget.
+    """
+    ttl = _ttl()
+    with _lock:
+        fresh = _cache["rows"] is not None and (time.time() - _cache["at"]) < ttl
+        if fresh and not force:
+            return _cache["rows"]
+
+    if nowcerts is None:
+        from hermes.sync.nowcerts_client import NowCertsClient
+
+        nowcerts = NowCertsClient()
+
+    records = nowcerts.fetch_policies(page_size=_PAGE_SIZE, max_pages=_MAX_PAGES)
+    lineage = _lineage_index(supa)
+
+    rows: list[dict[str, Any]] = []
+    for p in records:
+        guid = _policy_guid(p)
+        if not guid:
+            continue  # no stable key -> cannot be addressed or reconciled
+        row: dict[str, Any] = {POLICY_KEY: guid, **_map_policy_volatile(p)}
+        # Not in the shared volatile mapper, but commission_sync reads it and the
+        # AMS supplies it as ``totalAgencyCommission``. Pick by presence, not
+        # truthiness — a real 0.0 commission must stay 0.0 rather than collapse to
+        # None and send commission_sync off to its rule-based fallback.
+        commission = next(
+            (p[k] for k in ("totalAgencyCommission", "agencyCommission") if p.get(k) is not None),
+            None,
+        )
+        row["agency_commission_amount"] = _num(commission)
+        row[LINEAGE_FIELD] = lineage.get(guid)
+        rows.append(row)
+
+    log.info("ams.book: %s policies live (%s with lineage)", len(rows), len(lineage))
+    with _lock:
+        _cache["rows"], _cache["at"] = rows, time.time()
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# PostgREST-compatible filtering, so call sites swap without changing shape
+# ---------------------------------------------------------------------------
+def _matches(row: dict[str, Any], field: str, expr: str) -> bool:
+    op, _, raw = str(expr).partition(".")
+    val = row.get(field)
+    if op == "eq":
+        return str(val) == raw
+    if op == "neq":
+        return str(val) != raw
+    if op == "in":
+        return str(val) in {v.strip().strip('"') for v in raw.strip("()").split(",")}
+    if op == "is":
+        return val is None if raw == "null" else val is not None
+    # An unsupported operator must not silently widen the result set.
+    raise ValueError(f"ams.book: unsupported filter {field}={expr}")
+
+
+def _sort(rows: list[dict[str, Any]], order: str) -> list[dict[str, Any]]:
+    field, _, direction = order.partition(".")
+    desc = direction.startswith("desc")
+    # None sorts last in both directions — matches PostgREST's default NULLS LAST.
+    return sorted(
+        rows,
+        key=lambda r: (r.get(field) is None, r.get(field) if r.get(field) is not None else ""),
+        reverse=desc,
+    )
+
+
+def select_policies(
+    supa: "SupabaseClient",
+    *,
+    columns: str | None = None,
+    params: dict[str, Any] | None = None,
+    limit: int | None = None,
+    nowcerts: "NowCertsClient | None" = None,
+) -> list[dict[str, Any]]:
+    """Drop-in for ``supa.select("canonical_policies", ...)``.
+
+    Falls back to Supabase unless ``HERMES_AMS_LIVE_READS`` is set, and also on
+    any AMS failure — a degraded read beats a broken portal.
+    """
+    params = dict(params or {})
+    if not live_reads_enabled():
+        return supa.select(POLICIES_TABLE, columns=columns, params=params, limit=limit)
+
+    try:
+        rows = fetch_book(supa, nowcerts=nowcerts)
+    except Exception:  # noqa: BLE001
+        log.exception("ams.book: live read failed; falling back to the mirror")
+        return supa.select(POLICIES_TABLE, columns=columns, params=params, limit=limit)
+
+    order = params.pop("order", None)
+    for field, expr in params.items():
+        rows = [r for r in rows if _matches(r, field, expr)]
+    if order:
+        rows = _sort(rows, str(order))
+    if limit is not None:
+        rows = rows[:limit]
+
+    if columns and columns != "*":
+        wanted = [c.strip() for c in columns.split(",") if c.strip()]
+        rows = [{c: r.get(c) for c in wanted} for r in rows]
+    return rows

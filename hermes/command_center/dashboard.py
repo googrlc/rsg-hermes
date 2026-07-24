@@ -15,6 +15,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from hermes.ams import book as ams_book
+
 RETENTION_GOAL = 75.0   # RSG standing target
 
 
@@ -31,8 +33,8 @@ def _premium(p: dict) -> float:
 
 def kpi_summary(supa) -> dict[str, Any]:
     clients = supa.select("canonical_clients", columns="nowcerts_insured_guid", limit=5000)
-    policies = supa.select(
-        "canonical_policies",
+    policies = ams_book.select_policies(
+        supa,
         columns="active,annualized_premium,current_term_amount,premium_amount",
         limit=5000,
     )

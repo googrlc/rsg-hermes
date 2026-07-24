@@ -33,6 +33,8 @@ from hermes.jobs.commission_ingest import (
 )
 from hermes.renewals import eligibility as elig
 
+from hermes.ams import book as ams_book
+
 log = logging.getLogger(__name__)
 
 LEDGER_TABLE = "commission_ledger"
@@ -163,7 +165,9 @@ def run_commission_sync(
         if r.get("policy_number")
     }
 
-    policies = supa.select("canonical_policies", columns="*", limit=50000)
+    # Bind -> finance reads the AMS directly: the expected-commission side is
+    # derived from live policy facts, not from a nightly mirror.
+    policies = ams_book.select_policies(supa, limit=50000)
     if limit:
         policies = policies[:limit]
     result.policies_scanned = len(policies)

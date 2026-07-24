@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 from hermes.core.dispatcher import DispatchResult
 
+from hermes.ams import book as ams_book
+
 if TYPE_CHECKING:
     from hermes.core.client import EspoClient
 
@@ -950,8 +952,8 @@ def _exec_client_policies(client: "EspoClient", args: dict[str, Any]) -> Dispatc
             return DispatchResult(True, f"No client matching '{who}'.")
         guid, name = cs[0].get("nowcerts_insured_guid"), cs[0].get("insured_name")
     try:
-        pols = supa.select(
-            "canonical_policies",
+        pols = ams_book.select_policies(
+            supa,
             columns="policy_number,carrier,lines_of_business,premium_amount,status,expiration_date,active",
             params={"nowcerts_insured_guid": f"eq.{guid}", "order": "expiration_date.desc"}, limit=50,
         )

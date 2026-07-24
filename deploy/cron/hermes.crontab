@@ -30,6 +30,19 @@ CRON_TZ=America/New_York
 # deletes; preserves the renewed_policy lineage pointer. Uncommenting is the deliberate
 # go-live step. Dry-run to preview with zero writes: hermes --sync-canonical-book-dry-run
 # ENABLED 2026-07-16 after a verified full run (+249 clients / +157 policies, 0 errors).
+# WARNING 2026-07-24 — canonical_policies has TWO writers with different scopes, and
+# that mismatch corrupts the book. This job is the SAFE one (additive upsert only; it
+# never calls mark_canonical_inactive) and pulls the full 439-record book INCLUDING
+# quotes. The unsafe one is the `rsg-import` Supabase edge function (pg_cron
+# `rsg-import-daily`, 0 7 * * * UTC): it pulls only is_quote=false (329 records) and
+# then passes that short list to mark_canonical_inactive(), which tombstones every
+# active row outside it as "Inactive: not in NowCerts <date>". candidate_refresh then
+# drops active=false rows, so live renewals silently vanish from the desk.
+# Because the two jobs disagree on scope, the damage swung 0 / 5 / 47 / 90 per night.
+# The 07-24 run tombstoned 47 policies verified present in the live AMS by policy_guid.
+# rsg-import-daily was DISABLED 2026-07-24 (cron.alter_job(3, active := false)).
+# Repair for the 47: scripts/repair_tombstones.sql (already applied to prod).
+# Do NOT re-enable rsg-import until canonical_policies has exactly ONE writer.
 20 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-canonical-book >> /root/hermes-cron.log 2>&1
 # Commission ledger seed — daily 2:25am ET (after the book sync). Writes EXPECTED
 # commission per commissionable policy into commission_ledger (NowCerts agency
