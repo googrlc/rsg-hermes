@@ -205,7 +205,6 @@ class TestDispatcherRouting:
         d.supa = None
         d._slack_ctx = {}
 
-        from hermes.commands import data_entry, lookup, merge, revenue
         import re
 
         d._routes = [

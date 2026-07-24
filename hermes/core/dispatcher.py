@@ -39,10 +39,6 @@ _BROAD_REPORT_HINTS: dict[str, re.Pattern[str]] = {
 }
 
 
-def _looks_like_data_quality(text: str) -> bool:
-    return bool(_DATA_QUALITY_HINT.search(text.strip()))
-
-
 def _looks_like_sync_status_question(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
@@ -100,7 +96,7 @@ class Dispatcher:
     """Order matters: first matching pattern wins."""
 
     def __init__(self, *, use_openai: bool = False) -> None:
-        from hermes.commands import business_research, data_entry, lookup, merge, revenue
+        from hermes.commands import business_research
 
         self.use_openai = use_openai
         self.supa: SupabaseClient | None = None
@@ -117,13 +113,7 @@ class Dispatcher:
             (re.compile(r"^\s*(ping|health|status)\s*$", re.I), "ping"),
             (re.compile(r"\bsync\b.*\b(nowcerts|status|conflicts?|errors?|runs?)\b", re.I), "sync"),
             (re.compile(r"^\s*sync\s", re.I), "sync"),
-            (
-                re.compile(r"\b(repair|fix|link)\b.*\b(policy|policies)\b.*\b(account|accounts)\b", re.I),
-                "policy_repair",
-            ),
-            (re.compile(r"^\s*merge\s+", re.I), merge.handle),
-            (re.compile(r"\bcan\s+be\s+merged\b", re.I), merge.handle),
-            # CRM change proposal approval — must precede research/intake/lookup.
+            # CRM change proposal approval — must precede research/intake.
             (
                 re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+(?P<id>\S+)\s*$", re.I),
                 "change_proposals",
@@ -151,7 +141,7 @@ class Dispatcher:
                 ),
                 "renewal_research",
             ),
-            # Renewal case + tasks — MUST precede the data_entry "^create" route
+            # Renewal case + tasks route.
             # so "create a renewal case and tasks" isn't captured as a generic create.
             (
                 re.compile(r"\b(create|open|start)\s+(a\s+)?renewal\s+case\b", re.I),
@@ -162,7 +152,7 @@ class Dispatcher:
                 "renewal_tasks_create",
             ),
             # Renewal PDF generate + file-to-Nextcloud (both verbs -> same generate+file
-            # handler). Before data_entry ("create … pdf") and revenue ("file … renewal …").
+            # handler).
             (
                 re.compile(r"\b(generate|create|build|make)\s+(the\s+)?(renewal\s+)?(worksheet\s+)?pdf\b", re.I),
                 "renewal_pdf",
@@ -179,9 +169,6 @@ class Dispatcher:
                 re.compile(r"^\s*(research|enrich|investigate|look\s+up|web\s+research)\s+(business|account|company)?\b", re.I),
                 business_research.handle,
             ),
-            (re.compile(r"^\s*(create|update)\s+", re.I), data_entry.handle),
-            (re.compile(r"^\s*add\s+", re.I), data_entry.handle),
-            (re.compile(r"^\s*move\s+opportunit(?:y|ie)\s+", re.I), data_entry.handle),
             # Agency intake — explicit verbs that mean "stage a draft from this summary".
             (
                 re.compile(
@@ -202,7 +189,6 @@ class Dispatcher:
             ),
             # Fact retrieval — narrow: question word + recognized fact label,
             # OR short-form "<label> for <entity>". Must precede the broad
-            # `lookup.handle` route below.
             (
                 re.compile(
                     # Form A: "what/who/find/tell me … <label>"
@@ -222,8 +208,6 @@ class Dispatcher:
                 ),
                 "agency_fact",
             ),
-            (re.compile(r"\b(total\s+premium|sum\s+premium|premium\s+for)\b", re.I), lookup.handle),
-            (re.compile(r"^\s*(what|who|find|lookup|search)\b", re.I), lookup.handle),
             # Renewal worksheet — MUST precede the broad renewal/revenue route so that
             # "prepare a renewal worksheet for <client>" does not fall through to revenue.handle.
             (
@@ -282,28 +266,6 @@ class Dispatcher:
                     re.I,
                 ),
                 "renewal_wb_confirm",
-            ),
-            (
-                re.compile(r"\b(expir(?:e|ing|y)|renewal[-\s]?audit|renewals?|cross-?sell|revenue|opportunit)", re.I),
-                revenue.handle,
-            ),
-            # Data quality BEFORE reports — intent LLM sometimes rewrites "data quality" as "kpi".
-            (
-                re.compile(
-                    r"\b(data\s+quality|dq\s+report|audit\s+crm|crm\s+audit|quality\s+check)\b",
-                    re.I,
-                ),
-                "data_quality",
-            ),
-            (
-                re.compile(
-                    r"\b(pipeline|lob\s+break|premium\s+by\s+lob|kpi|dashboard"
-                    r"|commission\s+snap|stale|account\s*list|my\s+accounts"
-                    r"|report\s*[- ]?personal|personal\s*report|cleanup\s*report"
-                    r"|bulk\s*[- ]?normalize|normalize\s*preview)\b",
-                    re.I,
-                ),
-                "reports",
             ),
             (
                 re.compile(
@@ -366,20 +328,11 @@ class Dispatcher:
                 supa=self.supa,
                 **self._slack_ctx,
             )
-        if handler == "reports":
-            from hermes.commands.reports import handle as reports_handle
-            return reports_handle(client, text, supa=self.supa)
-        if handler == "data_quality":
-            from hermes.commands.data_quality import handle as dq_handle
-            return dq_handle(client, text, supa=self.supa)
         if handler == "ping":
             return DispatchResult(True, "Hermes is online and connected to CRM.")
         if handler == "sync":
             from hermes.commands.sync import handle as sync_handle
             return sync_handle(client, text, supa=self.supa)
-        if handler == "policy_repair":
-            from hermes.commands.policy_repair import handle as policy_repair_handle
-            return policy_repair_handle(client, text)
         if handler == "agency_intake":
             from hermes.commands.agency_intake import handle as ai_handle
             return ai_handle(client, text, supa=self.supa, **self._slack_ctx)
@@ -419,12 +372,6 @@ class Dispatcher:
         if handler == "change_proposals":
             from hermes.commands.change_proposals import handle as cp_handle
             return cp_handle(client, text, supa=self.supa)
-        if (
-            callable(handler)
-            and getattr(handler, "__module__", "") == "hermes.commands.data_entry"
-            and getattr(handler, "__name__", "") == "handle"
-        ):
-            return handler(client, text, **self._slack_ctx)
         return handler(client, text)
 
     def _capture_write_intent(self, result: DispatchResult) -> None:
@@ -466,27 +413,7 @@ class Dispatcher:
             )
             self._pending_write = None
             return DispatchResult(True, "Approved updates were written successfully.", {"results": results})
-        if kind == "data_entry":
-            from hermes.commands.data_entry import execute_approved_data_entry
 
-            if not approval.approve_crm:
-                return DispatchResult(False, "This pending draft only has CRM operations. Use APPROVE CRM ONLY or APPROVE ALL.")
-            results = execute_approved_data_entry(client, pending.get("operations") or [])
-            self._pending_write = None
-            return DispatchResult(True, "Approved CRM updates were written successfully.", {"results": results})
-        if kind == "merge":
-            from hermes.commands.merge import execute_approved_merge
-
-            if not approval.approve_crm:
-                return DispatchResult(False, "This pending draft is a CRM merge. Use APPROVE CRM ONLY or APPROVE ALL.")
-            result = execute_approved_merge(
-                client,
-                entity_type=str(pending.get("entity_type") or ""),
-                source_id=str(pending.get("source_id") or ""),
-                target_id=str(pending.get("target_id") or ""),
-            )
-            self._pending_write = None
-            return DispatchResult(True, "Approved CRM merge was executed successfully.", {"result": result})
         return DispatchResult(False, "Pending draft type is not executable yet.")
 
     def dispatch(
@@ -504,9 +431,6 @@ class Dispatcher:
         approval = parse_approval_token(text)
         if approval:
             return self._handle_approval(client, approval)
-        # Never route "data quality" through OpenAI intent as "kpi" — handle explicitly first.
-        if _looks_like_data_quality(text):
-            return self._call_handler("data_quality", client, text)
         for pattern, handler in self._routes:
             if pattern.search(text):
                 result = self._call_handler(handler, client, text)

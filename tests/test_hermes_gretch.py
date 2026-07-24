@@ -71,7 +71,7 @@ def test_web_research_is_gateable():
     disabled = frozenset({"web_research"})
     active = [t for t in nl_agent._TOOLS if t["function"]["name"] not in disabled]
     assert "web_research" not in {t["function"]["name"] for t in active}
-    assert "search_records" in {t["function"]["name"] for t in active}  # CRM tools remain
+    assert "find_client" in {t["function"]["name"] for t in active}  # CRM tools remain
 
 
 # ── persona overlay in the system prompt ─────────────────────────────────────
