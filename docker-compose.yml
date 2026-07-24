@@ -69,7 +69,8 @@ services:
     volumes:
       - .:/app
     restart: unless-stopped
-    # Executor scheduler: intake + renewal every 5 min with single-instance
+    # Executor scheduler: renewal, intake, quote, casework and
+    # opportunity-writeback every 5 min with single-instance
     # locking, backoff/dead-letter, stalled-queue reclaim, and #systems-check
     # alerts. DISABLED by default TWO ways:
     #   1. compose profile "scheduler" — a plain `docker compose up -d` skips it;
