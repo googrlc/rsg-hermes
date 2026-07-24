@@ -609,62 +609,6 @@ def _process_outbound_queue(
     )
     log.info("Processing %d outbound queue items for run %s", len(queued), run_id)
     _dispatch_outbound_batch(supa, espo, queued, result=result)
-
-
-def drain_outbound_queue(
-    supa: SupabaseClient,
-    espo: EspoClient,
-    *,
-    batch_size: int = 100,
-    result: SyncRunResult | None = None,
-) -> SyncRunResult:
-    """Drain due ``queued`` outbound rows regardless of run (single scheduler).
-
-    This is the run-agnostic entry point the Hermes scheduler calls every
-    15 minutes. It picks up rows re-enqueued by 409/404 reconciliation as well
-    as any that a run left behind, applying the same per-row typed handling.
-    """
-    result = result or SyncRunResult()
-    now_iso = datetime.now(timezone.utc).isoformat()
-    queued = supa.select(
-        "outbound_sync_queue",
-        params={
-            **_ESPO_OUTBOUND_GUARD,  # never sweep NowCerts rows (see constant above)
-            "status": f"eq.{QUEUE_QUEUED}",
-            "scheduled_for": f"lte.{now_iso}",
-            "order": "created_at.asc",
-        },
-        limit=batch_size,
-    )
-    log.info("Draining %d due outbound queue items", len(queued))
-    _dispatch_outbound_batch(supa, espo, queued, result=result)
-    return result
-
-
-def run_outbound_drain_loop(
-    supa: SupabaseClient,
-    espo: EspoClient,
-    *,
-    poll_seconds: float = 900.0,
-    batch_size: int = 100,
-) -> None:
-    """Continuously drain the outbound queue (Hermes's single scheduler).
-
-    This replaces the retired pg_cron/edge-function outbound path: pg_cron jobs
-    stay disabled and Hermes owns draining. Default cadence is 15 minutes.
-    """
-    interval = poll_seconds if poll_seconds > 0 else 900.0
-    log.info("Starting outbound drain loop: interval=%ss batch_size=%s", interval, batch_size)
-    while True:
-        try:
-            result = drain_outbound_queue(supa, espo, batch_size=batch_size)
-            if result.records_processed or result.records_created or result.records_updated or result.records_failed:
-                log.info(result.message)
-        except Exception:  # noqa: BLE001 — never let one bad cycle kill the loop
-            log.exception("Outbound drain cycle failed")
-        time.sleep(interval)
-
-
 def _dispatch_outbound_batch(
     supa: SupabaseClient,
     espo: EspoClient,

@@ -30,19 +30,12 @@ def test_candidates_by_name_uses_escaped_needle():
     assert params["eligibility_state"] == "neq.excluded"
 
 
-# ------------------------------------------------- #111: nowcerts guard on both drains
+# ------------------------------------------------- #111: nowcerts guard on the outbound processor
 
 def test_run_specific_processor_guards_nowcerts():
     supa = MagicMock()
     supa.select.return_value = []
     pipeline._process_outbound_queue(supa, MagicMock(), run_id="r1", result=SyncRunResult())
-    assert supa.select.call_args.kwargs["params"]["destination_system"] == "neq.nowcerts"
-
-
-def test_drain_outbound_queue_guards_nowcerts():
-    supa = MagicMock()
-    supa.select.return_value = []
-    pipeline.drain_outbound_queue(supa, MagicMock())
     assert supa.select.call_args.kwargs["params"]["destination_system"] == "neq.nowcerts"
 
 

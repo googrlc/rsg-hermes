@@ -60,7 +60,6 @@ hermes --enrich-nowcerts         # backfill/enrich NowCerts-sourced records
 
 # Command Center → NowCerts (outbound)
 hermes --sync-hub-to-nowcerts    # push queued Command Center changes to the AMS
-hermes --run-outbound-drain-worker --outbound-drain-poll-seconds 900
 
 # Renewals (Project 85)
 hermes --renewal-refresh         # refresh renewal pipeline state from the book
@@ -111,8 +110,7 @@ Run `hermes --commands` for the full catalog.
 | `rsg-hermes` | `hermes` | Per-cron runner — jobs run as `docker compose run --rm hermes hermes --<job>`. Default command is a harmless read-only check; **not** an always-on listener. | `no` |
 | `rsg-hermes-api` | `hermes-api` | The Command Center HTTP backend, `8788:8787`, on the external `hermes-shared` network. | `unless-stopped` |
 | `rsg-hermes-intake-worker` | `hermes-intake-worker` | Polls the intake queue (`--run-intake-worker`, 5s). | `unless-stopped` |
-| `rsg-hermes-outbound-drain` | `hermes-outbound-drain` | Drains `outbound_sync_queue` → NowCerts every 15 min. | `unless-stopped` |
-| `rsg-hermes-scheduler` | `hermes-scheduler` | Executor scheduler. **Disabled by default** — gated behind the `scheduler` compose profile *and* `SCHEDULER_ENABLED`. | `unless-stopped` |
+| `rsg-hermes-scheduler` | `hermes-scheduler` | Executor scheduler — drains `outbound_sync_queue` → NowCerts (renewal, intake, quote, casework, opportunity-writeback). **Disabled by default** — gated behind the `scheduler` compose profile *and* `SCHEDULER_ENABLED`. | `unless-stopped` |
 
 ```bash
 docker compose up -d --build                              # api + workers (no scheduler, no listener)
