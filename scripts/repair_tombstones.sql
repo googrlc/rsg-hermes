@@ -17,12 +17,14 @@
 -- After running, rebuild the desk:
 --   docker compose run --rm hermes hermes --renewal-refresh
 
+-- Casts are required: a VALUES list types these as text/float8, while the
+-- columns are date/numeric.
 update canonical_policies c set
   status = v.status, active = v.active,
-  effective_date = v.eff, expiration_date = v.exp,
-  current_term_amount = coalesce(v.prem, c.current_term_amount),
-  premium_amount      = coalesce(v.prem, c.premium_amount),
-  annualized_premium  = coalesce(v.prem, c.annualized_premium)
+  effective_date = v.eff::date, expiration_date = v.exp::date,
+  current_term_amount = coalesce(v.prem::numeric, c.current_term_amount),
+  premium_amount      = coalesce(v.prem::numeric, c.premium_amount),
+  annualized_premium  = coalesce(v.prem::numeric, c.annualized_premium)
 from (values
   ('a81763db-dde7-441c-9a89-1245ebb576a4', 'Active', true, '2026-08-15', '2027-02-15', 3213.0),
   ('33adab3b-52aa-4183-951c-4bfe5e21cc69', 'Active', true, '2026-04-17', '2026-10-17', 1350.0),
