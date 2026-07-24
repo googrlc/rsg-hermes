@@ -14,7 +14,7 @@ once it's actually resolved (not just "in flight").
 **Source:** Phase 3 Step 1 retry of Draft 1 (3D Pumps LLC), 2026-05-22.
 
 **Symptom:** Several fields the synthesizer extracted are silently dropped on
-EspoCRM writes — the queue worker reports `SUCCESS` but the field isn't
+the CRM writes — the queue worker reports `SUCCESS` but the field isn't
 persisted. Confirmed for:
 
 - `legalName`
@@ -27,7 +27,7 @@ persisted. Confirmed for:
 
 **Bug class:** same as the LOB / phoneNumber validation issues fixed in commit
 `42d2c79`. The synthesizer outputs human-readable strings; the
-`agency_intake_approval` mapper field-maps them to Espo names; the live Espo
+`agency_intake_approval` mapper field-maps them to the CRM names; the live the CRM
 install rejects (or silently drops) anything that doesn't match the live
 metadata.
 
@@ -118,7 +118,7 @@ reality in three places.
 
 1. **"synthesizer → dedup probes → drafting"** — no dedup probes exist.
    The synthesizer declares a `duplicate_search` bundle in its output JSON,
-   but nothing in the write path actually queries EspoCRM with it.
+   but nothing in the write path actually queries the CRM with it.
    `drafting` is a pure pass-through transition in the Phase 3 worker.
    Update the architecture diagram (Section 3) and the state-machine
    description (Section 6).

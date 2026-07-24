@@ -96,6 +96,6 @@ and are intentionally **not** in this slice:
   approves the copy.
 - Slack approval cards + Gretchen check sheets (DM routing), welcome-on-bound
   trigger, weekly renewal digest.
-- `espocrm-field-reference` `modules/renewals.md` documenting the full Renewal
+- `crm-field-reference` `modules/renewals.md` documenting the full Renewal
   entity incl. these touch fields.
 - Dry-run report over live data → Lamar reviews before the flag flips on.

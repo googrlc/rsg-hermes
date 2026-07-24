@@ -43,7 +43,7 @@ tool routes to:
 - intake_lead — process a casual lead intake message
 - merge_records — merge duplicate CRM records
 
-## Other OpenWebUI tools available
+## Other tools available
 
 | Tool | What it does |
 |---|---|

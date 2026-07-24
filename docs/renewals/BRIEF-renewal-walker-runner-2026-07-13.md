@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-13 (v3 supersedes v2 same day)
 **Approver:** Lamar
-**Builder:** Hermes (`rsg-hermes` repo → `/opt/rsg-hermes` on `rrespocrm-rsg`, git-first deploy)
+**Builder:** Hermes (`rsg-hermes` repo → `/opt/rsg-hermes` on `hermes-gretch`, git-first deploy)
 **Companion docs:** `BRIEF-renewal-cadence-2026-07-09.md` · RSG Renewal Walker GPT Setup Kit v2 · RSG Renewal Worksheet template
 **Priority:** Revenue-critical. This is the 54.92% → 80% retention machine.
 

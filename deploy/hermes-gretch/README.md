@@ -11,7 +11,7 @@ entirely by environment. This runbook is the deploy + verification procedure.
 | `HERMES_MEMORY_SCOPE` | `hermes-lamar` | `hermes-gretch` (isolated Supermemory) |
 | `HERMES_DISABLED_TOOLS` | _(none)_ | `web_research` — CRM-only, no public-web research |
 | Slack app | Hermes app | dedicated **hermes-gretch** app + tokens |
-| EspoCRM user | `api` | dedicated **hermes-gretch** API user |
+| the CRM user | `api` | dedicated **hermes-gretch** API user |
 | NowCerts | (gated queue) | **none** — no `NOWCERTS_*`, no mcp/nowcerts mount |
 
 ---
@@ -24,9 +24,9 @@ entirely by environment. This runbook is the deploy + verification procedure.
    - Install to workspace → copy **Bot User OAuth token** (`xoxb-…`).
    - Invite the bot to **#gretchen-tasks** (`C0AMWAZBBJP`).
    - Note the bot's **own user id** (`U…`) for `HERMES_BOT_USER_ID`.
-2. **EspoCRM API user `hermes-gretch`** — Administration → API Users:
+2. **the CRM API user `hermes-gretch`** — Administration → API Users:
    - Same `api` role (or a Gretchen-scoped role). Generate an API key.
-   - **Store the key in 1Password → "RSG Infrastructure" vault** (item: `hermes-gretch EspoCRM API key`).
+   - **Store the key in 1Password → "RSG Infrastructure" vault** (item: `hermes-gretch the CRM API key`).
 3. **Supermemory** — reuse the existing `SUPERMEMORY_API_KEY`. Isolation is by
    **scope tag**, not by account: the compose sets `HERMES_MEMORY_SCOPE=hermes-gretch`,
    so every memory this instance writes is tagged `scope:hermes-gretch` and reads are
@@ -52,14 +52,14 @@ supabase db push
 
 ```bash
 cp deploy/hermes-gretch/.env.hermes-gretch.example .env.hermes-gretch
-# fill every <...> with hermes-gretch-DEDICATED values (Slack tokens, Espo key, Supabase, Supermemory)
+# fill every <...> with hermes-gretch-DEDICATED values (Slack tokens, the CRM key, Supabase, Supermemory)
 ```
 
 `.env.hermes-gretch` is gitignored — it never gets committed.
 
 ### 2a. Set SERVICE_WEBHOOK_SECRET (required for /renewals/complete)
 
-The `SERVICE_WEBHOOK_SECRET` must be set and must match the value in EspoCRM
+The `SERVICE_WEBHOOK_SECRET` must be set and must match the value in the CRM
 **Administration → Integration → serviceWebhookSecret** exactly. If it is missing
 or blank, every incoming service webhook (renewal task completions, etc.) will be
 silently rejected with 401 — no worksheet filed, no Slack win/loss post.
@@ -71,7 +71,7 @@ openssl rand -hex 32
 # 2. Paste the output into .env (the main shared env, loaded by hermes-api):
 #    SERVICE_WEBHOOK_SECRET=<the hex string>
 
-# 3. Set the same value in EspoCRM:
+# 3. Set the same value in the CRM:
 #    Administration → Integration → serviceWebhookSecret
 
 # 4. Recreate hermes-api so the new env is loaded
@@ -121,7 +121,7 @@ select agent_id, entity_type, status, created_at
 from crm_write_queue order by created_at desc limit 5;
 ```
 - ✅ PASS: the new row's `agent_id` = `hermes-gretch`.
-- Also confirm in EspoCRM the record's stream/modifiedBy shows the **hermes-gretch**
+- Also confirm in the CRM the record's stream/modifiedBy shows the **hermes-gretch**
   API user (not `api` / not Lamar).
 
 Memory isolation spot-check (optional):
@@ -142,5 +142,5 @@ docker compose -f deploy/hermes-gretch/docker-compose.yml down   # stop + remove
   harmless. To fully revert the schema (rarely needed):
   `alter table crm_write_queue drop column agent_id;` (repeat for
   `agency_intake_drafts`, `cc_submissions`).
-- Revoke the hermes-gretch Slack tokens and EspoCRM API key in their dashboards if
+- Revoke the hermes-gretch Slack tokens and the CRM API key in their dashboards if
   decommissioning for good.

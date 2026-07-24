@@ -12,11 +12,11 @@ This document is the **source-to-table contract** between n8n, Hermes, Supabase,
 
 Ordered steps (same run / same `sync_runs.id`):
 
-1. **`sync_runs`** — Insert one row: `workflow_name`, `source_system` (e.g. `momentum` / `nowcerts`), `destination_system` = `espocrm`, `status` = `running`.
+1. **`sync_runs`** — Insert one row: `workflow_name`, `source_system` (e.g. `momentum` / `nowcerts`), `destination_system` = `crm`, `status` = `running`.
 2. **`sync_state`** — Read `high_water_mark` (or equivalent cursor) for the source feed.
 3. **Fetch** changed records from NowCerts/Momentum since that watermark.
 4. **`inbound_sync_staging`** — Upsert raw payloads (`source_object_type`, `source_object_id`, `raw_payload`, `run_id`, `processing_status`).
-5. **`sync_mappings`** — Upsert ID links (NowCerts/Momentum entity ↔ future or existing `espocrm_id`).
+5. **`sync_mappings`** — Upsert ID links (NowCerts/Momentum entity ↔ future or existing `crm_id`).
 6. **Business tables** (normalized hub):
    - **`crm_accounts`** — insured / client facts  
    - **`crm_commissions`** — policy / commission facts  
@@ -51,9 +51,9 @@ Hermes entrypoint: **`run_crm_to_hub`** in `hermes/sync/bidirectional.py`.
 
 Contract:
 
-1. **`sync_runs`** — `workflow_name` = `crm_to_hub`, `source_system` = `espocrm`, `destination_system` = `supabase`.
+1. **`sync_runs`** — `workflow_name` = `crm_to_hub`, `source_system` = `crm`, `destination_system` = `supabase`.
 2. Poll the CRM **`Account`** / **`Policy`** (or webhooks → staging only) by `modifiedAt` &gt; cursor.
-3. **`inbound_sync_staging`** — Raw the CRM payloads for the run (`source_system` = `espocrm`).
+3. **`inbound_sync_staging`** — Raw the CRM payloads for the run (`source_system` = `crm`).
 4. Upsert **`crm_accounts`** / **`crm_commissions`** (existing mappers in `field_mapper.py`).
 5. **`project_85_renewals`** — For policies with `policy_number` + `expiration_date`, upsert watchlist rows for the dashboard.
 6. **`sync_audit_log`** — Already written per mirrored account; extend as needed for policies.

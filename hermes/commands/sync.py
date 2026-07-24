@@ -1,7 +1,7 @@
 """Dispatcher-routed NowCerts sync commands.
 
 Allows triggering the NowCerts → EspoCRM sync pipeline and querying
-sync status from Slack or Open WebUI (any chat interface).
+sync status from Slack or any chat interface.
 """
 
 from __future__ import annotations

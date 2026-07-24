@@ -2,7 +2,7 @@
 #
 # Same image as Lamar's Hermes, built from the same repo. The ONLY differences
 # are environment: a Gretchen persona, a dedicated agent id, dedicated Slack bot
-# tokens, a dedicated EspoCRM API user, and an isolated Supermemory scope.
+# tokens, a dedicated the CRM API user, and an isolated Supermemory scope.
 #
 # Deploy from the repo root:
 #   docker compose -f deploy/hermes-gretch/docker-compose.yml up -d --build

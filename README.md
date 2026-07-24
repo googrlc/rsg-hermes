@@ -12,10 +12,10 @@ two entry points:
   separate thin facade container) is the public "one door" in front of it; this
   repo is what sits behind that door.
 
-> **Migration state (July 2026).** RSG ran on EspoCRM; it has been
+> **Migration state (July 2026).** The legacy CRM has been
 > **decommissioned**, and the inbound **Slack Socket Mode** listener has been
-> **retired**. Data now lives in **NowCerts + Supabase**. A number of Espo-era
-> CLI flags, `.env` keys, and modules still exist in the tree but are inert
+> **retired**. Data now lives in **NowCerts + Supabase**. Some legacy CLI flags,
+> `.env` keys, and modules still exist in the tree but are inert
 > against systems that are gone — they are called out under
 > [Legacy / decommissioned](#legacy--decommissioned) so a fresh reader does not
 > mistake them for live paths.
@@ -40,8 +40,8 @@ The credentials that matter now are:
 | **Slack posting** (outbound only) | `SLACK_THE_BOSS`, `HERMES_SENTINEL_SLACK_CHANNEL`, bot token |
 | **Nextcloud (file storage)** | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_APP_PASSWORD` |
 
-`.env.example` still lists `ESPO_*` keys — those are **legacy** and unused now
-that EspoCRM is gone. See [`docs/DEPLOY.md`](docs/DEPLOY.md) for the box layout.
+`.env.example` still lists legacy CRM keys — unused now that the old CRM is
+gone. See [`docs/DEPLOY.md`](docs/DEPLOY.md) for the box layout.
 
 ## Run
 
@@ -127,7 +127,7 @@ recurring work is driven by **scheduled `docker compose run` invocations**, not 
 24/7 loop.
 
 > The `hermes-crm-queue-worker` service was **removed 2026-07-21** — it drained
-> the EspoCRM-era `crm_write_queue`, which no longer exists.
+> the legacy `crm_write_queue`, which no longer exists.
 
 ## Private API bridge (`hermes-api`)
 
@@ -166,15 +166,15 @@ Schema lives in `supabase/migrations/`; operations modules in `hermes/operations
 These remain in the tree for history but target systems that are gone. Do **not**
 treat them as live:
 
-- **EspoCRM REST path** — `--doctor`, `--ping`, `--kpi`, `--audit-schema`,
-  `--inventory-metadata` read through `hermes/core/client.py` (the Espo client).
-  EspoCRM is decommissioned, so these no longer reach a live CRM. (`--doctor` is
+- **Legacy CRM REST path** — `--doctor`, `--ping`, `--kpi`, `--audit-schema`,
+  `--inventory-metadata` read through `hermes/core/client.py`. The old CRM is
+  decommissioned, so these no longer reach a live system. (`--doctor` is
   still the compose default command only as a harmless no-op read.)
-- **EspoCRM write-back / queue** — `--espo-writeback`, `--process-crm-queue`, and
-  the several `--sync-*`/`--*-writeback` flags aimed at Espo drain an
-  `crm_write_queue` that was dropped in the decommission.
-- **`--espo-db-doctor`** — the direct-Postgres read lane was **removed**
-  (PR #191, `docs/espocrm-read-lane.md` is historical).
+- **Legacy write-back / queue** — `--process-crm-queue` and the remaining
+  `--sync-*`/`--*-writeback` flags aimed at the old CRM drain a
+  `crm_write_queue` that was dropped in the decommission. The legacy changelog
+  and write-back flags were **deleted** in the 2026-07-24 purge, along with
+  their jobs. The direct-Postgres read lane was removed earlier (PR #191).
 - **Slack Socket Mode** (`--slack`) — the inbound listener was retired July 2026.
   Slack **outbound posting** (sentinel, scorecards, alerts) via the bot token is
   still live.

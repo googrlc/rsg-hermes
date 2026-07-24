@@ -42,7 +42,7 @@
 -- Golden record: unified client view
 CREATE TABLE IF NOT EXISTS crm_accounts (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    espocrm_id TEXT UNIQUE NOT NULL,
+    crm_id TEXT UNIQUE NOT NULL,
     nowcerts_id TEXT,                    -- NULL if CRM-originated
     name TEXT NOT NULL,
     account_type TEXT,
@@ -54,9 +54,9 @@ CREATE TABLE IF NOT EXISTS crm_accounts (
     email TEXT,
     phone TEXT,
     commission_rate NUMERIC(5,2),
-    source_system TEXT NOT NULL DEFAULT 'espocrm',  -- 'espocrm' or 'nowcerts'
+    source_system TEXT NOT NULL DEFAULT 'crm',  -- 'crm' or 'nowcerts'
     last_synced_at TIMESTAMPTZ DEFAULT NOW(),
-    raw_espo_payload JSONB,
+    raw_crm_payload JSONB,
     raw_nowcerts_payload JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS crm_commissions (
     effective_date DATE,
     expiration_date DATE,
     source_system TEXT NOT NULL,
-    espocrm_id TEXT,
+    crm_id TEXT,
     nowcerts_id TEXT,
     last_synced_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),

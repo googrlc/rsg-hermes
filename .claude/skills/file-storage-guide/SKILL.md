@@ -30,7 +30,7 @@ do I put this?" and "where is that file?"
 | Automations and workflows | n8n (defined in docker-compose, check if running) |
 | Analytics, snapshots, commission ledger | Supabase |
 | Slack messages and alerts | Slack |
-| Agency login links | RSG Launchpad (in OpenWebUI) |
+| Agency login links | RSG Launchpad |
 
 ## Client folder structure
 

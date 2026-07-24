@@ -86,7 +86,7 @@ def main() -> int:
     )
     parser = argparse.ArgumentParser(description="Hermes — EspoCRM coordinator")
     parser.add_argument("command", nargs="*", help="One-shot command (omit for REPL)")
-    parser.add_argument("--commands", action="store_true", help="Print Open WebUI command catalog and exit")
+    parser.add_argument("--commands", action="store_true", help="Print the Hermes command catalog and exit")
     parser.add_argument("--ping", action="store_true", help="Test API key and exit")
     parser.add_argument("--doctor", action="store_true", help="Run non-mutating CRM readiness checks")
     parser.add_argument("--kpi", action="store_true", help="Print quick entity counts")

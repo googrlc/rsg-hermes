@@ -1,6 +1,6 @@
 # Hermes Builder Spec (RSG)
 
-Builder-ready implementation reference for Open WebUI + Hermes routed specialist workflows.
+Builder-ready implementation reference for Hermes routed specialist workflows.
 
 ## Guardrails (required)
 
@@ -70,7 +70,7 @@ Builder-ready implementation reference for Open WebUI + Hermes routed specialist
 - Compare expected vs posted where ledger data exists.
 - Flag discrepancy reasons and recommended tasks.
 
-## Open WebUI command coverage
+## Command coverage
 
 The system should map the provided command families to these handlers:
 - Property research commands -> `property.*`

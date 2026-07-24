@@ -89,7 +89,7 @@ This skill composes with:
 5. **Search before insert.** Before creating any insured/account, `search_insureds`
    (NowCerts) and `search_accounts` (the CRM) by name / email / FEIN and link to the
    existing record. Never spawn a duplicate.
-6. **Writes go through MCP tools, not raw REST/DB.** Prefer `espocrm`, `nowcerts`,
+6. **Writes go through MCP tools, not raw REST/DB.** Prefer `crm`, `nowcerts`,
    `supabase` MCP tools. Legacy skills show REST bodies — treat those as *reference
    for the logic only*.
 7. **Field casing is per-entity:** `Account` = snake_case, `Contact` = camelCase,
@@ -137,14 +137,14 @@ than a 30-second delay.
 ### Step 1 — Resolve the client (search before touch)
 - `nowcerts.search_insureds` by name / email / FEIN → get the insured `databaseId`
   and `momentum_client_id`.
-- `espocrm.search_accounts` for the matching Account (watch for duplicate
+- `crm.search_accounts` for the matching Account (watch for duplicate
   `momentum_client_id` groups — pick the master record; see the data-integrity tag
   system). Confirm ONE match before mutating. On multiple/no match → clarify, stop.
 
 ### Step 2 — Pull the current picture
 - `nowcerts.list_policies` for the insured → soonest `expirationDate`, `premium`,
   `lineOfBusiness`, `carrierName`, `active`, prior-term premium if available.
-- `espocrm.get_opportunities` + `espocrm.list_open_tasks` for the Account → is there
+- `crm.get_opportunities` + `crm.list_open_tasks` for the Account → is there
   already an open renewal Opportunity / Task? (Dedup — never create a second.)
 - Bucket the renewal (per `nowcerts-skill`): 0–14 CRITICAL, 15–30 URGENT,
   31–60 WATCH, 61–90 PIPELINE. PL enters at 30 days, CL at 60.
@@ -176,9 +176,9 @@ default), then perform the additive writes. Report each write.
 **AUTO (state intent, then do it):**
 - Create a renewal **Opportunity** in the CRM (stage = Identified/pipeline).
 - Create / update / complete a renewal **Task** in the CRM.
-- Log an activity **Note** on the Account (`espocrm.create_note`) — e.g. "Called
+- Log an activity **Note** on the Account (`crm.create_note`) — e.g. "Called
   client, left voicemail" / "Sent renewal quote".
-- Open a **Case** for a renewal service issue — *not yet tooled.* The espocrm MCP has
+- Open a **Case** for a renewal service issue — *not yet tooled.* The crm MCP has
   no Case read/write tool (as of 2026-07-13). Until one is added, capture the issue as
   a **Task** instead, or flag to Lamar. Do NOT fall back to raw REST for a Case.
 
@@ -199,13 +199,13 @@ default), then perform the additive writes. Report each write.
 ## Write playbook by action type
 
 ### Log outreach / activity  →  AUTO
-`espocrm.create_note` on the Account (`parentType: "Account"`, `parentId: {id}`).
+`crm.create_note` on the Account (`parentType: "Account"`, `parentId: {id}`).
 Keep the note factual: what happened, when, next step. This is how renewal outreach
 becomes visible to retention-risk-scout and the daily queue.
 
 ### Create / advance a renewal Opportunity  →  AUTO
-Dedup first with `espocrm.get_opportunities`. If none open, `espocrm.create_opportunity`
-linked to the Account. Advance or close with `espocrm.update_opportunity` (stage →
+Dedup first with `crm.get_opportunities`. If none open, `crm.create_opportunity`
+linked to the Account. Advance or close with `crm.update_opportunity` (stage →
 Closed Won = renewed, Closed Lost = lost). **Opportunity fields = camelCase**
 (`name`, `stage`, `accountId`, `closeDate`, `amount`, `assignedUserId`). Owner is the
 renewal owner (Gretchen for personal lines) — never set yourself as `assignedUser`.
@@ -218,8 +218,8 @@ Omit `stage` to accept the install default rather than risk a dropped enum value
 > don't exist yet; the CRM silently drops unknown fields.
 
 ### Create / complete a renewal Task  →  AUTO
-Dedup with `espocrm.list_open_tasks` for the Account. If none open, `espocrm.create_task`;
-complete/reassign/re-date with `espocrm.update_task`. **Task fields = camelCase**
+Dedup with `crm.list_open_tasks` for the Account. If none open, `crm.create_task`;
+complete/reassign/re-date with `crm.update_task`. **Task fields = camelCase**
 (`name`, `status`, `priority`, `assignedUserId`, `dateStart`, `dateEnd`,
 `description`, `parentType`, `parentId`). Leave `status`/`priority` off to use the
 install default (this install customizes them — e.g. `Inbox`, `Cancelled`). An the CRM
@@ -228,7 +228,7 @@ Task/Case writes back to NowCerts as ONE `Tasks` entity — carry the linking ke
 **`assignedUserId` is REQUIRED** — this the CRM install rejects a task create with no
 assignee. Default personal-lines renewal tasks to **Gretchen**; use **Lamar**
 (`69bdad92458da2204`) otherwise. Never the api/Hermes identity (assignment guardrail).
-The server also falls back to `ESPO_DEFAULT_TASK_ASSIGNEE_ID` (env) if set — point
+The server also falls back to `CRM_DEFAULT_TASK_ASSIGNEE_ID` (env) if set — point
 that at Gretchen's user id so renewal tasks auto-route to her.
 
 ### Fill-blank an AMS field  →  APPROVAL
@@ -241,14 +241,13 @@ insured update. If the field is populated → **stop, flag the conflict.**
 `nowcerts.create_insured` with the minimal stub. Never a duplicate. This is the only
 sanctioned CRM-initiated AMS *creation*.
 
-> **Wiring note (capability, as of 2026-07-13):** the espocrm MCP exposes the
+> **Wiring note (capability, as of 2026-07-13):** the crm MCP exposes the
 > renewal write tools directly — `create_note`, `create_task`, `update_task`,
 > `create_opportunity`, `update_opportunity`. The nowcerts MCP covers AMS writes —
 > `create_insured`, `insert_policy`, `update_policy` (fill-blank). If a needed write
 > tool is ever *unavailable* (server down, tool missing), **stage the request, tell
 > Gretchen it's queued for Hermes/Lamar, and do NOT fall back to raw REST, the DB, or
 > the web UI** (fail-closed, per contract §6). the CRM server source:
-> `rsg-hermes/mcp/espo/src/server.js` (LaunchAgent `com.rsg.espo-mcp`,
 > `launchctl kickstart -k` to reload after edits).
 
 ---

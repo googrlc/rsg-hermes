@@ -147,5 +147,4 @@ When CRM and `client_facts` disagree:
 ## References
 
 - `docs/agency-memory-plan.md` — retrieval architecture
-- `mcp/espo/` — read-only MCP sidecar for CRM lookups
 - `crm-intake-writer` — handoff target when a missing fact should be added

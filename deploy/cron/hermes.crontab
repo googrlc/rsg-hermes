@@ -10,17 +10,17 @@
 #
 # NowCerts sync schedule — re-enabled 2026-07-14 after Phase 0 dedup fix
 # (migration 20260714200000 added UNIQUE constraints + collapsed the 58x fan-out).
-# --sync-nowcerts  → Account Sync v2: NowCerts Insured → EspoCRM Account (upsert only, no deletes)
-# --sync-policies  → Policy Sync v2:  NowCerts Policy  → EspoCRM Policy  (policies-only, no Account writes)
+# --sync-nowcerts  → Account Sync v2: NowCerts Insured → CRM Account (upsert only, no deletes)
+# --sync-policies  → Policy Sync v2:  NowCerts Policy  → CRM Policy  (policies-only, no Account writes)
 #
 # >>> hermes automations (managed by deploy/cron/install-cron.sh) >>>
 CRON_TZ=America/New_York
-# RETIRED 2026-07-23 — EspoCRM decommissioned. --sync-nowcerts writes EspoCRM Accounts
-# (nightly 400 PUT / 409 POST "EspoCRM request failed"). Disabled; no valid target.
-# Account Sync v2 — daily 2:00am ET (NowCerts Insured → EspoCRM Account)
+# RETIRED 2026-07-23 — the CRM decommissioned. --sync-nowcerts writes CRM Accounts
+# (nightly 400 PUT / 409 POST "the CRM request failed"). Disabled; no valid target.
+# Account Sync v2 — daily 2:00am ET (NowCerts Insured → CRM Account)
 # 0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
-# RETIRED 2026-07-23 — EspoCRM decommissioned. --sync-policies writes EspoCRM Policies. Disabled.
-# Policy Sync v2  — daily 2:10am ET (NowCerts Policy → EspoCRM Policy; no Account writes)
+# RETIRED 2026-07-23 — the CRM decommissioned. --sync-policies writes CRM Policies. Disabled.
+# Policy Sync v2  — daily 2:10am ET (NowCerts Policy → CRM Policy; no Account writes)
 # 10 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-policies >> /root/hermes-cron.log 2>&1
 # OPT-IN 2026-07-16 — Canonical book sync — daily 2:20am ET (BEFORE renewal refresh).
 # Pulls live NowCerts insureds+policies into canonical_clients (key nowcerts_insured_guid)
@@ -60,8 +60,8 @@ CRON_TZ=America/New_York
 # client+LOB; never resets a human-advanced stage; additive. Full pull each run
 # (safe — re-runs just backfill NowCerts ids on existing rows, no duplicates).
 35 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-quotes >> /root/hermes-cron.log 2>&1
-# RETIRED 2026-07-23 — EspoCRM decommissioned. --email-triage was removed from the CLI in
-# commit 967e8c5 ("remove ... --email-triage (dead Espo jobs)"); the current image errors with
+# RETIRED 2026-07-23 — the CRM decommissioned. --email-triage was removed from the CLI in
+# commit 967e8c5 ("remove ... --email-triage (dead the CRM jobs)"); the current image errors with
 # "unrecognized arguments: --email-triage". Outlook->intake now runs in the rsg-hermes-intake-worker
 # service (hermes --run-intake-worker), not via cron. Disabled to stop 48 failed runs/day.
 # Outlook -> intake triage — every 30 min, 2h lookback (idempotent via Hermes Triaged category)
@@ -80,19 +80,17 @@ CRON_TZ=America/New_York
 # 30 7 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-classify >> /root/hermes-cron.log 2>&1
 # Revenue sentinel — Project 85 daily briefing -> #the-boss, weekdays 8:00am ET
 0 8 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --revenue-sentinel >> /root/hermes-cron.log 2>&1
-# Renewal prep-task sweep for Gretchen — weekdays 8:15am ET (creates EspoCRM Tasks)
+# Renewal prep-task sweep for Gretchen — weekdays 8:15am ET (creates CRM Tasks)
 # 15 8 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-sweep >> /root/hermes-cron.log 2>&1
 # Commission audit (Revenue Integrity) — Mondays 7:00am ET -> Slack
 0 7 * * 1 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-audit >> /root/hermes-cron.log 2>&1
 # End-of-month revenue scorecard — 1st of month 7:00am ET -> Slack
 0 7 1 * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --eom-scorecard >> /root/hermes-cron.log 2>&1
-# RETIRED 2026-07-23 — EspoCRM decommissioned. --changelog QUERIES EspoCRM for 24h changes
-# and logs an EspoCRM Task (nightly 400 POST Task "validationFailure"). Both read + write are
-# Espo-only, so the job has no valid target. Disabled.
+# RETIRED 2026-07-23 — the CRM decommissioned. --changelog QUERIES the CRM for 24h changes
+# and logs an CRM Task (nightly 400 POST Task "validationFailure"). Both read + write are
+# the CRM-only, so the job has no valid target. Disabled.
 # Nightly CRM changelog -> #the-boss — 8:00pm ET
 # 0 20 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --changelog >> /root/hermes-cron.log 2>&1
-# RETIRED 2026-07-23 — EspoCRM decommissioned. --espo-writeback reads EspoCRM Cases/Tasks
 # (also "unrecognized arguments" since the 07-14 build dropped the flag). Disabled.
 # Cases -> NowCerts task ledger write-back — daily 7:00pm ET (AMS = source of truth; additive, idempotent via Case.momentumTaskId)
-# 0 19 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --espo-writeback >> /root/hermes-cron.log 2>&1
 # <<< hermes automations <<<

@@ -1,7 +1,7 @@
 # NowCerts / Momentum → the CRM CSV Import Mapping
 
 **Source AMS:** NowCerts / Momentum
-**Target:** the CRM at `rrespocrm-rsg-u69864.vm.elestio.app`
+**Target:** the CRM at `hermes-gretch-u69864.vm.elestio.app`
 **Mode:** Upsert (insert if new, merge if matched) with AMS-lock awareness
 **Generated from:** live `/api/v1/Metadata?key=entityDefs.{Entity}` (the CRM Metadata API)
 
@@ -459,7 +459,7 @@ If the CSV row represents an underwriter (carrier-side person):
 
 Run in this sequence — links depend on prior step:
 
-1. **Accounts first** → upsert by `momentum_client_id`. Build an in-memory lookup table `{nowcerts_insured_id → espo_account_id}`.
+1. **Accounts first** → upsert by `momentum_client_id`. Build an in-memory lookup table `{nowcerts_insured_id → crm_account_id}`.
 2. **Contacts second** → upsert by `momentumClientId`. Resolve `accountId` from the lookup table built in step 1.
 3. **Policies last** → upsert by `momentumPolicyId`. Resolve `accountId` from the same lookup, apply AMS-lock filter on PUT.
 

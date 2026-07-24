@@ -63,8 +63,8 @@ high-impact failures to `#systems-check`. Actions: `request_terms`,
 only). Run: `hermes --renewal-executor` (add `--renewal-executor-dry-run` to preview
 with zero side effects). Scheduled/triggered, **not** always-on.
 
-**Renewal Loop v6 is retired** (`loop.py`, the `/webhooks/espo/disposition` +
-`/webhooks/espo/worksheet` endpoints, and `--renewal-reconcile`). Its ledger tables
+**Renewal Loop v6 is retired** (`loop.py`, the `/webhooks/disposition` +
+`/webhooks/worksheet` endpoints, and `--renewal-reconcile`). Its ledger tables
 (`renewals_master`, `renewal_events`, `crm_dispositions`, `ams_writeback_log`) remain
 in the DB as history but are no longer written. The Momentum MCP notes client
 (`momentum_mcp_client.py`) survives — the executor's `note` channel uses it. This
@@ -94,10 +94,9 @@ ever needed.) The proposed Opportunity field additions live in the brief.
 
 ## Capability notes (2026-07-13)
 
-- espocrm MCP write tools: `create_note`, `create_task`, `update_task`,
-  `create_opportunity`, `update_opportunity` (server `mcp/espo/src/server.js`).
+- crm MCP write tools: `create_note`, `create_task`, `update_task`,
 - the CRM **Task create requires an assignee** — pass `assignedUserId` (Gretchen for PL,
-  Lamar `69bdad92458da2204`) or set `ESPO_DEFAULT_TASK_ASSIGNEE_ID` in the env.
+  Lamar `69bdad92458da2204`) or set `CRM_DEFAULT_TASK_ASSIGNEE_ID` in the env.
 - **Cases are not yet tooled** — no Case read/write tool exists; capture as a Task or
   flag Lamar until one is added.
 - **Business rules live in exactly one place — Hermes config** ($5K commercial

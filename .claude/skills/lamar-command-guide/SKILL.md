@@ -1,6 +1,6 @@
 ---
 name: lamar-command-guide
-description: Lamar's daily command shortcuts and priority framework for Hermes and OpenWebUI — approved commands, priority ordering, daily workflow loop, and how to phrase requests for maximum focus. Use when Lamar asks what to do next, needs help phrasing a request, or wants to know what Hermes can do for him.
+description: Lamar's daily command shortcuts and priority framework for Hermes — approved commands, priority ordering, daily workflow loop, and how to phrase requests for maximum focus. Use when Lamar asks what to do next, needs help phrasing a request, or wants to know what Hermes can do for him.
 ---
 
 # Lamar Command Guide
