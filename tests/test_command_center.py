@@ -462,19 +462,34 @@ class TestTeamQueue:
 
 
 class TestTeamQueueEndpoints:
-    @patch("hermes.api._get_espo")
-    def test_tasks_endpoint(self, mock_espo, client) -> None:
-        c = MagicMock()
-        c.get.return_value = {"list": [
-            {"id": "t1", "name": "Call client", "status": "Started",
-             "dateEnd": (date.today() + timedelta(days=1)).isoformat() + " 17:00:00",
-             "assignedUserName": "Gretchen", "priority": "High"},
-        ]}
-        mock_espo.return_value = c
+    @patch("hermes.api._get_supa")
+    def test_tasks_endpoint(self, mock_get_supa, client) -> None:
+        """Reads agency_crm_tasks, not EspoCRM — Espo was decommissioned
+        2026-07-23, and a dead-host call on a polled endpoint hung the pool."""
+        supa = MagicMock()
+        supa.select.return_value = [
+            {"id": "t1", "title": "Call client", "status": "open", "priority": "high",
+             "due_at": (date.today() + timedelta(days=1)).isoformat(),
+             "assigned_to_email": "gretchen@risksolutionsgroup.net", "case_id": "c1"},
+        ]
+        mock_get_supa.return_value = supa
         r = client.get("/api/command-center/tasks")
         assert r.status_code == 200
         data = r.json()
         assert data["count"] == 1 and "Gretchen" in data["by_assignee"]
+        assert data["source"] == "agency_crm_tasks"
+        assert supa.select.call_args.args[0] == "agency_crm_tasks"
+
+    @patch("hermes.api._get_supa")
+    def test_tasks_endpoint_maps_unknown_assignee(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [
+            {"id": "t2", "title": "Review", "assigned_to_email": "dana@example.com"},
+            {"id": "t3", "title": "Orphan", "assigned_to_email": None},
+        ]
+        mock_get_supa.return_value = supa
+        data = client.get("/api/command-center/tasks").json()
+        assert set(data["by_assignee"]) == {"Dana", "Unassigned"}
 
     @patch("hermes.api._get_espo")
     def test_complete_endpoint(self, mock_espo, client) -> None:
