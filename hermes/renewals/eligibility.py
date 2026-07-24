@@ -2,8 +2,8 @@
 
 A renewal candidate is ONE upcoming renewal *event*, not a policy row. This
 module implements the exact eligibility rule once, as a pure function, so every
-layer (NowCerts selection -> candidate build -> Supabase event -> Site/Walker
-queue -> Hermes execution-time revalidation) asks the same question and gets the
+layer (NowCerts selection -> candidate build -> Supabase event -> cockpit queue
+-> Hermes execution-time revalidation) asks the same question and gets the
 same answer.
 
     insured_is_active
