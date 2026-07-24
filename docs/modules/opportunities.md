@@ -1,9 +1,9 @@
-# EspoCRM Opportunity — Renewal Retain Layer
+# CRM Opportunity — Renewal Retain Layer
 
 **Contract document.** The Walker API writes renewal intelligence to the native
-EspoCRM `Opportunity` entity via these 8 custom fields. This file is the
+the CRM `Opportunity` entity via these 8 custom fields. This file is the
 source of truth for the field names, types, and semantics — update here, then
-update the EspoCRM entity manager.
+update the CRM entity manager.
 
 ## Custom Fields (8)
 

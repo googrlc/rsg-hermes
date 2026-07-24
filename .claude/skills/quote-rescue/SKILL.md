@@ -49,7 +49,7 @@ skill exists to stop that leak.
 3. **Revenue at risk** — estimated commission if lost
 4. **Next action** — one clear step
 5. **Client message** — draft follow-up (if needed)
-6. **EspoCRM note** — activity note for the file
+6. **CRM note** — activity note for the file
 7. **Follow-up task** — task with due date
 8. **Recommended stage update** — if the stage should change
 

@@ -1,6 +1,6 @@
 ---
 name: crm-intake-writer
-description: Turn any insurance-related summary, document, transcript, email, quote proposal, or Slack note into a structured, duplicate-safe CRM intake payload (Account + Contacts + per-LOB Opportunities + Note + Facts) for EspoCRM. Drafts the payload and asks for an approval token — never writes directly. Trigger whenever the user pastes an intake summary, says "put this into CRM," "draft an intake," "create the account for...", or attaches an underwriting/quote/transcript document for ingestion.
+description: Turn any insurance-related summary, document, transcript, email, quote proposal, or Slack note into a structured, duplicate-safe CRM intake payload (Account + Contacts + per-LOB Opportunities + Note + Facts) for the CRM. Drafts the payload and asks for an approval token — never writes directly. Trigger whenever the user pastes an intake summary, says "put this into CRM," "draft an intake," "create the account for...", or attaches an underwriting/quote/transcript document for ingestion.
 ---
 
 # CRM Intake Writer
@@ -22,7 +22,7 @@ Use this skill when:
 - Another skill (e.g. `commercial-risk-intake`, `personal-lines-intake`,
   `life-insurance-intake`, `benefits-intake`) needs a unified output envelope.
 - An email or Slack message is forwarded that describes a real prospect,
-  client, or service request that should land in EspoCRM.
+  client, or service request that should land in the CRM.
 
 Do **not** use this skill for:
 
@@ -53,7 +53,6 @@ Identify one or more of:
   `Carrier Appetite Note`.
 
 Identify line(s) of business from the canonical vocabulary in
-`hermes-training/espocrm/workflows.md` (General Liability, Workers Comp,
 Commercial Auto, BOP, Inland Marine, Pollution, Professional, Cyber,
 Umbrella, Home, Auto, Dwelling Fire, Life, Disability, Medicare, Group
 Health, Dental, Vision, Supplemental).
@@ -113,7 +112,6 @@ Each opportunity must include:
 - `primary_contact`
 - `opportunity_name`
 - `line_of_business` (single value)
-- `stage` (use the canonical enum — see `hermes-training/espocrm/guardrails.md`)
 - `proposed_effective_date` or `target_date`
 - `producer`
 - `opportunity_type` (`New Business`, `Renewal`, `Cross-Sell`, `Remarket`)
@@ -128,8 +126,8 @@ Stage defaults when only some LOBs are quoted:
 
 | Situation | Stage |
 |-----------|-------|
-| Quote number present | `Quote / Market Review` (Espo: `Quoting`) |
-| LOB requested but no quote yet | `Market / Submission Needed` (Espo: `Discovery`) |
+| Quote number present | `Quote / Market Review` |
+| LOB requested but no quote yet | `Market / Submission Needed` |
 | Carrier already declined | `Closed Lost` with reason |
 | Bound | `Closed Won` with policy reference |
 
@@ -284,7 +282,6 @@ Reply with one of:
 3. **Search first.** Always populate `duplicate_search`; never create when a
    confident match exists — mark `needs_human_review` instead.
 4. **Snake_case for new fields.** Existing camelCase fields stay until
-   migrated; see `espocrm-field-reference`.
 5. **No invented EINs, policy numbers, quote numbers, premiums, or DOBs.**
    If the source doesn't contain it, leave it null.
 6. **Mark sensitivity.** EIN, DOB, DL #, SSN, health notes, beneficiary
@@ -298,7 +295,7 @@ Reply with one of:
 - `crm-fact-retriever` — answers "what is X's Y?" using facts + CRM.
 - `crm-note-structurer` — formats the `note.body` portion of the payload.
 - `crm-upsert-planner` — converts an approved payload into specific
-  EspoCRM API calls / `crm_write_queue` rows.
+  the CRM API calls / `crm_write_queue` rows.
 - `commercial-risk-intake`, `personal-lines-intake`, `life-insurance-intake`,
   `benefits-intake` — specialty extractors.
 
@@ -307,6 +304,4 @@ Reply with one of:
 - `docs/agency-memory-plan.md` — full plan and rationale
 - `docs/hermes-builder-spec.md` — confirm-before-write contract
 - `docs/hermes-router-contract.md` — unified specialist envelope
-- `hermes-training/espocrm/guardrails.md` — enum vocab and write safety
-- `hermes-training/espocrm/field_dictionary.md` — field types and enums
 - `hermes/commands/intake.py` — existing lightweight intake handler

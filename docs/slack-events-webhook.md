@@ -2,7 +2,7 @@
 
 Second transport for Slack-driven CRM intake. Lives alongside the existing
 Socket Mode listener; both can deliver the same `#crm-entry` message and
-Hermes dedupes by message `ts` so EspoCRM only gets written once.
+Hermes dedupes by message `ts` so the CRM only gets written once.
 
 ```
 Slack #crm-entry post
@@ -11,7 +11,7 @@ n8n "Hermes Trigger" workflow
    ↓ (filter: contains "Hermes:" block)
 HTTP POST → /api/hermes/slack/crm-entry
    ↓
-Hermes verifies signature, parses block, writes to EspoCRM, posts ack
+Hermes verifies signature, parses block, writes to the CRM, posts ack
 ```
 
 ## Why a second Slack app?
@@ -114,7 +114,7 @@ remove the IF pre-filter for the verification leg if you want.
    MODULE: intake
    account: Acme Test
    ```
-   Expect: one EspoCRM Account create and one ack reply (not two of either).
+   Expect: one CRM Account create and one ack reply (not two of either).
 4. Tail logs: `docker compose logs -f hermes-api` should show
    `claim_event` decisions and dispatcher output.
 

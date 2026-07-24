@@ -46,7 +46,7 @@ the registry, Hermes refuses to post (`BLOCKED_BY_GUARDRAIL`) and logs to
 ## 3. CRM Write Rules & Receipt Formats
 
 Models propose CRM mutations as JSON payloads in `crm_write_queue`; a worker
-executes against EspoCRM and stores raw provider responses in `crm_receipts`.
+executes against the CRM and stores raw provider responses in `crm_receipts`.
 
 | Invariant | Rationale |
 |-----------|-----------|
@@ -58,7 +58,7 @@ executes against EspoCRM and stores raw provider responses in `crm_receipts`.
 
 ```
 Model Output → crm_write_queue (PENDING)
-    → Worker dequeues → POST/PUT to EspoCRM
+    → Worker dequeues → POST/PUT to the CRM
     → crm_receipts logged with raw response
     → Status updated to SUCCESS / FAILED / BLOCKED_BY_GUARDRAIL
 ```
@@ -140,8 +140,8 @@ category and freshness via `recorded_at`.
 |----------|----------|
 | `SUPABASE_URL` | Hermes Postgres + PostgREST base URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side Hermes only — full CRUD via RLS role binding |
-| `ESPO_URL` | EspoCRM REST API base URL |
-| `ESPO_API_KEY` | EspoCRM X-Api-Key authentication |
+| `ESPO_URL` | the CRM REST API base URL |
+| `ESPO_API_KEY` | the CRM X-Api-Key authentication |
 | `SLACK_BOT_TOKEN` | Slack bot for posting messages |
 | `SLACK_APP_TOKEN` | Slack Socket Mode connection |
 | `OPENAI_API_KEY` | LLM inference (kept separate from CRM credentials) |

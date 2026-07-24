@@ -1,6 +1,6 @@
 ---
 name: revenue-sentinel
-description: Operator playbook for the Project 85 Sentinel briefing — the daily Slack post that surfaces stale opportunities, Project 85 renewal checkpoints (90/60/30 days), and x-date opportunities. Covers how the sentinel reads from EspoCRM + `project_85_renewals`, how it routes via `slack_registry`, which env vars and idempotency state file it uses, how to dry-run/force, and how to respond when the sentinel posts an alert (delegating to `renewal-review`, `crm-intake-writer`, or `carrier-appetite` as needed). Use when the user asks to run, configure, or interpret the sentinel — or when a sentinel post lands in Slack and an agent needs to triage it.
+description: Operator playbook for the Project 85 Sentinel briefing — the daily Slack post that surfaces stale opportunities, Project 85 renewal checkpoints (90/60/30 days), and x-date opportunities. Covers how the sentinel reads from the CRM + `project_85_renewals`, how it routes via `slack_registry`, which env vars and idempotency state file it uses, how to dry-run/force, and how to respond when the sentinel posts an alert (delegating to `renewal-review`, `crm-intake-writer`, or `carrier-appetite` as needed). Use when the user asks to run, configure, or interpret the sentinel — or when a sentinel post lands in Slack and an agent needs to triage it.
 ---
 
 # Revenue Sentinel
@@ -87,10 +87,10 @@ payload with `approval_required: true`.
 Three buttons attached to each sentinel post (handled by
 `hermes --slack` Socket Mode):
 
-- **Remind me in 2 days** — creates an Espo `Task` due in 2 days,
+- **Remind me in 2 days** — creates an the CRM `Task` due in 2 days,
   parent = the surfaced entity. Use this when the row is real but
   blocked on a wait (e.g. carrier response).
-- **Assign to Gretchen** — creates an Espo `Task` assigned to
+- **Assign to Gretchen** — creates an the CRM `Task` assigned to
   `HERMES_SENTINEL_GRETCHEN_USER_ID`. Use when the action is service
   work, not producer work.
 - **Dismiss** — acknowledges without CRM write. Use only when the row
@@ -98,7 +98,7 @@ Three buttons attached to each sentinel post (handled by
 
 ## Reliability controls
 
-- **Retries:** Espo reads use `EspoClient` read retries; Slack posting
+- **Retries:** the CRM reads use `EspoClient` read retries; Slack posting
   uses `HERMES_SLACK_RETRIES` / `HERMES_SLACK_RETRY_SLEEP`.
 - **Idempotency:** last successful post date is stored in
   `HERMES_SENTINEL_STATE_FILE`. `--revenue-sentinel-force` overrides.
@@ -142,7 +142,5 @@ Three buttons attached to each sentinel post (handled by
 - `docs/revenue-sentinel.md`
 - `docs/revenue-integrity.md`
 - `hermes/commands/revenue.py`
-- `hermes-training/espocrm/workflows.md` — renewal stage enum
-- `hermes-training/espocrm/guardrails.md` — risk status enum
 - `renewal-review`, `crm-fact-retriever`, `crm-intake-writer`,
   `carrier-appetite`, `proposal-builder`

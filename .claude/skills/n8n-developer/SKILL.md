@@ -6,7 +6,7 @@ description: Developer skill for building and operating the self-hosted n8n work
 # n8n Developer Skill
 
 For engineering work on the self-hosted n8n service used by RSG to glue
-Hermes, EspoCRM, Slack, and external systems together.
+Hermes, the CRM, Slack, and external systems together.
 
 ## Service shape
 

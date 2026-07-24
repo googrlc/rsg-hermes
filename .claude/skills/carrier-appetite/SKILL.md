@@ -181,7 +181,6 @@ The output feeds:
 - `docs/agency-memory-plan.md`
 - `docs/hermes-supabase-domain-map.md` — `carrier_appetite`,
   `appetite_carrier_profiles`
-- `hermes-training/espocrm/field_dictionary.md` — Account `carrier`
   fields
 - `proposal-builder`
 - `commercial-risk-intake`
@@ -195,7 +194,7 @@ When you produce a carrier-fit / appetite summary worth keeping, file it in
 ```bash
 hermes --doc-add \
   --doc-title "<client> — Carrier Appetite (<LOB>)" \
-  --doc-account "<EspoCRM account name>" \
+  --doc-account "<CRM account name>" \
   --doc-type appetite \
   --doc-file <path>          # or pipe the summary via stdin
 ```

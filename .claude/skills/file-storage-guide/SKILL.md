@@ -1,6 +1,6 @@
 ---
 name: file-storage-guide
-description: File storage index for RSG — where client documents, internal SOPs, templates, COIs, CRM records, and automation configs live across Nextcloud, NowCerts, EspoCRM, and Supabase. Use when Gretchen asks "where do I put this?" or "where is that file?" or when recommending a file storage location.
+description: File storage index for RSG — where client documents, internal SOPs, templates, COIs, CRM records, and automation configs live across Nextcloud, NowCerts, the CRM, and Supabase. Use when Gretchen asks "where do I put this?" or "where is that file?" or when recommending a file storage location.
 ---
 
 # File Storage Guide
@@ -24,8 +24,8 @@ do I put this?" and "where is that file?"
 | Internal SOPs | Nextcloud |
 | Templates (emails, forms, checklists) | Nextcloud |
 | Certificates of Insurance | NowCerts |
-| CRM records (accounts, contacts, opportunities, tasks, notes) | EspoCRM |
-| Bound policy data (insureds, premiums, policy details) | NowCerts (synced to EspoCRM Policy entity) |
+| CRM records (accounts, contacts, opportunities, tasks, notes) | the CRM |
+| Bound policy data (insureds, premiums, policy details) | NowCerts (synced to CRM Policy entity) |
 | Daily assistant / commands | Hermes |
 | Automations and workflows | n8n (defined in docker-compose, check if running) |
 | Analytics, snapshots, commission ledger | Supabase |
@@ -57,9 +57,9 @@ RSG / 🏢 Commercial (Lamar) / ABC Plumbing LLC / 2026 / Commercial Auto /
    automatic mirror.
 3. COIs stay in NowCerts — do not duplicate to Nextcloud unless the
    client specifically requests a copy.
-4. CRM records (notes, tasks, opportunities) live in EspoCRM — do not
+4. CRM records (notes, tasks, opportunities) live in the CRM — do not
    create separate documents for them.
-5. If a document is referenced in an EspoCRM note, include the file
+5. If a document is referenced in an CRM note, include the file
    location (folder path or link) in the note.
 
 ## When to create a new folder
@@ -71,7 +71,7 @@ RSG / 🏢 Commercial (Lamar) / ABC Plumbing LLC / 2026 / Commercial Auto /
 ## Escalation
 
 If a file cannot be found:
-1. Check the EspoCRM Account for file references in notes.
+1. Check the CRM Account for file references in notes.
 2. Check Nextcloud by client name.
 3. Check NowCerts for COIs and policy documents.
 4. If still not found, ask Gretchen or Lamar where it was saved.

@@ -2,7 +2,7 @@
 
 Segment-aware renewal communication: right touch, right timing, per policy
 segment — drafted by Hermes, approved and sent by a human, tracked on the
-EspoCRM Renewal record. This document covers the **deterministic core** that is
+CRM Renewal record. This document covers the **deterministic core** that is
 built and tested; the human-in-the-loop delivery layers that sit on top are
 listed under [Remaining phases](#remaining-phases).
 
@@ -38,7 +38,7 @@ evaluated in order (`classify_segment`):
 ### Cadence & touch fields
 
 Touch day-thresholds are tuned in `CADENCE`; `TOUCH_SPEC` maps each to its
-EspoCRM date-field slot and template (a drift guard fails the import if the two
+the CRM date-field slot and template (a drift guard fails the import if the two
 disagree).
 
 | Segment | Touches (days before x-date) |
@@ -71,7 +71,7 @@ One full market review per policy per ~12 months. `auto_6mo_cycle()` returns
 `full_review` when no full review was logged within 300 days, else
 `light_confirm`; the T-30 touch resolves its template accordingly.
 
-## EspoCRM changes required before enabling
+## the CRM changes required before enabling
 
 Add four **date** fields to the Renewal entity (Admin → Field Manager → Quick
 Repair and Rebuild), then verify the exact API names against the entity:
@@ -85,7 +85,7 @@ nothing.
 
 ## Remaining phases
 
-These depend on external systems (EspoCRM Admin, Slack, live sync data, deploys)
+These depend on external systems (the CRM Admin, Slack, live sync data, deploys)
 and are intentionally **not** in this slice:
 
 - **Phase 0 blockers** — deploy pending patch, resume `rsg-sync-daily`, spot-check

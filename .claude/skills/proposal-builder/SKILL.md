@@ -1,6 +1,6 @@
 ---
 name: proposal-builder
-description: Build a structured client-facing or carrier-facing proposal packet — for a new submission, a renewal remarket, a side-by-side quote comparison, or a final binding presentation. Pulls account/contact/opportunity/quote data from EspoCRM + `quote_facts`, accepts the carrier slate from `carrier-appetite`, and produces a stack-rank table, coverage comparison, missing-info checklist, and a draft cover note. Never invents quote numbers, premiums, limits, or carrier offers. Use whenever the user says "build a proposal," "comparison for the client," "submission packet for carrier X," or "side-by-side for the renewal."
+description: Build a structured client-facing or carrier-facing proposal packet — for a new submission, a renewal remarket, a side-by-side quote comparison, or a final binding presentation. Pulls account/contact/opportunity/quote data from the CRM + `quote_facts`, accepts the carrier slate from `carrier-appetite`, and produces a stack-rank table, coverage comparison, missing-info checklist, and a draft cover note. Never invents quote numbers, premiums, limits, or carrier offers. Use whenever the user says "build a proposal," "comparison for the client," "submission packet for carrier X," or "side-by-side for the renewal."
 ---
 
 # Proposal Builder
@@ -249,7 +249,7 @@ Holographic Memory (Supermemory):
 ```bash
 hermes --doc-add \
   --doc-title "<client> — <LOB> Proposal" \
-  --doc-account "<EspoCRM account name>" \
+  --doc-account "<CRM account name>" \
   --doc-type proposal \
   --doc-file <path>          # or pipe the document via stdin
 ```
@@ -257,4 +257,4 @@ hermes --doc-add \
 Use `--doc-type comparison` for a side-by-side. Or POST `/api/documents/save`
 to the Hermes API: `{ "title", "content", "account_name", "doc_type":
 "proposal", "source": "proposal-builder" }`. `account_name` = the client's
-EspoCRM account so it files under that client's folder.
+CRM account so it files under that client's folder.

@@ -12,14 +12,14 @@ contract wins.
   nothing except what the Hermes API returns — it never invents policy data.
 - **Hermes = the runner and the API.** Nightly classify → compute due touches →
   serve the Walker API → write every touch, flag, handoff, and outcome to
-  EspoCRM/NowCerts → fire doorbells and escalations → compute the scoreboard.
+  the CRM/NowCerts → fire doorbells and escalations → compute the scoreboard.
   **Hermes never talks to a client.**
 - **Slack = the notification wire only.** Morning doorbell DM to Gretchen,
   🚨 escalations and 📋 handoffs to `#lamar-alerts`, Monday digest. No
   data-bearing cards on the primary path.
 - **Gretchen = the only hands that touch clients.** The Walker drafts; she sends.
 
-The GPT talks to **Hermes only** — never NowCerts direct, never EspoCRM direct.
+The GPT talks to **Hermes only** — never NowCerts direct, never the CRM direct.
 One Action, one scoped API key (`/walker/*`), one owner of writes (Hermes).
 
 ```
@@ -29,7 +29,7 @@ pull queue / snapshot   ────────► GET  /walker/queue · /walke
 draft outreach (Gretchen sends)   classify · compute due touches nightly
 post outcome / flag / handoff ──► POST /walker/.../touch|flag|handoff|outcome
 render worksheet inline           PATCH /walker/.../worksheet  (CRM state)
-                                  writes to EspoCRM + NowCerts · doorbells · scoreboard
+                                  writes to the CRM + NowCerts · doorbells · scoreboard
 ```
 
 ## Build status — read before you touch anything
@@ -38,7 +38,7 @@ render worksheet inline           PATCH /walker/.../worksheet  (CRM state)
 |---|---|
 | v3 architecture (this doc + the brief) | **Designed. Approved 2026-07-13.** |
 | `/walker/*` API + scoped key + GPT Action | **Phase 1 — designed, NOT built.** Does not start until Phase 0 is green AND Lamar says go. |
-| EspoCRM Opportunity field additions | **Phase 1 — designed, NOT built.** No live Entity Manager changes yet. |
+| CRM Opportunity field additions | **Phase 1 — designed, NOT built.** No live Entity Manager changes yet. |
 | Classifier / cadence / auto-flags module | **Phase 1 — designed, NOT built.** |
 | `renewal-desk` executor skill (MCP write path) | **Live now.** This is what actually runs today. |
 | v2 Slack paste-block flow | **Fallback Mode only** (behind a feature flag, for OpenAI/Action outages). |
@@ -96,7 +96,7 @@ ever needed.) The proposed Opportunity field additions live in the brief.
 
 - espocrm MCP write tools: `create_note`, `create_task`, `update_task`,
   `create_opportunity`, `update_opportunity` (server `mcp/espo/src/server.js`).
-- Espo **Task create requires an assignee** — pass `assignedUserId` (Gretchen for PL,
+- the CRM **Task create requires an assignee** — pass `assignedUserId` (Gretchen for PL,
   Lamar `69bdad92458da2204`) or set `ESPO_DEFAULT_TASK_ASSIGNEE_ID` in the env.
 - **Cases are not yet tooled** — no Case read/write tool exists; capture as a Task or
   flag Lamar until one is added.

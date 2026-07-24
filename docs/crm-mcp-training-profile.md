@@ -1,11 +1,10 @@
 # CRM MCP Training Profile
 
 > System prompt and reference guide for any AI agent (Hermes NL agent, MCP
-> server, Slack bot, or external copilot) that reads or writes RSG's EspoCRM.
+> server, Slack bot, or external copilot) that reads or writes RSG's the CRM.
 > Load this document as a system/profile instruction before the first CRM
 > interaction in any session.
 >
-> **Expanded docs:** See [`/hermes-training/espocrm/`](../hermes-training/espocrm/README.md)
 > for the split-file version with dedicated schema, field dictionary,
 > relationships, query patterns, workflows, and guardrails files.
 
@@ -35,7 +34,7 @@
 | **OpportunityDriver** | Driver details for auto/trucking opportunities |
 | **OpportunityVehicle** | Vehicle details for auto/trucking opportunities |
 | **ClientNote** | Free-text notes attached to an Account |
-| **Meeting** / **Call** / **Email** | Standard EspoCRM activity entities linked to Accounts |
+| **Meeting** / **Call** / **Email** | Standard the CRM activity entities linked to Accounts |
 
 ---
 
@@ -180,7 +179,7 @@ When using the CRM MCP or any Hermes interface:
 | **FEIN** | Federal Employer ID Number | `fein` field on Account |
 | **DOT Number** | Department of Transportation number (trucking) | `caDotNumber` on Opportunity |
 | **MC Number** | Motor Carrier number | `caMcNumber` on Opportunity |
-| **Project 85** | RSG's retention initiative targeting 85% retention | Renewals tracked via the `project_85_renewals` Supabase table and EspoCRM Renewal entity |
+| **Project 85** | RSG's retention initiative targeting 85% retention | Renewals tracked via the `project_85_renewals` Supabase table and CRM Renewal entity |
 | **Golden Record** | Supabase-hosted source of truth for synced data | `leads_staging`, `crm_write_queue`, etc. in Supabase |
 | **Write Gate** | Safety mechanism requiring approval before CRM mutations | `crm_write_queue` with approval tokens (APPROVE ALL, APPROVE CRM ONLY, etc.) |
 | **Intel Fields** | AI-populated research fields on Account | `ai_assessment`, `bbb_rating`, `intel_confidence`, `intel_entity_type`, etc. |
@@ -207,7 +206,7 @@ When using the CRM MCP or any Hermes interface:
 Commercial Auto | Transportation / Trucking | General Liability | Workers Comp | Commercial Property | BOP | Professional Liability | Umbrella | Builders Risk | Inland Marine | Personal Auto | Homeowners | Renters | Condo | Dwelling Fire | Motorcycle | Boat | RV | Life | Health | Medicare | Group Benefits | Garagekeepers | Commercial Package | Other
 
 ### Task Status
-Standard EspoCRM: `Not Started` | `Started` | `Completed` | `Cancelled` | `Deferred`
+Standard the CRM: `Not Started` | `Started` | `Completed` | `Cancelled` | `Deferred`
 
 ### Renewal Urgency
 `Critical` | `High` | `Medium` | `Low`
@@ -252,7 +251,7 @@ When logging guardrail events, use only: `LOW` | `INFO` | `MEDIUM` | `HIGH` | `C
 
 ## 8. Supabase Domain Context
 
-Hermes uses Supabase as a governance and staging layer alongside EspoCRM:
+Hermes uses Supabase as a governance and staging layer alongside the CRM:
 
 | Domain | Key Tables |
 |--------|-----------|
@@ -269,8 +268,8 @@ Hermes uses Supabase as a governance and staging layer alongside EspoCRM:
 
 | Variable | Purpose |
 |----------|---------|
-| `ESPO_URL` | EspoCRM REST API base URL |
-| `ESPO_API_KEY` | EspoCRM X-Api-Key authentication |
+| `ESPO_URL` | the CRM REST API base URL |
+| `ESPO_API_KEY` | the CRM X-Api-Key authentication |
 | `SUPABASE_URL` | Supabase PostgREST base URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side CRUD via RLS |
 | `SLACK_BOT_TOKEN` | Slack message posting |

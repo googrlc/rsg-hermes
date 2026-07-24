@@ -278,7 +278,6 @@ writer will produce one Opportunity per requested LOB.
   (`medicare_master_plan_index`, `medicare_plans`, `medicare_carriers`,
   `medicare_underwriting_rules`, `medicare_county_footprints`,
   `medicare_provider_registry`, `medicare_medical_rx_matrix`)
-- `hermes-training/espocrm/field_dictionary.md` — Contact Medicare fields
   (`aepSepDate`, `daysUntil65`, `irmaApplies`,
   `policyMedicarePlanType`)
 - `crm-intake-writer`

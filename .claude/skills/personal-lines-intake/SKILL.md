@@ -223,6 +223,5 @@ final upsert payload and ask for the approval token.
 ## References
 
 - `docs/agency-memory-plan.md`
-- `hermes-training/espocrm/field_dictionary.md` — Account / Contact household fields
 - `crm-intake-writer`
 - `revenue-sentinel` — picks up x-date opportunities from `current_carriers`

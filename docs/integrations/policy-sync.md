@@ -1,8 +1,8 @@
-# NowCerts → EspoCRM policy sync (policies ONLY)
+# NowCerts → the CRM policy sync (policies ONLY)
 
-EspoCRM owns Accounts / Contacts / Opportunities. The **only** data that flows
-from NowCerts into EspoCRM is **policies**. This job fetches updated NowCerts
-policies and upserts them into the EspoCRM `Policy` entity, matched to an
+the CRM owns Accounts / Contacts / Opportunities. The **only** data that flows
+from NowCerts into the CRM is **policies**. This job fetches updated NowCerts
+policies and upserts them into the CRM `Policy` entity, matched to an
 **existing** account.
 
 > This intentionally replaces the old `--sync-nowcerts` (Insured → Account)
@@ -12,19 +12,19 @@ policies and upserts them into the EspoCRM `Policy` entity, matched to an
 ## What it does
 
 - Reads NowCerts policies via `/api/PolicyDetailList` (incremental with `--since`).
-- Maps each to an EspoCRM `Policy` payload — exact mixed-casing field names
+- Maps each to an the CRM `Policy` payload — exact mixed-casing field names
   (`policy_number`, `line_of_business`, `effective_date`, `expiration_date`,
   `premium_amount`, `business_type`, `carrier`, `status` snake_case; `accountId`
-  camelCase). Wrong casing is silently dropped by EspoCRM, so these are pinned and
+  camelCase). Wrong casing is silently dropped by the CRM, so these are pinned and
   covered by tests in `tests/test_sync_field_mapper.py`.
-- Matches the insured to an **existing** EspoCRM Account by exact name. **No
+- Matches the insured to an **existing** CRM Account by exact name. **No
   match → skip and report**, never create an account (that's the garbage we avoid).
 - Upserts by `policy_number`: updates the existing Policy or creates a new one.
 
 ## CLI
 
 ```bash
-# Dry run first (reads NowCerts + EspoCRM, writes nothing). Cap with --limit.
+# Dry run first (reads NowCerts + the CRM, writes nothing). Cap with --limit.
 hermes --sync-policies-dry-run --sync-policies-since 2026-06-01T00:00:00 --sync-policies-limit 50
 
 # Go live once the dry-run looks right.
@@ -33,7 +33,7 @@ hermes --sync-policies --sync-policies-since 2026-06-01T00:00:00
 
 Output reports `created / updated / skipped_no_account / skipped_no_number /
 errors`, and lists the insured names that were skipped for lacking an account so
-they can be created/linked in EspoCRM (by a human) before the next run.
+they can be created/linked in the CRM (by a human) before the next run.
 
 ## ⚠️ Deployment prerequisite — NowCerts credentials
 
@@ -44,7 +44,7 @@ env vars**, so this job cannot run there as-is. Before scheduling it, either:
    (`NOWCERTS_USERNAME`, `NOWCERTS_PASSWORD`, `NOWCERTS_CLIENT_ID`, …), **or**
 2. Run it from a host that already has NowCerts access.
 
-The EspoCRM write path (mapping, account matching, existing-policy detection) is
+The the CRM write path (mapping, account matching, existing-policy detection) is
 verified against the live CRM; only the NowCerts read awaits credentials.
 
 ## Scheduling (after creds exist + a clean dry-run)
