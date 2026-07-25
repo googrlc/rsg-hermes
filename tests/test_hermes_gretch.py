@@ -208,7 +208,7 @@ def test_add_document_leaves_non_medicare_untouched():
 
 
 # ── ACORD 25 ─────────────────────────────────────────────────────────────────
-def test_from_espo_policy_maps_and_uses_endorsement_flags():
+def test_from_policy_records_maps_and_uses_endorsement_flags():
     account = {"name": "Acme LLC", "billing_address_city": "Atlanta", "billing_address_state": "GA"}
     policies = [{
         "lineOfBusiness": "General Liability",

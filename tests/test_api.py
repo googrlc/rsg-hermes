@@ -433,14 +433,14 @@ class TestTransitionHelper:
         supa = self._supa_with_row(existing)
         transition(
             supa, "sub-1", "failed",
-            error={"message": "espo 400", "field": "phoneNumber"},
+            error={"message": "ams 400", "field": "phoneNumber"},
         )
 
         sent = supa.update.call_args.args[2]
         assert sent["status"] == "failed"
         assert len(sent["error_log"]) == 2
         last = sent["error_log"][-1]
-        assert last["message"] == "espo 400"
+        assert last["message"] == "ams 400"
         assert last["field"] == "phoneNumber"
         assert last["status_at_failure"] == "writing"
 

@@ -128,7 +128,7 @@ def test_cycle_runs_all_executors_and_releases_lock():
         m = run_one_cycle(supa, lock=lk)
     rex.assert_called_once(); iex.assert_called_once()
     # The NowCerts-bound executors are the only path off outbound_sync_queue for
-    # these job types — the Espo drain is guarded off NowCerts rows.
+    # these job types.
     for name, mock in nc.items():
         mock.assert_called_once()
         assert name in m
