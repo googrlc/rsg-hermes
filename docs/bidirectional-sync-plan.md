@@ -1,5 +1,11 @@
 # Bidirectional Sync: the CRM ↔ Supabase ↔ NowCerts
 
+> **HISTORICAL (EspoCRM decommissioned 2026-07-23).** The "CRM" in every diagram below is
+> EspoCRM. The proposed schema (`espocrm_id`, `raw_espo_payload`,
+> `source_system = 'espocrm'`) was partly built and is now being dropped — see
+> `supabase/migrations/20260725000000_drop_dead_espo_columns.sql`. Kept for the
+> golden-record and conflict-resolution design, which the canonical book still follows.
+
 ## Architecture: Supabase as Golden Record
 
 ```

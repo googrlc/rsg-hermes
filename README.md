@@ -40,8 +40,8 @@ The credentials that matter now are:
 | **Slack posting** (outbound only) | `SLACK_THE_BOSS`, `HERMES_SENTINEL_SLACK_CHANNEL`, bot token |
 | **Nextcloud (file storage)** | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_APP_PASSWORD` |
 
-`.env.example` still lists `ESPO_*` keys — those are **legacy** and unused now
-that EspoCRM is gone. See [`docs/DEPLOY.md`](docs/DEPLOY.md) for the box layout.
+The `ESPO_*` keys are gone from `.env.example` — nothing reads them. See
+[`docs/DEPLOY.md`](docs/DEPLOY.md) for the box layout.
 
 ## Run
 

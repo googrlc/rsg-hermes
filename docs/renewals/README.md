@@ -37,7 +37,7 @@ with zero side effects). Scheduled/triggered, **not** always-on.
 - **The `/walker/*` API and the Renewal Walker GPT workstation (retired 2026-07-24).**
   `hermes/walker/` served an on-demand renewal API to a ChatGPT Action, and kept its
   entire retain layer (touch log, complexity flags, handoff notes, renewal decision)
-  in EspoCRM `Opportunity` custom fields. EspoCRM is being removed as a data source,
+  in EspoCRM `Opportunity` custom fields. EspoCRM has since been removed entirely,
   and the retain layer had no home outside it, so the service, its router mount, its
   OpenAPI contract, and the Opportunity field reference were deleted rather than
   rebuilt. Renewal work runs through the cockpit + the queue-driven executor.

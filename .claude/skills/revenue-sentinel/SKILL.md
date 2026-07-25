@@ -98,8 +98,8 @@ Three buttons attached to each sentinel post (handled by
 
 ## Reliability controls
 
-- **Retries:** the CRM reads use `EspoClient` read retries; Slack posting
-  uses `HERMES_SLACK_RETRIES` / `HERMES_SLACK_RETRY_SLEEP`.
+- **Retries:** the CRM reads go through `SupabaseClient` in-process; Slack
+  posting uses `HERMES_SLACK_RETRIES` / `HERMES_SLACK_RETRY_SLEEP`.
 - **Idempotency:** last successful post date is stored in
   `HERMES_SENTINEL_STATE_FILE`. `--revenue-sentinel-force` overrides.
 - **Partial output:** if one section query fails, the briefing still

@@ -77,7 +77,7 @@ This note captures key data-field and table gaps for the Hermes expansion scope 
 
 - **Life and Medicare field normalization:** tables currently include multiple synonym columns (`carrier`/`company`/`carrier_name`, `line_of_business`/`lob`, etc.). Create canonical views for Hermes reads so extraction and matching stay deterministic.
 - **Confidence and source consistency:** ensure all extraction/research artifacts include both `confidence` and source pointers (`source_links` and/or page anchors).
-- **CRM linkage consistency:** ensure every new object can resolve to the CRM IDs (`espocrm_account_id`, `espocrm_contact_id`, `espocrm_opportunity_id`, `espocrm_policy_id` where applicable).
+- **CRM linkage consistency:** ensure every new object can resolve to the canonical keys — `nowcerts_insured_guid` (client), `policy_number` / `policy_guid` (policy), and the `agency_crm_cases.id` / `opportunities.id` surrogate keys. The old `espocrm_*_id` columns are dead; do not add new ones.
 
 ## Confirm-before-write implications
 

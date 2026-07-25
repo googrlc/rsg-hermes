@@ -140,8 +140,6 @@ category and freshness via `recorded_at`.
 |----------|----------|
 | `SUPABASE_URL` | Hermes Postgres + PostgREST base URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side Hermes only — full CRUD via RLS role binding |
-| `ESPO_URL` | the CRM REST API base URL |
-| `ESPO_API_KEY` | the CRM X-Api-Key authentication |
 | `SLACK_BOT_TOKEN` | Slack bot for posting messages |
 | `SLACK_APP_TOKEN` | Slack Socket Mode connection |
 | `OPENAI_API_KEY` | LLM inference (kept separate from CRM credentials) |

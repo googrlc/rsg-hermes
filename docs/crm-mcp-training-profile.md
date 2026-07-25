@@ -268,8 +268,6 @@ Hermes uses Supabase as a governance and staging layer alongside the CRM:
 
 | Variable | Purpose |
 |----------|---------|
-| `ESPO_URL` | the CRM REST API base URL |
-| `ESPO_API_KEY` | the CRM X-Api-Key authentication |
 | `SUPABASE_URL` | Supabase PostgREST base URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side CRUD via RLS |
 | `SLACK_BOT_TOKEN` | Slack message posting |
