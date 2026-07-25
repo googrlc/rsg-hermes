@@ -192,7 +192,7 @@ class SubmissionObject(BaseModel):
     # Incumbent / renewal spine (the XDATE-first additions).
     current_carrier: Optional[str] = None
     current_premium: Optional[float] = None
-    current_policy_expiration: Optional[date] = None   # XDATE -> Espo x_date
+    current_policy_expiration: Optional[date] = None   # XDATE
 
     intake: IntakeMeta
     applicant: Applicant = Field(default_factory=Applicant)
@@ -207,7 +207,7 @@ class SubmissionObject(BaseModel):
     enrichment: Enrichment = Field(default_factory=Enrichment)
     gate: GateResult = Field(default_factory=GateResult)
 
-    espocrm_account_id: Optional[str] = None
+    crm_account_id: Optional[str] = None
     created_at: datetime = Field(default_factory=_utcnow)
 
 
