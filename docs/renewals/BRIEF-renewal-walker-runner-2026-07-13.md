@@ -6,14 +6,19 @@
 **Companion docs:** `BRIEF-renewal-cadence-2026-07-09.md` · RSG Renewal Walker GPT Setup Kit v2 · RSG Renewal Worksheet template
 **Priority:** Revenue-critical. This is the 54.92% → 80% retention machine.
 
-> **⚠️ Superseded for the EXECUTION path (2026-07-15).** The *write* model here
-> ("no new Supabase tables · state on the CRM Opportunity · the `/walker/*` API is
-> the write path") is replaced by the **Hermes Renewal Executor — Job Contract v2**:
-> a queue-driven worker (`hermes/renewals/executor.py`) that executes only
-> human-approved instructions staged in `outbound_sync_queue` and writes receipts to
-> `renewal_execution_receipts`. See [`README.md`](./README.md) → *Renewal Executor —
-> Job Contract v2*. The Walker's **read + draft** workstation role below still stands;
-> only "who writes and from where" changed.
+> **⚠️ HISTORICAL — this design is retired (2026-07-24).** Read it for the cadence,
+> segment, and classification reasoning, which still hold. Do not build from it.
+>
+> - **The execution path was superseded 2026-07-15** by the **Hermes Renewal Executor
+>   — Job Contract v2**: a queue-driven worker (`hermes/renewals/executor.py`) that
+>   executes only human-approved instructions staged in `outbound_sync_queue` and
+>   writes receipts to `renewal_execution_receipts`.
+> - **The read + draft path was retired 2026-07-24.** The `/walker/*` API kept its
+>   whole retain layer in EspoCRM `Opportunity` custom fields; with EspoCRM removed as
+>   a data source the service was deleted rather than rebuilt. Renewals are worked in
+>   the cockpit.
+>
+> See [`README.md`](./README.md) for what actually runs.
 
 **What changed in v3:** ChatGPT Business is the agency workstation — everything sits on it. So the paste-block bridge dies, the Walker GPT gets an **Action wired to the Hermes bridge**, the worksheet stops being a file anywhere (Drive and canvas are both out — it's CRM state rendered by the Walker on demand), and Slack is demoted to doorbell + siren.
 

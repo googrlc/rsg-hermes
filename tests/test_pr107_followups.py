@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 from hermes.commands.renewal_worksheet import _candidates_by_name, escape_ilike
 from hermes.core.dispatcher import Dispatcher
 from hermes.operations import intake_worker as w
-from hermes.sync import pipeline
-from hermes.sync.pipeline import SyncRunResult
 
 
 # ------------------------------------------------- #109: escape ilike metachars
@@ -30,21 +27,8 @@ def test_candidates_by_name_uses_escaped_needle():
     assert params["eligibility_state"] == "neq.excluded"
 
 
-# ------------------------------------------------- #111: nowcerts guard on both drains
-
-def test_run_specific_processor_guards_nowcerts():
-    supa = MagicMock()
-    supa.select.return_value = []
-    pipeline._process_outbound_queue(supa, MagicMock(), run_id="r1", result=SyncRunResult())
-    assert supa.select.call_args.kwargs["params"]["destination_system"] == "neq.nowcerts"
-
-
-def test_drain_outbound_queue_guards_nowcerts():
-    supa = MagicMock()
-    supa.select.return_value = []
-    pipeline.drain_outbound_queue(supa, MagicMock())
-    assert supa.select.call_args.kwargs["params"]["destination_system"] == "neq.nowcerts"
-
+# (#111 covered the outbound processor's nowcerts guard in hermes/sync/pipeline.py,
+# deleted with the NowCerts → EspoCRM pipeline.)
 
 # ------------------------------------------------- #112: no success log after failed transition
 
@@ -55,14 +39,18 @@ def test_no_success_log_after_failed_completion_transition():
         "draft_summary": {"account": {"account_name": "Z"}, "opportunities": [{"line_of_business": "BOP"}]},
         "approved_by": "lamar",
     }
+    def _transition(supa, submission_id, status, **kwargs):
+        if status == "complete":
+            raise RuntimeError("boom")
+
     with patch.object(w, "_claim_next_approved", return_value=claimed), \
          patch("hermes.intake.commit.commit_draft",
                return_value={"opportunities": [], "opportunity_count": 0,
                              "intake_job_id": "j", "nextcloud_folder": None}), \
-         patch("hermes.integrations.intake_submissions.transition", side_effect=RuntimeError("boom")), \
+         patch("hermes.integrations.intake_submissions.transition", side_effect=_transition), \
+         patch("hermes.operations.agency_intake_approval._insert_retrieval_rows", return_value={}), \
          patch.object(w, "_safe_transition_to_failed") as stf, \
-         patch.object(w, "log") as logm, \
-         patch.dict(os.environ, {"HERMES_INTAKE_TARGET": "nowcerts"}):
+         patch.object(w, "log") as logm:
         assert w.process_one_approved(supa) is True
         stf.assert_called_once()
         assert stf.call_args.kwargs["stage"] == "complete-nowcerts-intake"

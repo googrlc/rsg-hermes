@@ -31,76 +31,6 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "search_records",
-            "description": (
-                "Search CRM records by name across any entity type. "
-                "Use this for questions like 'find Acme', 'who is John Smith', "
-                "'look up Atlas Protection Service'."
-            ),
-            "parameters": {
-                "type": "object",
-                "required": ["entity", "query"],
-                "properties": {
-                    "entity": {
-                        "type": "string",
-                        "enum": ["Account", "Contact", "Lead", "Opportunity", "Policy", "Task"],
-                        "description": "CRM entity type to search.",
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Search term (name or partial name).",
-                    },
-                    "fields": {
-                        "type": "string",
-                        "description": (
-                            "Comma-separated extra fields to return beyond id,name. "
-                            "Examples: phoneNumber,emailAddress,fein,website,amount,stage"
-                        ),
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_field_value",
-            "description": (
-                "Look up a specific field value for a CRM record. "
-                "Use for questions like 'what is Acme's FEIN', "
-                "'what is the DOT number for Trucking Inc', "
-                "'show me Atlas Protection's email'."
-            ),
-            "parameters": {
-                "type": "object",
-                "required": ["entity", "name_query", "field"],
-                "properties": {
-                    "entity": {
-                        "type": "string",
-                        "enum": ["Account", "Contact", "Lead", "Opportunity", "Policy"],
-                        "description": "CRM entity to search in.",
-                    },
-                    "name_query": {
-                        "type": "string",
-                        "description": "Name or partial name to search for.",
-                    },
-                    "field": {
-                        "type": "string",
-                        "description": (
-                            "CRM field name to retrieve. Common fields: "
-                            "fein, caDotNumber (DOT), caMcNumber (MC), phoneNumber, "
-                            "emailAddress, website, billingAddressStreet, industry, "
-                            "amount, stage, policyNumber, carrier, effectiveDate, "
-                            "expirationDate, lineOfBusiness, status, description"
-                        ),
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "run_report",
             "description": (
                 "Run a CRM report or dashboard view. "
@@ -127,26 +57,6 @@ _TOOLS: list[dict[str, Any]] = [
                             "commission_snapshot",
                         ],
                         "description": "Which report to generate.",
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "total_premium",
-            "description": (
-                "Calculate total premium for a specific account. "
-                "Use for 'total premium for Acme', 'how much premium does Trucking Inc have'."
-            ),
-            "parameters": {
-                "type": "object",
-                "required": ["account_name"],
-                "properties": {
-                    "account_name": {
-                        "type": "string",
-                        "description": "Account name to look up.",
                     },
                 },
             },
@@ -242,66 +152,6 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "create_record",
-            "description": (
-                "Create a new CRM record (Contact, Lead, Account, Opportunity, Task). "
-                "Use for 'add contact John Smith', 'create a lead for Jane Doe', "
-                "'add account Acme Corp'. Only include fields that were explicitly mentioned."
-            ),
-            "parameters": {
-                "type": "object",
-                "required": ["entity", "fields"],
-                "properties": {
-                    "entity": {
-                        "type": "string",
-                        "enum": ["Account", "Contact", "Lead", "Opportunity", "Task"],
-                        "description": "CRM entity type to create.",
-                    },
-                    "fields": {
-                        "type": "object",
-                        "description": (
-                            "Key-value pairs for the record. Common keys: "
-                            "name, firstName, lastName, phoneNumber, emailAddress, "
-                            "accountId, stage, status, description, amount"
-                        ),
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_record",
-            "description": (
-                "Update an existing CRM record by ID. "
-                "Use for 'update opportunity X stage to Closed Won', "
-                "'change the phone number for contact abc123'."
-            ),
-            "parameters": {
-                "type": "object",
-                "required": ["entity", "record_id", "fields"],
-                "properties": {
-                    "entity": {
-                        "type": "string",
-                        "enum": ["Account", "Contact", "Lead", "Opportunity", "Task", "Policy"],
-                        "description": "CRM entity type.",
-                    },
-                    "record_id": {
-                        "type": "string",
-                        "description": "The record ID to update.",
-                    },
-                    "fields": {
-                        "type": "object",
-                        "description": "Key-value pairs of fields to update.",
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "intake_lead",
             "description": (
                 "Process a casual lead intake message. Use when someone describes "
@@ -316,36 +166,6 @@ _TOOLS: list[dict[str, Any]] = [
                     "raw_text": {
                         "type": "string",
                         "description": "The original unstructured lead description.",
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "merge_records",
-            "description": (
-                "Merge duplicate CRM records. The source is merged into the target "
-                "and then deleted. Use for 'merge contact abc into def', "
-                "'these two accounts are duplicates'."
-            ),
-            "parameters": {
-                "type": "object",
-                "required": ["entity", "source_id", "target_id"],
-                "properties": {
-                    "entity": {
-                        "type": "string",
-                        "enum": ["Contact", "Account", "Lead", "Opportunity"],
-                        "description": "Entity type of both records.",
-                    },
-                    "source_id": {
-                        "type": "string",
-                        "description": "ID of the record to merge FROM (will be deleted).",
-                    },
-                    "target_id": {
-                        "type": "string",
-                        "description": "ID of the record to merge INTO (will be kept).",
                     },
                 },
             },
@@ -587,16 +407,9 @@ Your capabilities (use the tools — never guess at CRM data):
 - Merge duplicate records
 - List your own capabilities via list_skills when asked what you can do
 
-Field aliases you should know:
-- FEIN / EIN / tax ID → field "fein" on Account
-- DOT / DOT number → field "caDotNumber" on Account
-- MC number → field "caMcNumber" on Account
-- SIC → field "sicCode", NAICS → field "naicsCode"
-- LOB / line of business → field "lineOfBusiness"
-- premium → field "amount" on Opportunity
-
-When the user asks about a company or person, search the appropriate entity.
-When they ask for a specific data point, use get_field_value.
+When the user asks about a company or person, use find_client.
+When they ask what a client holds, use client_policies (or ams_client_snapshot
+when the answer must be live from the AMS).
 When they ask for a report or overview, use run_report.
 When they ask who renews soon, who's at risk, retention, or the save-list, use renewals_overview.
 When they ask to look a business up online, research a prospect, or "go to the web" for client data, use web_research.
@@ -637,45 +450,6 @@ def _compose_system_prompt(persona_key: str | None = None) -> str:
 # Tool execution
 # ---------------------------------------------------------------------------
 
-def _exec_search(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
-    entity = args["entity"]
-    query = args["query"]
-    extra = args.get("fields", "")
-    select = "id,name"
-    if extra:
-        select = f"{select},{extra}"
-
-    try:
-        hits = client.search(entity, query, max_size=10, select=select)
-    except Exception as exc:
-        return DispatchResult(False, f"Search failed: {exc}")
-
-    if not hits:
-        return DispatchResult(True, f'No {entity} records matching "{query}".')
-
-    lines = [f"*{entity} search: \"{query}\"* ({len(hits)} result{'s' if len(hits) != 1 else ''})"]
-    for rec in hits:
-        name = rec.get("name", "?")
-        rec_id = rec.get("id", "?")
-        details = []
-        for key, val in rec.items():
-            if key in ("id", "name", "deleted") or val is None or val == "":
-                continue
-            details.append(f"{key}: {val}")
-        detail_str = " | ".join(details[:6])
-        lines.append(f"  *{name}* (id: {rec_id})" + (f" — {detail_str}" if detail_str else ""))
-    return DispatchResult(True, "\n".join(lines), {"results": hits})
-
-
-def _exec_get_field(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
-    from hermes.commands.lookup import _field_lookup, _resolve_field_name
-    field_hint = args["field"]
-    name_query = args["name_query"]
-    entity_hint = args.get("entity")
-    field_name = _resolve_field_name(field_hint)
-    return _field_lookup(client, field_name, name_query, entity_hint)
-
-
 def _exec_report(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
     report_type = args["report_type"]
     report_commands = {
@@ -692,11 +466,6 @@ def _exec_report(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
     }
     command = report_commands.get(report_type, report_type)
     return _get_report_dispatcher().dispatch(client, command)
-
-
-def _exec_total_premium(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
-    from hermes.commands.lookup import handle
-    return handle(client, f"total premium for {args['account_name']}")
 
 
 def _exec_list_skills(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
@@ -1200,58 +969,6 @@ def _exec_list_intake(client: "EspoClient", args: dict[str, Any]) -> DispatchRes
                           {"submissions": rows})
 
 
-def _exec_create(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
-    entity = args["entity"]
-    fields = args.get("fields", {})
-    if not confirmed:
-        field_summary = ", ".join(f"{k}={v}" for k, v in fields.items())
-        return DispatchResult(
-            False,
-            f"I would create a new {entity} with: {field_summary}. Confirm to proceed.",
-            {"requires_confirmation": True, "action": "create", "entity": entity, "fields": fields},
-        )
-    from hermes.commands.data_entry import _apply_workflow_defaults, _find_existing
-    existing = _find_existing(client, entity, fields)
-    if existing:
-        existing_id = str(existing["id"])
-        try:
-            record = client.update(entity, existing_id, fields)
-        except Exception as exc:
-            return DispatchResult(False, f"Failed to update existing {entity} {existing_id}: {exc}")
-        return DispatchResult(
-            True,
-            f"Found existing {entity} *{existing.get('name', existing_id)}* — updated instead of creating a duplicate.",
-            {"record": record if isinstance(record, dict) else {"result": record}, "dedupe": existing},
-        )
-    payload = _apply_workflow_defaults(client, entity, fields)
-    try:
-        result = client.create(entity, payload)
-    except Exception as exc:
-        return DispatchResult(False, f"Failed to create {entity}: {exc}")
-    rec_id = result.get("id", "?") if isinstance(result, dict) else "?"
-    name = result.get("name", "") if isinstance(result, dict) else ""
-    return DispatchResult(True, f"Created {entity}: *{name}* (id: {rec_id})", {"record": result})
-
-
-def _exec_update(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
-    entity = args["entity"]
-    record_id = args["record_id"]
-    fields = args.get("fields", {})
-    if not confirmed:
-        field_summary = ", ".join(f"{k}={v}" for k, v in fields.items())
-        return DispatchResult(
-            False,
-            f"I would update {entity} {record_id} with: {field_summary}. Confirm to proceed.",
-            {"requires_confirmation": True, "action": "update", "entity": entity, "record_id": record_id, "fields": fields},
-        )
-    try:
-        result = client.update(entity, record_id, fields)
-    except Exception as exc:
-        return DispatchResult(False, f"Failed to update {entity} {record_id}: {exc}")
-    name = result.get("name", record_id) if isinstance(result, dict) else record_id
-    return DispatchResult(True, f"Updated {entity}: *{name}*", {"record": result})
-
-
 def _exec_intake(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
     raw_text = args["raw_text"]
     if not confirmed:
@@ -1262,20 +979,6 @@ def _exec_intake(client: "EspoClient", args: dict[str, Any], *, confirmed: bool 
         )
     from hermes.commands.intake import handle as intake_handle
     return intake_handle(client, f"intake {raw_text}")
-
-
-def _exec_merge(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
-    entity = args["entity"]
-    source_id = args["source_id"]
-    target_id = args["target_id"]
-    if not confirmed:
-        return DispatchResult(
-            False,
-            f"I would merge {entity} {source_id} into {target_id} (source will be deleted). Confirm to proceed.",
-            {"requires_confirmation": True, "action": "merge", "entity": entity, "source_id": source_id, "target_id": target_id},
-        )
-    from hermes.commands.merge import handle as merge_handle
-    return merge_handle(client, f"merge {entity.lower()} {source_id} into {target_id}")
 
 
 def _exec_email_search(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
@@ -1331,18 +1034,12 @@ def _exec_email_search(client: "EspoClient", args: dict[str, Any]) -> DispatchRe
 
 
 _EXECUTORS: dict[str, Any] = {
-    "search_records": _exec_search,
-    "get_field_value": _exec_get_field,
     "run_report": _exec_report,
-    "total_premium": _exec_total_premium,
     "renewals_overview": _exec_renewals,
     "web_research": _exec_web_research,
     "list_skills": _exec_list_skills,
     "email_search": _exec_email_search,
-    "create_record": _exec_create,
-    "update_record": _exec_update,
     "intake_lead": _exec_intake,
-    "merge_records": _exec_merge,
     "list_carriers": _exec_list_carriers,
     "match_carrier_appetite": _exec_carrier_appetite,
     "commission_summary": _exec_commission_summary,
@@ -1355,7 +1052,7 @@ _EXECUTORS: dict[str, Any] = {
     "list_intake_submissions": _exec_list_intake,
 }
 
-_WRITE_TOOLS = {"create_record", "update_record", "intake_lead", "merge_records"}
+_WRITE_TOOLS = {"intake_lead"}
 
 # ---------------------------------------------------------------------------
 # Per-hub AI scoping — each hub gets its own assistant that only carries that

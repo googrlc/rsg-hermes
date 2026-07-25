@@ -107,13 +107,6 @@ try:
 except Exception:  # pragma: no cover - surfaced in logs, never fatal
     log.exception("extract routes unavailable")
 
-# Walker on-demand renewal API (no scheduler, no timers).
-try:
-    from hermes.walker.router import router as _walker_router
-    app.include_router(_walker_router)
-except Exception:  # pragma: no cover - surfaced in logs, never fatal
-    log.exception("walker routes unavailable")
-
 _espo = None
 _dispatcher = None
 _supa = None
@@ -176,18 +169,9 @@ def _get_supa():
     return _supa
 
 
-class CRMWriteDispatchRequest(BaseModel):
-    entity_type: str
-    entity_id: str | None = None
-    payload: dict[str, Any]
-    created_by_role: str = "dashboard"
-    priority: int = 1
-
-
 class DispatchRequest(BaseModel):
     command: str | None = None
     confirm: bool = False
-    crm_write: CRMWriteDispatchRequest | None = None
 
 
 class DispatchResponse(BaseModel):
@@ -379,35 +363,7 @@ async def dispatch(req: DispatchRequest):
 
 @app.post("/api/hermes/dispatch", response_model=AsyncAcceptedResponse)
 async def dashboard_dispatch(req: DispatchRequest):
-    """Dashboard async dispatch entrypoint.
-
-    - CRM mutations are queued into crm_write_queue and return HTTP 202.
-    """
-    if req.crm_write is not None:
-        from hermes.operations.crm_queue_worker import enqueue_crm_write
-
-        try:
-            row = enqueue_crm_write(
-                _get_supa(),
-                entity_type=req.crm_write.entity_type,
-                entity_id=req.crm_write.entity_id,
-                payload=req.crm_write.payload,
-                created_by_role=req.crm_write.created_by_role,
-                priority=req.crm_write.priority,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return JSONResponse(
-            status_code=202,
-            content=_model_dict(AsyncAcceptedResponse(
-                ok=True,
-                message="CRM write queued for Hermes worker.",
-                task_id=str(row.get("id")),
-                queue_name="crm_write_queue",
-                status="PENDING",
-            )),
-        )
-
+    """Dashboard async dispatch entrypoint."""
     if req.command and req.command.strip():
         # Backward compatible command execution for clients that still send command-only payloads.
         result = await dispatch(req)
@@ -421,7 +377,7 @@ async def dashboard_dispatch(req: DispatchRequest):
                 status="ACCEPTED",
             )),
         )
-    raise HTTPException(status_code=400, detail="Provide either crm_write or command.")
+    raise HTTPException(status_code=400, detail="Provide a command.")
 
 
 @app.get("/api/command-center/renewals")
@@ -1778,48 +1734,55 @@ async def sync_health():
             log.warning("sync-health: %s (%s) unavailable: %s", table, state, exc)
             return None
 
-    pending = _count("crm_write_queue", "PENDING")
-    if pending is None:
+    queued = _count("outbound_sync_queue", "queued")
+    if queued is None:
         status = "degraded"
-        queue = {"unavailable": "crm_write_queue not found in schema"}
+        queue = {"unavailable": "outbound_sync_queue not found in schema"}
     else:
         queue = {
-            "pending": pending,
-            "processing": _count("crm_write_queue", "PROCESSING"),
-            "failed": _count("crm_write_queue", "FAILED"),
+            "queued": queued,
+            "failed": _count("outbound_sync_queue", "failed"),
+            "dead": _count("outbound_sync_queue", "dead"),
         }
 
+    # Freshness: the most recent job the AMS executors actually finished.
     try:
-        latest_run = supa.select("sync_runs", params={"order": "created_at.desc"}, limit=1)
-        latest = latest_run[0] if latest_run else {}
-        latest_sync_run = {
+        recent = supa.select(
+            "outbound_sync_queue",
+            columns="id,object_type,destination_system,status,updated_at",
+            params={"status": "eq.completed", "order": "updated_at.desc"},
+            limit=1,
+        )
+        latest = recent[0] if recent else {}
+        latest_completed = {
             "id": latest.get("id"),
-            "status": latest.get("status"),
-            "workflow_name": latest.get("workflow_name"),
-            "finished_at": latest.get("finished_at"),
+            "object_type": latest.get("object_type"),
+            "destination_system": latest.get("destination_system"),
+            "updated_at": latest.get("updated_at"),
         }
     except Exception as exc:  # noqa: BLE001
-        log.warning("sync-health: sync_runs unavailable: %s", exc)
+        log.warning("sync-health: outbound_sync_queue history unavailable: %s", exc)
         status = "degraded"
-        latest_sync_run = {"unavailable": str(exc)[:200]}
+        latest_completed = {"unavailable": str(exc)[:200]}
 
     return {
         "status": status,
-        "crm_write_queue": queue,
-        "latest_sync_run": latest_sync_run,
+        "outbound_sync_queue": queue,
+        "latest_completed": latest_completed,
     }
 
 
 # ---------------------------------------------------------------------------
-# Book-sync health — compares actual book of business across NowCerts, EspoCRM
-# and Supabase. Read-only; complements /api/hermes/sync-health (queue depth).
+# Book-sync health — compares the actual book of business in NowCerts against
+# the canonical Supabase mirror. Read-only; complements /api/hermes/sync-health
+# (queue depth).
 # See hermes/book_sync/health.py.
 # ---------------------------------------------------------------------------
 
 
 @app.get("/api/hermes/book-sync")
 async def book_sync_health(request: Request, max_pages: int = 50):
-    """Drift report: policy counts, per-carrier premium, orphans, rate drift.
+    """Drift report: policy counts, tombstones, per-carrier premium, rate drift.
 
     Gated by HERMES_API_TOKEN bearer (skipped if env var unset).
 
@@ -1832,7 +1795,6 @@ async def book_sync_health(request: Request, max_pages: int = 50):
     try:
         report = run_book_sync_health(
             nowcerts_client=_get_nowcerts(),
-            espo_client=_get_espo(),
             supa=_get_supa(),
             max_pages=max_pages,
         )
@@ -1912,108 +1874,6 @@ async def ams_search_insured(
         "count": len(matches),
         "matches": matches,
     }
-
-
-# ---------------------------------------------------------------------------
-# CRM change proposals — staged EspoCRM field edits awaiting in-chat approval.
-# Approve enqueues a crm_write_queue row; the hermes-crm-queue-worker commits to
-# EspoCRM. Nothing here writes to EspoCRM directly. See operations/crm_proposals.py.
-# ---------------------------------------------------------------------------
-
-
-class CRMProposalCreateRequest(BaseModel):
-    entity: str
-    after: dict[str, Any]
-    op: str = "upsert"
-    match_key: str | None = None
-    espocrm_id: str | None = None
-    before: dict[str, Any] | None = None
-    rationale: str | None = None
-    confidence: float | None = None
-    source: str | None = None
-    proposed_by: str = "agent"
-
-
-class CRMProposalApproveRequest(BaseModel):
-    reviewer: str = "lamar"
-
-
-class CRMProposalRejectRequest(BaseModel):
-    reviewer: str = "lamar"
-    reason: str | None = None
-
-
-@app.post("/api/crm/proposals")
-async def crm_proposals_create(req: CRMProposalCreateRequest):
-    """Stage a proposed EspoCRM field edit (status=pending) for later approval.
-
-    `after` must use EspoCRM field names (load the espocrm field-reference skill
-    first). For op=upsert/update, espocrm_id is required; for op=create it must be
-    absent. No EspoCRM write happens here.
-    """
-    from hermes.operations.crm_proposals import ProposalError, create_proposal
-    try:
-        return create_proposal(
-            _get_supa(),
-            entity=req.entity,
-            after=req.after,
-            op=req.op,
-            match_key=req.match_key,
-            espocrm_id=req.espocrm_id,
-            before=req.before,
-            rationale=req.rationale,
-            confidence=req.confidence,
-            source=req.source,
-            proposed_by=req.proposed_by,
-        )
-    except ProposalError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
-    except Exception as exc:
-        log.exception("crm_proposals_create failed")
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/api/crm/proposals")
-async def crm_proposals_list(status: str | None = None, limit: int = 50):
-    """List proposals, optionally filtered by status. Pending first by default."""
-    from hermes.operations.crm_proposals import list_proposals
-    try:
-        rows = list_proposals(_get_supa(), status=status, limit=limit)
-        return {"proposals": rows, "count": len(rows)}
-    except Exception as exc:
-        log.exception("crm_proposals_list failed")
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/api/crm/proposals/{proposal_id}/approve")
-async def crm_proposals_approve(proposal_id: str, req: CRMProposalApproveRequest):
-    """Approve a pending proposal: enqueue a crm_write_queue row.
-
-    The hermes-crm-queue-worker commits the enqueued row to EspoCRM asynchronously
-    (hooks/ACL/Stream fire through EspoClient). This endpoint is the in-chat
-    committer — it never bypasses staging or the review gate.
-    """
-    from hermes.operations.crm_proposals import ProposalError, approve_proposal
-    try:
-        return approve_proposal(_get_supa(), proposal_id, reviewer=req.reviewer, espo=_get_espo())
-    except ProposalError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
-    except Exception as exc:
-        log.exception("crm_proposals_approve failed for %s", proposal_id)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/api/crm/proposals/{proposal_id}/reject")
-async def crm_proposals_reject(proposal_id: str, req: CRMProposalRejectRequest):
-    """Reject a pending (or not-yet-committed approved) proposal. No write occurs."""
-    from hermes.operations.crm_proposals import ProposalError, reject_proposal
-    try:
-        return reject_proposal(_get_supa(), proposal_id, reviewer=req.reviewer, reason=req.reason)
-    except ProposalError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
-    except Exception as exc:
-        log.exception("crm_proposals_reject failed for %s", proposal_id)
-        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -2187,7 +2047,6 @@ async def agency_fact(req: AgencyFactRequest):
 
     try:
         answer = fact_retriever.retrieve(
-            _get_espo(),
             _get_supa(),
             entity_name=entity,
             fact_label=fact_label,
@@ -2308,58 +2167,6 @@ def _get_slack_web_client():
 
 
 # ---------------------------------------------------------------------------
-@app.post("/renewals/complete")
-async def renewals_complete_webhook(request: Request):
-    """EspoCRM service.task_completed webhook for Renewal tasks.
-
-    Auth is the shared X-Service-Webhook-Secret header (EspoCRM config
-    serviceWebhookSecret == Hermes env SERVICE_WEBHOOK_SECRET).
-    """
-    from hermes.renewals import complete as renewals_complete
-
-    if not renewals_complete.verify_secret(request.headers.get("X-Service-Webhook-Secret")):
-        raise HTTPException(status_code=401, detail="bad webhook secret")
-    return renewals_complete.handle(await request.json())
-
-
-@app.post("/api/hermes/nowcerts-enrich")
-async def nowcerts_enrich_webhook(request: Request):
-    """EspoCRM webhook: enrich the linked NowCerts insured from an ACTIVE account.
-
-    Auth: shared X-Service-Webhook-Secret header (== SERVICE_WEBHOOK_SECRET).
-    Enrich-only — only accounts with lifecycle_status=Active and a
-    momentum_client_id are pushed, via NowCerts upsert-by-DatabaseId, so it can
-    never create a new insured. Add ?dry_run=1 to preview the payload without
-    writing to the AMS. Accepts an EspoCRM webhook array or a single record.
-    """
-    from hermes.renewals import complete as renewals_complete
-
-    if not renewals_complete.verify_secret(request.headers.get("X-Service-Webhook-Secret")):
-        raise HTTPException(status_code=401, detail="bad webhook secret")
-
-    body = await request.json()
-    records = body if isinstance(body, list) else [body]
-    ids = [
-        (r.get("id") or r.get("accountId") or r.get("entityId"))
-        for r in records
-        if isinstance(r, dict) and (r.get("id") or r.get("accountId") or r.get("entityId"))
-    ]
-    if not ids:
-        raise HTTPException(status_code=400, detail="no account id in webhook payload")
-
-    dry = str(request.query_params.get("dry_run", "")).lower() in ("1", "true", "yes")
-
-    from hermes.core.client import EspoClient
-    from hermes.sync.enrich import enrich_insured_from_account
-    from hermes.sync.nowcerts_client import NowCertsClient
-
-    espo = EspoClient()
-    nc = NowCertsClient()
-    results = [enrich_insured_from_account(espo, nc, i, dry_run=dry) for i in ids]
-    return {"count": len(results), "dry_run": dry, "results": results}
-
-
-
 # ---------------------------------------------------------------------------
 # Voice output — TTS endpoint for Slack voice clips.
 # ---------------------------------------------------------------------------
@@ -2467,8 +2274,8 @@ def main() -> int:
 
     if not os.environ.get("SERVICE_WEBHOOK_SECRET", "").strip():
         log.warning(
-            "SERVICE_WEBHOOK_SECRET is not set — all /renewals/complete and "
-            "service webhook requests will be rejected (401). "
+            "SERVICE_WEBHOOK_SECRET is not set — all service webhook "
+            "requests will be rejected (401). "
             "Set it in .env and recreate the container with "
             "`docker compose up -d hermes-api` (restart does not reload env_file)."
         )

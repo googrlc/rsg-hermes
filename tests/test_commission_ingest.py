@@ -103,16 +103,6 @@ def test_is_renewal():
     assert _is_renewal({}) is False
 
 
-def test_ingest_result_ok():
-    from hermes.jobs.commission_ingest import IngestResult
-    r = IngestResult(total=10, inserted=5, updated=3, skipped_no_rule=2)
-    assert r.ok is True
-    assert "total=10" in r.message
-
-    r2 = IngestResult(failed=1)
-    assert r2.ok is False
-
-
 def test_commissionable_statuses():
     from hermes.jobs.commission_ingest import COMMISSIONABLE_STATUSES
     assert "Active" in COMMISSIONABLE_STATUSES

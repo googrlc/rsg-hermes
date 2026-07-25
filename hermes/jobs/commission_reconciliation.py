@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from hermes.core.client import EspoClient, EspoClientError
+from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
 
 
@@ -28,7 +28,7 @@ class ReconciliationResult:
 
 
 def run_reconciliation(
-    client: EspoClient,
+    supa: SupabaseClient,
     *,
     statement_path: str,
     notifier: SlackNotifier | None = None,
@@ -38,7 +38,7 @@ def run_reconciliation(
     if not path.exists():
         return ReconciliationResult(False, False, f"Statement file not found: {path}", [], 0, 0, [], [])
     parsed_rows, parse_warnings = _parse_statement(path)
-    policy_index, fetch_warnings = _policy_index(client)
+    policy_index, fetch_warnings = _policy_index(supa)
     discrepancies, matched_count, unmatched_policy_numbers = _analyze_statement(parsed_rows, policy_index)
     warnings = [*parse_warnings, *fetch_warnings]
     text, blocks = _build_slack_payload(
@@ -85,54 +85,6 @@ def run_reconciliation(
         unmatched_policy_numbers,
         warnings,
     )
-
-
-def build_dispute_action_value(*, policy_id: str, policy_number: str, carrier: str) -> str:
-    return json.dumps(
-        {
-            "policy_id": policy_id,
-            "policy_number": policy_number,
-            "carrier": carrier,
-        },
-        separators=(",", ":"),
-    )
-
-
-def handle_dispute_action(*, client: EspoClient, action: str, action_value: str) -> str:
-    if action != "commission_create_dispute":
-        return "Unknown commission reconciliation action."
-    payload = _parse_dispute_action_value(action_value)
-    assigned_user_id = (
-        os.environ.get("HERMES_COMMISSION_TASK_ASSIGNEE_ID", "").strip()
-        or os.environ.get("HERMES_SENTINEL_GRETCHEN_USER_ID", "").strip()
-    )
-    task: dict[str, Any] = {
-        "name": f"Commission dispute: Policy {payload['policy_number']}",
-        "status": "Not Started",
-        "description": (
-            f"Carrier reconciliation discrepancy for policy {payload['policy_number']} "
-            f"(Carrier: {payload['carrier'] or 'Unknown'})."
-        ),
-    }
-    if assigned_user_id:
-        task["assignedUserId"] = assigned_user_id
-    client.create("Task", task)
-    return "Dispute task created."
-
-
-def _parse_dispute_action_value(raw_value: str) -> dict[str, str]:
-    try:
-        data = json.loads(raw_value)
-    except json.JSONDecodeError as e:
-        raise ValueError("Invalid dispute action payload.") from e
-    if not isinstance(data, dict):
-        raise ValueError("Invalid dispute action payload shape.")
-    policy_number = str(data.get("policy_number") or "").strip()
-    policy_id = str(data.get("policy_id") or "").strip()
-    carrier = str(data.get("carrier") or "").strip()
-    if not policy_number:
-        raise ValueError("Dispute action payload missing policy number.")
-    return {"policy_number": policy_number, "policy_id": policy_id, "carrier": carrier}
 
 
 def _parse_statement(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
@@ -208,41 +160,38 @@ def _parse_pdf(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return rows, []
 
 
-def _policy_index(client: EspoClient) -> tuple[dict[str, dict[str, Any]], list[str]]:
+def _policy_index(supa: SupabaseClient) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Expected commission per policy, from the Supabase commission_ledger.
+
+    The ledger is the reconciliation workspace: `expected_commission` is seeded
+    from the canonical NowCerts book by `hermes/sync/commission_sync.py`, and a
+    carrier statement is matched against it here.
+    """
     warnings: list[str] = []
     try:
-        body = client.get("Policy", params={"maxSize": 500})
-    except EspoClientError as e:
+        rows = supa.select(
+            "commission_ledger",
+            columns="id,policy_number,carrier_name,expected_commission,gross_premium",
+            limit=5000,
+        )
+    except SupabaseClientError as e:
         return {}, [str(e)]
-    rows = body.get("list", []) if isinstance(body, dict) else []
+
     index: dict[str, dict[str, Any]] = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
-        raw_candidates = [
-            _pick(row, "policyNumber", "policy_number"),
-            _pick(row, "caCurrentPolicyNum", "currentPolicyNumber", "current_policy_number"),
-            _pick(row, "name"),
-            _pick(row, "id"),
-        ]
-        candidates = [str(x).strip() for x in raw_candidates if x not in ("", None)]
-        if not candidates:
+        policy_number = str(row.get("policy_number") or "").strip()
+        if not policy_number:
             continue
-        expected = _as_money(_pick(row, "commissionAmount", "commission_amount"))
-        if expected <= 0:
-            premium = _as_money(_pick(row, "premiumAmount", "premium_amount", "amount"))
-            rate = _as_percent(_pick(row, "commissionRate", "commission_rate"))
-            expected = (premium * rate) / Decimal("100")
-        canonical = candidates[0]
         payload = {
             "policy_id": str(row.get("id") or ""),
-            "policy_number": canonical,
-            "carrier": str(_pick(row, "carrier") or ""),
-            "expected_commission": expected,
+            "policy_number": policy_number,
+            "carrier": str(row.get("carrier_name") or ""),
+            "expected_commission": _as_money(row.get("expected_commission")),
         }
-        for candidate in candidates:
-            for key in _matching_keys(candidate):
-                index[key] = payload
+        for key in _matching_keys(policy_number):
+            index[key] = payload
     return index, warnings
 
 
@@ -365,23 +314,6 @@ def _build_slack_payload(
                         f"paid `${row['paid_commission']:,.0f}`, expected `${row['expected_commission']:,.0f}`."
                     ),
                 },
-            }
-        )
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Create dispute task"},
-                        "action_id": "commission_create_dispute",
-                        "value": build_dispute_action_value(
-                            policy_id=row["policy_id"],
-                            policy_number=row["policy_number"],
-                            carrier=str(row.get("carrier") or ""),
-                        ),
-                    }
-                ],
             }
         )
     return text, blocks

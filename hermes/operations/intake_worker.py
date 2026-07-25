@@ -260,12 +260,7 @@ def process_one_received(supa: SupabaseClient) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Worker loop
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Arc 2: approved -> writing (enqueue CRM writes; crm_queue_worker POSTs)
+# Arc 2: approved -> committed to NowCerts + Supabase
 # ---------------------------------------------------------------------------
 
 
@@ -314,16 +309,16 @@ def _claim_next_approved(supa: SupabaseClient) -> dict[str, Any] | None:
 
 
 def process_one_approved(supa: SupabaseClient) -> bool:
-    """Enqueue CRM writes for one approved submission; transition to 'writing'.
+    """Commit one approved submission to NowCerts + Supabase.
 
-    The crm_queue_worker (a separate process) actually POSTs to EspoCRM.
-    ``process_writing_check`` (below) advances the row to written → complete
-    once those queue rows reach terminal status.
+    Walks the row approved -> writing -> written -> complete in a single pass:
+    ``commit_draft`` creates the opportunities and stages the NowCerts insured,
+    then the retrieval rows (client_entities / client_facts / client_notes) are
+    inserted so a lookup answers from this submission the moment it lands.
     """
-    # Imported here to avoid circular-import: agency_intake_approval imports
-    # this module too (no, it doesn't — but kept here for symmetry with the
-    # retrieval-inserts call further down).
-    from hermes.operations.agency_intake_approval import _enqueue_crm_writes
+    from hermes.integrations.intake_submissions import transition
+    from hermes.intake.commit import commit_draft
+    from hermes.operations.agency_intake_approval import _insert_retrieval_rows
 
     claimed = _claim_next_approved(supa)
     if claimed is None:
@@ -335,233 +330,63 @@ def process_one_approved(supa: SupabaseClient) -> bool:
     draft_summary = claimed.get("draft_summary") or {}
     approver = claimed.get("approved_by") or "system"
 
-    # Intake target: NowCerts (record of truth) + Supabase pipeline is the active
-    # architecture; the legacy EspoCRM enqueue is kept behind the flag for rollback.
-    if os.environ.get("HERMES_INTAKE_TARGET", "nowcerts").strip().lower() == "nowcerts":
-        from hermes.integrations.intake_submissions import transition
-        from hermes.intake.commit import commit_draft
-
-        try:
-            result = commit_draft(supa, draft_summary, approved_by=approver)
-        except Exception as exc:
-            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="commit-nowcerts-intake")
-            return True
-        try:
-            supa.update(
-                TABLE, submission_id,
-                {"records_created": {
-                    "target": "nowcerts",
-                    "opportunities": [r.get("id") for r in result.get("opportunities", [])],
-                    "intake_job_id": result.get("intake_job_id"),
-                    "nextcloud_folder": result.get("nextcloud_folder"),
-                }},
-            )
-            # writing -> written -> complete (opportunities created now; the
-            # NowCerts insured create is a separate approval-gated executor job).
-            transition(supa, submission_id, "written",
-                       note="intake opportunities created; NowCerts insured staged")
-            transition(supa, submission_id, "complete",
-                       note=f"intake committed to NowCerts+Supabase by {approver}")
-        except Exception as exc:
-            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="complete-nowcerts-intake")
-            return True  # #112: do NOT fall through to the success log after a failed transition
-        log.info(
-            "Submission %s committed to NowCerts+Supabase (%d opportunities, intake_job=%s)",
-            submission_id, result.get("opportunity_count", 0), result.get("intake_job_id"),
-        )
-        return True
-
     try:
-        queue_ids, write_plan = _enqueue_crm_writes(
-            supa, draft_summary,
-            created_by_role=f"agency-intake:{approver}:submission-{submission_id}",
-        )
+        result = commit_draft(supa, draft_summary, approved_by=approver)
     except Exception as exc:
-        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="enqueue-crm-writes")
+        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="commit-nowcerts-intake")
         return True
 
-    # Stash queue_ids in records_created so the writing arc can resolve
-    # them. The dict shape will be augmented with espo_records once the
-    # queue rows terminate, and finally with retrieval_row_ids on complete.
+    records_created: dict[str, Any] = {
+        "target": "nowcerts",
+        "opportunities": [r.get("id") for r in result.get("opportunities", [])],
+        "intake_job_id": result.get("intake_job_id"),
+        "nextcloud_folder": result.get("nextcloud_folder"),
+    }
     try:
-        supa.update(
-            TABLE, submission_id,
-            {"records_created": {"queue_ids": queue_ids, "write_plan": write_plan}},
-        )
-    except SupabaseClientError as exc:
-        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="stash-queue-ids")
+        supa.update(TABLE, submission_id, {"records_created": records_created})
+        # writing -> written (opportunities created now; the NowCerts insured
+        # create is a separate approval-gated executor job).
+        transition(supa, submission_id, "written",
+                   note="intake opportunities created; NowCerts insured staged")
+    except Exception as exc:
+        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="written-transition")
         return True
+
+    retrieval_ids: dict[str, list[str]] = {}
+    try:
+        retrieval_ids = _insert_retrieval_rows(supa, draft_summary)
+        records_created["retrieval_row_ids"] = retrieval_ids
+    except Exception as exc:
+        log.exception("Retrieval insert failed for submission %s", submission_id)
+        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="retrieval-inserts")
+        return True
+
+    try:
+        transition(supa, submission_id, "complete",
+                   note=f"intake committed to NowCerts+Supabase by {approver}",
+                   extra_fields={"records_created": records_created})
+    except Exception as exc:
+        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="complete-nowcerts-intake")
+        return True  # #112: do NOT fall through to the success log after a failed transition
 
     log.info(
-        "Submission %s enqueued %d CRM writes; awaiting crm_queue_worker",
-        submission_id, len(queue_ids),
+        "Submission %s committed to NowCerts+Supabase (%d opportunities, intake_job=%s)",
+        submission_id, result.get("opportunity_count", 0), result.get("intake_job_id"),
+    )
+
+    # Completion post to the draft channel for Gretchen's visibility.
+    retrieval_summary = ", ".join(
+        f"{k}={len(v)}" for k, v in retrieval_ids.items() if v
+    ) or "(none)"
+    _post_alert(
+        f":white_check_mark: Hermes intake complete\n"
+        f"- submission_id: {submission_id}\n"
+        f"- opportunities: {result.get('opportunity_count', 0)}\n"
+        f"- Retrieval rows: {retrieval_summary}",
+        channel=_intake_draft_channel(),
     )
     return True
 
-
-# ---------------------------------------------------------------------------
-# Arc 3: writing -> written -> complete
-# ---------------------------------------------------------------------------
-
-
-def _resolve_queue_outcomes(
-    supa: SupabaseClient, queue_ids: list[str]
-) -> tuple[bool, list[dict[str, Any]], list[str]]:
-    """Look up crm_write_queue rows. Returns (all_terminal, success_records, failures).
-
-    ``success_records`` is a list of dicts with keys queue_id, entity_type,
-    entity_id (resolved from crm_receipts.transaction_id when needed).
-    """
-    if not queue_ids:
-        return True, [], []
-
-    in_filter = ",".join(queue_ids)
-    rows = supa.select(
-        "crm_write_queue",
-        columns="id,entity_type,entity_id,status",
-        params={"id": f"in.({in_filter})"},
-        limit=len(queue_ids) + 5,
-    )
-    by_id = {str(r["id"]): r for r in rows}
-
-    success: list[dict[str, Any]] = []
-    failures: list[str] = []
-    all_terminal = True
-
-    for qid in queue_ids:
-        row = by_id.get(qid)
-        if not row:
-            # Queue row not yet visible (rare timing); treat as not-terminal.
-            all_terminal = False
-            continue
-        status = (row.get("status") or "").upper()
-        if status == "SUCCESS":
-            entity_id = row.get("entity_id")
-            if not entity_id:
-                # New record — recover Espo ID from crm_receipts.transaction_id.
-                receipts = supa.select(
-                    "crm_receipts",
-                    columns="queue_id,transaction_id,entity_id",
-                    params={"queue_id": f"eq.{qid}"},
-                    limit=1,
-                )
-                if receipts:
-                    tx = str(receipts[0].get("transaction_id") or "")
-                    entity_id = (
-                        tx[5:] if tx.startswith("espo_")
-                        else receipts[0].get("entity_id") or tx or None
-                    )
-            success.append({
-                "queue_id": qid,
-                "entity_type": row.get("entity_type"),
-                "entity_id": entity_id,
-            })
-        elif status in {"FAILED", "BLOCKED"}:
-            failures.append(qid)
-        else:
-            all_terminal = False
-    return all_terminal, success, failures
-
-
-def process_writing_check(supa: SupabaseClient) -> int:
-    """Advance any submission in ``writing`` whose CRM writes have settled.
-
-    Returns the number of submissions advanced (to written or failed).
-    """
-    from hermes.operations.agency_intake_approval import _insert_retrieval_rows
-
-    candidates = supa.select(
-        TABLE,
-        columns="id,records_created,draft_summary,status_history",
-        params={"status": "eq.writing", "order": "created_at.asc"},
-        limit=10,
-    )
-    advanced = 0
-    for row in candidates:
-        submission_id = str(row["id"])
-        stash = row.get("records_created") or {}
-        queue_ids = stash.get("queue_ids") if isinstance(stash, dict) else None
-        if not queue_ids:
-            log.warning(
-                "Submission %s in writing but has no queue_ids stashed — skipping",
-                submission_id,
-            )
-            continue
-
-        all_terminal, success, failures = _resolve_queue_outcomes(supa, queue_ids)
-        if not all_terminal:
-            continue  # still in flight
-
-        if failures:
-            _safe_transition_to_failed(
-                supa, submission_id,
-                exc=Exception(
-                    f"{len(failures)} of {len(queue_ids)} CRM writes failed permanently: "
-                    f"{failures}"
-                ),
-                stage="crm-writes",
-            )
-            advanced += 1
-            continue
-
-        # Walk writing -> written.
-        try:
-            transition(
-                supa, submission_id, "written",
-                note=f"{len(success)} CRM records written",
-                extra_fields={
-                    "records_created": {
-                        "queue_ids": queue_ids,
-                        "espo_records": success,
-                    },
-                },
-            )
-        except (IntakeError, SupabaseClientError) as exc:
-            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="written-transition")
-            advanced += 1
-            continue
-
-        # Retrieval inserts → client_entities / client_facts / client_notes.
-        retrieval_ids: dict[str, list[str]] = {}
-        try:
-            retrieval_ids = _insert_retrieval_rows(supa, row.get("draft_summary") or {})
-        except Exception as exc:
-            log.exception("Retrieval insert failed for submission %s", submission_id)
-            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="retrieval-inserts")
-            advanced += 1
-            continue
-
-        # written -> complete.
-        try:
-            transition(
-                supa, submission_id, "complete",
-                note="retrieval inserts complete",
-                extra_fields={
-                    "records_created": {
-                        "queue_ids": queue_ids,
-                        "espo_records": success,
-                        "retrieval_row_ids": retrieval_ids,
-                    },
-                },
-            )
-        except (IntakeError, SupabaseClientError) as exc:
-            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="complete-transition")
-            advanced += 1
-            continue
-
-        # Completion post to the draft channel for Gretchen's visibility.
-        retrieval_summary = ", ".join(
-            f"{k}={len(v)}" for k, v in retrieval_ids.items() if v
-        ) or "(none)"
-        _post_alert(
-            f":white_check_mark: Hermes intake complete\n"
-            f"- submission_id: {submission_id}\n"
-            f"- CRM records: {len(success)}\n"
-            f"- Retrieval rows: {retrieval_summary}",
-            channel=_intake_draft_channel(),
-        )
-        advanced += 1
-    return advanced
 
 
 # ---------------------------------------------------------------------------
@@ -570,14 +395,12 @@ def process_writing_check(supa: SupabaseClient) -> int:
 
 
 def tick(supa: SupabaseClient) -> dict[str, int]:
-    """One worker iteration. Drives all three arcs once each."""
+    """One worker iteration. Drives both arcs once each."""
     received = 1 if process_one_received(supa) else 0
     approved = 1 if process_one_approved(supa) else 0
-    writing_advanced = process_writing_check(supa)
     return {
         "received_processed": received,
         "approved_processed": approved,
-        "writing_advanced": writing_advanced,
     }
 
 

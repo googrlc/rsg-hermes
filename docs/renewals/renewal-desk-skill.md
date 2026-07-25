@@ -2,10 +2,10 @@
 name: renewal-desk
 description: >
   Hermes-side renewal EXECUTOR for RSG. This is the "one door" that performs the
-  actual AMS/CRM writes for renewals. The RSG Renewal Walker GPT (ChatGPT Business)
-  is the workstation where Gretchen and Lamar work renewals — it reads and drafts;
-  Hermes executes. Every mutation goes through the sanctioned MCP path — additive,
-  queued, human-approved.
+  actual AMS/CRM writes for renewals. The Command Center cockpit is the workstation
+  where Gretchen and Lamar work renewals — it reads and drafts; Hermes executes.
+  Every mutation goes through the sanctioned MCP path — additive, queued,
+  human-approved.
   Triggers on "renewal desk", "work the renewals", "work renewal requests",
   "execute renewal", "process renewal", "renew {client}", "Gretchen renewal request",
   or a renewal action posted in #renewal-updates / her DM.
@@ -15,8 +15,8 @@ description: >
 
 # Renewal Desk (Hermes = the executor)
 
-> Canonical spec: `docs/renewals/BRIEF-renewal-walker-runner-2026-07-13.md` (v3).
-> This skill is the **execution arm** — the sanctioned write door. It is live today.
+> Canonical reference: `docs/renewals/README.md`. This skill is the **execution
+> arm** — the sanctioned write door. It is live today.
 >
 > **Automated path (Job Contract v2, 2026-07-15):** the same execution role also
 > runs headless as `hermes/renewals/executor.py` (`hermes --renewal-executor`). It
@@ -34,38 +34,34 @@ description: >
 
 ## Purpose & role split
 
-One system, four roles (v3):
+One system, three roles:
 
-- **RSG Renewal Walker GPT (ChatGPT Business) = the workstation.** Gretchen and
-  Lamar work renewals there. It pulls the queue, walks one step at a time, renders
-  the worksheet, and posts outcomes back. It is **read + draft only** — it never
-  writes to NowCerts or the CRM, and it knows nothing except what Hermes returns.
+- **The Command Center cockpit = the workstation.** Gretchen and Lamar work
+  renewals there. It reads the canonical book, walks one renewal at a time, and
+  stages approved instructions. It is **read + draft only** — it never writes to
+  NowCerts directly.
 - **Hermes — this skill — is the only thing that writes.** Every mutation goes
   through the sanctioned MCP path: additive-only, queued, human-approved. **Hermes
   never talks to a client.**
-- **Gretchen = the only hands that touch clients.** The Walker drafts; she sends.
+- **Gretchen = the only hands that touch clients.** Hermes drafts; she sends.
 
 ```
-Renewal Walker GPT (ChatGPT)   →   asks Hermes   →   Hermes (this skill)
-   READ  +  DRAFT  (no writes)       plain ask        EXECUTES the writes (MCP path)
+Command Center cockpit   →   asks Hermes   →   Hermes (this skill)
+  READ  +  DRAFT  (no writes)   plain ask       EXECUTES the writes (MCP path)
 ```
 
-### Two front doors into this executor
+### How this executor is reached
 
-**1. The `/walker/*` API — Phase 1, DESIGNED, NOT BUILT.**
-The v3 target is the Walker GPT hitting Hermes over an Action wired to a
-`/walker/*` HTTPS API (scoped key, `GET /walker/queue`, `POST /walker/.../touch`,
-etc. — see the brief). **This does not exist yet.** Do not assume the endpoints,
-the scoped key, or the CRM Opportunity field additions are live. Phase 1 does
-not start until Phase 0 is green AND Lamar explicitly says go.
+A renewal action reaches Hermes as a plain-language request in
+**#renewal-updates (`C09R2CG2KS6`)**, **Gretchen DM (`C0AMWAZBBJP`)**, or an
+interactive Hermes session — or headless, as an approved `outbound_sync_queue` row
+staged by the cockpit. Hermes parses the request and performs the additive MCP
+writes below.
 
-**2. The live path — what runs TODAY (and the permanent FALLBACK MODE).**
-Until the API ships, and forever after as the outage fallback, a renewal action
-reaches Hermes as a plain-language request in **#renewal-updates (`C09R2CG2KS6`)**,
-**Gretchen DM (`C0AMWAZBBJP`)**, or an interactive Hermes session. Hermes parses it
-and performs the additive MCP writes below. If OpenAI or the Action is ever down,
-this is the door the day runs through — data-bearing Slack cards + the reply
-grammar in the fallback section.
+> The `/walker/*` API — a ChatGPT Action front door for a Renewal Walker GPT — was
+> **retired 2026-07-24** along with `hermes/walker/`. Its state lived entirely in
+> EspoCRM `Opportunity` custom fields, which are going away. Do not expect those
+> endpoints, that scoped key, or those custom fields to exist.
 
 This skill composes with:
 - **`retention-risk-scout`** — finds who's at risk and why (scoring model, buckets).
@@ -106,7 +102,7 @@ A renewal action lands as one of:
 
 - A message in **#renewal-updates (`C09R2CG2KS6`)** or **Gretchen DM (`C0AMWAZBBJP`)**.
 - A direct instruction in an interactive Hermes session.
-- (Phase 1, once built) a `/walker/*` API call from the Renewal Walker GPT.
+- An approved `outbound_sync_queue` row staged by the cockpit (headless path).
 
 Hermes is **not** an always-on listener (Max-plan boundary). Drain requests when:
 - invoked on demand ("work the renewal requests"), or
@@ -255,10 +251,9 @@ sanctioned CRM-initiated AMS *creation*.
 
 ## Fallback Mode (Slack paste grammar — keep it implemented)
 
-When the `/walker/*` API is unavailable (not built yet, or OpenAI/Action down),
-Hermes works the day the v2 way: data-bearing Slack cards + a thread-reply grammar
-Gretchen can use in #renewal-updates / her DM. Behind a feature flag; the backup
-door is always present. The reply grammar:
+When the cockpit is unavailable, Hermes works the day over Slack: data-bearing
+cards + a thread-reply grammar Gretchen can use in #renewal-updates / her DM.
+Behind a feature flag; the backup door is always present. The reply grammar:
 
 ```
 done · log: <text> · flag: <reason> · handoff · renewed $<amt> · lost <reason> · pending

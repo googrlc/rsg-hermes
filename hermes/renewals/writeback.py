@@ -12,9 +12,9 @@ verify / read-after write and records a ``renewal_execution_receipts`` row.
     confirm_writeback(...)  -> stamps approved_by + approved_at, which flips the
                                row into the executor's eligible set.
 
-The Espo outbound drain (``pipeline.drain_outbound_queue``) is guarded to skip
+Only the approval-gated executors on the Hermes scheduler consume
 ``destination_system='nowcerts'`` rows, so a proposed row waits safely for a
-human to confirm — it can never be swept into an EspoCRM write.
+human to confirm before anything reaches the AMS.
 """
 
 from __future__ import annotations

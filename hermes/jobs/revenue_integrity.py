@@ -1,9 +1,9 @@
 """Revenue Integrity jobs (commission audit + EOM scorecard).
 
-Data source: the custom CRM (Command Center). EspoCRM is decommissioned, so both
-the commission audit and the EOM scorecard read directly from the custom CRM's
-Supabase tables via the in-process SupabaseClient — the same path the revenue
-sentinel (see hermes/jobs/revenue_sentinel.py) and canonical-book jobs use:
+Data source: the custom CRM (Command Center). Both the commission audit and the
+EOM scorecard read directly from the custom CRM's Supabase tables via the
+in-process SupabaseClient — the same path the revenue sentinel (see
+hermes/jobs/revenue_sentinel.py) and canonical-book jobs use:
 
   - COMMISSION AUDIT (revenue blind spot) -> commission_ledger. A blind spot is a
     ledgered, commissionable policy with no expected commission recorded
@@ -16,11 +16,6 @@ sentinel (see hermes/jobs/revenue_sentinel.py) and canonical-book jobs use:
 The emitted row/summary shapes are preserved so the Slack/Talk rendering is
 unchanged; delivery is already Slack-free (SlackNotifier is a shim onto
 Nextcloud Talk team_notify).
-
-`client` (EspoClient) is retained only for CLI/dispatcher signature
-compatibility; the scheduled runs never touch it. FOLLOW-UP: handle_commission_action
-still creates an EspoCRM Task on a Slack button press — reroute to the custom CRM
-task API (mirrors the sentinel's handle_slack_action follow-up).
 """
 
 from __future__ import annotations
@@ -33,7 +28,6 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from hermes.core.client import EspoClient
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
@@ -62,7 +56,6 @@ class EomScorecardResult:
 
 
 def run_commission_audit(
-    client: EspoClient | None = None,
     *,
     supa: SupabaseClient | None = None,
     notifier: SlackNotifier | None = None,
@@ -70,7 +63,7 @@ def run_commission_audit(
     dry_run: bool = False,
     force: bool = False,
 ) -> CommissionAuditResult:
-    _ = (client, now)
+    _ = now
     supa = supa or SupabaseClient()
     rows, warnings = _query_commission_blind_spots(supa)
     text, blocks = _build_slack_payload(rows)
@@ -117,7 +110,6 @@ def run_commission_audit(
 
 
 def run_eom_scorecard(
-    client: EspoClient | None = None,
     *,
     supa: SupabaseClient | None = None,
     notifier: SlackNotifier | None = None,
@@ -125,7 +117,6 @@ def run_eom_scorecard(
     dry_run: bool = False,
     force: bool = False,
 ) -> EomScorecardResult:
-    _ = client
     supa = supa or SupabaseClient()
     ref = now or datetime.now()
     target_month_start, target_month_end = _previous_month_window(ref.date())
@@ -175,44 +166,6 @@ def run_eom_scorecard(
         summary=summary,
         warnings=warnings,
     )
-
-
-def build_commission_action_value(*, policy_id: str, policy_name: str) -> str:
-    payload = {"policy_id": policy_id, "policy_name": policy_name}
-    return json.dumps(payload, separators=(",", ":"))
-
-
-def parse_commission_action_value(raw_value: str) -> dict[str, str]:
-    try:
-        data = json.loads(raw_value)
-    except json.JSONDecodeError as e:
-        raise ValueError("Invalid commission action payload.") from e
-    if not isinstance(data, dict):
-        raise ValueError("Invalid commission action payload shape.")
-    policy_id = str(data.get("policy_id") or "").strip()
-    policy_name = str(data.get("policy_name") or "").strip()
-    if not policy_id:
-        raise ValueError("Commission action payload missing policy_id.")
-    return {"policy_id": policy_id, "policy_name": policy_name}
-
-
-def handle_commission_action(*, client: EspoClient, action: str, action_value: str) -> str:
-    if action != "commission_update_pct":
-        return "Unknown commission action."
-    item = parse_commission_action_value(action_value)
-    assigned_user_id = (
-        os.environ.get("HERMES_COMMISSION_TASK_ASSIGNEE_ID", "").strip()
-        or os.environ.get("HERMES_SENTINEL_GRETCHEN_USER_ID", "").strip()
-    )
-    payload: dict[str, Any] = {
-        "name": f"Update Commission %: {item['policy_name'] or item['policy_id']}",
-        "status": "Not Started",
-        "description": f"Revenue Integrity audit flagged missing commission for Policy {item['policy_id']}.",
-    }
-    if assigned_user_id:
-        payload["assignedUserId"] = assigned_user_id
-    client.create("Task", payload)
-    return "Commission update task created."
 
 
 def _query_commission_blind_spots(supa: SupabaseClient) -> tuple[list[dict[str, Any]], list[str]]:
@@ -370,22 +323,6 @@ def _build_slack_payload(rows: list[dict[str, Any]]) -> tuple[str, list[dict[str
             {
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": f"• *{row['name']}* ({row['lob']}) - Premium: ${row['premium']:,.0f}."},
-            }
-        )
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Update Commission %"},
-                        "action_id": "commission_update_pct",
-                        "value": build_commission_action_value(
-                            policy_id=row["policy_id"],
-                            policy_name=row["name"],
-                        ),
-                    }
-                ],
             }
         )
     return text, blocks
