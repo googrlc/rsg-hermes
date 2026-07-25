@@ -1773,15 +1773,16 @@ async def sync_health():
 
 
 # ---------------------------------------------------------------------------
-# Book-sync health — compares actual book of business across NowCerts, EspoCRM
-# and Supabase. Read-only; complements /api/hermes/sync-health (queue depth).
+# Book-sync health — compares the actual book of business in NowCerts against
+# the canonical Supabase mirror. Read-only; complements /api/hermes/sync-health
+# (queue depth).
 # See hermes/book_sync/health.py.
 # ---------------------------------------------------------------------------
 
 
 @app.get("/api/hermes/book-sync")
 async def book_sync_health(request: Request, max_pages: int = 50):
-    """Drift report: policy counts, per-carrier premium, orphans, rate drift.
+    """Drift report: policy counts, tombstones, per-carrier premium, rate drift.
 
     Gated by HERMES_API_TOKEN bearer (skipped if env var unset).
 
@@ -1794,7 +1795,6 @@ async def book_sync_health(request: Request, max_pages: int = 50):
     try:
         report = run_book_sync_health(
             nowcerts_client=_get_nowcerts(),
-            espo_client=_get_espo(),
             supa=_get_supa(),
             max_pages=max_pages,
         )
