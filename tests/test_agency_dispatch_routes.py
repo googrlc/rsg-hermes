@@ -28,32 +28,34 @@ def _make_dispatcher() -> Dispatcher:
 class FactRouteTests(unittest.TestCase):
     def test_what_is_ein_routes_to_agency_fact(self) -> None:
         d = _make_dispatcher()
-        client = MagicMock()
-        client.search.return_value = [
-            {"id": "acc-1", "name": "JB Noble", "fein": "12-3456789"}
+        # EIN has no canonical column, so the answer comes from client_facts.
+        d.supa.select.side_effect = [
+            [{"id": "ent-1", "entity_name": "JB Noble"}],
+            [{
+                "id": "fact-1", "fact_label": "EIN", "fact_value": "12-3456789",
+                "sensitivity": "restricted", "source": "underwriting summary",
+                "confidence": "high", "source_date": "2026-05-19",
+            }],
         ]
-        result = d.dispatch(client, "What is JB Noble's EIN?")
+        result = d.dispatch(MagicMock(), "What is JB Noble's EIN?")
         self.assertTrue(result.ok)
         self.assertIn("12-3456789", result.message)
-        # Source should cite the CRM canonical field, not the lookup handler.
-        self.assertIn("EspoCRM Account.fein", result.message)
+        # Source should cite the retrieval table, not the lookup handler.
+        self.assertIn("client_facts", result.message)
 
     def test_phone_for_routes_to_agency_fact(self) -> None:
         d = _make_dispatcher()
-        client = MagicMock()
-        client.search.return_value = [
-            {"id": "c-1", "name": "Joseph Washington", "phoneNumber": "+14045550142"}
+        d.supa.select.return_value = [
+            {"insured_name": "Joseph Washington", "phone": "+14045550142"}
         ]
-        result = d.dispatch(client, "phone for Joseph Washington")
+        result = d.dispatch(MagicMock(), "phone for Joseph Washington")
         self.assertTrue(result.ok)
         self.assertIn("+14045550142", result.message)
 
     def test_renewal_date_routes_to_agency_fact(self) -> None:
         d = _make_dispatcher()
-        client = MagicMock()
-        client.search.return_value = []
-        d.supa.select.return_value = []  # no entity match either
-        result = d.dispatch(client, "What is 3D Pumps's renewal date?")
+        d.supa.select.return_value = []  # nothing in the book or the facts
+        result = d.dispatch(MagicMock(), "What is 3D Pumps's renewal date?")
         # Even when nothing found, the route was reached — verify it's
         # the not-found template, not lookup's response.
         self.assertIn("do not have", result.message)

@@ -3,7 +3,7 @@
 Runtime executor for the `crm-fact-retriever` skill. Resolves questions
 against this strict hierarchy:
 
-  1. CRM canonical field   (EspoCRM Account/Contact via EspoClient)
+  1. Canonical book        (Supabase canonical_clients / canonical_policies)
   2. client_facts          (Supabase retrieval table)
   3. client_notes          (summary/full_text)
   4. client_documents      (summary)
@@ -21,11 +21,11 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from hermes.commands.renewal_worksheet import escape_ilike
 from hermes.core.dispatcher import DispatchResult
 from hermes.integrations import retrieval_client
 
 if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
@@ -57,31 +57,24 @@ FACT_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 # CRM canonical-field lookup map: fact_label → (entity, espo_field).
 # Honors the canonical convention from hermes-training/espocrm/field_dictionary.md.
-CRM_CANONICAL_FIELDS: dict[str, list[tuple[str, str]]] = {
-    "EIN": [("Account", "fein")],
-    "Phone": [("Contact", "phoneNumber"), ("Account", "phoneNumber")],
-    "Email": [("Contact", "emailAddress"), ("Account", "emailAddress")],
-    "Address": [
-        ("Account", "billingAddressStreet"),
-        ("Contact", "addressStreet"),
-    ],
-    "Annual Revenue": [("Account", "annual_revenue")],
-    "Estimated Payroll": [("Account", "annual_payroll")],
-    "NAICS": [("Account", "naics")],
-    "Date of Birth": [("Contact", "dateOfBirth")],
-    "Effective Date": [("Policy", "effective_date")],
+# Facts the canonical NowCerts book answers directly, as
+# label -> [(table, column), ...] in preference order. Anything absent here
+# (EIN, revenue, payroll, NAICS, date of birth) has no canonical column and
+# falls through to client_facts, which is where intake records it.
+CANONICAL_BOOK_FIELDS: dict[str, list[tuple[str, str]]] = {
+    "Phone": [("canonical_clients", "phone"), ("canonical_clients", "cell_phone")],
+    "Email": [("canonical_clients", "email")],
+    "Address": [("canonical_clients", "address_line1")],
+    "Effective Date": [("canonical_policies", "effective_date")],
     # "Renewal Date" maps to expiration_date: in insurance, the renewal/x-date IS
     # the policy expiration date (when the policy expires and renews).
-    "Renewal Date": [("Policy", "expiration_date")],
+    "Renewal Date": [("canonical_policies", "expiration_date")],
 }
 
-# Alternate field name variants to check when the primary field is absent.
-# Handles the EspoCRM camelCase ↔ snake_case transition.
-_FIELD_FALLBACKS: dict[str, list[str]] = {
-    "annual_revenue": ["annualRevenue"],
-    "annual_payroll": ["annualPayroll"],
-    "effective_date": ["effectiveDate"],
-    "expiration_date": ["expirationDate"],
+# The column each canonical table matches an entity name against.
+_CANONICAL_NAME_COLUMN: dict[str, str] = {
+    "canonical_clients": "insured_name",
+    "canonical_policies": "client_name",
 }
 
 
@@ -195,61 +188,46 @@ _FACT_LABEL_WORDS_RE = re.compile(
 )
 
 
-def _try_crm_canonical(
-    client: "EspoClient",
+def _try_canonical_book(
+    supa: "SupabaseClient",
     entity_name: str,
     fact_label: str,
 ) -> tuple[FactAnswer | None, list[dict[str, Any]]]:
-    """Look up the answer in EspoCRM. Returns (answer_or_none, candidates_inspected)."""
-    targets = CRM_CANONICAL_FIELDS.get(fact_label)
+    """Look the answer up in the canonical NowCerts book.
+
+    Returns (answer_or_none, candidates_inspected).
+    """
+    targets = CANONICAL_BOOK_FIELDS.get(fact_label)
     if not targets:
         return None, []
 
     candidates: list[dict[str, Any]] = []
-    for espo_entity, espo_field in targets:
-        fallbacks = _FIELD_FALLBACKS.get(espo_field, [])
-        all_fields = [espo_field] + fallbacks
-        # Include all casing variants in the select so none are silently dropped.
-        select_fields = ",".join(["id", "name"] + all_fields)
-        # Use the wildcard-friendly search first for fuzzy matches by name.
-        rows = client.search(
-            espo_entity,
-            entity_name,
-            max_size=5,
-            select=select_fields,
-            fields=["name"],
+    for table, column in targets:
+        name_column = _CANONICAL_NAME_COLUMN[table]
+        rows = supa.select(
+            table,
+            columns=f"{name_column},{column}",
+            params={name_column: f"ilike.*{escape_ilike(entity_name)}*"},
+            limit=5,
         )
         for row in rows:
-            # Accept the first non-empty value across all field name variants.
-            value = None
-            matched_field = espo_field
-            for fld in all_fields:
-                v = row.get(fld)
-                if v not in (None, ""):
-                    value = v
-                    matched_field = fld
-                    break
+            value = row.get(column)
             candidates.append({
-                "espo_entity": espo_entity,
-                "id": row.get("id"),
-                "name": row.get("name"),
-                "field": matched_field,
+                "table": table,
+                "name": row.get(name_column),
+                "field": column,
                 "value": value,
             })
-            if value:
+            if value not in (None, ""):
                 return (
                     FactAnswer(
                         found=True,
-                        entity=row.get("name") or entity_name,
+                        entity=row.get(name_column) or entity_name,
                         fact_label=fact_label,
                         fact_value=str(value),
-                        source=f"EspoCRM {espo_entity}.{matched_field}",
+                        source=f"canonical book {table}.{column}",
                         confidence="high",
-                        sensitivity=(
-                            "restricted"
-                            if fact_label in {"EIN", "Date of Birth"}
-                            else "standard"
-                        ),
+                        sensitivity="standard",
                     ),
                     candidates,
                 )
@@ -403,7 +381,6 @@ def _try_policy_facts(
 
 
 def retrieve(
-    client: "EspoClient | None",
     supa: "SupabaseClient | None",
     *,
     entity_name: str,
@@ -413,17 +390,16 @@ def retrieve(
     """Run the retrieval cascade. Returns a FactAnswer (found=True or False)."""
     inspected_candidates: list[dict[str, Any]] = []
 
-    # 1. CRM canonical field
-    if client is not None:
+    if supa is not None:
+        # 1. canonical book
         try:
-            answer, candidates = _try_crm_canonical(client, entity_name, fact_label)
+            answer, candidates = _try_canonical_book(supa, entity_name, fact_label)
             inspected_candidates.extend(candidates)
             if answer:
                 return answer
         except Exception:
-            log.exception("CRM canonical lookup failed for %s / %s", entity_name, fact_label)
+            log.exception("canonical book lookup failed for %s / %s", entity_name, fact_label)
 
-    if supa is not None:
         # 2. client_facts
         try:
             answer = _try_client_facts(
@@ -466,7 +442,6 @@ def retrieve(
 
 
 def handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,
@@ -486,7 +461,6 @@ def handle(
         )
     entity_name, fact_label = parsed
     answer = retrieve(
-        client,
         supa,
         entity_name=entity_name,
         fact_label=fact_label,

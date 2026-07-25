@@ -2047,7 +2047,6 @@ async def agency_fact(req: AgencyFactRequest):
 
     try:
         answer = fact_retriever.retrieve(
-            _get_espo(),
             _get_supa(),
             entity_name=entity,
             fact_label=fact_label,

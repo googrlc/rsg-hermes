@@ -96,8 +96,6 @@ class Dispatcher:
     """Order matters: first matching pattern wins."""
 
     def __init__(self, *, use_openai: bool = False) -> None:
-        from hermes.commands import business_research
-
         self.use_openai = use_openai
         self.supa: SupabaseClient | None = None
         self._slack_ctx: dict[str, Any] = {}
@@ -148,7 +146,7 @@ class Dispatcher:
             ),
             (
                 re.compile(r"^\s*(research|enrich|investigate|look\s+up|web\s+research)\s+(business|account|company)?\b", re.I),
-                business_research.handle,
+                "business_research",
             ),
             # Agency intake — explicit verbs that mean "stage a draft from this summary".
             (
@@ -253,7 +251,7 @@ class Dispatcher:
                     r"^\s*(met|talked|spoke|just\s+met|new\s+lead|log\s+lead|intake)\b",
                     re.I,
                 ),
-                "intake",
+                "agency_intake",
             ),
         ]
 
@@ -302,21 +300,17 @@ class Dispatcher:
         client: "EspoClient",
         text: str,
     ) -> DispatchResult:
-        if handler == "intake":
-            from hermes.commands.intake import handle as intake_handle
-            return intake_handle(
-                client, text,
-                supa=self.supa,
-                **self._slack_ctx,
-            )
         if handler == "ping":
             return DispatchResult(True, "Hermes is online and connected to CRM.")
+        if handler == "business_research":
+            from hermes.commands.business_research import handle as research_business_handle
+            return research_business_handle(text, supa=self.supa)
         if handler == "agency_intake":
             from hermes.commands.agency_intake import handle as ai_handle
             return ai_handle(client, text, supa=self.supa, **self._slack_ctx)
         if handler == "agency_fact":
             from hermes.commands.fact_retriever import handle as fact_handle
-            return fact_handle(client, text, supa=self.supa)
+            return fact_handle(text, supa=self.supa)
         if handler == "renewal_worksheet":
             from hermes.commands.renewal_worksheet import handle as rw_handle
             return rw_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
@@ -357,12 +351,6 @@ class Dispatcher:
         if isinstance(write_intent, dict):
             self._pending_write = write_intent
             return
-        if data.get("write_status") == "NOT_WRITTEN_AWAITING_CONFIRMATION":
-            self._pending_write = {
-                "kind": "intake_drafts",
-                "espo_drafts": data.get("espo_drafts") or {},
-                "supabase_drafts": data.get("supabase_drafts") or {},
-            }
 
     def _handle_approval(self, client: "EspoClient", approval: Any) -> DispatchResult:
         pending = self._pending_write
@@ -373,21 +361,6 @@ class Dispatcher:
             return DispatchResult(True, "Pending draft cancelled. Nothing written.")
         if approval.revise_requested:
             return DispatchResult(True, "Revision requested. Send updated instructions and I will regenerate the draft.")
-
-        kind = pending.get("kind")
-        if kind == "intake_drafts":
-            from hermes.commands.intake import execute_approved_drafts
-
-            results = execute_approved_drafts(
-                client,
-                self.supa,
-                espo_drafts=pending.get("espo_drafts") or {},
-                supabase_drafts=pending.get("supabase_drafts") or {},
-                approve_crm=approval.approve_crm,
-                approve_supabase=approval.approve_supabase,
-            )
-            self._pending_write = None
-            return DispatchResult(True, "Approved updates were written successfully.", {"results": results})
 
         return DispatchResult(False, "Pending draft type is not executable yet.")
 
