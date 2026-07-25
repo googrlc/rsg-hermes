@@ -156,11 +156,10 @@ class TestTick:
         assert result == {
             "received_processed": 0,
             "approved_processed": 0,
-            "writing_advanced": 0,
         }
 
     def test_tick_reports_one_when_row_processed(self) -> None:
-        """tick() drives all three arcs; only received_processed should
+        """tick() drives both arcs; only received_processed should
         increment when only the received queue has work."""
         supa = MagicMock()
 
@@ -174,7 +173,7 @@ class TestTick:
             if params.get("id") == "eq.sub-1":
                 return [{"id": "sub-1", "status": "synthesizing",
                          "status_history": [], "error_log": []}]
-            # Approved + writing queues empty
+            # Approved queue empty
             return []
 
         supa.select.side_effect = _select
@@ -193,7 +192,6 @@ class TestTick:
             result = tick(supa)
         assert result["received_processed"] == 1
         assert result["approved_processed"] == 0
-        assert result["writing_advanced"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -631,15 +629,8 @@ class TestProcessOneApproved:
         supa.select.return_value = []
         assert process_one_approved(supa) is False
 
-    @patch("hermes.operations.agency_intake_approval._enqueue_crm_writes")
-    def test_happy_path_enqueues_and_transitions(self, mock_enqueue, monkeypatch) -> None:
+    def test_happy_path_commits_and_transitions(self) -> None:
         from hermes.operations.intake_worker import process_one_approved
-
-        monkeypatch.setenv("HERMES_INTAKE_TARGET", "espocrm")  # legacy enqueue path
-        mock_enqueue.return_value = (
-            ["q-1", "q-2", "q-3"],
-            {"steps": [{"order": 1, "entity": "Account"}]},
-        )
 
         supa = MagicMock()
         # First select → _claim_next_approved
@@ -652,16 +643,25 @@ class TestProcessOneApproved:
         supa.update_where.return_value = [{"id": "sub-1", "status": "writing", "status_history": []}]
         supa.update.return_value = {"id": "sub-1"}
 
-        assert process_one_approved(supa) is True
+        with patch("hermes.intake.commit.commit_draft") as commit_draft, \
+             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
+                   return_value={}), \
+             patch.object(intake_worker, "_post_alert"):
+            commit_draft.return_value = {
+                "opportunities": [{"id": "opp-1"}], "opportunity_count": 1,
+                "intake_job_id": "job-1", "nextcloud_folder": None,
+            }
+            assert process_one_approved(supa) is True
 
         # The atomic claim was conditional on status='approved'.
         upd_kwargs = supa.update_where.call_args.kwargs
         assert upd_kwargs["filters"]["status"] == "eq.approved"
-        assert upd_kwargs["payload"]["status"] == "writing" if "payload" in upd_kwargs else True
 
-        # records_created stash holds the queue_ids for the writing arc.
+        # records_created stash names the commit target and the created opportunities.
         stash_update = supa.update.call_args.args[2]
-        assert stash_update["records_created"]["queue_ids"] == ["q-1", "q-2", "q-3"]
+        assert stash_update["records_created"]["target"] == "nowcerts"
+        assert stash_update["records_created"]["opportunities"] == ["opp-1"]
 
     def test_race_lost_returns_false(self) -> None:
         from hermes.operations.intake_worker import process_one_approved
@@ -673,12 +673,8 @@ class TestProcessOneApproved:
         supa.update_where.return_value = []  # race lost
         assert process_one_approved(supa) is False
 
-    @patch("hermes.operations.agency_intake_approval._enqueue_crm_writes")
-    def test_enqueue_failure_transitions_to_failed(self, mock_enqueue, monkeypatch) -> None:
+    def test_commit_failure_transitions_to_failed(self) -> None:
         from hermes.operations.intake_worker import process_one_approved
-
-        monkeypatch.setenv("HERMES_INTAKE_TARGET", "espocrm")  # legacy enqueue path
-        mock_enqueue.side_effect = RuntimeError("supabase down")
 
         supa = MagicMock()
         supa.select.side_effect = [
@@ -689,136 +685,23 @@ class TestProcessOneApproved:
         supa.update_where.return_value = [{"id": "sub-1", "status": "writing"}]
         supa.update.return_value = {"id": "sub-1"}
 
-        with patch.object(intake_worker, "_post_alert"):
+        with patch("hermes.intake.commit.commit_draft", side_effect=RuntimeError("supabase down")), \
+             patch.object(intake_worker, "_post_alert"):
             assert process_one_approved(supa) is True
 
         update = supa.update.call_args.args[2]
         assert update["status"] == "failed"
-        assert update["error_log"][-1]["stage"] == "enqueue-crm-writes"
-
-
-class TestProcessWritingCheck:
-    @patch("hermes.operations.agency_intake_approval._insert_retrieval_rows")
-    def test_all_succeeded_advances_writing_to_complete(self, mock_retrieval) -> None:
-        from hermes.operations.intake_worker import process_writing_check
-
-        mock_retrieval.return_value = {
-            "client_entities": ["e-1"],
-            "client_facts": ["f-1", "f-2"],
-            "client_notes": ["n-1"],
-        }
-
-        supa = MagicMock()
-        # First select → writing candidates
-        # Then select → crm_write_queue rows
-        # Then 3 receipts lookups (one per queue row) — for entity_id resolution
-        # Then transition re-reads (writing -> written, written -> complete)
-        supa.select.side_effect = [
-            # writing candidates
-            [{
-                "id": "sub-1",
-                "records_created": {"queue_ids": ["q-1", "q-2", "q-3"]},
-                "draft_summary": {"account": {"account_name": "Acme"}},
-                "status_history": [],
-            }],
-            # crm_write_queue rows
-            [
-                {"id": "q-1", "entity_type": "Account", "entity_id": None, "status": "SUCCESS"},
-                {"id": "q-2", "entity_type": "Contact", "entity_id": None, "status": "SUCCESS"},
-                {"id": "q-3", "entity_type": "Opportunity", "entity_id": None, "status": "SUCCESS"},
-            ],
-            # receipts for q-1, q-2, q-3
-            [{"queue_id": "q-1", "transaction_id": "espo_acct-id"}],
-            [{"queue_id": "q-2", "transaction_id": "espo_contact-id"}],
-            [{"queue_id": "q-3", "transaction_id": "espo_opp-id"}],
-            # transition select: writing -> written
-            [{"id": "sub-1", "status": "writing", "status_history": [], "error_log": []}],
-            # transition select: written -> complete
-            [{"id": "sub-1", "status": "written", "status_history": [], "error_log": []}],
-        ]
-        supa.update.return_value = {"id": "sub-1"}
-
-        with patch.object(intake_worker, "_post_alert") as mock_alert:
-            advanced = process_writing_check(supa)
-
-        assert advanced == 1
-
-        # Two transitions executed: written then complete
-        statuses = [c.args[2].get("status") for c in supa.update.call_args_list if "status" in c.args[2]]
-        assert statuses == ["written", "complete"]
-
-        # records_created on complete carries espo_records + retrieval_row_ids
-        complete_update = supa.update.call_args_list[-1].args[2]
-        rc = complete_update["records_created"]
-        assert rc["queue_ids"] == ["q-1", "q-2", "q-3"]
-        assert {e["entity_type"] for e in rc["espo_records"]} == {"Account", "Contact", "Opportunity"}
-        assert rc["espo_records"][0]["entity_id"] == "acct-id"
-        assert rc["retrieval_row_ids"]["client_facts"] == ["f-1", "f-2"]
-
-        # Completion post landed on the draft channel.
-        mock_alert.assert_called_once()
-        assert "intake complete" in mock_alert.call_args.args[0]
-
-    def test_some_queue_failed_transitions_submission_to_failed(self) -> None:
-        from hermes.operations.intake_worker import process_writing_check
-
-        supa = MagicMock()
-        supa.select.side_effect = [
-            # writing candidates
-            [{
-                "id": "sub-1",
-                "records_created": {"queue_ids": ["q-1", "q-2"]},
-                "draft_summary": {},
-                "status_history": [],
-            }],
-            # crm_write_queue rows — one SUCCESS, one FAILED
-            [
-                {"id": "q-1", "entity_type": "Account", "entity_id": "a", "status": "SUCCESS"},
-                {"id": "q-2", "entity_type": "Contact", "entity_id": None, "status": "FAILED"},
-            ],
-            # transition re-read for the failed transition
-            [{"id": "sub-1", "status": "writing", "status_history": [], "error_log": []}],
-        ]
-        supa.update.return_value = {"id": "sub-1"}
-
-        with patch.object(intake_worker, "_post_alert"):
-            assert process_writing_check(supa) == 1
-
-        update = supa.update.call_args.args[2]
-        assert update["status"] == "failed"
-        assert "CRM writes failed" in update["error_log"][-1]["message"]
-
-    def test_not_all_terminal_yet_returns_zero(self) -> None:
-        from hermes.operations.intake_worker import process_writing_check
-
-        supa = MagicMock()
-        supa.select.side_effect = [
-            # writing candidates
-            [{
-                "id": "sub-1",
-                "records_created": {"queue_ids": ["q-1", "q-2"]},
-                "draft_summary": {},
-                "status_history": [],
-            }],
-            # one SUCCESS, one still PROCESSING
-            [
-                {"id": "q-1", "entity_type": "Account", "entity_id": "a", "status": "SUCCESS"},
-                {"id": "q-2", "entity_type": "Contact", "entity_id": None, "status": "PROCESSING"},
-            ],
-        ]
-        assert process_writing_check(supa) == 0
-        # No transition issued.
-        supa.update.assert_not_called()
+        assert update["error_log"][-1]["stage"] == "commit-nowcerts-intake"
 
 
 class TestTickAllArcs:
-    """tick() must drive all three arcs once each."""
+    """tick() must drive both arcs once each."""
 
     def test_tick_reports_all_arcs(self) -> None:
         supa = MagicMock()
         supa.select.return_value = []  # all queues empty
         result = tick(supa)
-        assert set(result.keys()) == {"received_processed", "approved_processed", "writing_advanced"}
+        assert set(result.keys()) == {"received_processed", "approved_processed"}
         assert all(v == 0 for v in result.values())
 
 

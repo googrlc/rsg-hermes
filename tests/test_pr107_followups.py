@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 from hermes.commands.renewal_worksheet import _candidates_by_name, escape_ilike
@@ -40,14 +39,18 @@ def test_no_success_log_after_failed_completion_transition():
         "draft_summary": {"account": {"account_name": "Z"}, "opportunities": [{"line_of_business": "BOP"}]},
         "approved_by": "lamar",
     }
+    def _transition(supa, submission_id, status, **kwargs):
+        if status == "complete":
+            raise RuntimeError("boom")
+
     with patch.object(w, "_claim_next_approved", return_value=claimed), \
          patch("hermes.intake.commit.commit_draft",
                return_value={"opportunities": [], "opportunity_count": 0,
                              "intake_job_id": "j", "nextcloud_folder": None}), \
-         patch("hermes.integrations.intake_submissions.transition", side_effect=RuntimeError("boom")), \
+         patch("hermes.integrations.intake_submissions.transition", side_effect=_transition), \
+         patch("hermes.operations.agency_intake_approval._insert_retrieval_rows", return_value={}), \
          patch.object(w, "_safe_transition_to_failed") as stf, \
-         patch.object(w, "log") as logm, \
-         patch.dict(os.environ, {"HERMES_INTAKE_TARGET": "nowcerts"}):
+         patch.object(w, "log") as logm:
         assert w.process_one_approved(supa) is True
         stf.assert_called_once()
         assert stf.call_args.kwargs["stage"] == "complete-nowcerts-intake"

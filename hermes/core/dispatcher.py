@@ -111,23 +111,6 @@ class Dispatcher:
             # --- Core operational commands (#108: restored after the PR #107 de-dup
             # dropped them). All specific/anchored, so none intercept renewal routes. ---
             (re.compile(r"^\s*(ping|health|status)\s*$", re.I), "ping"),
-            # CRM change proposal approval — must precede research/intake.
-            (
-                re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+(?P<id>\S+)\s*$", re.I),
-                "change_proposals",
-            ),
-            (
-                re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+ALL\s*$", re.I),
-                "change_proposals",
-            ),
-            (
-                re.compile(r"^\s*(?:LIST|SHOW)\s+CHANGES?\s*$", re.I),
-                "change_proposals",
-            ),
-            (
-                re.compile(r"^\s*(?:REJECT|CANCEL)\s+CHANGE\s+(?P<id>\S+)", re.I),
-                "change_proposals",
-            ),
             # Renewal exposure review — MUST precede business_research so that
             # "research renewal client / exposures" isn't treated as intake NAICS research.
             (
@@ -364,9 +347,6 @@ class Dispatcher:
         if handler in ("renewal_pdf", "renewal_file"):
             from hermes.commands.renewal_documents import generate_pdf_handle
             return generate_pdf_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
-        if handler == "change_proposals":
-            from hermes.commands.change_proposals import handle as cp_handle
-            return cp_handle(client, text, supa=self.supa)
         return handler(client, text)
 
     def _capture_write_intent(self, result: DispatchResult) -> None:

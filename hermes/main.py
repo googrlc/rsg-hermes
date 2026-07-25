@@ -434,27 +434,6 @@ def main() -> int:
         help="Check Supabase connectivity and Hermes table health",
     )
     parser.add_argument(
-        "--process-crm-queue",
-        action="store_true",
-        help="Dequeue pending CRM writes and apply to EspoCRM",
-    )
-    parser.add_argument(
-        "--process-crm-queue-dry-run",
-        action="store_true",
-        help="Preview CRM queue processing without writing to EspoCRM",
-    )
-    parser.add_argument(
-        "--run-crm-queue-worker",
-        action="store_true",
-        help="Continuously poll crm_write_queue every N seconds (systemd worker mode)",
-    )
-    parser.add_argument(
-        "--crm-queue-poll-seconds",
-        type=float,
-        default=5.0,
-        help="Poll interval for --run-crm-queue-worker (default: 5s)",
-    )
-    parser.add_argument(
         "--run-intake-worker",
         action="store_true",
         help="Continuously poll intake_submissions every N seconds (Phase 3 rsg-intake worker)",
@@ -945,44 +924,6 @@ def main() -> int:
             for warning in result.warnings:
                 print(f"- {warning}")
         return 0 if result.ok else 1
-
-    if args.process_crm_queue or args.process_crm_queue_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.operations.crm_queue_worker import process_queue
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-        result = process_queue(
-            supa,
-            client,
-            dry_run=args.process_crm_queue_dry_run,
-        )
-        print(result.message)
-        if result.errors:
-            print("Errors:")
-            for err in result.errors:
-                print(f"- {err}")
-        return 0 if result.ok else 1
-
-    if args.run_crm_queue_worker:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.operations.crm_queue_worker import run_worker_loop
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-        print(f"Starting CRM queue worker loop every {args.crm_queue_poll_seconds}s...")
-        run_worker_loop(
-            supa,
-            client,
-            poll_seconds=args.crm_queue_poll_seconds,
-        )
-        return 0
 
     if args.run_intake_worker:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError

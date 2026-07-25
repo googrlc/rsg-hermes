@@ -5,7 +5,6 @@ import pytest
 
 from hermes.core import identity
 from hermes.command_center import store
-from hermes.operations import crm_queue_worker
 from hermes.integrations import supermemory_client
 from hermes.deliverables import acord25
 
@@ -95,15 +94,6 @@ def test_compose_system_prompt_uses_persona(monkeypatch, tmp_path):
 
 
 # ── agent_id stamping on writes ──────────────────────────────────────────────
-def test_enqueue_crm_write_stamps_agent_id(monkeypatch):
-    monkeypatch.setenv("HERMES_AGENT_ID", "hermes-gretch")
-    supa = FakeSupa()
-    row = crm_queue_worker.enqueue_crm_write(
-        supa, entity_type="Contact", payload={"name": "X"}, created_by_role="gretchen",
-    )
-    assert row["agent_id"] == "hermes-gretch"
-
-
 def test_create_submission_stamps_agent_id(monkeypatch):
     monkeypatch.setenv("HERMES_AGENT_ID", "hermes-gretch")
     supa = FakeSupa()
