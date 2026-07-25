@@ -11,8 +11,6 @@ from dotenv import load_dotenv
 
 import os
 
-from hermes.core.auditor import SchemaAuditor, crm_readiness, quick_kpis
-from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher
 
 COMMAND_CATALOG = """Hermes command catalog
@@ -65,9 +63,9 @@ Commissions:
 - Compare expected vs posted commission for this policy
 
 CRM draft commands:
-- Prepare an EspoCRM account update draft
-- Prepare an EspoCRM opportunity update draft
-- Show me exactly what you would write to EspoCRM
+- Stage intake: [paste the account summary]
+- New commercial prospect: [paste the account summary]
+- Show me the proposed NowCerts changes for policy [number]
 
 Policy data repair:
 - Repair policy accounts dry run
@@ -82,19 +80,11 @@ def main() -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
-    parser = argparse.ArgumentParser(description="Hermes — EspoCRM coordinator")
+    parser = argparse.ArgumentParser(description="Hermes — agency CRM coordinator")
     parser.add_argument("command", nargs="*", help="One-shot command (omit for REPL)")
     parser.add_argument("--commands", action="store_true", help="Print Open WebUI command catalog and exit")
-    parser.add_argument("--ping", action="store_true", help="Test API key and exit")
-    parser.add_argument("--doctor", action="store_true", help="Run non-mutating CRM readiness checks")
-    parser.add_argument("--kpi", action="store_true", help="Print quick entity counts")
-    parser.add_argument("--audit-fields", action="store_true", help="Build schema_map.json field audit")
-    parser.add_argument("--audit-schema", action="store_true", help="Build schema_map.json schema audit")
-    parser.add_argument(
-        "--inventory-metadata",
-        action="store_true",
-        help="Build live Espo metadata inventory (writable/read-only/required fields)",
-    )
+    parser.add_argument("--ping", action="store_true", help="Check that Hermes itself is up and exit")
+    parser.add_argument("--kpi", action="store_true", help="Print canonical book counts (clients, policies, premium)")
     parser.add_argument(
         "--revenue-sentinel",
         action="store_true",
@@ -594,7 +584,7 @@ def main() -> int:
         print(f"Saved '{row['title']}' to [{row['space']}] {where} (id={row['id']})")
         return 0
 
-    # --- Supabase-only commands (no EspoCRM credentials required) ---
+    # --- Supabase-only commands ---
     if args.ops_doctor:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.operations.ops_doctor import run_ops_doctor
@@ -644,36 +634,30 @@ def main() -> int:
         uvicorn.run(api_app, host="0.0.0.0", port=args.api_port)
         return 0
 
-    # --- Commands requiring EspoCRM ---
-    try:
-        client = EspoClient()
-    except EspoClientError as e:
-        print(e, file=sys.stderr)
-        return 2
-
-    if args.audit_fields or args.audit_schema:
-        schema = SchemaAuditor(client).run_field_audit()
-        print(f"Schema audit wrote {os.environ.get('HERMES_SCHEMA_MAP', 'schema_map.json')}")
-        print(schema)
-        return 0
-    if args.inventory_metadata:
-        schema = SchemaAuditor(client).run_live_metadata_inventory()
-        print(f"Metadata inventory wrote {os.environ.get('HERMES_SCHEMA_MAP', 'schema_map.json')}")
-        print(f"Entity count: {schema.get('entity_count', 0)}")
-        return 0
-
     if args.ping:
-        print(client.ping())
+        print("Hermes is online.")
         return 0
-
-    if args.doctor:
-        report = crm_readiness(client)
-        print("\n".join(report.format_lines()))
-        return 0 if report.ok else 1
 
     if args.kpi:
-        for r in quick_kpis(client):
-            print(f"{r.label}: {r.value}" + (f" — {r.detail}" if r.detail else ""))
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(e, file=sys.stderr)
+            return 2
+        rows = supa.select("agency_snapshots", params={"order": "snapshot_date.desc"}, limit=1)
+        if not rows:
+            print("No agency snapshot on file yet — run --snapshot-kpis first.", file=sys.stderr)
+            return 1
+        s = rows[0]
+        print(f"As of {s.get('snapshot_date')}:")
+        for label, key in (("Clients", "client_count"), ("Policies", "policy_count")):
+            print(f"  {label}: {s.get(key) if s.get(key) is not None else 'n/a'}")
+        premium = s.get("active_premium")
+        retention = s.get("retention_rate")
+        print(f"  Active premium: ${float(premium):,.0f}" if premium is not None else "  Active premium: n/a")
+        print(f"  Retention: {retention}%" if retention is not None else "  Retention: n/a")
         return 0
 
     if args.revenue_sentinel or args.revenue_sentinel_dry_run:
@@ -919,7 +903,7 @@ def main() -> int:
     dispatcher = Dispatcher(use_openai=use_openai)
     if args.command:
         line = " ".join(args.command)
-        result = dispatcher.dispatch(client, line)
+        result = dispatcher.dispatch(line)
         print(result.message)
         return 0 if result.ok else 1
 
@@ -932,7 +916,7 @@ def main() -> int:
             break
         if not line:
             break
-        result = dispatcher.dispatch(client, line)
+        result = dispatcher.dispatch(line)
         print(result.message)
     return 0
 

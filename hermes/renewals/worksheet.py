@@ -36,16 +36,6 @@ def _yn(v) -> str:
     return "Yes" if v else "No"
 
 
-def account_url(account_id: str | None) -> str | None:
-    base = config.ESPO_BASE_URL
-    return f"{base}/#Account/view/{account_id}" if base and account_id else None
-
-
-def renewal_url(renewal_id: str | None) -> str | None:
-    base = config.ESPO_BASE_URL
-    return f"{base}/#{config.RENEWAL_ENTITY}/view/{renewal_id}" if base and renewal_id else None
-
-
 def worksheet_record(renewal: dict[str, Any]) -> dict[str, Any]:
     for key in config.WORKSHEET_LOOKUP_KEYS:
         value = renewal.get(key)

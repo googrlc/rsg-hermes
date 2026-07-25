@@ -14,9 +14,9 @@ two entry points:
 
 > **Migration state (July 2026).** RSG ran on EspoCRM; it has been
 > **decommissioned**, and the inbound **Slack Socket Mode** listener has been
-> **retired**. Data now lives in **NowCerts + Supabase**. A number of Espo-era
-> CLI flags, `.env` keys, and modules still exist in the tree but are inert
-> against systems that are gone — they are called out under
+> **retired**. Data now lives in **NowCerts + Supabase**. The Espo client and its
+> CLI flags have now been **deleted** from the tree; a few Espo-era `.env` keys
+> remain but are unused — see
 > [Legacy / decommissioned](#legacy--decommissioned) so a fresh reader does not
 > mistake them for live paths.
 
@@ -161,18 +161,23 @@ Schema lives in `supabase/migrations/`; operations modules in `hermes/operations
 
 ## Legacy / decommissioned
 
-These remain in the tree for history but target systems that are gone. Do **not**
-treat them as live:
+The **EspoCRM code path is gone**, not merely inert. `hermes/core/client.py`
+(the Espo REST client), `hermes/core/auditor.py`, and `hermes/core/schema_map.py`
+were deleted, along with the flags that only made sense against Espo metadata
+(`--doctor`, `--audit-fields`, `--audit-schema`, `--inventory-metadata`) and the
+write-back/queue flags (`--espo-writeback`, `--process-crm-queue`,
+`--espo-db-doctor`). The two survivors were repointed:
 
-- **EspoCRM REST path** — `--doctor`, `--ping`, `--kpi`, `--audit-schema`,
-  `--inventory-metadata` read through `hermes/core/client.py` (the Espo client).
-  EspoCRM is decommissioned, so these no longer reach a live CRM. (`--doctor` is
-  still the compose default command only as a harmless no-op read.)
-- **EspoCRM write-back / queue** — `--espo-writeback`, `--process-crm-queue`, and
-  the several `--sync-*`/`--*-writeback` flags aimed at Espo drain an
-  `crm_write_queue` that was dropped in the decommission.
-- **`--espo-db-doctor`** — the direct-Postgres read lane was **removed**
-  (PR #191, `docs/espocrm-read-lane.md` is historical).
+- `--ping` reports on Hermes itself; it no longer proves a CRM connection.
+- `--kpi` prints the latest `agency_snapshots` row (clients, policies, active
+  premium, retention) instead of Espo entity counts.
+
+For readiness checks use **`--ops-doctor`** (Supabase connectivity + Hermes
+tables). `docs/espocrm-read-lane.md` is historical (the direct-Postgres read lane
+was removed in PR #191).
+
+Still in the tree but retired:
+
 - **Slack Socket Mode** (`--slack`) — the inbound listener was retired July 2026.
   Slack **outbound posting** (sentinel, scorecards, alerts) via the bot token is
   still live.

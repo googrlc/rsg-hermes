@@ -91,9 +91,8 @@ def run_one_cycle(
         metrics["intake"] = run_intake_executor(supa=supa, limit=batch)
         lock.renew()
 
-        # NowCerts-bound executors. The Espo drain is guarded off NowCerts rows
-        # (_ESPO_OUTBOUND_GUARD), so these are the ONLY thing that moves quote /
-        # casework / opportunity-writeback jobs to the AMS. One shared client so
+        # NowCerts-bound executors — the ONLY thing that moves quote / casework /
+        # opportunity-writeback jobs to the AMS. One shared client so
         # a cycle authenticates to NowCerts once. Guarded as a group: NowCertsClient()
         # raises when credentials are absent, and that must not cost us the
         # renewal/intake problem detection below.

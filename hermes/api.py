@@ -49,13 +49,13 @@ def openapi_schema() -> dict[str, Any]:
 
 app = FastAPI(
     title="Hermes API",
-    description="EspoCRM coordination middleware — sync, lookup, data quality, and more.",
+    description="Agency CRM coordination middleware — sync, lookup, data quality, and more.",
     version="0.1.0",
 )
 
 # CORS: restrict to an explicit allowlist read from HERMES_CORS_ALLOW_ORIGINS
 # (comma-separated). Only browsers enforce CORS, so server-to-server callers
-# (n8n, EspoCRM webhooks, Slack) are unaffected, and the same-origin
+# (n8n, NowCerts webhooks, Slack) are unaffected, and the same-origin
 # /command-center UI needs no cross-origin grant. Defaults to no cross-origin
 # access (fail closed). Never pair a wildcard origin with credentials: modern
 # Starlette reflects the request Origin instead of sending "*", which would let
