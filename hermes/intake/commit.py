@@ -4,8 +4,7 @@ On approval this:
   1. Creates the Supabase ``opportunities`` rows (the pipeline — immediate, no AMS write).
   2. Stages an approval-gated NowCerts ``create_insured`` (prospect) job on
      ``outbound_sync_queue`` (object_type='intake', destination='nowcerts').
-     The Espo drain already skips destination='nowcerts', so it can't be swept
-     into an EspoCRM write. The intake executor drains it out-of-band.
+     The intake executor drains it out-of-band.
   3. Creates the client's Nextcloud folder tree (if configured).
 
 Nothing writes to NowCerts synchronously here — the insured create is queued and

@@ -1,5 +1,11 @@
 # NowCerts / Momentum → the CRM CSV Import Mapping
 
+> **HISTORICAL (EspoCRM decommissioned 2026-07-23).** This mapping targets the Espo
+> entity model and was generated from its `entityDefs` Metadata API; neither exists
+> now. Kept for the field-level mapping logic and the `momentum_client_id` upsert
+> strategy, which the canonical book still follows. The live import path is
+> `hermes/sync/canonical_book_sync.py` → `canonical_clients` / `canonical_policies`.
+
 **Source AMS:** NowCerts / Momentum
 **Target:** the CRM at `rrespocrm-rsg-u69864.vm.elestio.app`
 **Mode:** Upsert (insert if new, merge if matched) with AMS-lock awareness

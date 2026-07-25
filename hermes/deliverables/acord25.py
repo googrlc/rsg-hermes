@@ -1,17 +1,17 @@
 """ACORD 25 — Certificate of Insurance generator.
 
-"COI for <client>" → a *draft* ACORD 25 PDF, filled from EspoCRM policy data,
+"COI for <client>" → a *draft* ACORD 25 PDF, filled from agency policy data,
 saved for filing in the client's Nextcloud folder and posted to #gretchen-tasks
 for review. **Never auto-sent** — Gretchen reviews and sends.
 
 Design (so the testable core has no I/O):
 
-  EspoCRM policy/account  --from_espo_policy-->  Coi (logical model)
+  policy/account records  --from_policy_records-->  Coi (logical model)
   Coi                     --build_field_map-->   {pdf_field_name: value}
   {pdf_field_name: value} --fill_pdf----------->  filled PDF bytes
   filled PDF              --draft_coi---------->   Nextcloud + Slack + Supabase log
 
-`from_espo_policy` and `build_field_map` are pure and unit-tested. `fill_pdf`
+`from_policy_records` and `build_field_map` are pure and unit-tested. `fill_pdf`
 needs RSG's **licensed** ACORD 25 template (ACORD forms are copyrighted — pull
 ours from NowCerts / agency files; never download a random copy). `draft_coi`
 wires the live integrations, which are injected so they can be faked in tests.
@@ -35,10 +35,10 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Two Policy endorsement flags this feature needs on the EspoCRM Policy entity.
-# AI/WOS checkboxes on the COI are driven by these. If they don't exist yet, add
-# them to the Policy entity (boolean fields) before relying on the checkboxes.
-# Policy casing is "mixed" per the EspoCRM schema notes — these are camelCase.
+# Two policy endorsement flags this feature needs on the incoming policy record.
+# AI/WOS checkboxes on the COI are driven by these; NowCerts does not expose them
+# today, so absent means the box stays unchecked. camelCase to match the rest of
+# the policy keys read below.
 # ---------------------------------------------------------------------------
 POLICY_FIELD_ADDITIONAL_INSURED = "additionalInsuredOnFile"
 POLICY_FIELD_WAIVER_OF_SUB = "waiverOfSubOnFile"
@@ -117,7 +117,7 @@ COVERAGE_ROWS: dict[str, dict[str, str]] = {
 
 
 # ---------------------------------------------------------------------------
-# EspoCRM Policy/Account -> Coi  (pure)
+# policy / account records -> Coi  (pure)
 # ---------------------------------------------------------------------------
 def _g(d: dict[str, Any], *keys: str, default: str = "") -> str:
     """First non-empty value across candidate keys (handles dirty/mixed casing)."""
@@ -129,7 +129,7 @@ def _g(d: dict[str, Any], *keys: str, default: str = "") -> str:
 
 
 def _classify_lob(lob: str) -> str:
-    """Map an Espo line-of-business string to an ACORD 25 coverage row kind."""
+    """Map a line-of-business string to an ACORD 25 coverage row kind."""
     t = (lob or "").lower()
     if "umbrella" in t or "excess" in t:
         return "umbrella"
@@ -142,7 +142,7 @@ def _classify_lob(lob: str) -> str:
     return "general_liability"
 
 
-def from_espo_policy(
+def from_policy_records(
     policies: list[dict[str, Any]],
     account: dict[str, Any],
     *,
@@ -150,11 +150,21 @@ def from_espo_policy(
     holder_address: str = "",
     description: str = "",
 ) -> Coi:
-    """Build a Coi from one account and its EspoCRM policy records.
+    """Build a Coi from one account and its policy records.
+
+    Key reads are casing-tolerant and already match what NowCerts returns
+    (``lineOfBusiness``, ``carrierName``, ``policyNumber``, ``effectiveDate``,
+    ``expirationDate``).
 
     AI/WOS per row come from the policy's endorsement flags
     (``additionalInsuredOnFile`` / ``waiverOfSubOnFile``) — absent/false means
     the box stays unchecked. Nothing is invented; missing data stays blank.
+
+    GAP: the ``account`` address reads still expect the old CRM's
+    ``billing_address_*`` / ``billingAddress*`` keys. A NowCerts insured uses
+    different names, so feeding one straight in yields a blank insured address.
+    Map the address before calling, or extend ``_g`` here, when this gets a
+    production caller — it has none today.
     """
     coverages: list[CoverageLine] = []
     for p in policies:

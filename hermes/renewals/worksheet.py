@@ -1,14 +1,15 @@
 """Worksheet helpers for the renewal flow.
 
-The worksheet Gretchen completes lives on the Renewal record (required fields +
-checkbox booleans, enforced by Dynamic Logic). On completion the finished
-worksheet is rendered to text via build_worksheet_content() and persisted with
-save_document(); client files themselves live in Nextcloud (the file source of
-truth).
+The worksheet Gretchen completes is rendered to text by
+build_worksheet_content() and persisted with save_document(); client files
+themselves live in Nextcloud (the file source of truth).
 
-Field reads use the EspoCRM API names, which for the custom Renewal fields are
-snake_case (current_premium, renewal_premium, line_of_business, the bool
-checkboxes, ...) — NOT camelCase.
+Field reads expect the normalized worksheet-shaped dict that
+``resolve.ResolvedPolicy.policy`` produces from a NowCerts PolicyDetail. Its
+custom-renewal fields are snake_case (current_premium, renewal_premium,
+line_of_business, the bool checkboxes, ...) — NOT camelCase — while the
+policy-level ones stay camelCase (accountName, policyNumber, ...). Change the
+names here only alongside resolve.py.
 """
 from __future__ import annotations
 
@@ -34,16 +35,6 @@ def _pct(v) -> str:
 
 def _yn(v) -> str:
     return "Yes" if v else "No"
-
-
-def account_url(account_id: str | None) -> str | None:
-    base = config.ESPO_BASE_URL
-    return f"{base}/#Account/view/{account_id}" if base and account_id else None
-
-
-def renewal_url(renewal_id: str | None) -> str | None:
-    base = config.ESPO_BASE_URL
-    return f"{base}/#{config.RENEWAL_ENTITY}/view/{renewal_id}" if base and renewal_id else None
 
 
 def worksheet_record(renewal: dict[str, Any]) -> dict[str, Any]:
@@ -100,8 +91,8 @@ def merge_fields(renewal: dict) -> dict:
     """Placeholder token -> string value for the renewal worksheet fields.
 
     Put these exact tokens in the template doc (double braces), e.g. {{account}}.
-    Reads snake_case EspoCRM field names; the four checkbox reads correspond 1:1
-    to config.CHECKBOX_FIELDS.
+    Reads the snake_case custom-renewal field names; the four checkbox reads
+    correspond 1:1 to config.CHECKBOX_FIELDS.
     """
     worksheet_row = worksheet_record(renewal)
     pipeline_stage = _first_present(renewal, "pipeline_stage", "stage") or ""

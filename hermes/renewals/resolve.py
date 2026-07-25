@@ -1,6 +1,6 @@
 """Resolve ONE renewal event by exact NowCerts identity — the renewal desk's front door.
 
-NowCerts is the source of truth; EspoCRM is NOT consulted here. A caller MUST
+NowCerts is the source of truth. A caller MUST
 supply an exact policy number or NowCerts policy GUID. This module never
 fuzzy-matches, never picks one of several matches, and never falls back to a
 general report — an ambiguous or missing identifier is returned as such so the

@@ -15,11 +15,9 @@ from hermes.core.dispatcher import DispatchResult
 def _reset_singletons():
     """Reset lazy singletons between tests."""
     import hermes.api as api_mod
-    api_mod._espo = None
     api_mod._dispatcher = None
     api_mod._supa = None
     yield
-    api_mod._espo = None
     api_mod._dispatcher = None
     api_mod._supa = None
 
@@ -50,8 +48,7 @@ class TestHealth:
 
 class TestDispatch:
     @patch("hermes.api._get_dispatcher")
-    @patch("hermes.api._get_espo")
-    def test_ping(self, mock_espo, mock_dispatcher, client) -> None:
+    def test_ping(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             True, "Hermes is online and connected to CRM.",
         )
@@ -62,8 +59,7 @@ class TestDispatch:
         assert "online" in data["message"]
 
     @patch("hermes.api._get_dispatcher")
-    @patch("hermes.api._get_espo")
-    def test_sync_status(self, mock_espo, mock_dispatcher, client) -> None:
+    def test_sync_status(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             True, "No sync runs found yet.",
         )
@@ -72,8 +68,7 @@ class TestDispatch:
         assert resp.json()["ok"] is True
 
     @patch("hermes.api._get_dispatcher")
-    @patch("hermes.api._get_espo")
-    def test_dispatch_error(self, mock_espo, mock_dispatcher, client) -> None:
+    def test_dispatch_error(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             False, "No handler matched.",
         )
@@ -91,8 +86,7 @@ class TestDispatch:
         assert resp.status_code == 400
 
     @patch("hermes.api._get_dispatcher")
-    @patch("hermes.api._get_espo")
-    def test_server_error(self, mock_espo, mock_dispatcher, client) -> None:
+    def test_server_error(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.side_effect = RuntimeError("boom")
         resp = client.post("/dispatch", json={"command": "ping"})
         assert resp.status_code == 500
@@ -439,14 +433,14 @@ class TestTransitionHelper:
         supa = self._supa_with_row(existing)
         transition(
             supa, "sub-1", "failed",
-            error={"message": "espo 400", "field": "phoneNumber"},
+            error={"message": "ams 400", "field": "phoneNumber"},
         )
 
         sent = supa.update.call_args.args[2]
         assert sent["status"] == "failed"
         assert len(sent["error_log"]) == 2
         last = sent["error_log"][-1]
-        assert last["message"] == "espo 400"
+        assert last["message"] == "ams 400"
         assert last["field"] == "phoneNumber"
         assert last["status_at_failure"] == "writing"
 

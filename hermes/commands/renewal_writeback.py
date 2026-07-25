@@ -30,7 +30,6 @@ from hermes.renewals.executor import (
 )
 
 if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
 
 # NL phrase -> (action, human expected-result label). First match wins.
@@ -82,7 +81,6 @@ def _fmt_pending(row: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def propose_handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,
@@ -145,7 +143,6 @@ def propose_handle(
 # ---------------------------------------------------------------------------
 
 def show_handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,
@@ -176,7 +173,6 @@ def show_handle(
 # ---------------------------------------------------------------------------
 
 def confirm_handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,

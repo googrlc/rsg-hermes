@@ -15,8 +15,26 @@ description: >
 
 # Renewal Desk (Hermes = the executor)
 
-> Canonical reference: `docs/renewals/README.md`. This skill is the **execution
-> arm** — the sanctioned write door. It is live today.
+> ⚠️ **The `espocrm.*` tool calls below are obsolete (EspoCRM decommissioned
+> 2026-07-23).** Every `espocrm.create_note` / `create_task` / `update_task` /
+> `create_opportunity` / `update_opportunity` / `search_accounts` /
+> `get_opportunities` / `list_open_tasks` reference, and the
+> `ESPO_DEFAULT_TASK_ASSIGNEE_ID` env var, target an MCP server that no longer
+> exists — `mcp/espo/src/server.js` is not in this repo. Treat those sections as
+> **logic reference only**, the same way the rest of this doc treats raw REST.
+>
+> The live write door is the **`rsg-hermes` MCP server**, whose tools are:
+> `create_case`, `create_task`, `complete_task`, `create_client`, `draft_intake`,
+> `save_document`, `file_to_nextcloud`, `ams_create_insured`, `ams_upsert_policy`,
+> `hermes_dispatch`. Reads: `list_renewals`, `list_tasks`, `list_documents`,
+> `retention_scan`, `list_commissions`, `commission_rules`, `carrier_appetite`,
+> `ams_search_insured`, `sync_health`, `ping`. Cases and tasks live in Supabase
+> (`agency_crm_cases` / `agency_crm_tasks`), not in an Espo entity — so
+> "not yet tooled" notes below about Cases are stale too. Per-step rewiring is
+> pending; do not infer a mapping from the old names.
+>
+> Canonical reference: `docs/renewals/README.md`. The **automated** path below
+> (Job Contract v2) is accurate and live.
 >
 > **Automated path (Job Contract v2, 2026-07-15):** the same execution role also
 > runs headless as `hermes/renewals/executor.py` (`hermes --renewal-executor`). It
@@ -237,15 +255,16 @@ insured update. If the field is populated → **stop, flag the conflict.**
 `nowcerts.create_insured` with the minimal stub. Never a duplicate. This is the only
 sanctioned CRM-initiated AMS *creation*.
 
-> **Wiring note (capability, as of 2026-07-13):** the espocrm MCP exposes the
-> renewal write tools directly — `create_note`, `create_task`, `update_task`,
-> `create_opportunity`, `update_opportunity`. The nowcerts MCP covers AMS writes —
-> `create_insured`, `insert_policy`, `update_policy` (fill-blank). If a needed write
-> tool is ever *unavailable* (server down, tool missing), **stage the request, tell
-> Gretchen it's queued for Hermes/Lamar, and do NOT fall back to raw REST, the DB, or
-> the web UI** (fail-closed, per contract §6). the CRM server source:
-> `rsg-hermes/mcp/espo/src/server.js` (LaunchAgent `com.rsg.espo-mcp`,
-> `launchctl kickstart -k` to reload after edits).
+> **Wiring note (superseded — see the banner at the top of this file):** the
+> espocrm MCP that used to expose `create_note`, `create_task`, `update_task`,
+> `create_opportunity`, `update_opportunity` is gone, along with its
+> `mcp/espo/src/server.js` source and the `com.rsg.espo-mcp` LaunchAgent. CRM
+> writes now go through the `rsg-hermes` MCP door (`create_case`, `create_task`,
+> `complete_task`, …). The nowcerts MCP still covers AMS writes —
+> `create_insured`, `insert_policy`, `update_policy` (fill-blank). The fail-closed
+> rule is unchanged: if a needed write tool is *unavailable* (server down, tool
+> missing), **stage the request, tell Gretchen it's queued for Hermes/Lamar, and do
+> NOT fall back to raw REST, the DB, or the web UI** (contract §6).
 
 ---
 

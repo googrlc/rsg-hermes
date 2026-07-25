@@ -11,14 +11,11 @@ import json
 import logging
 import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from hermes.core.dispatcher import DispatchResult
 
 from hermes.ams import book as ams_book
-
-if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
 
 log = logging.getLogger(__name__)
 
@@ -387,7 +384,7 @@ About RSG (use this context; don't ask Lamar to re-explain it):
 - Independent agency writing commercial, personal, benefits, life, and Medicare lines.
 - The #1 priority is RETENTION and protecting the book — client retention has been
   ~55% vs an ~84% industry benchmark, so renewals and at-risk clients matter most.
-- You sit on top of EspoCRM, a Supabase data hub, and NowCerts policy data.
+- You sit on top of the agency CRM, a Supabase data hub, and NowCerts policy data.
 
 Voice: conversational, concrete, and brief. Lead with the answer and the next action.
 Never reply "I don't know who you are" — you know it's Lamar at RSG. If you truly lack
@@ -450,7 +447,7 @@ def _compose_system_prompt(persona_key: str | None = None) -> str:
 # Tool execution
 # ---------------------------------------------------------------------------
 
-def _exec_report(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_report(args: dict[str, Any]) -> DispatchResult:
     report_type = args["report_type"]
     report_commands = {
         "pipeline": "pipeline",
@@ -465,25 +462,25 @@ def _exec_report(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
         "commission_snapshot": "commission snapshot",
     }
     command = report_commands.get(report_type, report_type)
-    return _get_report_dispatcher().dispatch(client, command)
+    return _get_report_dispatcher().dispatch(command)
 
 
-def _exec_list_skills(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_list_skills(args: dict[str, Any]) -> DispatchResult:
     from hermes.operations.skills_catalog import render_text
 
     return DispatchResult(True, render_text())
 
 
-def _exec_web_research(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_web_research(args: dict[str, Any]) -> DispatchResult:
     from hermes.commands.business_research import handle as research_handle
 
     business = (args.get("business") or "").strip()
     if not business:
         return DispatchResult(False, "Tell me which business to research (name, and city/state if you have it).")
-    return research_handle(client, f"research business {business}")
+    return research_handle(f"research business {business}")
 
 
-def _exec_renewals(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_renewals(args: dict[str, Any]) -> DispatchResult:
     from hermes.integrations.supabase_client import SupabaseClient
     from hermes.operations.command_center_qa import renewals_facts
 
@@ -496,7 +493,7 @@ def _exec_renewals(client: "EspoClient", args: dict[str, Any]) -> DispatchResult
     return DispatchResult(True, renewals_facts(supa, scope=scope, within_days=within))
 
 
-def _exec_list_carriers(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_list_carriers(args: dict[str, Any]) -> DispatchResult:
     """Carrier hub tool — list carriers from the Supabase carrier book (read-only)."""
     from hermes.integrations.supabase_client import SupabaseClient
 
@@ -532,7 +529,7 @@ def _exec_list_carriers(client: "EspoClient", args: dict[str, Any]) -> DispatchR
                           {"carriers": rows})
 
 
-def _exec_carrier_appetite(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_carrier_appetite(args: dict[str, Any]) -> DispatchResult:
     """Carrier hub tool — match carriers to a risk via the carrier_appetite table."""
     from hermes.integrations.supabase_client import SupabaseClient
 
@@ -595,7 +592,7 @@ def _num(v: Any) -> float:
 _OWED_STATUSES = {"underpaid", "missing_statement", "pending"}
 
 
-def _exec_commission_summary(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_commission_summary(args: dict[str, Any]) -> DispatchResult:
     """Commissions hub tool — expected vs received vs outstanding from commission_ledger."""
     from collections import Counter
 
@@ -630,7 +627,7 @@ def _exec_commission_summary(client: "EspoClient", args: dict[str, Any]) -> Disp
                           {"expected": exp, "received": act, "outstanding": exp - act, "rows": len(rows)})
 
 
-def _exec_commission_shortfalls(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_commission_shortfalls(args: dict[str, Any]) -> DispatchResult:
     """Commissions hub tool — the specific underpaid/missing-statement policies RSG is chasing."""
     from hermes.integrations.supabase_client import SupabaseClient
 
@@ -668,7 +665,7 @@ def _exec_commission_shortfalls(client: "EspoClient", args: dict[str, Any]) -> D
                           {"total": total, "count": len(owed)})
 
 
-def _exec_find_client(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_find_client(args: dict[str, Any]) -> DispatchResult:
     """CRM hub tool — search the canonical client book (Supabase, NowCerts-sourced)."""
     from hermes.integrations.supabase_client import SupabaseClient
 
@@ -698,7 +695,7 @@ def _exec_find_client(client: "EspoClient", args: dict[str, Any]) -> DispatchRes
                           {"clients": rows})
 
 
-def _exec_client_policies(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_client_policies(args: dict[str, Any]) -> DispatchResult:
     """CRM hub tool — a client's policies from the canonical book (Supabase)."""
     from hermes.integrations.supabase_client import SupabaseClient
 
@@ -749,7 +746,7 @@ def _first(d: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _exec_ams_snapshot(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_ams_snapshot(args: dict[str, Any]) -> DispatchResult:
     """CRM hub tool — LIVE NowCerts snapshot for one client (insured + policies +
     opportunities), read straight from the AMS rather than the nightly mirror."""
     who = (args.get("client") or "").strip()
@@ -811,7 +808,7 @@ def _exec_ams_snapshot(client: "EspoClient", args: dict[str, Any]) -> DispatchRe
                           {"insured": name, "insured_guid": guid, "policies": pols, "opportunities": opps})
 
 
-def _exec_crm_activity(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_crm_activity(args: dict[str, Any]) -> DispatchResult:
     """CRM hub tool — a client's open cases + tasks from the custom agency CRM
     (agency_crm_cases / agency_crm_tasks in Supabase)."""
     who = (args.get("client") or "").strip()
@@ -868,7 +865,7 @@ def _exec_crm_activity(client: "EspoClient", args: dict[str, Any]) -> DispatchRe
 _DOC_MAX_CHARS = 6000
 
 
-def _exec_client_documents(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_client_documents(args: dict[str, Any]) -> DispatchResult:
     """CRM hub tool — list or read a client's Nextcloud documents. Read-only and
     hard-scoped to Clients/{client}/ (no path traversal outside the client)."""
     who = (args.get("client") or "").strip()
@@ -942,7 +939,7 @@ def _exec_client_documents(client: "EspoClient", args: dict[str, Any]) -> Dispat
                           {"files": files, "base": base})
 
 
-def _exec_list_intake(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_list_intake(args: dict[str, Any]) -> DispatchResult:
     """Intake hub tool — the intake submission queue and its statuses (Supabase)."""
     from hermes.integrations.supabase_client import SupabaseClient
 
@@ -969,7 +966,7 @@ def _exec_list_intake(client: "EspoClient", args: dict[str, Any]) -> DispatchRes
                           {"submissions": rows})
 
 
-def _exec_intake(client: "EspoClient", args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
+def _exec_intake(args: dict[str, Any], *, confirmed: bool = False) -> DispatchResult:
     raw_text = args["raw_text"]
     if not confirmed:
         return DispatchResult(
@@ -977,11 +974,17 @@ def _exec_intake(client: "EspoClient", args: dict[str, Any], *, confirmed: bool 
             f"I would process this as a lead intake and create CRM records. Confirm to proceed.\n> {raw_text}",
             {"requires_confirmation": True, "action": "intake", "raw_text": raw_text},
         )
-    from hermes.commands.intake import handle as intake_handle
-    return intake_handle(client, f"intake {raw_text}")
+    from hermes.commands.agency_intake import handle as intake_handle
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:
+        return DispatchResult(False, f"Intake staging unavailable: {exc}")
+    return intake_handle(f"intake {raw_text}", supa=supa)
 
 
-def _exec_email_search(client: "EspoClient", args: dict[str, Any]) -> DispatchResult:
+def _exec_email_search(args: dict[str, Any]) -> DispatchResult:
     """Search the connected Microsoft 365 mailbox for recent matching emails.
 
     Reuses the proven MS365 inbox read (same path the triage lane uses); filters
@@ -1103,7 +1106,6 @@ def _get_report_dispatcher() -> Any:
 # ---------------------------------------------------------------------------
 
 def ask(
-    client: "EspoClient",
     text: str,
     *,
     confirmed: bool = False,
@@ -1114,7 +1116,6 @@ def ask(
     """Process a natural language CRM request using the OpenAI agent.
 
     Args:
-        client: EspoCRM client for executing operations.
         text: The user's natural language input.
         confirmed: Whether write operations should be executed (vs. previewed).
         conversation: Optional prior conversation messages for multi-turn context.
@@ -1188,9 +1189,9 @@ def ask(
 
             is_write = fn_name in _WRITE_TOOLS
             if is_write:
-                result = executor(client, fn_args, confirmed=confirmed)
+                result = executor(fn_args, confirmed=confirmed)
             else:
-                result = executor(client, fn_args)
+                result = executor(fn_args)
 
             final_result = result
             tool_results.append({

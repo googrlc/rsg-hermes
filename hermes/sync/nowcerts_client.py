@@ -621,7 +621,7 @@ class NowCertsClient:
         POST /api/Insured/InsertNoOverride — preserves fields that are not sent
         (verified: sending ``{DatabaseId, Active}`` leaves name/email/phone
         intact). Use this for the new-client stub (on Opportunity Closed Won)
-        and for fill-blank corrections so Espo can never overwrite the AMS
+        and for fill-blank corrections so a caller can never overwrite the AMS
         source of truth. Dedupe against the AMS first to avoid duplicate
         insureds. Body is PascalCase like ``create_insured``.
 

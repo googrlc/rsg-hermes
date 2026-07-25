@@ -1,6 +1,15 @@
 # Sync flow contract: AMS / Momentum → Supabase → the CRM (and reverse)
 
-This document is the **source-to-table contract** between n8n, Hermes, Supabase, and the CRM. Implementations live in **rsg-hermes** (`hermes/sync/pipeline.py`, `hermes/sync/bidirectional.py`); orchestration uses **n8n** plus **Hermes** workers.
+> **HISTORICAL (EspoCRM decommissioned 2026-07-23).** The "CRM" leg of every flow below
+> was EspoCRM, and the implementations this contract pointed at —
+> `hermes/sync/pipeline.py` and `hermes/sync/bidirectional.py` — have been deleted. The
+> `destination_system = 'espocrm'` conventions and `espocrm_id` mappings no longer apply.
+>
+> **What holds today:** Supabase is still the hub, and the staging/queue/audit discipline
+> below is still the rule. The live tables are `inbound_sync_staging` → `canonical_clients` /
+> `canonical_policies` (in `hermes/sync/canonical_book_sync.py`) inbound, and
+> `outbound_sync_queue` → NowCerts (the approval-gated executors) outbound. Read this for
+> the contract shape, not the table names.
 
 ## Design principle
 

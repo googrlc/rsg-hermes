@@ -12,15 +12,20 @@
 --                                          despite the name; verified by grep)
 -- Everything else listed is empty in prod.
 --
--- DELIBERATELY NOT IN THIS FILE — the columns that live code still reads:
+-- DELIBERATELY NOT IN THIS FILE — columns that still hold data:
 --   sync_mappings.espocrm_id / espocrm_entity_type   (1154 / 1301 rows)
 --   canonical_clients.espocrm_id                      (101 rows)
 --   commission_ledger.espocrm_policy_id               (12 rows, money)
 --   sync_conflicts.espocrm_id / espocrm_value
--- Those need RENAME to crm_* landed in the SAME change as their code updates
--- (sync/field_mapper.py, sync/bidirectional.py, jobs/commission_ingest.py,
--- commands/sync.py, sync/pipeline.py). Renaming them ahead of the code would
--- break the sync-conflict read and the commission ingest on the next run.
+--
+-- UPDATE (slice 5): these no longer have a code dependency either. The readers
+-- this file named — sync/field_mapper.py, sync/bidirectional.py, commands/sync.py,
+-- sync/pipeline.py — were deleted in slices 1-4, and jobs/commission_ingest.py
+-- moved to the canonical book. `grep -rn 'espocrm_' hermes/` now returns nothing.
+-- So the RENAME-with-code-change is no longer required: they can be dropped
+-- outright once someone confirms the archived values aren't wanted, or renamed to
+-- crm_* purely to keep the cross-reference. Left out of this migration because
+-- that is a data-retention decision, not a code one.
 
 begin;
 

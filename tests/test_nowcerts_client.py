@@ -100,7 +100,7 @@ class NowCertsPaginationTests(unittest.TestCase):
 
 
 class NowCertsWriteMethodTests(unittest.TestCase):
-    """The Espo->NowCerts write-back endpoints (task ledger + no-override insured)."""
+    """The CRM->NowCerts write-back endpoints (task ledger + no-override insured)."""
 
     def _client(self) -> NowCertsClient:
         return NowCertsClient(

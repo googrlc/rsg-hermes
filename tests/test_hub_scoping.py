@@ -41,7 +41,7 @@ def test_list_carriers(monkeypatch):
     import hermes.integrations.supabase_client as sc
     fake = FakeSupa([{"name": "Travelers", "segment": "Commercial", "lines_of_business": "GL, Auto"}])
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
-    res = A._exec_list_carriers(None, {"query": "trav", "line_of_business": "GL"})
+    res = A._exec_list_carriers({"query": "trav", "line_of_business": "GL"})
     assert res.ok and "Travelers" in res.message
     assert fake.last[0] == "carriers"
     assert fake.last[1].get("name") == "ilike.*trav*"
@@ -54,7 +54,7 @@ def test_carrier_appetite_match(monkeypatch):
                       "appetite_level": "Strong", "min_premium": 1000, "max_premium": 50000,
                       "states_approved": ["GA"]}])
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
-    res = A._exec_carrier_appetite(None, {"line_of_business": "Commercial Auto", "state": "GA"})
+    res = A._exec_carrier_appetite({"line_of_business": "Commercial Auto", "state": "GA"})
     assert res.ok and "Progressive" in res.message and "Strong" in res.message
     assert fake.last[0] == "carrier_appetite"
     assert fake.last[1].get("lob") == "ilike.*Commercial Auto*"
@@ -70,7 +70,7 @@ def test_carrier_appetite_state_filters_and_all(monkeypatch):
         {"carrier_name": "FL-Only", "lob": "GL", "states_approved": ["FL"]},
     ]
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
-    res = A._exec_carrier_appetite(None, {"line_of_business": "GL", "state": "GA"})
+    res = A._exec_carrier_appetite({"line_of_business": "GL", "state": "GA"})
     assert "GA-Only" in res.message and "Nationwide-ALL" in res.message  # ALL always matches
     assert "FL-Only" not in res.message
 
@@ -78,7 +78,7 @@ def test_carrier_appetite_state_filters_and_all(monkeypatch):
 def test_carrier_appetite_empty_is_honest(monkeypatch):
     import hermes.integrations.supabase_client as sc
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa([]))
-    res = A._exec_carrier_appetite(None, {"line_of_business": "Aviation"})
+    res = A._exec_carrier_appetite({"line_of_business": "Aviation"})
     assert res.ok and "No carriers" in res.message
 
 
@@ -98,7 +98,7 @@ def test_commission_summary(monkeypatch):
         {"carrier_name": "Progressive", "expected_commission": "500", "actual_commission": "500", "reconciliation_status": "paid"},
     ]
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
-    res = A._exec_commission_summary(None, {})
+    res = A._exec_commission_summary({})
     assert res.ok
     assert res.data["expected"] == 1500 and res.data["received"] == 900 and res.data["outstanding"] == 600
     assert "underpaid: 1" in res.message
@@ -112,7 +112,7 @@ def test_commission_shortfalls_ranks_owed(monkeypatch):
         {"client_name": "Gamma", "carrier_name": "Progressive", "expected_commission": "500", "actual_commission": "500", "reconciliation_status": "paid"},
     ]
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
-    res = A._exec_commission_shortfalls(None, {})
+    res = A._exec_commission_shortfalls({})
     # Beta (missing $800) ranks above Acme (underpaid $600); Gamma (paid) excluded
     assert res.data["count"] == 2 and res.data["total"] == 1400
     assert res.message.index("Beta") < res.message.index("Acme")
@@ -123,7 +123,7 @@ def test_commission_shortfalls_none(monkeypatch):
     import hermes.integrations.supabase_client as sc
     rows = [{"client_name": "Ok", "carrier_name": "X", "expected_commission": "100", "actual_commission": "100", "reconciliation_status": "paid"}]
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
-    res = A._exec_commission_shortfalls(None, {})
+    res = A._exec_commission_shortfalls({})
     assert res.ok and "No outstanding commission shortfalls" in res.message
 
 
@@ -142,7 +142,7 @@ def test_find_client(monkeypatch):
     fake = FakeSupa([{"insured_name": "Dream Chaser Trucking", "client_type": "Commercial",
                       "city": "Atlanta", "state": "Georgia", "nowcerts_insured_guid": "g1"}])
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
-    res = A._exec_find_client(None, {"query": "dream"})
+    res = A._exec_find_client({"query": "dream"})
     assert res.ok and "Dream Chaser Trucking" in res.message
     assert fake.last[0] == "canonical_clients"
     assert fake.last[1].get("insured_name") == "ilike.*dream*"
@@ -164,7 +164,7 @@ def test_client_policies_resolves_name(monkeypatch):
 
     two = TwoStep()
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: two)
-    res = A._exec_client_policies(None, {"client": "Dream Chaser"})
+    res = A._exec_client_policies({"client": "Dream Chaser"})
     assert res.ok and "Dream Chaser Trucking" in res.message and "Commercial Auto" in res.message
     assert "1 active of 1" in res.message
     assert two.calls == ["canonical_clients", "canonical_policies"]
@@ -174,7 +174,7 @@ def test_list_intake_filters_status(monkeypatch):
     import hermes.integrations.supabase_client as sc
     fake = FakeSupa([{"client_identifier": "Acme", "intake_kind": "commercial", "status": "awaiting_approval"}])
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
-    res = A._exec_list_intake(None, {"status": "awaiting_approval"})
+    res = A._exec_list_intake({"status": "awaiting_approval"})
     assert res.ok and "Acme" in res.message
     assert fake.last[0] == "intake_submissions"
     assert fake.last[1].get("status") == "eq.awaiting_approval"
@@ -229,7 +229,7 @@ def test_ams_client_snapshot_live(monkeypatch):
                "neededBy": "2026-09-01T00:00:00"}],
     )
     monkeypatch.setattr(ncmod, "NowCertsClient", lambda *a, **k: fake)
-    res = A._exec_ams_snapshot(None, {"client": "acme"})
+    res = A._exec_ams_snapshot({"client": "acme"})
     assert res.ok
     assert fake.searched == "acme" and fake.policies_guid == "g-123"
     assert "Acme Trucking" in res.message and "Commercial Auto" in res.message
@@ -240,7 +240,7 @@ def test_ams_client_snapshot_live(monkeypatch):
 def test_ams_client_snapshot_no_match(monkeypatch):
     import hermes.sync.nowcerts_client as ncmod
     monkeypatch.setattr(ncmod, "NowCertsClient", lambda *a, **k: FakeNowCerts(insureds=[]))
-    res = A._exec_ams_snapshot(None, {"client": "nobody"})
+    res = A._exec_ams_snapshot({"client": "nobody"})
     assert res.ok and "No AMS insured" in res.message
 
 
@@ -261,7 +261,7 @@ def test_crm_client_activity(monkeypatch):
 
     two = CasesThenTasks()
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: two)
-    res = A._exec_crm_activity(None, {"client": "acme"})
+    res = A._exec_crm_activity({"client": "acme"})
     assert res.ok and "Acme Trucking" in res.message and "Renewal — Acme" in res.message
     assert "Build option comparison" in res.message  # task nested under its case
     assert two.calls[0][0] == "agency_crm_cases"
@@ -306,7 +306,7 @@ def test_client_documents_lists(monkeypatch):
         ],
     })
     _patch_nextcloud(monkeypatch, fake)
-    res = A._exec_client_documents(None, {"client": "Acme Trucking"})
+    res = A._exec_client_documents({"client": "Acme Trucking"})
     assert res.ok and "acme-2026.pdf" in res.message and "COIs/" in res.message
     assert "readme.txt" in res.message
 
@@ -314,7 +314,7 @@ def test_client_documents_lists(monkeypatch):
 def test_client_documents_scope_guard_blocks_traversal(monkeypatch):
     fake = FakeNextcloud(files={})
     _patch_nextcloud(monkeypatch, fake)
-    res = A._exec_client_documents(None, {"client": "Acme", "path": "../Other/secret.pdf"})
+    res = A._exec_client_documents({"client": "Acme", "path": "../Other/secret.pdf"})
     assert not res.ok and "isn't allowed" in res.message
     assert fake.read_calls == []  # never touched Nextcloud
 
@@ -324,12 +324,12 @@ def test_client_documents_reads_file(monkeypatch):
     _patch_nextcloud(monkeypatch, fake)
     import hermes.command_center.extract as ex
     monkeypatch.setattr(ex, "read_document_text", lambda p, ocr=True: "COI for Acme — active")
-    res = A._exec_client_documents(None, {"client": "Acme", "path": "COIs/acme.txt"})
+    res = A._exec_client_documents({"client": "Acme", "path": "COIs/acme.txt"})
     assert res.ok and "COI for Acme — active" in res.message
     assert fake.read_calls == ["Clients/Acme/COIs/acme.txt"]
 
 
 def test_client_documents_unconfigured_is_honest(monkeypatch):
     _patch_nextcloud(monkeypatch, FakeNextcloud(configured=False))
-    res = A._exec_client_documents(None, {"client": "Acme"})
+    res = A._exec_client_documents({"client": "Acme"})
     assert not res.ok and "isn't configured" in res.message

@@ -147,5 +147,5 @@ When CRM and `client_facts` disagree:
 ## References
 
 - `docs/agency-memory-plan.md` — retrieval architecture
-- `mcp/espo/` — read-only MCP sidecar for CRM lookups
+- the `rsg-hermes` MCP door — read-only CRM lookups (`ams_search_insured`, `list_renewals`, …)
 - `crm-intake-writer` — handoff target when a missing fact should be added

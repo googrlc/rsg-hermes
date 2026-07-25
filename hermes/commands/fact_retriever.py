@@ -55,8 +55,6 @@ FACT_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-# CRM canonical-field lookup map: fact_label → (entity, espo_field).
-# Honors the canonical convention from hermes-training/espocrm/field_dictionary.md.
 # Facts the canonical NowCerts book answers directly, as
 # label -> [(table, column), ...] in preference order. Anything absent here
 # (EIN, revenue, payroll, NAICS, date of birth) has no canonical column and

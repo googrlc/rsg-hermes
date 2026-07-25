@@ -17,7 +17,7 @@ Project 85 Sentinel is a Hermes-native revenue guardrail that posts a daily Slac
 
 ## Reliability Controls
 
-- **Retries:** the CRM reads use `EspoClient` read retries; Slack posting uses `HERMES_SLACK_RETRIES` and `HERMES_SLACK_RETRY_SLEEP`.
+- **Retries:** the CRM reads go through `SupabaseClient` in-process; Slack posting uses `HERMES_SLACK_RETRIES` and `HERMES_SLACK_RETRY_SLEEP`.
 - **Idempotency:** last successful post date is stored in `HERMES_SENTINEL_STATE_FILE`.
 - **Partial output:** if one query fails, Sentinel still posts available sections and includes warnings.
 - **Timezone consistency:** all date windows use `HERMES_SENTINEL_TIMEZONE` (default `America/New_York`).

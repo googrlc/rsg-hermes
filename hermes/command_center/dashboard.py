@@ -6,7 +6,8 @@ Wired to live data where it's cheap and honest:
   - Approval queue from cc_submissions still in review (Phase 1 output).
   - Feed from cc_review_events (the real intake activity).
 
-Pipeline stays None until the Espo opportunity read is wired (Phase 4). We show
+Pipeline stays None: the Supabase `opportunities` rollup for this card is not
+wired yet (`opportunity_summary` below serves the LOB view). We show
 real premium/clients, not a placeholder, and compare retention to RSG's standing
 75% target (the book was 54.92%) rather than an invented goal.
 """
@@ -49,7 +50,7 @@ def kpi_summary(supa) -> dict[str, Any]:
         "retention_rate": s.get("retention_rate"),
         "retention_goal": RETENTION_GOAL,
         "retention_snapshot_date": s.get("snapshot_date"),
-        "pipeline": None,   # Phase 4 — Espo opportunities
+        "pipeline": None,   # not wired — see module docstring
     }
 
 

@@ -208,7 +208,7 @@ def test_add_document_leaves_non_medicare_untouched():
 
 
 # ── ACORD 25 ─────────────────────────────────────────────────────────────────
-def test_from_espo_policy_maps_and_uses_endorsement_flags():
+def test_from_policy_records_maps_and_uses_endorsement_flags():
     account = {"name": "Acme LLC", "billing_address_city": "Atlanta", "billing_address_state": "GA"}
     policies = [{
         "lineOfBusiness": "General Liability",
@@ -218,7 +218,7 @@ def test_from_espo_policy_maps_and_uses_endorsement_flags():
         acord25.POLICY_FIELD_ADDITIONAL_INSURED: True,
         acord25.POLICY_FIELD_WAIVER_OF_SUB: False,
     }]
-    coi = acord25.from_espo_policy(policies, account, holder_name="City of Atlanta")
+    coi = acord25.from_policy_records(policies, account, holder_name="City of Atlanta")
     assert coi.insured_name == "Acme LLC"
     assert coi.holder_name == "City of Atlanta"
     assert len(coi.coverages) == 1

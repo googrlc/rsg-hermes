@@ -18,7 +18,7 @@ surrogate ``id`` and differ from the phase-0 migration):
 Design guarantees:
   * **Additive.** Upsert-by-natural-key only; never deletes rows. (The
     ``nowcerts_insured_mirror`` golden/crosswalk table is intentionally left
-    alone — it is an EspoCRM↔NowCerts record the renewal engine does not read.)
+    alone — it is a legacy crosswalk record the renewal engine does not read.)
   * **Preserves ``renewed_policy`` lineage.** The NowCerts API exposes no renewal
     lineage pointer (see ``candidate_refresh`` docstring); the CSV-loaded value is
     irreplaceable, so an update never overwrites it — only volatile fields

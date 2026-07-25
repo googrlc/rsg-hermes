@@ -83,7 +83,7 @@ def _live_client_row(**over):
         "insured_name_normalized": "old name", "first_name": None, "last_name": None,
         "client_type": "Commercial", "business_type": None, "phone": None,
         "cell_phone": None, "email": None, "address_line1": None, "city": None,
-        "state": None, "zip": None, "espocrm_id": None, "created_at": "2026-06-10",
+        "state": None, "zip": None, "created_at": "2026-06-10",
         "updated_at": "2026-06-10",
     }
     row.update(over)

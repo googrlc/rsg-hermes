@@ -129,7 +129,7 @@ def test_create_case_handle_opens_case_and_tasks():
     supa = _supa({"renewal_candidates": [_candidate()], "renewal_case_details": [],
                   "agency_crm_cases": [], "agency_crm_tasks": []})
     r = rc.create_case_handle(
-        None, "create a renewal case and tasks for policy TST-0001", supa=supa, nowcerts=_nc(_detail())
+        "create a renewal case and tasks for policy TST-0001", supa=supa, nowcerts=_nc(_detail())
     )
     assert r.ok and r.data["created"] is True
     assert r.data["tasks_created"] == 5
@@ -143,12 +143,12 @@ def test_create_case_handle_existing():
                               "owner_email": "gretchen@x.com", "insured_name": "Acme LLC"}],
         "agency_crm_tasks": [],
     })
-    r = rc.create_case_handle(None, "create a renewal case for policy TST-0001", supa=supa, nowcerts=_nc(_detail()))
+    r = rc.create_case_handle("create a renewal case for policy TST-0001", supa=supa, nowcerts=_nc(_detail()))
     assert r.ok and r.data["created"] is False
 
 
 def test_create_case_handle_needs_identifier():
-    r = rc.create_case_handle(None, "create a renewal case", supa=MagicMock(), nowcerts=_nc(_detail()))
+    r = rc.create_case_handle("create a renewal case", supa=MagicMock(), nowcerts=_nc(_detail()))
     assert not r.ok and r.data.get("need_identifier") is True
 
 
@@ -159,7 +159,7 @@ def test_create_tasks_handle_seeds_defaults():
         "agency_crm_cases": [{"id": "case-9", "policy_number": "TST-0001", "owner_email": "g@x.com"}],
         "agency_crm_tasks": [],
     })
-    r = rc.create_tasks_handle(None, "create renewal tasks for policy TST-0001", supa=supa, nowcerts=_nc(_detail()))
+    r = rc.create_tasks_handle("create renewal tasks for policy TST-0001", supa=supa, nowcerts=_nc(_detail()))
     assert r.ok and r.data["tasks_created"] == 5
 
 
@@ -168,12 +168,12 @@ def test_create_tasks_handle_seeds_defaults():
 def test_create_renewal_case_beats_data_entry():
     with patch("hermes.commands.renewal_cases.create_case_handle") as h:
         h.return_value = DispatchResult(True, "case")
-        _make_dispatcher().dispatch(MagicMock(), "create a renewal case and tasks for policy TST-0001")
+        _make_dispatcher().dispatch("create a renewal case and tasks for policy TST-0001")
         h.assert_called_once()
 
 
 def test_create_renewal_tasks_routes():
     with patch("hermes.commands.renewal_cases.create_tasks_handle") as h:
         h.return_value = DispatchResult(True, "tasks")
-        _make_dispatcher().dispatch(MagicMock(), "create renewal tasks for policy TST-0001")
+        _make_dispatcher().dispatch("create renewal tasks for policy TST-0001")
         h.assert_called_once()

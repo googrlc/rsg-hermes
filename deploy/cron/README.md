@@ -27,8 +27,6 @@ revenue briefing. This artifact makes it repeatable.
 
 | Job | Cadence | Output |
 |---|---|---|
-| `--sync-nowcerts` | daily 2:00am | Account Sync v2: NowCerts Insured → EspoCRM Account |
-| `--sync-policies` | daily 2:10am | Policy Sync v2: NowCerts Policy → EspoCRM Policy (policies only, no Account writes) |
 | `--email-triage` (ms365) | every 30 min | actionable Outlook mail → intake queue |
 | `--snapshot-kpis` | daily 6:00am | Supabase `dashboard_kpis` (no Slack) |
 | `--renewal-reconcile` | daily 6:15am | retry due Renewal Loop v6 AMS writebacks, alert `#systems-check` on failures |
