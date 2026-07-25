@@ -24,7 +24,6 @@ from hermes.core.dispatcher import DispatchResult
 from hermes.renewals import resolve
 
 if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
     from hermes.sync.nowcerts_client import NowCertsClient
 
@@ -66,7 +65,6 @@ def _risk_key(row: dict[str, Any]) -> tuple[int, str]:
 
 
 def queue_handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,
@@ -155,7 +153,6 @@ def _render_open(resolved: resolve.ResolvedPolicy) -> str:
 
 
 def open_handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,
@@ -333,7 +330,6 @@ def _resolve_for_research(
 
 
 def research_handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,

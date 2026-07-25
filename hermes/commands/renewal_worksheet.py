@@ -30,7 +30,6 @@ from hermes.core.dispatcher import DispatchResult
 from hermes.renewals import resolve, worksheet
 
 if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
     from hermes.sync.nowcerts_client import NowCertsClient
 
@@ -170,7 +169,6 @@ def _candidates_by_name(
 # ---------------------------------------------------------------------------
 
 def handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,
@@ -178,8 +176,7 @@ def handle(
 ) -> DispatchResult:
     """Prepare a renewal worksheet for the requested client or policy.
 
-    ``client`` (EspoClient) is accepted for dispatcher-signature compatibility but
-    unused — all reads come from NowCerts + the Supabase candidate index.
+    All reads come from NowCerts + the Supabase candidate index.
     """
     req = parse_request(text)
     policy_number = req["policy_number"]

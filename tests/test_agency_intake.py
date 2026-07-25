@@ -308,8 +308,7 @@ class DispatcherHandleTests(unittest.TestCase):
             return_value=PUMPS_PAYLOAD,
         ):
             result = handle(
-                client=MagicMock(),
-                text="stage intake: 3D Pumps LLC — bypass pumping…",
+                    text="stage intake: 3D Pumps LLC — bypass pumping…",
                 supa=supa,
                 channel_id="C123",
                 user_id="U999",
@@ -327,7 +326,6 @@ class DispatcherHandleTests(unittest.TestCase):
 
         supa = MagicMock()
         result = handle(
-            client=MagicMock(),
             text="stage intake:",
             supa=supa,
         )
@@ -339,7 +337,6 @@ class DispatcherHandleTests(unittest.TestCase):
         from hermes.commands.agency_intake import handle
 
         result = handle(
-            client=MagicMock(),
             text="stage intake: anything",
             supa=None,
         )

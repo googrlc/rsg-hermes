@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Any
 from hermes.core.dispatcher import DispatchResult
 
 if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
@@ -581,7 +580,6 @@ _NEW_PROSPECT_RE = re.compile(
 
 
 def handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,
@@ -596,7 +594,6 @@ def handle(
     DispatchResult whose `data["slack_blocks"]` carries the 6 approval
     buttons.
     """
-    _ = client  # CRM lookups happen during approval, not staging.
     if supa is None:
         return DispatchResult(
             False,

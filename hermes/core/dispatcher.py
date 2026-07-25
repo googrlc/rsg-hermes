@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 from hermes.operations.write_gate import parse_approval_token
 
 if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
@@ -89,7 +88,7 @@ class DispatchResult:
     data: dict[str, Any] | None = None
 
 
-Handler = Callable[["EspoClient", str], DispatchResult]
+Handler = Callable[[str], DispatchResult]
 
 
 class Dispatcher:
@@ -297,7 +296,6 @@ class Dispatcher:
     def _call_handler(
         self,
         handler: Handler | str,
-        client: "EspoClient",
         text: str,
     ) -> DispatchResult:
         if handler == "ping":
@@ -307,41 +305,41 @@ class Dispatcher:
             return research_business_handle(text, supa=self.supa)
         if handler == "agency_intake":
             from hermes.commands.agency_intake import handle as ai_handle
-            return ai_handle(client, text, supa=self.supa, **self._slack_ctx)
+            return ai_handle(text, supa=self.supa, **self._slack_ctx)
         if handler == "agency_fact":
             from hermes.commands.fact_retriever import handle as fact_handle
             return fact_handle(text, supa=self.supa)
         if handler == "renewal_worksheet":
             from hermes.commands.renewal_worksheet import handle as rw_handle
-            return rw_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return rw_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_queue":
             from hermes.commands.renewal_desk import queue_handle
-            return queue_handle(client, text, supa=self.supa)
+            return queue_handle(text, supa=self.supa)
         if handler == "renewal_open":
             from hermes.commands.renewal_desk import open_handle
-            return open_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return open_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_research":
             from hermes.commands.renewal_desk import research_handle
-            return research_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return research_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_wb_propose":
             from hermes.commands.renewal_writeback import propose_handle
-            return propose_handle(client, text, supa=self.supa)
+            return propose_handle(text, supa=self.supa)
         if handler == "renewal_wb_show":
             from hermes.commands.renewal_writeback import show_handle
-            return show_handle(client, text, supa=self.supa)
+            return show_handle(text, supa=self.supa)
         if handler == "renewal_wb_confirm":
             from hermes.commands.renewal_writeback import confirm_handle
-            return confirm_handle(client, text, supa=self.supa)
+            return confirm_handle(text, supa=self.supa)
         if handler == "renewal_case_create":
             from hermes.commands.renewal_cases import create_case_handle
-            return create_case_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return create_case_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_tasks_create":
             from hermes.commands.renewal_cases import create_tasks_handle
-            return create_tasks_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return create_tasks_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler in ("renewal_pdf", "renewal_file"):
             from hermes.commands.renewal_documents import generate_pdf_handle
-            return generate_pdf_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
-        return handler(client, text)
+            return generate_pdf_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+        return handler(text)
 
     def _capture_write_intent(self, result: DispatchResult) -> None:
         data = result.data if isinstance(result.data, dict) else {}
@@ -352,7 +350,7 @@ class Dispatcher:
             self._pending_write = write_intent
             return
 
-    def _handle_approval(self, client: "EspoClient", approval: Any) -> DispatchResult:
+    def _handle_approval(self, approval: Any) -> DispatchResult:
         pending = self._pending_write
         if not pending:
             return DispatchResult(False, "No pending draft update found to approve.")
@@ -366,7 +364,6 @@ class Dispatcher:
 
     def dispatch(
         self,
-        client: "EspoClient",
         line: str,
         *,
         _allow_intent: bool = True,
@@ -378,16 +375,16 @@ class Dispatcher:
         # Process approval tokens before route matching.
         approval = parse_approval_token(text)
         if approval:
-            return self._handle_approval(client, approval)
+            return self._handle_approval(approval)
         for pattern, handler in self._routes:
             if pattern.search(text):
-                result = self._call_handler(handler, client, text)
+                result = self._call_handler(handler, text)
                 if (
                     self.use_openai
                     and _allow_intent
                     and _should_retry_with_intent(text, result)
                 ):
-                    intent_result = self._dispatch_from_intent(client, text)
+                    intent_result = self._dispatch_from_intent(text)
                     if intent_result is not None:
                         return intent_result
                 self._capture_write_intent(result)
@@ -395,13 +392,13 @@ class Dispatcher:
         if self.use_openai and _allow_intent:
             from hermes.core.nl_agent import ask as nl_ask
 
-            return nl_ask(client, text, confirmed=confirmed)
+            return nl_ask(text, confirmed=confirmed)
         return DispatchResult(
             True,
             _clarification_message(text),
         )
 
-    def _dispatch_from_intent(self, client: "EspoClient", text: str) -> DispatchResult | None:
+    def _dispatch_from_intent(self, text: str) -> DispatchResult | None:
         from hermes.core.intent_openai import command_from_intent
 
         command = command_from_intent(text)
@@ -414,4 +411,4 @@ class Dispatcher:
             return None
         if _intent_translation_needs_clarification(text, normalized):
             return DispatchResult(True, _clarification_message(text))
-        return self.dispatch(client, command, _allow_intent=False)
+        return self.dispatch(command, _allow_intent=False)

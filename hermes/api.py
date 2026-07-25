@@ -107,10 +107,28 @@ try:
 except Exception:  # pragma: no cover - surfaced in logs, never fatal
     log.exception("extract routes unavailable")
 
-_espo = None
 _dispatcher = None
 _supa = None
 _nowcerts = None
+
+
+def _get_dispatcher():
+    global _dispatcher
+    if _dispatcher is None:
+        from hermes.core.dispatcher import Dispatcher
+
+        use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
+        _dispatcher = Dispatcher(use_openai=use_openai)
+    return _dispatcher
+
+
+def _get_supa():
+    global _supa
+    if _supa is None:
+        from hermes.integrations.supabase_client import SupabaseClient
+
+        _supa = SupabaseClient()
+    return _supa
 
 
 def _get_nowcerts():
@@ -137,36 +155,6 @@ def _require_hermes_token(request: Request) -> None:
     scheme, _, token = auth.partition(" ")
     if scheme.lower() != "bearer" or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")
-
-
-def _get_espo():
-    global _espo
-    if _espo is None:
-        from hermes.core.client import EspoClient
-
-        # Fail-fast: Espo is decommissioned; a dead-host call must not hang the
-        # worker pool. 5s timeout, no connect retries (was 60s x 3 = ~180s).
-        _espo = EspoClient(timeout=5, max_retries=0)
-    return _espo
-
-
-def _get_dispatcher():
-    global _dispatcher
-    if _dispatcher is None:
-        from hermes.core.dispatcher import Dispatcher
-
-        use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
-        _dispatcher = Dispatcher(use_openai=use_openai)
-    return _dispatcher
-
-
-def _get_supa():
-    global _supa
-    if _supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
-
-        _supa = SupabaseClient()
-    return _supa
 
 
 class DispatchRequest(BaseModel):
@@ -352,9 +340,8 @@ async def dispatch(req: DispatchRequest):
             requires_confirmation=True,
         )
     try:
-        espo = _get_espo()
         dispatcher = _get_dispatcher()
-        result = dispatcher.dispatch(espo, req.command, confirmed=req.confirm)
+        result = dispatcher.dispatch(req.command, confirmed=req.confirm)
         return DispatchResponse(ok=result.ok, message=result.message, data=result.data, requires_confirmation=False)
     except Exception as exc:
         log.exception("Dispatch failed for command: %s", req.command)
@@ -445,15 +432,19 @@ async def command_center_tasks():
 
 @app.post("/api/command-center/tasks/{task_id}/complete")
 async def command_center_complete_task(task_id: str):
-    """Mark a team task done (writes status=Completed back to EspoCRM)."""
+    """Mark a team task done in agency_crm_tasks."""
     from hermes.operations.team_queue import complete_task
 
     try:
-        complete_task(_get_espo(), task_id)
+        row = complete_task(_get_supa(), task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         log.exception("complete task failed: %s", task_id)
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "id": task_id, "status": "Completed"}
+    if row is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"ok": True, "id": task_id, "status": "completed"}
 
 
 @app.get("/api/command-center/skills")
@@ -553,7 +544,7 @@ async def command_center_ask(req: AskRequest):
     from hermes.core.nl_agent import ask as nl_ask
 
     try:
-        result = nl_ask(_get_espo(), prompt, confirmed=False, persona=(req.persona or None), hub=(req.hub or None))
+        result = nl_ask(prompt, confirmed=False, persona=(req.persona or None), hub=(req.hub or None))
     except Exception as exc:
         log.exception("command-center ask failed: %s", prompt)
         raise HTTPException(status_code=502, detail=str(exc))

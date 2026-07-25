@@ -171,7 +171,7 @@ def test_worksheet_route_precedes_renewal_sentinel():
     # Patch the worksheet handler so we can confirm it is the one called.
     with patch("hermes.commands.renewal_worksheet.handle") as rw_handle:
         rw_handle.return_value = DispatchResult(True, "worksheet ran for Test Corp LLC")
-        result = d.dispatch(mock_client, "prepare a renewal worksheet for Test Corp LLC")
+        result = d.dispatch("prepare a renewal worksheet for Test Corp LLC")
         rw_handle.assert_called_once()
 
     assert result.ok
@@ -190,7 +190,7 @@ def test_renewal_audit_still_routes_to_revenue():
 
     with patch("hermes.commands.renewal_worksheet.handle") as rw_handle:
         rw_handle.return_value = DispatchResult(True, "worksheet ran")
-        result = d.dispatch(mock_client, "renewal audit")
+        result = d.dispatch("renewal audit")
         rw_handle.assert_not_called()
 
     # result.ok is True and comes from revenue.handle (not the worksheet handler)
@@ -260,7 +260,7 @@ def _supa_returning(rows):
 def test_exact_policy_match_returns_worksheet():
     nc = _mock_nowcerts(_nc_detail(policy_number="TST-0001"))
     supa = _supa_returning([_candidate(policy_number="TST-0001")])
-    result = rw_mod.handle(None, "prepare renewal worksheet for policy TST-0001", supa=supa, nowcerts=nc)
+    result = rw_mod.handle("prepare renewal worksheet for policy TST-0001", supa=supa, nowcerts=nc)
     assert result.ok
     assert "TST-0001" in result.message
     assert result.data["source"] == "nowcerts"
@@ -270,7 +270,7 @@ def test_exact_policy_no_fuzzy_cross_match():
     """Policy TST-0001 must not match TST-00010 (exact OData filter, no prefix match)."""
     nc = _mock_nowcerts(_nc_detail(policy_number="TST-00010"))
     supa = _supa_returning([])
-    result = rw_mod.handle(None, "prepare renewal worksheet for policy TST-0001", supa=supa, nowcerts=nc)
+    result = rw_mod.handle("prepare renewal worksheet for policy TST-0001", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["reconciliation_needed"] is True
 
@@ -280,7 +280,7 @@ def test_exact_policy_no_fuzzy_cross_match():
 def test_missing_policy_returns_reconciliation_needed():
     nc = _mock_nowcerts(None)
     supa = _supa_returning([])
-    result = rw_mod.handle(None, "prepare renewal worksheet for policy NOTEXIST-999", supa=supa, nowcerts=nc)
+    result = rw_mod.handle("prepare renewal worksheet for policy NOTEXIST-999", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["reconciliation_needed"] is True
     assert "NOTEXIST-999" in result.message
@@ -289,7 +289,7 @@ def test_missing_policy_returns_reconciliation_needed():
 def test_missing_client_returns_reconciliation_needed():
     nc = _mock_nowcerts(None)
     supa = _supa_returning([])  # no candidate rows for the name
-    result = rw_mod.handle(None, "prepare renewal worksheet for Unknown Client XYZ", supa=supa, nowcerts=nc)
+    result = rw_mod.handle("prepare renewal worksheet for Unknown Client XYZ", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["reconciliation_needed"] is True
 
@@ -301,7 +301,7 @@ def test_ambiguous_policy_number_returns_matches():
     ambiguous = {"_ambiguous": True, "matches": [_nc_detail(guid="a"), _nc_detail(guid="b")]}
     nc = _mock_nowcerts(ambiguous)
     supa = _supa_returning([])
-    result = rw_mod.handle(None, "prepare renewal worksheet for policy DUP-001", supa=supa, nowcerts=nc)
+    result = rw_mod.handle("prepare renewal worksheet for policy DUP-001", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["ambiguous"] is True
     assert len(result.data["matches"]) == 2
@@ -314,7 +314,7 @@ def test_ambiguous_client_name_returns_candidates():
         _candidate(policy_number="POL-001", lob="Commercial Auto"),
         _candidate(policy_number="POL-002", lob="General Liability"),
     ])
-    result = rw_mod.handle(None, "prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
+    result = rw_mod.handle("prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["ambiguous"] is True
     assert len(result.data["candidates"]) == 2
@@ -327,7 +327,7 @@ def test_ambiguous_does_not_create_records():
         _candidate(policy_number="POL-001"),
         _candidate(policy_number="POL-002"),
     ])
-    result = rw_mod.handle(None, "prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
+    result = rw_mod.handle("prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
     assert not result.ok
     assert "worksheet" not in (result.data or {})
 
@@ -337,9 +337,9 @@ def test_ambiguous_does_not_create_records():
 def test_repeated_identical_request_returns_same_result():
     """Calling handle() twice with the same input returns identical results."""
     supa = _supa_returning([_candidate(policy_number="TST-0001")])
-    r1 = rw_mod.handle(None, "prepare renewal worksheet for policy TST-0001",
+    r1 = rw_mod.handle("prepare renewal worksheet for policy TST-0001",
                        supa=supa, nowcerts=_mock_nowcerts(_nc_detail(policy_number="TST-0001")))
-    r2 = rw_mod.handle(None, "prepare renewal worksheet for policy TST-0001",
+    r2 = rw_mod.handle("prepare renewal worksheet for policy TST-0001",
                        supa=supa, nowcerts=_mock_nowcerts(_nc_detail(policy_number="TST-0001")))
     assert r1.ok == r2.ok
     assert r1.message == r2.message
@@ -354,6 +354,6 @@ def test_excluded_candidates_absent_from_client_lookup():
     """
     nc = _mock_nowcerts(None)
     supa = _supa_returning([])  # excluded rows filtered out at the query
-    result = rw_mod.handle(None, "prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
+    result = rw_mod.handle("prepare renewal worksheet for Test Corp LLC", supa=supa, nowcerts=nc)
     assert not result.ok
     assert result.data["reconciliation_needed"] is True
