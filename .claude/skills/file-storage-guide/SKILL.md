@@ -25,12 +25,12 @@ do I put this?" and "where is that file?"
 | Templates (emails, forms, checklists) | Nextcloud |
 | Certificates of Insurance | NowCerts |
 | CRM records (accounts, contacts, opportunities, tasks, notes) | the CRM |
-| Bound policy data (insureds, premiums, policy details) | NowCerts (synced to CRM Policy entity) |
+| Bound policy data (insureds, premiums, policy details) | NowCerts (mirrored to Supabase `canonical_policies`) |
 | Daily assistant / commands | Hermes |
 | Automations and workflows | n8n (defined in docker-compose, check if running) |
 | Analytics, snapshots, commission ledger | Supabase |
 | Slack messages and alerts | Slack |
-| Agency login links | RSG Launchpad (in OpenWebUI) |
+| Agency login links | Command Center dashboard (`/command-center/`) |
 
 ## Client folder structure
 
