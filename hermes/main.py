@@ -116,17 +116,6 @@ def main() -> int:
         help="Check sentinel freshness/config status without posting",
     )
     parser.add_argument(
-        "--renewal-sweep",
-        action="store_true",
-        help="Create renewal prep tasks for Identified renewals (Gretchen)",
-    )
-    parser.add_argument(
-        "--renewal-sweep-limit",
-        type=int,
-        default=None,
-        help="Cap renewal-sweep candidates (use 1 for a safe first live run)",
-    )
-    parser.add_argument(
         "--renewal-refresh",
         action="store_true",
         help="Rebuild renewal_candidates from the live book (eligibility engine) + project eligible to project_85_renewals",
@@ -700,14 +689,6 @@ def main() -> int:
             for warning in result.warnings:
                 print(f"- {warning}")
         return 0 if result.ok else 1
-
-    if args.renewal_sweep:
-        from hermes.renewals.sweep import run as renewal_sweep
-
-        result = renewal_sweep(limit=args.renewal_sweep_limit)
-        print(f"Renewal sweep: {result['created']} task(s) created of "
-              f"{result['candidates']} candidate(s)")
-        return 0
 
     if args.renewal_refresh or args.renewal_refresh_dry_run:
         from hermes.renewals.candidate_refresh import run_refresh

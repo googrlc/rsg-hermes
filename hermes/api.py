@@ -2167,20 +2167,6 @@ def _get_slack_web_client():
 
 
 # ---------------------------------------------------------------------------
-@app.post("/renewals/complete")
-async def renewals_complete_webhook(request: Request):
-    """EspoCRM service.task_completed webhook for Renewal tasks.
-
-    Auth is the shared X-Service-Webhook-Secret header (EspoCRM config
-    serviceWebhookSecret == Hermes env SERVICE_WEBHOOK_SECRET).
-    """
-    from hermes.renewals import complete as renewals_complete
-
-    if not renewals_complete.verify_secret(request.headers.get("X-Service-Webhook-Secret")):
-        raise HTTPException(status_code=401, detail="bad webhook secret")
-    return renewals_complete.handle(await request.json())
-
-
 # ---------------------------------------------------------------------------
 # Voice output — TTS endpoint for Slack voice clips.
 # ---------------------------------------------------------------------------
@@ -2288,8 +2274,8 @@ def main() -> int:
 
     if not os.environ.get("SERVICE_WEBHOOK_SECRET", "").strip():
         log.warning(
-            "SERVICE_WEBHOOK_SECRET is not set — all /renewals/complete and "
-            "service webhook requests will be rejected (401). "
+            "SERVICE_WEBHOOK_SECRET is not set — all service webhook "
+            "requests will be rejected (401). "
             "Set it in .env and recreate the container with "
             "`docker compose up -d hermes-api` (restart does not reload env_file)."
         )
