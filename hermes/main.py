@@ -275,16 +275,6 @@ def main() -> int:
         help="Bypass daily idempotency guard for commission audit",
     )
     parser.add_argument(
-        "--commission-ingest",
-        action="store_true",
-        help="Ingest commissionable policies from crm_commissions into commission_ledger",
-    )
-    parser.add_argument(
-        "--commission-ingest-dry-run",
-        action="store_true",
-        help="Preview commission ingest without writing to commission_ledger",
-    )
-    parser.add_argument(
         "--eom-scorecard",
         action="store_true",
         help="Post end-of-month revenue scorecard for previous month",
@@ -302,7 +292,7 @@ def main() -> int:
     parser.add_argument(
         "--commission-reconcile-file",
         type=str,
-        help="Reconcile a carrier statement file (csv/xlsx/pdf) against Espo commissions",
+        help="Reconcile a carrier statement file (csv/xlsx/pdf) against commission_ledger",
     )
     parser.add_argument(
         "--commission-reconcile-dry-run",
@@ -701,7 +691,6 @@ def main() -> int:
         from hermes.jobs import revenue_sentinel
 
         result = revenue_sentinel.run(
-            client,
             dry_run=args.revenue_sentinel_dry_run,
             force=args.revenue_sentinel_force,
         )
@@ -887,7 +876,6 @@ def main() -> int:
         from hermes.jobs import revenue_integrity
 
         result = revenue_integrity.run_commission_audit(
-            client,
             dry_run=args.commission_audit_dry_run,
             force=args.commission_audit_force,
         )
@@ -898,23 +886,10 @@ def main() -> int:
                 print(f"- {warning}")
         return 0 if result.ok else 1
 
-    if args.commission_ingest or args.commission_ingest_dry_run:
-        from hermes.jobs.commission_ingest import run_ingest
-
-        result = run_ingest(dry_run=args.commission_ingest_dry_run)
-        print(result.message)
-        if result.errors:
-            print("Errors:")
-            for err in result.errors[:10]:
-                print(f"- {err}")
-        return 0 if result.ok else 1
-
-
     if args.eom_scorecard or args.eom_scorecard_dry_run:
         from hermes.jobs import revenue_integrity
 
         result = revenue_integrity.run_eom_scorecard(
-            client,
             dry_run=args.eom_scorecard_dry_run,
             force=args.eom_scorecard_force,
         )
@@ -939,10 +914,16 @@ def main() -> int:
         return 0
 
     if args.commission_reconcile_file:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.jobs import commission_reconciliation
 
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
         result = commission_reconciliation.run_reconciliation(
-            client,
+            supa,
             statement_path=args.commission_reconcile_file,
             dry_run=args.commission_reconcile_dry_run,
         )

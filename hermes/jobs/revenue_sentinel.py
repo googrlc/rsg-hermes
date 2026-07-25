@@ -11,13 +11,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from hermes.core.client import EspoClient
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 # Data source: the custom CRM (Command Center) — read directly from its Supabase
-# tables via SupabaseClient, the same in-process path renewal-refresh / canonical-book
-# use. EspoCRM is decommissioned; the sentinel no longer reads from it.
+# tables via SupabaseClient, the same in-process path renewal-refresh /
+# canonical-book use.
 STALE_STATUSES = ("Prospecting", "Quoting", "Gathering Info")
 # Owner-facing briefing → #the-boss. team_notify.resolve_room maps this id to
 # HERMES_TALK_ROOM_BOSS (Nextcloud Talk). Override via HERMES_SENTINEL_REPORT_CHANNEL.
@@ -51,7 +50,6 @@ class SentinelHealthStatus:
 
 
 def run(
-    client: EspoClient | None = None,
     *,
     supa: SupabaseClient | None = None,
     notifier: SlackNotifier | None = None,
@@ -59,9 +57,6 @@ def run(
     dry_run: bool = False,
     force: bool = False,
 ) -> SentinelRunResult:
-    # `client` (EspoCRM) is retained only for signature compatibility with the CLI
-    # dispatcher and the Slack action handler; the daily briefing reads exclusively
-    # from the custom CRM's Supabase tables.
     local_now = _now_in_timezone(now)
     target_day = local_now.date()
     supa = supa or SupabaseClient()
@@ -167,70 +162,6 @@ def health_status(now: datetime | None = None) -> SentinelHealthStatus:
     )
 
 
-def build_action_value(*, entity: str, record_id: str, name: str, category: str) -> str:
-    payload = {
-        "entity": entity,
-        "record_id": record_id,
-        "name": name,
-        "category": category,
-    }
-    return json.dumps(payload, separators=(",", ":"))
-
-
-def parse_action_value(raw_value: str) -> dict[str, str]:
-    try:
-        data = json.loads(raw_value)
-    except json.JSONDecodeError as e:
-        raise ValueError("Invalid sentinel action payload.") from e
-    if not isinstance(data, dict):
-        raise ValueError("Invalid sentinel action payload shape.")
-    entity = str(data.get("entity") or "").strip()
-    record_id = str(data.get("record_id") or "").strip()
-    name = str(data.get("name") or "").strip()
-    category = str(data.get("category") or "").strip()
-    if not entity or not record_id:
-        raise ValueError("Sentinel action payload missing required fields.")
-    return {"entity": entity, "record_id": record_id, "name": name, "category": category}
-
-
-def handle_slack_action(
-    *,
-    client: EspoClient,
-    action: str,
-    action_value: str,
-) -> str:
-    item = parse_action_value(action_value)
-    now_local = _now_in_timezone(None)
-    if action == "sentinel_remind":
-        due = (now_local.date() + timedelta(days=2)).isoformat()
-        payload = {
-            "name": f"Follow up: {item['name'] or item['record_id']} ({item['category']})",
-            "status": "Not Started",
-            "dateEnd": due,
-            "description": f"Hermes sentinel reminder for {item['entity']}:{item['record_id']}",
-        }
-        client.create("Task", payload)
-        return f"Reminder created for {due}."
-    if action == "sentinel_assign_gretchen":
-        gretchen_user_id = os.environ.get("HERMES_SENTINEL_GRETCHEN_USER_ID", "").strip()
-        if not gretchen_user_id:
-            return "Set HERMES_SENTINEL_GRETCHEN_USER_ID to assign this action."
-        payload = {
-            "name": f"Project 85 follow-up: {item['name'] or item['record_id']}",
-            "status": "Not Started",
-            "assignedUserId": gretchen_user_id,
-            "description": (
-                f"Assigned from Hermes sentinel ({item['category']}) for "
-                f"{item['entity']}:{item['record_id']}"
-            ),
-        }
-        client.create("Task", payload)
-        return "Assigned to Gretchen."
-    if action == "sentinel_dismiss":
-        return "Dismissed."
-    return "Unknown sentinel action."
-
-
 def _query_stale_opportunities(*, supa: SupabaseClient, now_local: datetime) -> SentinelQueryResult:
     """Open opportunities in the custom CRM not touched in HERMES_SENTINEL_STALE_DAYS."""
     stale_days = int(os.environ.get("HERMES_SENTINEL_STALE_DAYS", "14"))
@@ -323,8 +254,7 @@ def _query_renewals(*, supa: SupabaseClient, now_local: datetime) -> SentinelQue
 def _query_x_dates(*, supa: SupabaseClient, now_local: datetime) -> SentinelQueryResult:
     """Re-quote pipeline: opportunities the agency lost — chase them back.
 
-    EspoCRM's Lead.xDate (competitor-renewal date) is gone with the decommission;
-    lost opportunities in the custom CRM are the live re-quote signal.
+    Lost opportunities in the custom CRM are the re-quote signal.
     """
     try:
         rows = supa.select(
@@ -410,37 +340,6 @@ def _section_block(title: str, rows: list[dict[str, Any]]) -> list[dict[str, Any
     for row in rows[:8]:
         item_line = _format_line(row)
         output.append({"type": "section", "text": {"type": "mrkdwn", "text": item_line}})
-        action_value = build_action_value(
-            entity=row.get("entity", ""),
-            record_id=row.get("record_id", ""),
-            name=row.get("name", ""),
-            category=row.get("category", ""),
-        )
-        output.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Remind me in 2 days"},
-                        "action_id": "sentinel_remind",
-                        "value": action_value,
-                    },
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Assign to Gretchen"},
-                        "action_id": "sentinel_assign_gretchen",
-                        "value": action_value,
-                    },
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Dismiss"},
-                        "action_id": "sentinel_dismiss",
-                        "value": action_value,
-                    },
-                ],
-            }
-        )
     if len(rows) > 8:
         output.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"... +{len(rows) - 8} more"}]})
     return output
@@ -512,37 +411,6 @@ def _renewal_section_blocks(buckets: dict[int, list[dict[str, Any]]]) -> list[di
         for row in rows[:8]:
             item_line = _format_line(row)
             output.append({"type": "section", "text": {"type": "mrkdwn", "text": item_line}})
-            action_value = build_action_value(
-                entity=row.get("entity", ""),
-                record_id=row.get("record_id", ""),
-                name=row.get("name", ""),
-                category=row.get("category", ""),
-            )
-            output.append(
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Remind me in 2 days"},
-                            "action_id": "sentinel_remind",
-                            "value": action_value,
-                        },
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Assign to Gretchen"},
-                            "action_id": "sentinel_assign_gretchen",
-                            "value": action_value,
-                        },
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Dismiss"},
-                            "action_id": "sentinel_dismiss",
-                            "value": action_value,
-                        },
-                    ],
-                }
-            )
         if len(rows) > 8:
             output.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"... +{len(rows) - 8} more"}]})
     return output
