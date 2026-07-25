@@ -1,7 +1,7 @@
 """Renewal desk read routes — queue, open-exact, and client research.
 
-NowCerts + the reconciled ``renewal_candidates`` index are the source of truth;
-EspoCRM is not consulted. These are the client-facing entry points a staffer
+NowCerts + the reconciled ``renewal_candidates`` index are the source of truth.
+These are the client-facing entry points a staffer
 uses before the worksheet / case / writeback steps.
 
 Routes:

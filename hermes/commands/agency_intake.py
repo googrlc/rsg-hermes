@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# Canonical Opportunity stage enum (see hermes-training/espocrm/guardrails.md).
+# Canonical Opportunity stage enum.
 ALLOWED_STAGES = {
     "Discovery",
     "Quoting",

@@ -8,8 +8,8 @@ Recognises variants such as:
 Route precedence: this handler is registered BEFORE the broad renewal/revenue
 route so it intercepts worksheet requests first.
 
-Resolution rules (NowCerts is the source of truth; EspoCRM is NOT consulted)
---------------------------------------------------------------------------
+Resolution rules (NowCerts is the source of truth)
+---------------------------------------------
 * An exact policy number resolves one policy via
   ``hermes.renewals.resolve.resolve_exact_policy`` (NowCerts
   ``find_policy_by_number``). Duplicate policy numbers are a stop-and-escalate

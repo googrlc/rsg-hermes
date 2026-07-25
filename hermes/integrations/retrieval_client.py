@@ -185,7 +185,7 @@ def insert_note(
     crm_contact_id: str | None = None,
     crm_opportunity_id: str | None = None,
 ) -> dict[str, Any]:
-    """Insert one `client_notes` row paired with the EspoCRM ClientNote."""
+    """Insert one `client_notes` row paired with the agency CRM note."""
     payload: dict[str, Any] = {
         "entity_id": entity_id,
         "note_type": note_type,

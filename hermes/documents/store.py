@@ -10,7 +10,7 @@ truth); this store is Hermes' searchable index of documents it authors, not the
 file store. (A former Google Drive mirror was removed 2026-07-10.)
 
 Folder model:
-  - client space:   one folder per EspoCRM account (``account_name``)
+  - client space:   one folder per client account (``account_name``)
   - internal space: freeform folders for internal references (``folder``)
 """
 

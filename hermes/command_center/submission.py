@@ -13,7 +13,7 @@ confirm before quote/bind.
 Extensions over the freshhermes spine (for personal-lines renewal lanes):
   - ``current_policy_expiration`` — the **XDATE** (expiring policy's expiration).
     The whole Gretchen lane revolves around it, so it's first-class, not buried
-    inside ``prior_carriers``. Maps to EspoCRM ``x_date`` / ``next_x_date``.
+    inside ``prior_carriers``.
   - ``current_carrier`` / ``current_premium`` — the incumbent being remarketed.
   - ``FIELD_ALIASES`` — lane configs reference human-readable field names
     ("xdate", "property_details") that resolve to real spine paths. The lane

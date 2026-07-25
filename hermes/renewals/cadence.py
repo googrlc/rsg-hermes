@@ -198,7 +198,7 @@ def due_touches(
     """Return the touches due to fire for this renewal right now.
 
     A touch at threshold T (days before expiration) fires only when ALL hold:
-      - its EspoCRM field slot is empty (not already queued/sent) — idempotency,
+      - its touch-tracking field slot is empty (not already queued/sent) — idempotency,
       - today has reached the threshold: days_until <= T,
       - it is not stale: days_until >= T - grace  (BACKFILL_GRACE_DAYS).
 
