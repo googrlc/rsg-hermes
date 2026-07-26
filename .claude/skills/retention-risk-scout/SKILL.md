@@ -5,7 +5,7 @@ description: >
   prioritized at-risk list, sourced from Supabase `renewal_candidates` /
   `project_85_renewals` and the canonical book. Triggers on "retention scan",
   "who's at risk", "risk report", "retention check", "who might cancel", or the
-  Wednesday 9am ET weekly schedule. Revenue-critical — retention baseline 54.92%,
+  Wednesday 9am ET weekly schedule. Revenue-critical — retention 60.78% (2026-07-26),
   target 75%+. Finds the risk; `renewal-desk` executes on it and
   `gretchen-daily-queue` puts it on someone's plate.
 ---
@@ -65,7 +65,7 @@ it.** Only `premium_current` / `premium_renewal` feed it.
 | `canonical_clients` | 415 | Client mirror. |
 | `canonical_policies` | 618 (163 flagged active) | Premium + LOB. **Contaminated — see below.** |
 | `renewal_actions` | 5 | Outreach history. |
-| `agency_snapshots` | **1** | Retention history. **See below.** |
+| `agency_snapshots` | growing daily | Computed retention + book history (writer shipped 2026-07-26). |
 
 **Current standing** (48 renewals in the working queue):
 
@@ -87,18 +87,19 @@ headline number, and it is the one to lead a report with.
    written by the `rsg-import` pg_cron path before it was disabled 2026-07-24
    for tombstoning anything it didn't see. Another 5 are `Expired` with
    `active=true`, and 2 are `Renewed` with `active=true`. The tombstoned rows
-   are `active=false`, so they are **excluded** from any active-premium total —
-   the contamination **suppresses** the book by **$378,575** rather than
-   inflating it. State the caveat; don't silently publish a contaminated number.
+   are `active=false` and excluded from active-premium totals. Checked against
+   the live AMS 2026-07-26: **28 of the 48 still exist in NowCerts (24 active,
+   $246,027); 20 are genuinely gone.** Reading live (`HERMES_AMS_LIVE_READS`)
+   resolves this — the mirror does not. Tombstoned terms are excluded from the
+   retention denominator so the importer bug can't manufacture churn.
 
-2. **There is exactly one retention snapshot, and it is a manual baseline.**
-   `agency_snapshots` holds a single row: `2026-03-31`, $385,000 active premium,
-   104 policies, 81 clients, **retention 54.92%**, `source='manual'`. The famous
-   54.92% is that hand-entered baseline from nearly four months ago — it is not
-   a computed, refreshed metric. **Week-over-week retention movement cannot be
-   reported**, because no second snapshot exists. Say "no trend available yet"
-   rather than implying movement. Writing a fresh snapshot is the fix, and it is
-   the single highest-value thing this skill could gain.
+2. **Retention is now computed daily — use it, don't re-derive it.**
+   `hermes --agency-snapshot` (cron 5:45am ET) writes `agency_snapshots` from
+   policy lineage. Live on 2026-07-26: **60.78% premium-weighted, 65.34% logo**
+   — not the 54.92% everyone still quotes, which was a hand-typed 2026-03-31
+   baseline and the only row in the table until the writer shipped.
+   Logo running *above* premium-weighted means churn is concentrated in the
+   larger accounts — worth leading with.
 
 ---
 
@@ -147,7 +148,7 @@ At risk: <n> renewals, $<premium> of premium
 Top exposure:
   1. <client> — <LOB> — $<prem> — <days> to x-date — <why>
   ...
-Baseline: 54.92% (manual snapshot 2026-03-31; no newer snapshot — no trend available)
+Retention: {rate}% premium-weighted (agency_snapshots, {date}) → target 75%
 Caveat: canonical_policies carries 48 tombstoned rows from the disabled import path
 ```
 
@@ -158,7 +159,7 @@ age-reference a client in writing.
 
 ## Known gaps
 
-- **No retention trend.** One snapshot, manual, four months old.
+- **The retention trend starts 2026-07-26.** Expect a thin history at first.
 - **`renewal_actions` has 5 rows**, so "no outreach logged" is the default state
   for nearly every client and is not by itself a risk signal yet.
 - **The `segment` column mislabels personal vs commercial**, as does

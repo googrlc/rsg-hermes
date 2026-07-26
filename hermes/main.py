@@ -116,6 +116,17 @@ def main() -> int:
         help="Preview renewal eligibility (eligible/needs_verification/excluded counts) without writing",
     )
     parser.add_argument(
+        "--agency-snapshot",
+        action="store_true",
+        help="Compute and write today's agency_snapshots row (book size + trailing-12mo retention) "
+             "from the live book. Idempotent per day — replaces the same-day row.",
+    )
+    parser.add_argument(
+        "--agency-snapshot-dry-run",
+        action="store_true",
+        help="Preview the agency snapshot (computed numbers, no write)",
+    )
+    parser.add_argument(
         "--renewal-classify",
         action="store_true",
         help="Re-grade urgency (risk_status) over eligible renewal_candidates (Command Center)",
@@ -690,6 +701,19 @@ def main() -> int:
         for s in summary.get("sample_eligible", []):
             print(f"  {s['branch']}: {s['policy_number']} {s['event_date']} seg={s['segment']} "
                   f"queue={s['in_working_queue']} risk={s['risk_status']}")
+        return 0
+
+    if args.agency_snapshot or args.agency_snapshot_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.jobs.agency_snapshot import format_summary, run_snapshot
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        summary = run_snapshot(supa=supa, dry_run=args.agency_snapshot_dry_run)
+        print(format_summary(summary))
         return 0
 
     if args.renewal_classify or args.renewal_classify_dry_run:

@@ -68,10 +68,15 @@ pulled `is_quote=false` only and marked everything it didn't see as gone. It was
 further 5 rows are `status='Expired'` with `active=true`, and 2 are `'Renewed'`
 with `active=true`.
 
-**Consequence:** the tombstoned rows are `active=false` and carry **$378,575**,
-so they are *excluded* from any active-premium total — the mirror **understates**
-the book by up to that much. Either verify against the AMS directly or state the
-caveat. When the mirror and NowCerts disagree, **NowCerts wins.**
+**Verified against the live AMS 2026-07-26:** of the 48 tombstoned rows, **28
+still exist in NowCerts (24 of them active, $246,027) and 20 are genuinely
+gone.** The tombstones were roughly half wrong.
+
+**The fix already exists: `HERMES_AMS_LIVE_READS`.** With it set,
+`select_policies` pulls the book from NowCerts (440 rows, no tombstones,
+$738,919 active) instead of the mirror (618 rows, 178 of them stale). The mirror
+also **overstates retention by ~6 points** by creating phantom renewal matches.
+When the mirror and NowCerts disagree, **NowCerts wins** — so prefer live.
 
 `policy_guid` is unique — `canonical_policies` has no true duplicate rows. What
 looks like duplication is overlapping *terms*, resolved through `renewed_policy`

@@ -7,7 +7,7 @@ description: >
   NowCerts, with a verified receipt per job. Triggers on "renewal desk", "work the
   renewals", "execute renewal", "process renewal", "renew {client}", or a renewal
   action raised in the cockpit or Nextcloud Talk. Revenue-critical — retention
-  baseline 54.92%, target 75%+. Complements retention-risk-scout (finds risk) and
+  60.78% as of 2026-07-26, target 75%+. Complements retention-risk-scout and
   gretchen-daily-queue (tells Gretchen what to do); this one DOES it.
 ---
 
@@ -96,10 +96,10 @@ Preview without committing: `--renewal-executor --dry-run`.
   path, which pulled `is_quote=false` only and tombstoned everything it didn't
   see. It was **disabled 2026-07-24** and needs one writer before re-enabling.
   A further 5 rows are `status='Expired'` but `active=true`, and 2 are
-  `'Renewed'` but `active=true`. The tombstoned rows carry **$378,575** and are
-  `active=false`, so they are **excluded** from active-premium totals — the
-  contamination suppresses the book rather than inflating it. **Say so when you
-  report a premium figure.**
+  `'Renewed'` but `active=true`. Of the 48 tombstoned rows, **28 still exist in
+  the live AMS (24 active) and 20 are genuinely gone** (checked 2026-07-26).
+  Reading live (`HERMES_AMS_LIVE_READS`) resolves it; the mirror does not.
+  **Say which source a premium figure came from.**
 - **`renewal_candidates` is an event ledger, not a to-do list.** 475 rows is the
   history of renewal events, not 475 open renewals. Filter to
   `in_working_queue` / the forward window before showing a count to anyone.

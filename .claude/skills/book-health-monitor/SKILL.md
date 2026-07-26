@@ -20,55 +20,54 @@ Lamar should never have to wonder how the agency is doing.
 
 ---
 
-## Read this before you report a number
+## The snapshot is now computed, not typed
 
-### There is exactly one snapshot, and it is a manual baseline
+**`hermes --agency-snapshot` writes one `agency_snapshots` row per day** (cron
+5:45am ET), built by
+[hermes/jobs/agency_snapshot.py](../../../hermes/jobs/agency_snapshot.py). Run
+it — don't hand-assemble the numbers, and don't re-derive retention.
 
-`agency_snapshots` holds **one row**:
+Preview with zero writes: `hermes --agency-snapshot-dry-run`.
 
-| Field | Value |
-|---|---|
-| `snapshot_date` | 2026-03-31 |
-| `active_premium` | $385,000 |
-| `policy_count` | 104 |
-| `client_count` | 81 |
-| `retention_rate` | **54.92** |
-| `source` | `manual` |
+Before this existed, `agency_snapshots` held a single hand-typed baseline
+(2026-03-31, $385,000, 104 policies, 81 clients, retention **54.92%**,
+`source='manual'`) and nothing ever wrote a second one. That is where the
+much-quoted 54.92% came from. **It is a four-month-old manual entry, not a
+measurement** — treat any older report citing it accordingly.
 
-The famous 54.92% is that hand-entered baseline, now ~4 months old. **No
-week-over-week delta is possible.** Do not compute one, do not imply movement,
-and do not present 54.92% as a current measurement. Say "baseline 2026-03-31;
-no newer snapshot."
-
-**Writing a fresh snapshot is the single highest-value action this skill can
-take.** Until it happens, every run reports the same stale retention figure.
-
-### The book number is unreliable by roughly $378K
-
-Computed live from `canonical_policies` on 2026-07-26:
+### Live numbers (verified 2026-07-26, live AMS)
 
 | Measure | Value |
 |---|---|
+| Active premium | **$738,919** |
 | Active policies | 163 |
-| Active premium | **$733,213** |
 | Clients | 415 |
-| **Tombstoned policies** | **48, carrying $378,575** |
+| Open pipeline | $257,628 across 55 |
+| **Retention (premium-weighted, trailing 12mo)** | **60.78%** |
+| Retention (logo) | 65.34% (115/176 terms) |
 
-Those 48 rows have a literal status of `Inactive: not in NowCerts 2026-07-21`
-(43) or `...2026-07-23` (5). They were written by the `rsg-import` pg_cron path,
-which pulled `is_quote=false` only and marked everything it didn't see as gone.
-It was **disabled 2026-07-24** pending a single-writer fix.
+**Retention is 60.78%, not 54.92%** — up 5.9 points on the baseline. Nobody knew
+because nothing was computing it.
 
-Crucially they are marked `active=false`, so they are **excluded** from the
-$733,213. The contamination therefore **suppresses** the book rather than
-inflating it. If those tombstones are false, real active premium is up to
-**$1.11M**. If they're genuine, $733K stands.
+Note logo (65.34%) runs *above* premium-weighted (60.78%): the agency is keeping
+more policies than dollars, i.e. **the churn is concentrated in larger accounts.**
+That gap is worth a sentence in any scorecard.
 
-**Every scorecard must carry that band.** Reporting $733,213 as a clean number
-is the failure mode.
+### Read live, not the mirror
 
-Two smaller inconsistencies: 5 rows are `status='Expired'` with `active=true`,
-and 2 are `'Renewed'` with `active=true`.
+The numbers above come from the AMS with `HERMES_AMS_LIVE_READS` set. Off that
+flag, the job falls back to `canonical_policies`, which carries ~178 stale rows
+and **overstates retention by about 6 points** (66.66% vs 60.78%) by creating
+phantom "later term" matches. The snapshot's `notes` field always records which
+source produced it — check it before quoting a number.
+
+The 48 rows tombstoned `Inactive: not in NowCerts 2026-07-21/23` by the disabled
+`rsg-import` path were checked against the live AMS on 2026-07-26: **28 still
+exist in NowCerts (24 of them active, $246,027) and 20 are genuinely gone.** So
+the tombstones were roughly half wrong — but the live read already resolves it,
+which is why $738,919 is a clean figure and the old "±$378K" band no longer
+applies. Tombstoned terms are excluded from the retention denominator so the
+importer bug can't manufacture churn.
 
 ---
 
@@ -77,7 +76,7 @@ and 2 are `'Renewed'` with `active=true`.
 | Card | Source |
 |---|---|
 | Premium / policies / clients | `canonical_policies`, `canonical_clients` via `hermes/ams/book.py` |
-| Retention | `agency_snapshots` (latest) — currently the single baseline |
+| Retention | `agency_snapshots` (latest row, written daily by `--agency-snapshot`) |
 | Pipeline | `opportunities` (63 rows) |
 | Renewal radar | `renewal_candidates` / `project_85_renewals` |
 | Approval queue | `cc_submissions` where `status='in_review'` |
@@ -111,8 +110,9 @@ Lead with the number and the decision. Plain English.
 • Policies: {active}/{total} active   • Clients: {clients}
 
 🔄 RETENTION
-• 54.92% (baseline 2026-03-31, manual) → target 75% | gap 20.1 pts
-• No newer snapshot — no trend available
+• {retention_rate}% premium-weighted, trailing 12mo → target 75%
+• Logo {logo_rate}% — gap vs premium-weighted means churn is in the bigger accounts
+• vs prior snapshot: {delta_retention:+.2f} pts
 
 💰 PIPELINE
 • {n} opportunities, ${value} — {n} CRM-worked, {n} mirrored from the AMS
@@ -120,12 +120,12 @@ Lead with the number and the decision. Plain English.
 ⚠️ RENEWAL RADAR
 • 🔴 CRITICAL {n} (${prem}) • 🟡 AT_RISK {n} (${prem}) • 🟢 SAFE {n} (${prem})
 
-🧾 DATA NOTE
-• 48 policies ($378,575) tombstoned by the disabled import path and excluded
-  from active premium. Real book is $733K–$1.11M until that's resolved.
+🧾 SOURCE
+• {live AMS | canonical_policies mirror} — from the snapshot's `notes` field.
+  Mirror-sourced numbers overstate retention ~6 pts; say so if that's the source.
 
 🎯 GATE 1 ($425K premium / 60% retention)
-• Premium: cleared on the reported figure • Retention: 54.92% → 5.1 pts short
+• Premium: $738,919 → cleared • Retention: 60.78% → cleared (60% bar)
 ```
 
 If any renewal is ≤14 days out, append the critical list: client, expiration,
@@ -159,10 +159,10 @@ worth avoiding.
 
 ## Known gaps
 
-- **No trend, and no automated snapshot writer.** One manual row, four months
-  old; nothing in the scheduler writes `agency_snapshots`.
-- **Retention is not computed anywhere.** 54.92% is typed in, not derived. Until
-  a real calculation exists, every retention statement quotes that baseline.
+- **The trend starts now.** The writer shipped 2026-07-26; before that there was
+  one manual row. Expect a thin history for the first few weeks.
+- ~~Retention is not computed anywhere.~~ **Fixed 2026-07-26** — computed from
+  policy lineage by `hermes/jobs/agency_snapshot.py`, written daily.
 - **The pipeline card is unwired** in `kpi_summary` (`pipeline: None`).
 - **`dashboard_kpis`** exists with a `record_kpi` writer, but this scorecard
   doesn't feed it.

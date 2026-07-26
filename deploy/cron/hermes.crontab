@@ -68,6 +68,18 @@ CRON_TZ=America/New_York
 # */30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
 # Dashboard KPI history — daily 6:00am ET (Supabase dashboard_kpis, no Slack)
 0 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --snapshot-kpis >> /root/hermes-cron.log 2>&1
+# Agency snapshot — daily 5:45am ET (after the 2:20am book sync, before the 6:00am KPIs).
+# Writes ONE agency_snapshots row/day: active premium, policy + client counts, per-LOB
+# split, open pipeline, and trailing-12-month retention computed from policy lineage.
+# Until 2026-07-26 this table held a single hand-typed baseline (2026-03-31, retention
+# 54.92%) and nothing ever wrote a second one — so every "how's the book?" answer quoted
+# a stale manual number and no trend existed. Supabase-only, no client/AMS writes,
+# idempotent per day (a re-run replaces the same-day row rather than stacking).
+# Accuracy depends on HERMES_AMS_LIVE_READS: with it set the numbers come from NowCerts;
+# without it they come from the canonical_policies mirror, which carries ~178 stale rows
+# and overstates retention by ~6 points. The row's `notes` says which source was used.
+# Preview with zero writes: hermes --agency-snapshot-dry-run
+45 5 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --agency-snapshot >> /root/hermes-cron.log 2>&1
 # OPT-IN 2026-07-15 — Renewal Executor (Job Contract v2). Processes human-approved
 # renewal jobs from outbound_sync_queue → NowCerts, idempotent (guarded claim), writes
 # receipts to renewal_execution_receipts. Uncommenting is the deliberate go-live step
