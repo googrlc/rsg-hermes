@@ -111,12 +111,15 @@ RULES: tuple[StalenessRule, ...] = (
                 "nothing noticed because the endpoint still answered.",
     ),
     StalenessRule(
-        name="AMS sync activity",
-        table="sync_audit_log",
-        column="created_at",
+        name="NowCerts book mirror",
+        table="canonical_clients",
+        column="updated_at",
         max_age_days=3,
-        so_what="No sync has been audited in 3 days. The NowCerts mirror is drifting "
-                "from the AMS and reads are quietly serving old data.",
+        so_what="The nightly canonical book sync (2:20am ET) hasn't refreshed a "
+                "client row in 3 days. canonical_clients / canonical_policies are "
+                "the NowCerts mirror the renewals desk reads; if the refresh "
+                "stopped, the book is drifting from the AMS and renewals are "
+                "working off stale insured/policy data.",
     ),
 )
 

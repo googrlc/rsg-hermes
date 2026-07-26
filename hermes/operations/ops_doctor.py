@@ -25,14 +25,15 @@ HERMES_TABLES = [
     "guardrail_logs",
     "reporting_schedules",
     "dashboard_kpis",
-    # Sync control tables (NowCerts ↔ canonical book pipeline)
-    "sync_runs",
-    "inbound_sync_staging",
-    "sync_mappings",
+    # The live NowCerts ↔ Supabase mirror surface. The Espo-era sync control
+    # tables (sync_runs / inbound_sync_staging / sync_mappings / sync_audit_log /
+    # sync_errors / sync_conflicts) were built for the NowCerts↔EspoCRM pipeline
+    # deleted in slice 4 (commit 7ee2787); nothing writes them anymore, so
+    # listing them here was reachability theatre — green rows from July that
+    # never move. outbound_sync_queue is the one survivor (the executor queue).
     "outbound_sync_queue",
-    "sync_audit_log",
-    "sync_errors",
-    "sync_conflicts",
+    "canonical_clients",
+    "canonical_policies",
 ]
 
 
