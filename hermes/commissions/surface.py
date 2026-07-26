@@ -36,7 +36,16 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 LEDGER_TABLE = "commission_ledger"
+ENTITY_TYPE = "commission_ledger"      # portal_overrides.entity_type
 DEFAULT_SINCE = "2026-01-01"
+
+# Fields a human may correct in the portal. Deliberately narrow: identity and
+# reconciliation state are not hand-editable — the first is the AMS's to own,
+# the second is derived from statement transactions.
+OVERRIDABLE_FIELDS = frozenset({
+    "gross_premium", "expected_commission", "carrier_name", "lob",
+    "client_name", "policy_effective_date", "policy_expiration_date", "notes",
+})
 
 # Statuses a policy can carry and still be commissionable, mirroring
 # commission_sync: only won, in-force business ledgers a commission.
@@ -186,6 +195,7 @@ class Overview:
     counts_by_status: dict[str, int] = field(default_factory=dict)
     coverage: Coverage = field(default_factory=Coverage)
     total_ledger_rows: int = 0
+    active_overrides: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -194,6 +204,7 @@ class Overview:
             "total_ledger_rows": self.total_ledger_rows,
             "counts_by_status": self.counts_by_status,
             "coverage": self.coverage.as_dict(),
+            "active_overrides": self.active_overrides,
         }
 
 
@@ -250,9 +261,26 @@ def commission_overview(
         if r.get("policy_number")
     }
 
+    # Human corrections outrank the synced values, and say so on the row.
+    try:
+        from hermes.overrides.core import apply_overrides
+        from hermes.overrides.store import active_overrides
+
+        overrides = active_overrides(supa, ENTITY_TYPE)
+    except Exception:  # noqa: BLE001 — a correction layer must not break the read
+        log.exception("commission surface: override read failed; showing raw values")
+        overrides = {}
+
+    visible = (
+        apply_overrides(rows[:limit], overrides,
+                        entity_type=ENTITY_TYPE, key_field="policy_number")
+        if overrides else rows[:limit]
+    )
+
     return Overview(
-        rows=rows[:limit],
+        rows=visible,
         counts_by_status=status_counts(all_rows),
         coverage=coverage(policies, ledger_numbers),
         total_ledger_rows=len(all_rows),
+        active_overrides=len(overrides),
     )

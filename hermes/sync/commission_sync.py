@@ -65,6 +65,8 @@ class CommissionSyncResult:
     skipped_out_of_window: int = 0
     skipped_no_date: int = 0         # statement_date is NOT NULL and nothing to seed it
     no_expected: int = 0             # seeded, but no expected commission could be derived
+    overrides_retired: int = 0       # portal corrections the AMS has caught up to
+    overrides_conflicted: int = 0    # AMS moved somewhere unexpected — needs a human
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -102,6 +104,8 @@ class CommissionSyncResult:
             f"not_commissionable={self.skipped_not_commissionable} "
             f"no_value={self.skipped_no_value} out_of_window={self.skipped_out_of_window} "
             f"no_date={self.skipped_no_date} no_expected={self.no_expected} "
+            f"overrides_retired={self.overrides_retired} "
+            f"overrides_conflicted={self.overrides_conflicted} "
             f"balanced={self.balanced} errors={len(self.errors)}"
         )
 
@@ -294,6 +298,35 @@ def run_commission_sync(
         except Exception as exc:  # noqa: BLE001 — one bad policy shouldn't abort the run
             result.errors.append(f"policy {pn}: {exc}")
             log.warning("commission sync error on %s: %s", pn, exc)
+
+    # Portal corrections: retire the ones the AMS has caught up to, flag the ones
+    # where it moved somewhere unexpected. Never silently discard a correction —
+    # see hermes.overrides.core for why the third branch is a conflict, not a
+    # retirement. Best-effort: an override hiccup must not fail the seed.
+    try:
+        from hermes.commissions.surface import OVERRIDABLE_FIELDS
+        from hermes.overrides.store import reconcile_overrides
+
+        ledger_now = {
+            str(r.get("policy_number") or "").strip(): r
+            for r in supa.select(LEDGER_TABLE, columns="*", limit=50000)
+            if r.get("policy_number")
+        }
+        source_values = {
+            (pn, field_name): row.get(field_name)
+            for pn, row in ledger_now.items()
+            for field_name in OVERRIDABLE_FIELDS
+            if field_name in row
+        }
+        recon = reconcile_overrides(
+            supa, "commission_ledger", source_values,
+            actor="commission_sync", dry_run=dry_run,
+        )
+        result.overrides_retired = recon["retired"]
+        result.overrides_conflicted = recon["conflicted"]
+    except Exception as exc:  # noqa: BLE001
+        log.exception("commission sync: override reconcile failed")
+        result.errors.append(f"override reconcile: {exc}")
 
     log.info("commission sync done: %s", result.message)
     return result

@@ -111,3 +111,140 @@ def test_ledger_failure_is_a_502_not_a_silent_empty(client):
     with patch("hermes.api._get_supa", return_value=Boom()):
         r = client.get("/api/commissions")
     assert r.status_code == 502
+
+
+# --- overrides ---------------------------------------------------------------
+
+class OverrideSupa:
+    """Ledger + users + a writable portal_overrides/portal_write_log."""
+
+    def __init__(self, ledger):
+        self.tables = {
+            "commission_ledger": ledger,
+            "agency_crm_users": [
+                {"email": "lamar@risksolutionsgroup.net", "active": True},
+            ],
+            "portal_overrides": [],
+            "portal_write_log": [],
+        }
+        self._seq = 0
+
+    def select(self, table, *, columns="*", params=None, limit=1000):
+        rows = self.tables.get(table, [])
+        for k, v in (params or {}).items():
+            if k == "order":
+                continue
+            if isinstance(v, str) and v.startswith("eq."):
+                # PostgREST renders booleans lowercase ("eq.true"); Python's
+                # str(True) is "True". Compare case-folded so the double matches.
+                want = v[3:].casefold()
+                rows = [r for r in rows if str(r.get(k)).casefold() == want]
+        return [dict(r) for r in rows][:limit]
+
+    def insert(self, table, payload):
+        self._seq += 1
+        row = {"id": f"ov-{self._seq}", **payload}
+        self.tables.setdefault(table, []).append(row)
+        return dict(row)
+
+    def update(self, table, record_id, payload):
+        for row in self.tables.get(table, []):
+            if row.get("id") == record_id:
+                row.update(payload)
+                return dict(row)
+        raise AssertionError("missing row")
+
+
+LEDGER_ROW = [{"id": "L1", "policy_number": "P1", "gross_premium": 0,
+               "expected_commission": 535.65, "reconciliation_status": "pending"}]
+
+
+def test_override_sets_a_correction(client):
+    supa = OverrideSupa(list(LEDGER_ROW))
+    with patch("hermes.api._get_supa", return_value=supa):
+        r = client.post("/api/commissions/L1/override", json={
+            "field_name": "gross_premium", "value": 12000,
+            "approved_by": "lamar@risksolutionsgroup.net", "reason": "AMS blank",
+        })
+    assert r.status_code == 200, r.text
+    ov = supa.tables["portal_overrides"][0]
+    assert ov["entity_key"] == "P1"          # keyed by policy_number, not row id
+    assert ov["override_value"] == 12000
+    assert ov["original_value"] == 0         # the SOURCE value, for reconcile
+    assert supa.tables["portal_write_log"]
+
+
+def test_override_rejects_a_non_overridable_field(client):
+    supa = OverrideSupa(list(LEDGER_ROW))
+    with patch("hermes.api._get_supa", return_value=supa):
+        r = client.post("/api/commissions/L1/override", json={
+            "field_name": "reconciliation_status", "value": "reconciled",
+            "approved_by": "lamar@risksolutionsgroup.net",
+        })
+    assert r.status_code == 400
+    assert "overridable" in r.json()["detail"]
+
+
+def test_override_rejects_an_unknown_approver(client):
+    supa = OverrideSupa(list(LEDGER_ROW))
+    with patch("hermes.api._get_supa", return_value=supa):
+        r = client.post("/api/commissions/L1/override", json={
+            "field_name": "gross_premium", "value": 1,
+            "approved_by": "lamar@risk-solutionsgroup.com",   # .com
+        })
+    assert r.status_code == 400
+    assert "agency_crm_users" in r.json()["detail"]
+
+
+def test_override_on_a_missing_row_is_404(client):
+    supa = OverrideSupa([])
+    with patch("hermes.api._get_supa", return_value=supa):
+        r = client.post("/api/commissions/nope/override", json={
+            "field_name": "gross_premium", "value": 1,
+            "approved_by": "lamar@risksolutionsgroup.net",
+        })
+    assert r.status_code == 404
+
+
+def test_override_needs_a_policy_number_to_key_on(client):
+    supa = OverrideSupa([{"id": "L1", "policy_number": None, "gross_premium": 0}])
+    with patch("hermes.api._get_supa", return_value=supa):
+        r = client.post("/api/commissions/L1/override", json={
+            "field_name": "gross_premium", "value": 1,
+            "approved_by": "lamar@risksolutionsgroup.net",
+        })
+    assert r.status_code == 400
+    assert "policy_number" in r.json()["detail"]
+
+
+def test_overridden_value_shows_on_the_read_with_its_original(client):
+    supa = OverrideSupa(list(LEDGER_ROW))
+    with patch("hermes.api._get_supa", return_value=supa):
+        client.post("/api/commissions/L1/override", json={
+            "field_name": "gross_premium", "value": 12000,
+            "approved_by": "lamar@risksolutionsgroup.net",
+        })
+        with patch("hermes.ams.book.select_policies", return_value=[]):
+            body = client.get("/api/commissions?status=all").json()
+    row = body["commissions"][0]
+    assert row["gross_premium"] == 12000
+    assert row["_overridden"] == {"gross_premium": 0}
+    assert body["active_overrides"] == 1
+
+
+def test_withdraw_requires_a_valid_approver(client):
+    supa = OverrideSupa(list(LEDGER_ROW))
+    with patch("hermes.api._get_supa", return_value=supa):
+        client.post("/api/commissions/L1/override", json={
+            "field_name": "gross_premium", "value": 1,
+            "approved_by": "lamar@risksolutionsgroup.net",
+        })
+        oid = supa.tables["portal_overrides"][0]["id"]
+        bad = client.delete(f"/api/commissions/overrides/{oid}?approved_by=x@y.com")
+        good = client.delete(
+            f"/api/commissions/overrides/{oid}"
+            "?approved_by=lamar@risksolutionsgroup.net"
+        )
+    assert bad.status_code == 400
+    assert good.status_code == 200
+    assert supa.tables["portal_overrides"][0]["status"] == "retired"

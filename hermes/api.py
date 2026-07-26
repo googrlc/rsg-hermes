@@ -1571,6 +1571,108 @@ async def list_commissions_endpoint(limit: int = 1000, status: str = "reconciled
     return overview.as_dict()
 
 
+class CommissionOverrideRequest(BaseModel):
+    """A human correction to a commission row.
+
+    ``approved_by`` must be an active agency_crm_users identity — an override is
+    a named decision on money data, and the audit log records who made it.
+    """
+    field_name: str
+    value: Any
+    approved_by: str
+    reason: str | None = None
+
+
+@app.post("/api/commissions/{ledger_id}/override")
+async def override_commission_field(ledger_id: str, req: CommissionOverrideRequest):
+    """Correct a commission field in the portal.
+
+    The override outranks the synced value until the AMS reports the same thing,
+    at which point the nightly reconcile retires it automatically. Fix NowCerts
+    by hand separately — this does NOT write to the AMS.
+    """
+    from hermes.commissions.surface import ENTITY_TYPE, OVERRIDABLE_FIELDS
+    from hermes.overrides.store import set_override
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+
+    field_name = (req.field_name or "").strip()
+    if field_name not in OVERRIDABLE_FIELDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name!r} is not overridable; allowed: {sorted(OVERRIDABLE_FIELDS)}",
+        )
+
+    try:
+        rows = supa.select("commission_ledger", columns="*",
+                           params={"id": f"eq.{ledger_id}"}, limit=1)
+    except Exception:
+        rows = []          # malformed uuid -> not found
+    if not rows:
+        raise HTTPException(status_code=404, detail="commission row not found")
+    ledger = rows[0]
+
+    policy_number = str(ledger.get("policy_number") or "").strip()
+    if not policy_number:
+        raise HTTPException(
+            status_code=400,
+            detail="row has no policy_number; overrides are keyed by it so they "
+                   "survive a re-seed",
+        )
+
+    try:
+        row = set_override(
+            supa,
+            entity_type=ENTITY_TYPE,
+            entity_key=policy_number,
+            field_name=field_name,
+            override_value=req.value,
+            original_value=ledger.get(field_name),   # the SOURCE value, for reconcile
+            approved_by=req.approved_by,
+            reason=req.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("commission override failed: %s %s", ledger_id, field_name)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"ok": True, "override": row,
+            "note": "Portal value only — correct NowCerts separately. The override "
+                    "retires itself once the AMS reports the same value."}
+
+
+@app.delete("/api/commissions/overrides/{override_id}")
+async def withdraw_commission_override(override_id: str, approved_by: str):
+    """Withdraw an override — the correction was wrong or is no longer wanted."""
+    from hermes.overrides.store import withdraw
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", approved_by)])
+    try:
+        row = withdraw(supa, override_id, actor=approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        log.exception("override withdraw failed: %s", override_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "override": row}
+
+
+@app.get("/api/commissions/overrides")
+async def list_commission_overrides(status: str = "active", limit: int = 500):
+    """Active corrections, plus anything the sync flagged as conflicted."""
+    from hermes.commissions.surface import ENTITY_TYPE
+
+    params: dict[str, str] = {"entity_type": f"eq.{ENTITY_TYPE}",
+                              "order": "approved_at.desc"}
+    if status and status.lower() != "all":
+        params["status"] = f"eq.{status}"
+    rows = _get_supa().select("portal_overrides", columns="*", params=params, limit=limit)
+    return {"overrides": rows, "count": len(rows)}
+
+
 @app.get("/api/carriers")
 async def list_carrier_appetite(
     limit: int = 500,
