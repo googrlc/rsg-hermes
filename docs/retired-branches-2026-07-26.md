@@ -42,3 +42,8 @@ branches (devin/, cursor/, claude/, copilot/) or superseded prototypes.
 | 2026-06-22 | `b77e008` | `hermes/openwebui-supermemory-bridge` | 3 | fix(webui): default hermes_tool valve to durable host-gateway route |
 | 2026-06-24 | `e05f3d4` | `hermes/dry-refactor-policy-fields` | 4 | refactor: apply presets in nl_agent search and data_entry account search |
 | 2026-06-26 | `f9ea7b4` | `hermes/commission-engine-prototype` | 4 | Add commission engine export snapshot for worksheet build |
+| Last commit | Tip SHA | Branch | Commits | Why retired |
+| 2026-07-10 | `545bb47` | `phase2-commission-ingest` | 16 | Momentum-era work; identical tree db8d643 shared by three names. Superseded by the NowCerts architecture. |
+| 2026-07-08 | `5a1ae17` | `phase3-statement-reconciliation` | 15 | Momentum-era work; identical tree db8d643 shared by three names. Superseded by the NowCerts architecture. |
+| 2026-07-10 | `65fdbf8` | `hermes/momentum-foundation` | 17 | Momentum-era work; identical tree db8d643 shared by three names. Superseded by the NowCerts architecture. |
+| 2026-07-13 | `62f3cfe` | `renewals-pause-crons-2026-07-13` | 1 | Already applied — the live crontab matches main. |
