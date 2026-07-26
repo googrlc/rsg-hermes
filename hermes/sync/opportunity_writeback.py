@@ -113,6 +113,33 @@ def _writeback_payload(fresh: dict[str, Any], target_stage: str) -> dict[str, An
     return payload
 
 
+def _resolve_preview(nowcerts: "NowCertsClient", ncid: str, target: str | None) -> dict[str, Any]:
+    """Read-only diagnostic: resolve exactly what would be sent for one opportunity.
+
+    Calls ``find_opportunity`` (a read) and builds the writeback payload, but never
+    ``insert_opportunity``. The point (#257) is to see the live shape of
+    ``assignedTo`` (display-name array vs user identifiers) and whether the fresh
+    read carries ``insuredDatabaseId`` — the two suspects for the persistent
+    ``Can't assign to Insured/Prospect`` 400 — before any trial write.
+    """
+    fresh = nowcerts.find_opportunity(ncid)
+    if not fresh:
+        return {
+            "opportunity": ncid, "target_stage": target, "found": False,
+            "assigned_to_raw": None, "assigned_to_type": None,
+            "insured_database_id_present": False, "resolved_payload": None,
+        }
+    return {
+        "opportunity": ncid,
+        "target_stage": target,
+        "found": True,
+        "assigned_to_raw": fresh.get("assignedTo"),
+        "assigned_to_type": type(fresh.get("assignedTo")).__name__,
+        "insured_database_id_present": bool(fresh.get("insuredDatabaseId")),
+        "resolved_payload": _writeback_payload(fresh, target or STAGE_BOUND_WON),
+    }
+
+
 def _eligible(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
     # Local import: retry.py imports OBJECT_TYPE from here (circular otherwise).
     from hermes.scheduler.retry import due_filter
@@ -138,13 +165,38 @@ def run_opportunity_writeback_executor(
     nowcerts: "NowCertsClient | None" = None,
     limit: int = 1,
     dry_run: bool = False,
+    opportunity_id: str | None = None,
 ) -> dict[str, Any]:
-    """Drain approved opportunity-writeback jobs → NowCerts. ``dry_run`` previews only."""
+    """Drain approved opportunity-writeback jobs → NowCerts.
+
+    ``dry_run`` previews only. ``opportunity_id`` is a **read-only diagnostic
+    override**: resolve that one NowCerts opportunity regardless of queue state
+    (so a ``status=dead`` row's opportunity can be inspected without requeuing).
+    It forces dry-run — it bypasses the approval queue, so it must never write.
+    """
     if supa is None:
         from hermes.integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
     summary: dict[str, Any] = {"claimed": 0, "completed": 0, "failed": 0, "previews": []}
+
+    if opportunity_id:
+        # Bypasses the approval queue → never write, regardless of the flag.
+        if not dry_run:
+            log.warning(
+                "opportunity writeback: --opportunity-id forces dry-run "
+                "(resolves one opportunity outside the approval queue; no write)"
+            )
+        dry_run = True
+        if nowcerts is None:
+            from hermes.sync.nowcerts_client import NowCertsClient
+
+            nowcerts = NowCertsClient()
+        # Resolve for both terminal stages so the session sees the live shape of
+        # assignedTo / insuredDatabaseId regardless of which stage the dead row carried.
+        for target in (STAGE_BOUND_WON, STAGE_LOST):
+            summary["previews"].append(_resolve_preview(nowcerts, opportunity_id, target))
+        return summary
 
     for job in _eligible(supa, limit)[:limit]:
         payload = dict(job.get("payload") or {})
@@ -152,7 +204,13 @@ def run_opportunity_writeback_executor(
         target = payload.get("target_stage")
 
         if dry_run:
-            summary["previews"].append({"queue_id": job.get("id"), "opportunity": ncid, "target_stage": target})
+            if nowcerts is None:
+                from hermes.sync.nowcerts_client import NowCertsClient
+
+                nowcerts = NowCertsClient()
+            preview = _resolve_preview(nowcerts, ncid, target)
+            preview["queue_id"] = job.get("id")
+            summary["previews"].append(preview)
             continue
 
         claimed = supa.update_where(

@@ -119,3 +119,66 @@ def test_executor_dry_run_no_write():
     nc = FakeNC([])
     res = wb.run_opportunity_writeback_executor(supa=supa, nowcerts=nc, dry_run=True, limit=5)
     assert res["previews"] and not nc.inserted and res["claimed"] == 0
+
+
+
+# --- diagnostic dry-run preview (#257) --------------------------------------
+
+def test_dry_run_resolves_the_full_payload_read_only():
+    """dry_run now resolves find_opportunity + _writeback_payload and previews the
+    live assignedTo shape, without calling insert_opportunity (#257)."""
+    supa = FakeSupa([_job("Bound / Won")])
+    nc = FakeNC([{"id": "NCO-1", "lineOfBusinessName": "GL", "neededBy": "2026-07-24",
+                  "winProbability": "Good", "agencyCommission": 0,
+                  "assignedTo": ["Gretchen Smith"],   # display-name array, the suspect
+                  "opportunityStageName": "Quotes Received",
+                  "insuredDatabaseId": "INS-1"}])
+    res = wb.run_opportunity_writeback_executor(supa=supa, nowcerts=nc, dry_run=True, limit=5)
+    assert res["claimed"] == 0 and not nc.inserted   # read-only, no write
+    pv = res["previews"][0]
+    assert pv["found"] is True
+    assert pv["assigned_to_raw"] == ["Gretchen Smith"]
+    assert pv["assigned_to_type"] == "list"
+    assert pv["insured_database_id_present"] is True
+    assert pv["resolved_payload"]["opportunityStageName"] == "Bound / Won"
+    assert pv["resolved_payload"]["assignedTo"] == ["Gretchen Smith"]   # round-tripped verbatim
+    assert "insuredDatabaseId" not in pv["resolved_payload"]            # still excluded on update
+
+
+def test_dry_run_preview_when_opportunity_not_found():
+    supa = FakeSupa([_job("Lost")])
+    nc = FakeNC([])   # not in AMS
+    res = wb.run_opportunity_writeback_executor(supa=supa, nowcerts=nc, dry_run=True, limit=5)
+    pv = res["previews"][0]
+    assert pv["found"] is False
+    assert pv["resolved_payload"] is None
+    assert not nc.inserted
+
+
+def test_opportunity_id_override_bypasses_queue_and_forces_dry_run():
+    """--opportunity-id resolves one opportunity read-only even with dry_run=False,
+    so a status=dead row's opportunity can be inspected without requeuing (#257)."""
+    nc = FakeNC([{"id": "806b1add", "lineOfBusinessName": "GL", "neededBy": "2026-07-24",
+                  "winProbability": "Good", "agencyCommission": 0,
+                  "assignedTo": "Gretchen Smith",   # string, not list
+                  "opportunityStageName": "Quotes Received"}])
+    # No supa needed — the override never touches the queue; pass a dummy.
+    res = wb.run_opportunity_writeback_executor(
+        supa=FakeSupa(), nowcerts=nc, dry_run=False, opportunity_id="806b1add")
+    assert res["claimed"] == 0 and res["completed"] == 0 and not nc.inserted
+    # Both terminal stages are resolved so the session sees the shape regardless.
+    stages = [pv["target_stage"] for pv in res["previews"]]
+    assert stages == [wb.STAGE_BOUND_WON, wb.STAGE_LOST]
+    pv0 = res["previews"][0]
+    assert pv0["found"] is True
+    assert pv0["assigned_to_type"] == "str"          # the live shape, captured
+    assert pv0["resolved_payload"]["assignedTo"] == ["Gretchen Smith"]   # coerced to array
+
+
+def test_opportunity_id_override_reports_not_found():
+    nc = FakeNC([])
+    res = wb.run_opportunity_writeback_executor(
+        supa=FakeSupa(), nowcerts=nc, opportunity_id="ghost")
+    assert len(res["previews"]) == 2   # both stages
+    assert all(pv["found"] is False for pv in res["previews"])
+    assert not nc.inserted
