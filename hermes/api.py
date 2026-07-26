@@ -1553,20 +1553,22 @@ async def upsert_commission_rule(req: CommissionRuleRequest):
 
 @app.get("/api/commissions")
 async def list_commissions_endpoint(limit: int = 1000, status: str = "reconciled"):
-    """Commission ledger — READ-ONLY reconciled window for the CRM. Ingest and
-    reconciliation happen in the standalone tracker (which reads/writes the same
-    Supabase ledger); the CRM shows only reconciled rows. Pass status=all to see
-    everything (expected + pending)."""
-    params: dict[str, str] = {"order": "statement_date.desc"}
-    if status and status.lower() != "all":
-        params["reconciliation_status"] = f"eq.{status}"
-    rows = _get_supa().select(
-        "commission_ledger",
-        columns="policy_number,client_name,carrier_name,lob,gross_premium,expected_commission,"
-                "actual_commission,delta,reconciliation_status,statement_date",
-        params=params, limit=limit,
-    )
-    return {"commissions": rows, "count": len(rows)}
+    """Commission ledger, plus the context that keeps an empty result honest.
+
+    Always returns ``counts_by_status`` (over the whole ledger) and ``coverage``
+    (how much of the active book reaches the surface, and why the rest doesn't)
+    — regardless of what ``status`` matches. Filtering to a status with no rows
+    used to render a blank table that read as "no commission data exists", which
+    was false for the entire life of the ledger. Pass ``status=all`` for everything.
+    """
+    from hermes.commissions.surface import commission_overview
+
+    try:
+        overview = commission_overview(_get_supa(), status=status, limit=limit)
+    except Exception as exc:
+        log.exception("commissions read failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+    return overview.as_dict()
 
 
 @app.get("/api/carriers")
