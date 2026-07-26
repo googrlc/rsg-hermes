@@ -1229,7 +1229,12 @@ async def list_cases_endpoint(status: str | None = None, case_type: str | None =
 
 
 class TaskCreateRequest(BaseModel):
-    case_id: str
+    """Create a task. As of issue #195 a task has three legitimate shapes:
+    case-linked (case_id), client-but-no-case (insured_database_id), or purely
+    internal (neither) — "update commission percentage" is not client work and
+    should not have to borrow somebody's case to exist."""
+    case_id: str | None = None
+    insured_database_id: str | None = None
     title: str
     description: str | None = None
     priority: str = "medium"
@@ -1240,7 +1245,13 @@ class TaskCreateRequest(BaseModel):
 
 @app.post("/api/tasks")
 async def create_task_endpoint(req: TaskCreateRequest):
-    """Create a task under a case. assigned_to/created_by validated vs agency_crm_users."""
+    """Create a task. assigned_to/created_by validated vs agency_crm_users.
+
+    ``case_id`` is optional — omit it for internal work. Idempotent per title
+    within the task's scope (its case, else its client, else the internal
+    bucket), counting only OPEN tasks so a recurring chore isn't blocked forever
+    by last month's completed copy.
+    """
     from hermes.renewals import cases as C
 
     supa = _get_supa()
@@ -1250,6 +1261,7 @@ async def create_task_endpoint(req: TaskCreateRequest):
     try:
         created = C.create_tasks(
             supa, case_id=req.case_id,
+            insured_database_id=req.insured_database_id,
             tasks=[{"title": req.title, "description": req.description,
                     "assigned_to_email": req.assigned_to_email,
                     "priority": req.priority, "due_at": req.due_at}],
@@ -1259,7 +1271,7 @@ async def create_task_endpoint(req: TaskCreateRequest):
         log.exception("create task failed: %s", req.title)
         raise HTTPException(status_code=502, detail=str(exc))
     if not created:
-        # Title already exists under this case (idempotent no-op).
+        # Title already open in this scope (idempotent no-op).
         return {"ok": True, "created": False, "task": None}
     # Best-effort: ping the team chat (Nextcloud Talk) about the new task. Never
     # let a chat hiccup fail the task create — it's fire-and-forget.
@@ -1283,13 +1295,75 @@ async def post_task_digest():
 
 
 @app.get("/api/tasks")
-async def list_tasks_endpoint(case_id: str | None = None, limit: int = 200):
-    """List tasks, optionally scoped to a case."""
+async def list_tasks_endpoint(
+    case_id: str | None = None,
+    insured_id: str | None = None,
+    scope: str | None = None,
+    open_only: bool = False,
+    limit: int = 200,
+):
+    """List tasks.
+
+    ``scope='internal'`` returns only standalone tasks (no case) — the queue of
+    things that are nobody's client work but still somebody's job. Without it the
+    internal items are buried among case tasks, which is how they get missed.
+    """
     params: dict[str, str] = {"order": "created_at.desc"}
     if case_id:
         params["case_id"] = f"eq.{case_id}"
+    if insured_id:
+        params["insured_database_id"] = f"eq.{insured_id}"
+    if scope == "internal":
+        params["case_id"] = "is.null"
+    elif scope == "case":
+        params["case_id"] = "not.is.null"
+    if open_only:
+        from hermes.renewals.cases import TASK_STATUS_CLOSED
+
+        params["status"] = f"not.in.({','.join(TASK_STATUS_CLOSED)})"
     rows = _get_supa().select("agency_crm_tasks", columns="*", params=params, limit=limit)
     return {"tasks": rows, "count": len(rows)}
+
+
+class TaskUpdateRequest(BaseModel):
+    """Editable task fields. All optional — only what's provided is written."""
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    assigned_to_email: str | None = None
+    due_at: str | None = None
+    case_id: str | None = None
+    insured_database_id: str | None = None
+
+
+@app.patch("/api/tasks/{task_id}")
+async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
+    """Update a task (issue #195 — tasks were create-only and view-only).
+
+    ``completed_at`` is derived from ``status``, never accepted from the caller.
+    A reassignment is validated against agency_crm_users: assigned_to_email is a
+    real FK, so an unknown address fails at the database with a message nobody
+    can act on.
+    """
+    from hermes.renewals import cases as C
+
+    supa = _get_supa()
+    fields = req.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="no fields provided")
+    if not C.get_task(supa, task_id):
+        raise HTTPException(status_code=404, detail="task not found")
+    if fields.get("assigned_to_email"):
+        _require_users(supa, [("assigned_to_email", fields["assigned_to_email"])])
+    try:
+        row = C.update_task(supa, task_id, fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("update task failed: %s", task_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "task": row}
 
 
 class PushToAmsRequest(BaseModel):
