@@ -113,12 +113,16 @@ def _writeback_payload(fresh: dict[str, Any], target_stage: str) -> dict[str, An
 
 
 def _eligible(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
+    # Local import: retry.py imports OBJECT_TYPE from here (circular otherwise).
+    from hermes.scheduler.retry import due_filter
+
     return supa.select(
         QUEUE_TABLE,
         params={
             "object_type": f"eq.{OBJECT_TYPE}",
             "destination_system": f"eq.{DESTINATION_NOWCERTS}",
             "status": f"eq.{QUEUE_QUEUED}",
+            **due_filter(),
             "approved_by": "not.is.null",
             "approved_at": "not.is.null",
             "order": "created_at.asc",

@@ -71,11 +71,16 @@ def map_insured_payload(insured: dict[str, Any]) -> dict[str, Any]:
 
 
 def _eligible_jobs(supa, limit):
+    # Local import: retry.py imports OBJECT_TYPE_CRM/AMS from router, and this
+    # module imports those too — keep the dependency one-directional.
+    from hermes.scheduler.retry import due_filter
+
     return supa.select(
         QUEUE_TABLE, columns="*",
         params={
             "object_type": f"in.({OBJECT_TYPE_CRM},{OBJECT_TYPE_AMS})",
             "status": f"eq.{QUEUE_QUEUED}",
+            **due_filter(),
             "order": "created_at.asc",
         },
         limit=limit,
