@@ -54,6 +54,23 @@ STATUS_COMMITTED = "committed"
 STATUS_NEEDS_MAPPING = "needs_mapping"
 STATUS_ERROR = "error"
 
+# Columns Postgres computes. Sending any of them raises 428C9 "cannot insert a
+# non-DEFAULT value". Listed per table so a new one is a one-line change rather
+# than another live failure — this codebase has now been bitten twice, by
+# commission_ledger.delta and commission_transactions.is_negative.
+GENERATED_COLUMNS: dict[str, frozenset[str]] = {
+    "commission_transactions": frozenset({"is_negative"}),
+    "commission_ledger": frozenset({"delta", "unearned_balance"}),
+    "commission_audits": frozenset({"variance"}),
+    "commission_rules": frozenset({"lookup_priority"}),
+}
+
+
+def strip_generated(table: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Drop columns the database computes. Postgres owns them; we never send them."""
+    generated = GENERATED_COLUMNS.get(table, frozenset())
+    return {k: v for k, v in payload.items() if k not in generated}
+
 # How far parsed totals may drift from the carrier's own stated totals before we
 # refuse to commit. A cent or two is rounding; anything more means the parse
 # missed rows or double-counted them.
@@ -565,7 +582,9 @@ def commit_statement(
         payload["statement_id"] = result.statement_id
         if not payload.get("carrier_name"):
             payload["carrier_name"] = batch.get("carrier_name") or "Unknown"
-        payload["is_negative"] = (line.get("commission_amount") or 0) < 0
+        # is_negative is GENERATED AS (commission_amount < 0) — Postgres derives
+        # it from the amount we're already sending.
+        payload = strip_generated(TRANSACTIONS_TABLE, payload)
         try:
             supa.insert(TRANSACTIONS_TABLE, payload)
             result.committed += 1
@@ -581,8 +600,11 @@ def commit_statement(
 
     result.rollup = run_rollup(supa).message
 
+    # A batch where every line failed is not committed — marking it so would
+    # hide the failure and block a retry behind the "already committed" guard.
+    final_status = STATUS_COMMITTED if result.committed else STATUS_ERROR
     supa.update(BATCHES_TABLE, batch_id, {
-        "ingest_status": STATUS_COMMITTED,
+        "ingest_status": final_status,
         "statement_id": result.statement_id,
         "reviewed_by": approved_by,
         "reviewed_at": datetime.now().astimezone().isoformat(),

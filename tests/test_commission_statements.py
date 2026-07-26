@@ -304,16 +304,19 @@ def test_commit_promotes_lines_and_records_the_approver(supa, monkeypatch):
     assert batch["statement_id"] == out.statement_id
 
 
-def test_committed_lines_carry_the_negative_flag(supa, monkeypatch):
+def test_the_credit_line_commits_with_its_negative_amount(supa, monkeypatch):
+    """is_negative is a GENERATED column, so we send the AMOUNT and let Postgres
+    derive the flag. The signed amount is what has to survive the commit."""
     monkeypatch.setattr("hermes.commissions.matching.relink_unmatched",
                         lambda *a, **k: _NullLink())
     monkeypatch.setattr("hermes.commissions.reconcile.run_rollup",
                         lambda *a, **k: _NullRoll())
     staged = _stage(supa)
     st.commit_statement(supa, batch_id=staged.batch_id, approved_by="a@b.net")
-    negatives = [r for r in supa.tables[st.TRANSACTIONS_TABLE] if r["is_negative"]]
-    assert len(negatives) == 1
-    assert negatives[0]["policy_number"] == "864561433"
+    credits = [r for r in supa.tables[st.TRANSACTIONS_TABLE]
+               if (r.get("commission_amount") or 0) < 0]
+    assert len(credits) == 1
+    assert credits[0]["policy_number"] == "864561433"
 
 
 # --- reject ------------------------------------------------------------------
@@ -347,3 +350,51 @@ def test_lines_never_stage_a_null_carrier_even_with_none_supplied(supa):
     st.stage_statement(supa, content=PROGRESSIVE_CSV, filename="p.csv",
                        uploaded_by="a@b.net", carrier=None)
     assert all(r["carrier_name"] for r in supa.tables[st.STAGING_TABLE])
+
+
+# --- generated columns -------------------------------------------------------
+
+def test_generated_columns_are_stripped_before_insert():
+    """Postgres computes these; sending one raises 428C9. Bitten twice live —
+    commission_ledger.delta and commission_transactions.is_negative."""
+    payload = {"policy_number": "P1", "commission_amount": -5, "is_negative": True}
+    out = st.strip_generated(st.TRANSACTIONS_TABLE, payload)
+    assert "is_negative" not in out
+    assert out["commission_amount"] == -5
+
+
+def test_strip_generated_leaves_other_tables_alone():
+    assert st.strip_generated("some_other_table", {"is_negative": True}) == {"is_negative": True}
+
+
+def test_ledger_generated_columns_are_known():
+    assert st.GENERATED_COLUMNS["commission_ledger"] == frozenset({"delta", "unearned_balance"})
+
+
+def test_committed_lines_never_carry_a_generated_column(supa, monkeypatch):
+    monkeypatch.setattr("hermes.commissions.matching.relink_unmatched",
+                        lambda *a, **k: _NullLink())
+    monkeypatch.setattr("hermes.commissions.reconcile.run_rollup",
+                        lambda *a, **k: _NullRoll())
+    staged = _stage(supa)
+    st.commit_statement(supa, batch_id=staged.batch_id, approved_by="a@b.net")
+    assert all("is_negative" not in r for r in supa.tables[st.TRANSACTIONS_TABLE])
+
+
+def test_a_batch_where_every_line_failed_is_not_marked_committed(supa, monkeypatch):
+    """Marking it committed would hide the failure and block a retry."""
+    monkeypatch.setattr("hermes.commissions.matching.relink_unmatched",
+                        lambda *a, **k: _NullLink())
+    monkeypatch.setattr("hermes.commissions.reconcile.run_rollup",
+                        lambda *a, **k: _NullRoll())
+    staged = _stage(supa)
+
+    def boom(table, payload):
+        if table == st.TRANSACTIONS_TABLE:
+            raise RuntimeError("insert rejected")
+        return FakeSupa.insert(supa, table, payload)
+
+    supa.insert = boom
+    out = st.commit_statement(supa, batch_id=staged.batch_id, approved_by="a@b.net")
+    assert out.committed == 0 and len(out.errors) == 3
+    assert supa.tables[st.BATCHES_TABLE][0]["ingest_status"] == st.STATUS_ERROR
