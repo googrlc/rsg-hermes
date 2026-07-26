@@ -36,6 +36,17 @@ HERMES_TABLES = [
     "canonical_policies",
 ]
 
+# The reachability probe below selects one column to count rows, and most tables
+# have a surrogate `id`. The canonical book does not: it is keyed by the NowCerts
+# guids, so probing `id` there 400s ("column canonical_clients.id does not
+# exist") and pins --ops-doctor at ISSUES FOUND forever — the same
+# permanently-red trap the HERMES_TABLES comment above warns about.
+TABLE_KEY_COLUMNS = {
+    "canonical_clients": "nowcerts_insured_guid",
+    "canonical_policies": "policy_guid",
+}
+DEFAULT_KEY_COLUMN = "id"
+
 
 @dataclass
 class OpsCheckResult:
@@ -88,7 +99,8 @@ def run_ops_doctor(supa: SupabaseClient, *, check_movement: bool = True) -> OpsD
 
     for table in HERMES_TABLES:
         try:
-            count_rows = supa.select(table, columns="id", limit=1000)
+            key = TABLE_KEY_COLUMNS.get(table, DEFAULT_KEY_COLUMN)
+            count_rows = supa.select(table, columns=key, limit=1000)
             report.checks.append(
                 OpsCheckResult(table=table, ok=True, row_count=len(count_rows))
             )
