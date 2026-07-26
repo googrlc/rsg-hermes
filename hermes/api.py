@@ -1673,6 +1673,118 @@ async def list_commission_overrides(status: str = "active", limit: int = 500):
     return {"overrides": rows, "count": len(rows)}
 
 
+# ── Commission statements — upload, review, approve ──────────────────────────
+@app.post("/api/commission-statements")
+async def upload_commission_statement(
+    file: UploadFile = File(...),
+    uploaded_by: str = Form(...),
+    carrier: str = Form(default=""),
+    stated_total_premium: str = Form(default=""),
+    stated_total_commission: str = Form(default=""),
+):
+    """Upload a carrier statement. Parses and STAGES it — writes no money.
+
+    Returns a review card: what parsed, whether it matches the carrier's own
+    stated totals, and where every line would land. Approve separately.
+
+    Supply the carrier's stated totals when the statement prints them; the
+    crosscheck is what stops a bad parse reaching the ledger.
+    """
+    from hermes.commissions.statements import stage_statement
+
+    supa = _get_supa()
+    _require_users(supa, [("uploaded_by", uploaded_by)])
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="empty file")
+
+    try:
+        staged = stage_statement(
+            supa,
+            content=content,
+            filename=file.filename or "statement.csv",
+            uploaded_by=uploaded_by,
+            carrier=carrier.strip() or None,
+            stated_premium=stated_total_premium.strip() or None,
+            stated_commission=stated_total_commission.strip() or None,
+        )
+    except Exception as exc:
+        log.exception("statement staging failed: %s", file.filename)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return staged.as_dict()
+
+
+@app.get("/api/commission-statements")
+async def list_commission_batches(status: str = "", limit: int = 50):
+    """Uploaded statement batches, newest first."""
+    from hermes.commissions.statements import BATCHES_TABLE
+
+    params: dict[str, str] = {"order": "created_at.desc"}
+    if status.strip():
+        params["ingest_status"] = f"eq.{status.strip()}"
+    rows = _get_supa().select(BATCHES_TABLE, columns="*", params=params, limit=limit)
+    return {"batches": rows, "count": len(rows)}
+
+
+@app.get("/api/commission-statements/{batch_id}")
+async def get_commission_batch(batch_id: str, lines: int = 100):
+    """One batch plus its staged lines — the review detail."""
+    from hermes.commissions.statements import BATCHES_TABLE, STAGING_TABLE
+
+    supa = _get_supa()
+    rows = supa.select(BATCHES_TABLE, columns="*", params={"id": f"eq.{batch_id}"}, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail="batch not found")
+    staged = supa.select(STAGING_TABLE, columns="*",
+                         params={"batch_id": f"eq.{batch_id}"}, limit=lines)
+    return {"batch": rows[0], "lines": staged, "line_count": len(staged)}
+
+
+class StatementDecision(BaseModel):
+    approved_by: str
+    reason: str | None = None
+
+
+@app.post("/api/commission-statements/{batch_id}/approve")
+async def approve_commission_statement(batch_id: str, req: StatementDecision):
+    """Commit a reviewed batch: statement + transactions + link + rollup.
+
+    This is the money gate. Refuses a batch that isn't pending review, parsed
+    nothing, or failed its crosscheck.
+    """
+    from hermes.commissions.statements import commit_statement
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+    try:
+        result = commit_statement(supa, batch_id=batch_id, approved_by=req.approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("statement commit failed: %s", batch_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, **result.as_dict()}
+
+
+@app.post("/api/commission-statements/{batch_id}/reject")
+async def reject_commission_statement(batch_id: str, req: StatementDecision):
+    """Reject a staged batch. The staged lines stay for diagnosis."""
+    from hermes.commissions.statements import reject_statement
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+    try:
+        row = reject_statement(supa, batch_id=batch_id,
+                               reviewed_by=req.approved_by, reason=req.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        log.exception("statement reject failed: %s", batch_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "batch": row}
+
+
 @app.get("/api/carriers")
 async def list_carrier_appetite(
     limit: int = 500,
