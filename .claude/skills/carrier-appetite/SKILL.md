@@ -30,31 +30,42 @@ old version of this skill assumed.
 | `carrier_contacts` | 142 | Underwriter / marketing rep contacts, joined via `carrier_id`. |
 | `appetite_records` | 9 | Raw ingest staging. Not query-ready. |
 | `appetite_code_definitions` | 6 | Class-code definitions. Thin. |
+| `carrier_appetite_class_codes` | 7 | **The class-code bridge** (added 2026-07-25). Explicit-source links only. |
+| `appetite_placement_outcomes` | 0 | **The feedback loop** (live 2026-07-25). Write outcomes here. |
 | `appetite_carrier_profiles` | **0** | **EMPTY — deprecated. Do not query, do not cite.** |
 
 ### The classification tables (separate subsystem — know they exist)
 
-RSG has a fully populated class-code system. It is **not** joined to
-appetite yet, but it is real and it is not empty:
+RSG has a class-code system. The **code tables** are well populated; the
+**mapping and search layers on top of them are not.** Do not describe this
+system as "fully populated" — that oversells it and leads to queries that
+return nothing.
 
-| Table | Rows |
-|---|---|
-| `naics_codes` | 2,126 |
-| `gl_class_codes` | 1,154 |
-| `wc_class_codes` | 499 |
-| `sic_codes` | 445 |
-| `naics_wc_mappings` | 174 |
-| `naics_gl_mappings` | 151 |
-| `operations_to_codes` | 57 |
-| `code_bundles` | 0 (empty) |
+| Table | Rows | Reality |
+|---|---|---|
+| `naics_codes` | 2,126 | `naics_title` on all; `description` on 6 |
+| `gl_class_codes` | 1,154 | `description` on all; `search_keywords` on **0** |
+| `wc_class_codes` | 499 | `description` + `category` on all; `search_keywords` on 29 |
+| `sic_codes` | 445 | usable |
+| `naics_wc_mappings` | 174 | covers **154 of 2,126** NAICS (7.2%) |
+| `naics_gl_mappings` | 151 | covers **125 of 2,126** NAICS (5.9%) |
+| `operations_to_codes` | 57 | good keywords; NAICS links on only 6 |
+| `code_bundles` + `bundle_*` | 0 | empty |
+| pairing tables (`gl_prohibited_pairings`, `wc_common_pairings`, `wc_red_flag_pairings`) | 0 | empty — **no pairing validation exists** |
 
-Plus views `vw_classification_resolved`, `vw_classification_payload`,
-`vw_naics_candidate_expansion`.
+Two traps:
 
-**This skill does not own class-code lookup.** Classification belongs to
-a separate `class-code-lookup` skill. If a user asks "what class code is
-X?", answer from these tables or hand off — do not answer from
-`carrier_appetite`, which has almost no codes on it.
+- **All `embedding` columns are NULL** across all five code tables. There is no
+  semantic search. Text matching only.
+- **`vw_classification_resolved`, `vw_naics_candidate_expansion` and
+  `vw_ops_keyword_candidates` all join `leads_staging` and key on `lead_id`.**
+  They classify an existing lead row — they are *not* general "classify this
+  sentence" helpers.
+
+**This skill does not own class-code lookup.** Classification belongs to the
+`class-code-lookup` skill (**built 2026-07-25**). If a user asks "what class
+code is X?", hand off — do not answer from `carrier_appetite`, which has almost
+no codes on it.
 
 ### `carrier_appetite` real columns
 
@@ -66,20 +77,31 @@ X?", answer from these tables or hand off — do not answer from
 
 ### Known data gaps — plan around these, don't pretend they're fixed
 
-- **73 of 74 rows have no `class_codes`.** This is a *missing join*, not
-  missing data — the codes exist in `wc_class_codes` / `gl_class_codes`
-  / `naics_codes`, they've just never been linked to appetite rows.
-  Until that link exists, class-code matching is an *annotation and
-  tiebreaker*, never a filter. Filtering on class code returns an empty
-  set. Say "not linked yet," not "we don't have class codes" — the
-  second is false and it makes RSG sound less equipped than it is.
+- **73 of 74 rows still have an empty `class_codes[]` array.** The array is
+  now the *legacy* field — the real link lives in
+  `carrier_appetite_class_codes` (7 explicit-source links as of 2026-07-25).
+  Class-code matching remains an *annotation and tiebreaker*, never a filter.
+  Say "not linked yet," not "we don't have class codes" — the second is false
+  and it makes RSG sound less equipped than it is.
 - **58 of 74 rows are `confidence = 'unverified'`.** Every answer must
   carry a confidence signal. See "Confidence and staleness" below.
-- **32 of 74 rows have no `carrier_id`.** The join to
-  `carrier_contacts` fails for ~43% of rows. Fall back to
-  `carriers.underwriting_hotline`, then to "no contact on file."
-- **16 rows have no `states_approved`.** Treat as unknown, not as
-  "all states." Flag it.
+- **26 of 74 rows have no `carrier_id`** (was 32; 6 backfilled 2026-07-25).
+  The residual is **not a broken join — it is a missing appointment roster.**
+  ~14 carriers referenced by `carrier_appetite` have no row in `carriers` at
+  all (ALLSTATE, EMPLOYERS, RLI, PATHPOINT, NEPTUNE, SEMSEE, KELLY KLEE,
+  SLICE, ANNEX RISK, EVERPEAK, QBE Specialty, SIMPLICITY, SES RISK SOLUTIONS,
+  STATE NATL, GEICO MARINE). Fall back to `carriers.underwriting_hotline`,
+  then to "no contact on file."
+- **`carrier_appetite_carrier_lob_uq` is `UNIQUE (carrier_id, lob) WHERE
+  carrier_id IS NOT NULL`.** Sub-brands cannot share a parent's roster id on
+  the same LOB — PROGRESSIVE MOUNTAIN and PROGRESSIVE FREEDOM are deliberately
+  left unlinked rather than collapsed onto `progressive`. Never "fix" this by
+  merging them; they are distinct underwriting companies.
+- **14 rows have no `states_approved`** (was 16). Treat as unknown, not as
+  "all states." Flag it. All 14 say verbatim in their own source that the
+  territory is *not itemized* — they cannot be derived, they need the carrier
+  program map. They are logged in `data_quality_issues`. **Do not guess them:**
+  inventing a state approval manufactures a licensure claim.
 - **16 rows have `appetite_level = null`.** Report as `unrated`.
 - No Contractors Pollution Liability row exists. If asked, say so and
   route to the wholesale path.
@@ -98,6 +120,11 @@ X?", answer from these tables or hand off — do not answer from
 | `null` | Unrated | Appetite not yet recorded. Verify before submitting. |
 
 Ranking order: `preferred` → `standard` → `non-standard` → `unrated`.
+
+**Schema note:** the live CHECK constraint also permits a 4th value,
+`declined`. **Zero rows use it today.** If one ever appears, treat it as a hard
+disqualification — the carrier has affirmatively said no, which is stronger
+than `non-standard`. Do not bulk-set it without deciding what it means.
 
 **Never emit** `Sweet Spot`, `Niche`, `Hard-To-Place`, `Wholesale`, or
 `Excluded` as appetite levels. Those values do not exist in the data.
@@ -241,12 +268,16 @@ Always print the color. Gretchen should never have to infer it.
    `disqualified_carriers` with the exact exclusion string.
 6. **Check `key_requirements`** — these become the
    `missing_information` checklist, not disqualifiers.
-7. **Annotate class codes** — if `class_codes` is populated (rare),
-   note the match as a confidence boost. If empty, add the caveat that
-   *this carrier's* appetite is recorded at LOB level only. If the user
-   supplied a NAICS or class code, you may still resolve and echo it
-   from the classification tables so the submission packet carries the
-   right code — just don't present it as carrier-verified appetite.
+7. **Annotate class codes** — check `carrier_appetite_class_codes` (via
+   `vw_carrier_appetite_class_resolved`) for a link on this appetite row.
+   A link with `match_method='explicit_source'` is carrier-stated and is a real
+   confidence boost; `eligibility='prohibited'` is a hard disqualification —
+   respect `state_scope` when it is set. A link with `match_method` of
+   `keyword`/`embedding` is machine-derived: annotation only, never a filter.
+   No link at all → say this carrier's appetite is recorded at LOB level only.
+   If the user supplied a NAICS or class code, hand off to `class-code-lookup`
+   to resolve it so the submission packet carries the right code — just don't
+   present it as carrier-verified appetite.
 8. **Cross-check `carriers`** — if the carrier appears in
    `appetite_cannot_write` for this class, disqualify it even if
    `carrier_appetite` says otherwise. `carriers` wins on conflict.
@@ -304,8 +335,9 @@ Return, in order:
 The appetite data will rot unless outcomes flow back into it. This is
 the highest-leverage addition to the skill.
 
-**Status: the table below does not exist yet.** Proposed DDL — review
-before applying:
+**Status: LIVE as of 2026-07-25.** The table exists, is RLS-locked to
+`service_role`, and is empty. The loop is inert only because nothing writes to
+it yet — start recording outcomes. Applied DDL, for reference:
 
 ```sql
 create table if not exists appetite_placement_outcomes (
@@ -328,6 +360,7 @@ create table if not exists appetite_placement_outcomes (
 );
 create index on appetite_placement_outcomes (lob, state);
 create index on appetite_placement_outcomes (carrier_bound);
+-- plus: (carrier_submitted, lob, created_at desc) for the 90-day decline rule
 ```
 
 ### Write rules
@@ -417,9 +450,12 @@ create index on appetite_placement_outcomes (carrier_bound);
    No source, no recommendation.
 6. **Always surface `confidence`.** Unverified data gets a warning, not
    a confident tone.
-7. **Never filter on class code.** 73/74 appetite rows have none —
-   filtering deletes the result set. Resolving a code from the
-   classification tables is fine; gating carriers on it is not.
+7. **Never filter on class code.** Only 7 explicit links exist across 74 rows —
+   filtering deletes the result set. Resolving a code via `class-code-lookup`
+   is fine; gating carriers on it is not. The one exception: a
+   `carrier_appetite_class_codes` row with `eligibility='prohibited'` and
+   `match_method='explicit_source'` **is** disqualifying, because the carrier
+   said so — honour `state_scope` when it is set.
 8. **Never treat a null `states_approved` as nationwide.** Flag it.
 9. **`carriers.appetite_cannot_write` overrides `carrier_appetite`.**
    Conflict goes to the more restrictive answer.
@@ -448,10 +484,10 @@ Output feeds:
 
 Receives from:
 
-- `class-code-lookup` (not yet built) — resolves a description or NAICS
-  into WC/GL class codes before this skill runs. Until it exists, query
-  `wc_class_codes` / `gl_class_codes` / `naics_*_mappings` directly and
-  keep it to a lookup, not a full classification workflow.
+- `class-code-lookup` (**built 2026-07-25**) — resolves a description or NAICS
+  into WC/GL class codes before this skill runs. Hand off to it rather than
+  querying the classification tables here; it carries the coverage caveats
+  (no embeddings, ~6% NAICS mapping, empty pairing tables).
 
 ---
 
@@ -460,21 +496,29 @@ Receives from:
 Surfacing these is part of the skill's job, not a separate project.
 When a run trips one, mention it once, briefly, at the end:
 
-1. **Link `carrier_appetite.class_codes` to the existing classification
-   tables.** Highest-value fix by a wide margin — it's the missing
-   bridge between 4,400 populated codes and 74 carrier rows. Until it
-   exists, "who writes NAICS 237110?" cannot be answered end-to-end.
-   Start with Commercial Auto (39% of the book) and Workers Comp — 19
-   rows, editable in the Carrier Hub, no SQL required.
-2. Backfill `carrier_id` — 32 rows can't reach an underwriter contact.
+1. **Populate `carrier_appetite_class_codes`.** The bridge now exists; it holds
+   only 7 links because that is all the *explicit* code-level evidence in the
+   table. This is the highest-value fix by a wide margin — every additional
+   link makes "who writes NAICS 237110?" answerable for one more class. Start
+   with Commercial Auto (39% of the book) and Workers Comp. Enter links as
+   `match_method='manual'` when a human reads them off a carrier guide.
+2. **Add the ~14 missing carriers to `carriers`.** This is the real blocker
+   behind the 28 orphan `carrier_id` rows — the roster is incomplete, the join
+   is fine. Creating an appointment record asserts a business relationship, so
+   Lamar confirms each one; the backfill then finishes itself.
 3. Verify the 58 `unverified` rows. **Now unblocked** — the MARK
    VERIFIED toggle shipped 2026-07-25. Start with Commercial Auto (39%
    of the book) and Workers Comp (10 rows).
-4. Populate `states_approved` on the 16 rows missing it.
-5. Set `appetite_level` on the 16 `null` rows.
+4. Populate `states_approved` on the 16 rows missing it. **14 need the carrier
+   program map** — their own source says the territory is not itemized, so
+   they cannot be derived from anything on hand. Do not guess them.
+5. Set `appetite_level` on the 16 `null` rows — decide first whether `declined`
+   (permitted by the CHECK constraint, unused) is in play.
 6. `carrier_documents` still carries `dify_dataset_id` / `dify_doc_id`
    columns. Dify is retired — those columns are dead weight and should
    be dropped in a cleanup migration.
+7. Classification-side gaps are tracked in `class-code-lookup`'s own backlog
+   (empty embeddings, ~6% NAICS mapping coverage, empty pairing tables).
 
 ---
 
@@ -501,7 +545,9 @@ For a generic note not tied to one client, drop `account_name` and pass
 ## References
 
 - `docs/hermes-supabase-domain-map.md`
-- `proposal-builder`, `commercial-risk-intake`, `renewal-review`
+- `proposal-builder`, `commercial-risk-intake`, `renewal-review`,
+  `class-code-lookup`
+- `supabase/migrations/20260725120000_carrier_appetite_class_bridge.sql`
 - `rsg-carrierhub` — `server.ts` (`/api/carriers`),
   `src/lib/carriers-repo.ts`, `src/components/FindMarkets.tsx`
 - Live schema verified 2026-07-25 against Supabase project
@@ -510,14 +556,33 @@ For a generic note not tied to one client, drop `account_name` and pass
 
 ## Open items (not done)
 
-- `appetite_placement_outcomes` — DDL written above, **not applied.**
-  The feedback loop is inert until someone runs it.
-- `class-code-lookup` skill — not built.
-- `carrier_appetite.class_codes` — not linked to the classification
-  tables. 73 of 74 rows still empty.
+- **17 missing `carriers` rows** — logged in `data_quality_issues` as
+  `missing_carrier_appointment`. Needs Lamar to confirm each appointment before
+  anyone creates the record; the `carrier_id` backfill then finishes itself.
+- **14 rows still have no `states_approved`** — logged as
+  `states_approved_not_itemized`. Needs the carrier program maps; not derivable.
+- Only 7 bridge links exist. Growing them is the highest-value ongoing work.
+- `carrier_appetite.class_codes[]` (the legacy array) stays empty on 73 rows by
+  design; the bridge table supersedes it. Decide whether to drop the column.
 
 ## Shipped
 
+- 2026-07-25 — **`appetite_placement_outcomes` live.** Feedback-loop table + 4
+  indexes + RLS (`service_role`) + column comments. Empty; nothing writes to it
+  yet, so the loop is built but not yet turning.
+- 2026-07-25 — **class-code bridge live.** `carrier_appetite_class_codes`
+  (7 explicit-source links), `vw_carrier_appetite_class_resolved`, and
+  `vw_who_writes_naics` — which now returns real rows, so "who writes NAICS
+  236220?" is answerable end-to-end for the first time.
+- 2026-07-25 — **`carrier_id` backfill.** 32 → 26 orphans (THREE BY BERKSHIRE
+  HATHAWAY ×3, PROGRESSIVE ×3). Diagnosis: the residual is a missing
+  appointment roster, not a broken join.
+- 2026-07-25 — **`states_approved`.** 16 → 14 blanks (the two ISC trucking rows
+  had an explicit "48 contiguous states" territory). The other 14 are logged,
+  not guessed.
+- 2026-07-25 — **31 data-quality issues logged** so the gaps surface instead of
+  evaporating.
+- 2026-07-25 — **`class-code-lookup` skill built.**
 - 2026-07-25 — Carrier Hub confidence editing. Added `newAppConfidence`
   state, a confidence dropdown on the add-row form, and a per-row
   MARK VERIFIED toggle in `CarrierDrawer.tsx`. Verification is now
