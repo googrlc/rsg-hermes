@@ -26,13 +26,18 @@ Project 85 Sentinel is a Hermes-native revenue guardrail that posts a daily Slac
 
 If `HERMES_SENTINEL_SLACK_CHANNEL` is not set, Sentinel defaults to Slack channel `D0AUTEYHBDH`.
 
-## Slack Loop-Back Actions
+## Slack Loop-Back Actions — ⚠️ INERT
 
-The briefing includes buttons handled by Hermes Socket Mode (`hermes --slack`):
+The briefing still renders three buttons, but **nothing handles the clicks.**
+They were served by the Socket Mode listener (`hermes --slack`), which was
+retired July 2026 — the flag no longer exists and no `block_actions` handler
+remains in the tree. A click is silently dropped.
 
-- `Remind me in 2 days`: creates an the CRM `Task` due in 2 days.
-- `Assign to Gretchen`: creates an the CRM `Task` assigned to `HERMES_SENTINEL_GRETCHEN_USER_ID`.
-- `Dismiss`: acknowledges without CRM write.
+- `Remind me in 2 days` — was: create a task due in 2 days.
+- `Assign to Gretchen` — was: create a task assigned to `HERMES_SENTINEL_GRETCHEN_USER_ID`.
+- `Dismiss` — was: acknowledge without a CRM write.
 
-To use interactive actions, ensure Slack Interactivity is enabled for the app and the Socket Mode bot is running.
+Until an inbound path exists (Events API endpoint or re-enabled Socket Mode),
+treat the briefing as read-only and act on it in the cockpit. Either wire a
+handler or stop rendering the buttons.
 

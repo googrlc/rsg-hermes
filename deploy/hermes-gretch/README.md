@@ -17,12 +17,12 @@ entirely by environment. This runbook is the deploy + verification procedure.
 
 ## 0. Prerequisites (do these once, in the dashboards — cannot be scripted from here)
 
-1. **Slack app `hermes-gretch`** — create at api.slack.com/apps:
-   - Socket Mode ON → generate an **App-Level token** (`xapp-…`, scope `connections:write`).
-   - Bot scopes: `chat:write`, `app_mentions:read`, `im:history`, `im:read`, `channels:history`.
+1. **Slack app `hermes-gretch`** — create at api.slack.com/apps. **Outbound
+   posting only** — the inbound Socket Mode listener is retired, so no
+   App-Level (`xapp-`) token and no `connections:write`.
+   - Bot scope: `chat:write`.
    - Install to workspace → copy **Bot User OAuth token** (`xoxb-…`).
    - Invite the bot to **#gretchen-tasks** (`C0AMWAZBBJP`).
-   - Note the bot's **own user id** (`U…`) for `HERMES_BOT_USER_ID`.
 2. **Supermemory** — reuse the existing `SUPERMEMORY_API_KEY`. Isolation is by
    **scope tag**, not by account: the compose sets `HERMES_MEMORY_SCOPE=hermes-gretch`,
    so every memory this instance writes is tagged `scope:hermes-gretch` and reads are
@@ -85,11 +85,17 @@ docker compose up -d hermes-api
 
 ```bash
 docker compose -f deploy/hermes-gretch/docker-compose.yml up -d --build
-docker logs -f rsg-hermes-gretch        # watch it connect to Slack
+docker logs -f rsg-hermes-gretch
 ```
 
-This runs `hermes --slack` (Socket Mode). It builds the same `Dockerfile` as the
-main stack; `personas/SOUL-GRETCHEN.md` is baked into the image at `/app/personas/`.
+> ⚠️ This instance existed to run the Slack Socket Mode listener, which is
+> retired. Its compose command is now a harmless `--ops-doctor` read, so
+> starting it does nothing useful — decide what this instance is *for* before
+> enabling it. The persona and memory-scope isolation below still work; it just
+> has no inbound surface to serve.
+
+It builds the same `Dockerfile` as the main stack;
+`personas/SOUL-GRETCHEN.md` is baked into the image at `/app/personas/`.
 
 ---
 
