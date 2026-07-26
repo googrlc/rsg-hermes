@@ -97,8 +97,8 @@ def _insert_retrieval_rows(
 ) -> dict[str, list[str]]:
     """Insert client_entities + client_facts + client_notes rows.
 
-    CRM ids land later (via crm_receipts) — these rows are written eagerly
-    so retrieval works even before the CRM POST completes.
+    CRM ids land later (the intake worker stamps them) — these rows are written
+    eagerly so retrieval works even before the CRM write completes.
     """
     out: dict[str, list[str]] = {"client_entities": [], "client_facts": [], "client_notes": []}
 

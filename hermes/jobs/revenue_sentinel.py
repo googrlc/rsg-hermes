@@ -554,12 +554,16 @@ def _expected_latest_business_day(today_local: date) -> date:
 
 
 def _missing_required_env() -> list[str]:
-    required = ["SLACK_BOT_TOKEN"]
-    missing: list[str] = []
-    for key in required:
-        if not os.environ.get(key, "").strip():
-            missing.append(key)
-    return missing
+    """Env the briefing genuinely cannot run without.
+
+    Was ["SLACK_BOT_TOKEN"]. Slack is retired and the sentinel posts through the
+    TeamNotifier to Nextcloud Talk, so requiring a Slack credential meant the
+    briefing would refuse to run the day that stale token was removed. The Talk
+    room is what it actually needs; TeamNotifier falls back to the boss room, so
+    HERMES_TALK_ROOM_BOSS is the one that must exist.
+    """
+    required = ["HERMES_TALK_ROOM_BOSS"]
+    return [key for key in required if not os.environ.get(key, "").strip()]
 
 
 def _renewal_checkpoints() -> list[int]:

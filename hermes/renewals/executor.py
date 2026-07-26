@@ -784,14 +784,16 @@ def _log_guardrail(
 def _escalate(
     notifier_cls: type[SlackNotifier], ctx: JobContext, *, receipt_status: str, reason: str
 ) -> None:
-    """Escalate high-impact renewal stops to #systems-check.
+    """Escalate high-impact renewal stops to the systems-check room.
 
     Posts identifiers + reason only — never the raw payload or credentials.
-    """
-    import os
 
-    if not os.environ.get("SLACK_BOT_TOKEN", "").strip():
-        return
+    This used to return early unless SLACK_BOT_TOKEN was set. Slack is retired —
+    the notifier posts to Nextcloud Talk — so gating a Talk post on a Slack
+    credential meant that rotating out a stale token would have silently
+    disabled renewal failure alerts. The notifier raises if no room is
+    configured, and the except below already swallows that.
+    """
     text = (
         f":rotating_light: Renewal executor {receipt_status.upper()}\n"
         f"- action: {ctx.action}\n"
