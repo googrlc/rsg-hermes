@@ -28,5 +28,8 @@ services:
       - HERMES_MEMORY_SCOPE=hermes-gretch
       # Gretchen's scope is the CRM — no public-web business research.
       - HERMES_DISABLED_TOOLS=web_research
-    restart: unless-stopped
-    command: ["hermes", "--slack"]
+    # NOTE: this instance existed to run the Slack Socket Mode listener,
+    # which is retired — it has no listener role today. Harmless read-only
+    # default so it cannot crash-loop; decide its purpose before enabling.
+    restart: "no"
+    command: ["hermes", "--ops-doctor"]

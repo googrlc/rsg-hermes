@@ -82,10 +82,13 @@ For each row the sentinel surfaces, decide:
 Whatever the section, never write CRM data directly — produce a draft
 payload with `approval_required: true`.
 
-## Slack loop-back actions
+## Slack loop-back actions — ⚠️ INERT
 
-Three buttons attached to each sentinel post (handled by
-`hermes --slack` Socket Mode):
+Three buttons are attached to each sentinel post, but **nothing handles the
+clicks** — the Socket Mode listener that served them was retired July 2026.
+Do not tell anyone these work; act on the row in the cockpit instead.
+
+What they were meant to do:
 
 - **Remind me in 2 days** — creates an the CRM `Task` due in 2 days,
   parent = the surfaced entity. Use this when the row is real but

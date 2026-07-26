@@ -77,7 +77,7 @@ reality in three places.
 
 1. **"synthesizer → dedup probes → drafting"** — no dedup probes exist.
    The synthesizer declares a `duplicate_search` bundle in its output JSON,
-   but nothing in the write path actually queries EspoCRM with it.
+   but nothing in the write path ever runs those searches.
    `drafting` is a pure pass-through transition in the Phase 3 worker.
    Update the architecture diagram (Section 3) and the state-machine
    description (Section 6).

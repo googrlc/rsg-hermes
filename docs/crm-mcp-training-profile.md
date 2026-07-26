@@ -271,7 +271,6 @@ Hermes uses Supabase as a governance and staging layer alongside the CRM:
 | `SUPABASE_URL` | Supabase PostgREST base URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side CRUD via RLS |
 | `SLACK_BOT_TOKEN` | Slack message posting |
-| `SLACK_APP_TOKEN` | Slack Socket Mode |
 | `OPENAI_API_KEY` | NLP intent fallback |
 | `HERMES_VERIFY_TLS` | Set `"true"` to enable TLS verification |
 | `HERMES_MAX_LIST_SIZE` | Max records per list call (default: 200) |

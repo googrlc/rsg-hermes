@@ -9,8 +9,12 @@ services:
       - .env
     volumes:
       - .:/app
-    restart: unless-stopped
-    command: ["hermes", "--slack"]
+    # Per-cron runner, not a listener: jobs run as
+    #   docker compose run --rm hermes hermes --<job>
+    # Default command is a harmless read-only check so a plain `up -d`
+    # cannot crash-loop. restart: no for the same reason.
+    restart: "no"
+    command: ["hermes", "--ops-doctor"]
   hermes-api:
     build:
       context: .
