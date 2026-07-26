@@ -50,6 +50,18 @@ OWNER_BOOK_SYNC = "book_sync"
 CLIENT_KEY = "nowcerts_insured_guid"
 POLICY_KEY = "policy_guid"
 
+# Audit trail. The canonical book sync writes one sync_audit_log row per
+# mirrored object so "what did the last sync do to this insured/policy?" is
+# answerable and ops-doctor can see the mirror move (#232 — sync_audit_log
+# went dead when the Espo bidirectional sync was deleted in slice 4).
+# run_id is left NULL: sync_runs.direction is an Espo-only enum
+# (nowcerts_to_espocrm / espocrm_to_nowcerts), so we don't create a run
+# parent. The audit_action enum (create/update/skip/error) fits the book
+# sync's outcomes exactly, and sync_audit_log.run_id is nullable.
+AUDIT_TABLE = "sync_audit_log"
+AUDIT_OBJECT_CLIENT = "canonical_client"
+AUDIT_OBJECT_POLICY = "canonical_policy"
+
 # Fallback column sets, used only when a table is empty (no sample row to
 # introspect). Superset of the live CSV schema; writes intersect with these.
 _CLIENT_COLS = {
@@ -66,6 +78,40 @@ _POLICY_COLS = {
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _audit(
+    supa: Any,
+    *,
+    object_type: str,
+    source_object_id: str | None,
+    action: str,
+    status: str = "success",
+    dest_object_id: str | None = None,
+    message: str | None = None,
+    dry_run: bool = False,
+) -> None:
+    """Append one sync_audit_log row for a mirrored object.
+
+    Best-effort: an audit-write failure must never abort the sync. Skipped
+    entirely in dry_run (there is no real write to audit).
+    """
+    if dry_run:
+        return
+    payload: dict[str, Any] = {
+        "object_type": object_type,
+        "source_object_id": str(source_object_id) if source_object_id else None,
+        "action": action,
+        "status": status,
+    }
+    if dest_object_id is not None:
+        payload["dest_object_id"] = str(dest_object_id)
+    if message:
+        payload["message"] = message[:2000]
+    try:
+        supa.insert(AUDIT_TABLE, payload)
+    except Exception:  # noqa: BLE001
+        log.warning("sync_audit_log insert failed for %s %s", object_type, source_object_id)
 
 
 def _num(value: Any) -> float | None:
@@ -235,6 +281,9 @@ def _sync_clients(
     for ins in insureds:
         client = _map_client(ins, now_iso=now_iso)
         if not client:
+            _audit(supa, object_type=AUDIT_OBJECT_CLIENT,
+                   source_object_id=_insured_guid(ins), action="skip",
+                   message="no guid or insured_name", dry_run=dry_run)
             continue
         guid = client[CLIENT_KEY]
         try:
@@ -243,14 +292,21 @@ def _sync_clients(
                 if not dry_run and payload:
                     supa.update_where(CLIENTS_TABLE, payload, filters={CLIENT_KEY: f"eq.{guid}"})
                 result.clients_updated += 1
+                _audit(supa, object_type=AUDIT_OBJECT_CLIENT,
+                       source_object_id=guid, action="update", dry_run=dry_run)
             else:
                 if not dry_run:
                     supa.insert(CLIENTS_TABLE, _project(client, cols))
                 result.clients_created += 1
                 existing.add(guid)
+                _audit(supa, object_type=AUDIT_OBJECT_CLIENT,
+                       source_object_id=guid, action="create", dry_run=dry_run)
         except Exception as exc:  # noqa: BLE001 — one bad insured shouldn't abort the run
             result.errors.append(f"insured {guid}: {exc}")
             log.warning("canonical sync: insured %s failed: %s", guid, exc)
+            _audit(supa, object_type=AUDIT_OBJECT_CLIENT,
+                   source_object_id=guid, action="error", status="failed",
+                   message=str(exc), dry_run=dry_run)
 
 
 def _sync_policies(
@@ -266,6 +322,9 @@ def _sync_policies(
         pg = _policy_guid(p)
         if not pg:
             result.policies_skipped_no_guid += 1
+            _audit(supa, object_type=AUDIT_OBJECT_POLICY,
+                   source_object_id=_policy_number(p), action="skip",
+                   message="no policy guid", dry_run=dry_run)
             continue
         volatile = _map_policy_volatile(p)
         try:
@@ -276,6 +335,8 @@ def _sync_policies(
                 if not dry_run and payload:
                     supa.update_where(POLICIES_TABLE, payload, filters={POLICY_KEY: f"eq.{pg}"})
                 result.policies_updated += 1
+                _audit(supa, object_type=AUDIT_OBJECT_POLICY,
+                       source_object_id=pg, action="update", dry_run=dry_run)
             else:
                 # Claim ownership on create. Any writer may refresh a row's volatile
                 # fields; only its owner may deactivate it. Stamping here is what
@@ -291,9 +352,14 @@ def _sync_policies(
                     supa.insert(POLICIES_TABLE, payload)
                 result.policies_created += 1
                 existing.add(pg)
+                _audit(supa, object_type=AUDIT_OBJECT_POLICY,
+                       source_object_id=pg, action="create", dry_run=dry_run)
         except Exception as exc:  # noqa: BLE001 — one bad policy shouldn't abort the run
             result.errors.append(f"policy {_policy_number(p) or pg}: {exc}")
             log.warning("canonical sync: policy %s failed: %s", pg, exc)
+            _audit(supa, object_type=AUDIT_OBJECT_POLICY,
+                   source_object_id=pg, action="error", status="failed",
+                   message=str(exc), dry_run=dry_run)
 
 
 # ---------------------------------------------------------------------------
