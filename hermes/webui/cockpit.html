@@ -230,6 +230,11 @@ async function apiUpload(path,formData){
 function toast(msg,isErr){ const t=el(`<div class="toast ${isErr?'err':''}">${esc(msg)}</div>`); $('#toasts').append(t); setTimeout(()=>t.remove(),4200); }
 async function loadUsers(){ if(USERS.length)return USERS; try{USERS=(await api('/api/agency-users')).users||[]}catch{USERS=[]} return USERS; }
 const userOptions = (selected)=> USERS.map(u=>`<option value="${esc(u.email)}"${u.email===selected?' selected':''}>${esc(u.display_name||u.email)}</option>`).join('');
+/* Work is assigned to people, not to the robot. lc-rsg@ (role 'service') stays a
+   valid created_by / approved_by / uploaded_by target — it just shouldn't appear
+   in an ASSIGNEE list, where picking it would hand a real job to a machine. */
+const assigneeOptions = (selected)=> USERS.filter(u=>u.role!=='service')
+  .map(u=>`<option value="${esc(u.email)}"${u.email===selected?' selected':''}>${esc(u.display_name||u.email)}</option>`).join('');
 
 /* ---------- View configs ---------- */
 const TABLES = {
@@ -651,7 +656,10 @@ async function renderPipeline(host){
 function ago(iso){ if(!iso)return''; const d=Math.floor((Date.now()-new Date(iso))/86400000); return d<=0?'today':(d+'d ago'); }
 function kcard(o){
   const meta=[o.line_of_business, o.referral_source||o.lead_source].filter(Boolean).join(' · ');
-  const who=o.assigned_to?('@'+String(o.assigned_to).split('@')[0]):'';
+  // assigned_to_email is the canonical owner. The legacy assigned_to holds a
+  // NowCerts display-name array ('["Lamar Coates"]'), so splitting it on '@'
+  // rendered '@["Lamar Coates"]' on every card that had an owner.
+  const who=o.assigned_to_email?('@'+String(o.assigned_to_email).split('@')[0]):'';
   const sub=[who, o.created_at?ago(o.created_at):''].filter(Boolean).join(' · ');
   return `<div class="kcard" draggable="true" data-id="${esc(o.id)}">
     <div class="kc-name">${esc(o.insured_name||'—')}</div>
@@ -1044,7 +1052,7 @@ async function openEditOpp(o){
      <div class="row2"><div class="field"><label>Carrier</label><input id="eCarrier" value="${esc(o.carrier||'')}"/></div>
        <div class="field"><label>Win probability (%)</label><input id="eProb" type="number" min="0" max="100" value="${o.probability!=null?o.probability:''}"/></div></div>
      <div class="row2"><div class="field"><label>Likelihood</label><select id="eLike">${OPP_LIKELIHOODS.map(l=>`<option${sel(l,o.likelihood)}>${l}</option>`).join('')}</select></div>
-       <div class="field"><label>Assigned to</label><select id="eBy">${userOptions(o.assigned_to)}</select></div></div>
+       <div class="field"><label>Assigned to</label><select id="eBy"><option value="">— unassigned —</option>${assigneeOptions(o.assigned_to_email)}</select></div></div>
      <div class="field"><label>Disposition (close reason)</label><select id="eDisp">${OPP_DISPOSITIONS.map(d=>`<option value="${esc(d)}"${sel(d,o.disposition||'')}>${d||'—'}</option>`).join('')}</select></div>
      <div class="field"><label>Next action</label><input id="eNext" value="${esc(o.next_action||'')}"/></div>
      <div class="row2"><div class="field"><label>Referral source</label><input id="eRef" value="${esc(o.referral_source||'')}"/></div>
@@ -1058,7 +1066,7 @@ async function openEditOpp(o){
       opportunity_type:$('#eType').value, line_of_business:$('#eLob').value.trim()||null,
       stage:$('#eStage').value, premium_estimate:parseFloat($('#ePrem').value)||null,
       carrier:$('#eCarrier').value.trim()||null, likelihood:$('#eLike').value,
-      disposition:$('#eDisp').value||null, assigned_to:$('#eBy').value||null,
+      disposition:$('#eDisp').value||null, assigned_to_email:$('#eBy').value||null,
       next_action:$('#eNext').value.trim()||null, description:$('#eDesc').value.trim()||null,
       referral_source:$('#eRef').value.trim()||null, lead_source:$('#eLead').value.trim()||null,
     };
@@ -1092,7 +1100,7 @@ async function openOpportunity(o){
        <div><div class="m-l">Probability</div><div class="m-v">${o.probability!=null?o.probability+'%':'—'}</div></div>
        <div><div class="m-l">Weighted value</div><div class="m-v">${(o.premium_estimate&&o.probability)?money(o.premium_estimate*o.probability/100):'—'}</div></div>
        <div><div class="m-l">Referral source</div><div class="m-v">${esc(o.referral_source||o.lead_source||'—')}</div></div>
-       <div><div class="m-l">Assigned to</div><div class="m-v">${esc(o.assigned_to||'—')}</div></div>
+       <div><div class="m-l">Assigned to</div><div class="m-v">${esc(o.assigned_to_email||'—')}</div></div>
        <div><div class="m-l">Prospect type</div><div class="m-v">${esc(o.prospect_type||'—')}</div></div>
        <div><div class="m-l">Quote #</div><div class="m-v">${esc(o.quote_number||'—')}</div></div>
        <div><div class="m-l">Created</div><div class="m-v">${esc((o.created_at||'').slice(0,10)||'—')}</div></div>
@@ -1392,7 +1400,7 @@ async function openTask(t){
            .map(s=>`<option value="${s}"${t.priority===s?' selected':''}>${s}</option>`).join('')}</select></div>
      </div>
      <div class="row2">
-       <div class="field"><label>Assignee</label><select id="tkAssignee">${userOptions(t.assigned_to_email)}</select></div>
+       <div class="field"><label>Assignee</label><select id="tkAssignee">${assigneeOptions(t.assigned_to_email)}</select></div>
        <div class="field"><label>Due</label><input id="tkDue" type="date" value="${esc((t.due_at||'').slice(0,10))}"/></div>
      </div>
      <div class="field"><label>Description</label><textarea id="tkDesc">${esc(t.description||'')}</textarea></div>
@@ -1430,7 +1438,7 @@ async function openNewTask(preCase){
      <div class="field"><label>Case <span class="muted">— leave as “No case” for internal work</span></label>
        <select id="taskCase"><option value="">No case (internal task)</option>${caseOpts}</select></div>
      <div class="field"><label>Title</label><input id="taskTitle" placeholder="Call the client"/></div>
-     <div class="row2"><div class="field"><label>Assignee</label><select id="taskAssignee">${userOptions()}</select></div>
+     <div class="row2"><div class="field"><label>Assignee</label><select id="taskAssignee">${assigneeOptions()}</select></div>
        <div class="field"><label>Priority</label><select id="taskPrio">${['low','medium','high','urgent'].map(s=>`<option${s==='medium'?' selected':''}>${s}</option>`).join('')}</select></div></div>
      <div class="field"><label>Description</label><textarea id="taskDesc"></textarea></div></div>
    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="taskSave">Create task</button></div>`);

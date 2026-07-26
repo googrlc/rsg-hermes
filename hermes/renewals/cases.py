@@ -55,9 +55,11 @@ DEFAULT_TASK_TEMPLATES: list[tuple[str, str]] = [
 
 def _service_email() -> str:
     # created_by_email / actor_email are FK'd to agency_crm_users — must be a real
-    # user. No hermes bot user exists yet, so default to the admin; override with
-    # HERMES_SERVICE_EMAIL once a hermes@ user is added to agency_crm_users.
-    return os.environ.get("HERMES_SERVICE_EMAIL", "lamar@risksolutionsgroup.net")
+    # user. lc-rsg@ IS the service account (role 'service'): it was already the
+    # machine identity, created_by on 5 tasks and assigned_to on zero, it just wore
+    # Lamar's display name until 2026-07-26. Defaulting here means a machine write
+    # no longer looks like something Lamar did by hand.
+    return os.environ.get("HERMES_SERVICE_EMAIL", "lc-rsg@risksolutionsgroup.net")
 
 
 def _default_owner_email() -> str:
