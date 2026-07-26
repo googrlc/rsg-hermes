@@ -52,13 +52,18 @@ with zero side effects). Scheduled/triggered, **not** always-on.
 | File | Runs where | Purpose |
 |---|---|---|
 | [`BRIEF-renewal-walker-runner-2026-07-13.md`](./BRIEF-renewal-walker-runner-2026-07-13.md) | spec | **Historical.** The v3 Walker × runner design. Superseded — kept for the reasoning behind the cadence and segment rules, which still hold. |
-| [`renewal-desk-skill.md`](./renewal-desk-skill.md) | **Hermes** (Claude Code) | The executor skill. The one door that performs the sanctioned, additive, queued, approved AMS/CRM writes. Version-controlled source for the live skill. |
 
-## Where the live copy lives
+## Where the skill lives
 
-- **Skill** → `~/.claude/skills/renewal-desk/SKILL.md` (auto-loads for Hermes; must
-  stay in the skills dir to trigger). Keep it in sync with `renewal-desk-skill.md`
-  here — they are meant to be byte-identical.
+- **`.claude/skills/renewal-desk/SKILL.md`** — one copy, in the repo,
+  version-controlled and auto-loading.
+
+> Changed 2026-07-26: there used to be a second copy here
+> (`docs/renewals/renewal-desk-skill.md`) that was meant to stay byte-identical
+> with a live copy under `~/.claude/skills/`. It drifted — the doc fork still
+> described the EspoCRM desk months after the executor moved to
+> `outbound_sync_queue`. Both duplicates are gone; the skill in `.claude/skills/`
+> is the only copy. Don't reintroduce a fork.
 
 ## Business rules live in exactly one place
 

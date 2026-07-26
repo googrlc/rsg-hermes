@@ -19,7 +19,7 @@ duplicate records, bad CRM writes, and channel drift.
 
 | Role | Scope | CRM Access | Success Criteria |
 |------|-------|------------|------------------|
-| **HermesCommissionAuditor** | `commission_audits`, `eom_scorecards`, `crm_write_queue` | Queue only | Variance explained or zero; EOM rollups balanced; no hallucinated policy numbers |
+| **HermesCommissionAuditor** | `commission_audits`, `eom_scorecards`, `commission_ledger` | Queue only | Variance explained or zero; EOM rollups balanced; no hallucinated policy numbers |
 | **HermesRenewalSpecialist** | `project_85_renewals`, `renewal_actions`, `slack_registry` | Queue only | Action log complete; risk status from enum; escalations to Slack |
 | **HermesFinanceOps** | `commission_audits`, `eom_scorecards`, `dashboard_kpis` | None | Scorecard numbers traceable to audits; month lock respected |
 | **HermesOpsRouter** | `slack_registry`, `reporting_schedules`, `guardrail_logs` | Queue only | Posts only via registry channels; guardrail on unknown Slack targets |
@@ -45,23 +45,39 @@ the registry, Hermes refuses to post (`BLOCKED_BY_GUARDRAIL`) and logs to
 
 ## 3. CRM Write Rules & Receipt Formats
 
-Models propose CRM mutations as JSON payloads in `crm_write_queue`; a worker
-executes against the CRM and stores raw provider responses in `crm_receipts`.
+> **Corrected 2026-07-26.** This section originally specified `crm_write_queue`
+> → `crm_receipts`. Those tables were never built. The **principle** — propose,
+> gate, execute, retain proof — is intact and is implemented by
+> `outbound_sync_queue`.
+
+Models propose mutations as JSON payloads in `outbound_sync_queue`; an executor
+claims approved rows, writes to the destination system, re-reads to verify, and
+retains a per-domain receipt.
 
 | Invariant | Rationale |
 |-----------|-----------|
-| No direct CRM PATCH from completions alone | Prevents hallucinated entity IDs |
-| Receipt retained for each applied write | `transaction_id` + `raw_response` are the citeable artifact |
-| Queue status vocabulary | `sync_status` enum only — no free-text states |
+| No direct CRM/AMS write from completions alone | Prevents hallucinated entity IDs |
+| `approved_by` + `approved_at` required before a row is eligible | A write is a human decision, not a model decision |
+| Re-read after write | The receipt's `after_state` / `verified` come from the re-read, not from the request |
+| Queue status vocabulary | `queued` → `processing` → `completed` / `failed` — no free-text states |
 
 ### Write Path
 
 ```
-Model Output → crm_write_queue (PENDING)
-    → Worker dequeues → POST/PUT to the CRM
-    → crm_receipts logged with raw response
-    → Status updated to SUCCESS / FAILED / BLOCKED_BY_GUARDRAIL
+Model output → outbound_sync_queue (queued, approved_by + approved_at set)
+    → Scheduler claims (every 5 min, SCHEDULER_ENABLED, one lease holder)
+    → Executor validates → reads destination → compares → stops on ambiguity
+    → Executes → re-reads to verify
+    → Receipt written (e.g. renewal_execution_receipts)
+    → Status → completed / failed; failures back off, then dead-letter + alert
 ```
+
+**Receipts are per-domain, not one global table:**
+`renewal_execution_receipts` (renewals). Guardrail decisions go to
+`guardrail_logs` (564 rows); sync history to `sync_audit_log` (3,778 rows).
+
+`object_type` routes the job: `renewal`, `intake_crm`, `intake_ams`, `quote`,
+`opportunity_writeback`, casework.
 
 ---
 
@@ -119,7 +135,7 @@ category and freshness via `recorded_at`.
 | Rule | Enforcement |
 |------|-------------|
 | No channel drift | `slack_registry` lookup required; miss = BLOCKED_BY_GUARDRAIL |
-| No direct CRM writes | All mutations go through `crm_write_queue` |
+| No direct CRM writes | All mutations go through `outbound_sync_queue` |
 | No hallucinated policy numbers | Registry + FK + enum constraints |
 | No invented states | Strict enums: `sync_status`, `commission_status`, `renewal_risk_status` |
 | No duplicate commission rows | Unique index on `(statement_id, policy_number, snapshot_month)` |
@@ -127,7 +143,7 @@ category and freshness via `recorded_at`.
 
 ### Database Safeguards
 
-- Nonnegative `attempt_count` on `crm_write_queue`
+- Nonnegative `attempt_count` on `outbound_sync_queue`
 - `ON DELETE SET NULL` for Slack FK on `reporting_schedules`
 - `hermes_touch_updated_at()` trigger on mutation-heavy tables
 - Partial index `idx_crm_queue_open_work` for worker scanning
@@ -152,7 +168,7 @@ category and freshness via `recorded_at`.
 |-------|-------------|--------|
 | 1 | Foundation: Supabase DDL, RLS, edge-case migrations | Complete |
 | 2 | Seed `slack_registry` and `hermes_ai_roles`; wire prompt IDs | Complete |
-| 3 | CRM worker: dequeue `crm_write_queue`, POST to CRM, persist `crm_receipts` | In Progress |
+| 3 | Executors: dequeue `outbound_sync_queue`, write to CRM/AMS, persist a per-domain receipt | Live — scheduler drains every 5 min |
 | 4 | Commission pipeline: ingest statements, reconcile, lock EOM scorecards | Pending |
 | 5 | Project 85 renewals: load renewals, log actions, escalate risk with human gates | Pending |
 | 6 | Reporting: schedules + KPI writers; Slack delivery against registry channel IDs | Pending |
@@ -166,8 +182,10 @@ category and freshness via `recorded_at`.
 |-------|---------|
 | `slack_registry` | Channel drift control + role allowlists |
 | `hermes_ai_roles` | Role definitions with permissions + success criteria |
-| `crm_write_queue` | Staged CRM mutations with sync_status lifecycle |
-| `crm_receipts` | Proof of CRM write with transaction IDs |
+| `outbound_sync_queue` | Staged CRM/AMS mutations; `queued` → `processing` → `completed`/`failed` |
+| `renewal_execution_receipts` | Proof of a renewal write — before/after state, `verified` flag |
+| `guardrail_logs` | Guardrail decisions (564 rows) |
+| `sync_audit_log` | Sync history (3,778 rows) |
 | `commission_audits` | Line-level expected vs received with generated variance |
 | `eom_scorecards` | Locked monthly summary rollups |
 | `project_85_renewals` | Renewal inventory with generated increase % |

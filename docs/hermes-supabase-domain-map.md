@@ -4,9 +4,14 @@ Domain mapping based on live `public` schema inventory.
 
 ## CRM governance
 
-- `crm_write_queue`: staged outbound CRM writes
-- `crm_receipts`: write receipts linked to queue items
-- `guardrail_logs`: policy violation logs
+- `outbound_sync_queue`: staged outbound CRM/AMS writes, gated on `approved_by` + `approved_at`
+- `renewal_execution_receipts`: per-job before/after proof for renewal writes
+- `guardrail_logs`: guardrail decisions
+- `sync_audit_log`: sync history
+
+> Corrected 2026-07-26: this section previously listed `crm_write_queue` and
+> `crm_receipts`. Neither table exists in the live schema — they were designed
+> for the Espo-era write path and never built.
 
 ## Intake and document flow
 
