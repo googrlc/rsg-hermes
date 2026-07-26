@@ -75,6 +75,13 @@ it is 76 policies nobody has reconciled. Do not report it as money owed.
   read-only.** It parses a statement file, compares against a policy index, and
   posts discrepancies to chat. It contains no insert or update.
 
+Every `overpaid` / `underpaid` / `no_expected` row in the ledger was written by
+the **standalone tracker**, which reads and writes the same Supabase.
+
+**So "reconcile in the cockpit" means Hermes gains its first actuals-write
+path into money data.** That is the real weight of this build, and it is why
+Phase 2 carries an approval gate rather than a save button.
+
 ### Slack is retired — what that does and does not change
 
 **The transport already migrated.** `SlackNotifier` is a façade:
@@ -96,13 +103,6 @@ post already lands in Talk, not Slack. No transport work is needed for this plan
    must deep-link into the cockpit (`HERMES_PUBLIC_BASE_URL` +
    `/cockpit#commissions`), the way `task_notify._crm_link()` already does. The
    cockpit is where the work happens; Talk only says that work exists.
-
-Every `overpaid` / `underpaid` / `no_expected` row in the ledger was written by
-the **standalone tracker**, which reads and writes the same Supabase.
-
-**So "reconcile in the cockpit" means Hermes gains its first actuals-write
-path into money data.** That is the real weight of this build, and it is why
-Phase 2 carries an approval gate rather than a save button.
 
 ---
 
@@ -144,6 +144,43 @@ Small, unblocks everything, no schema change.
 
 **Done when:** `active_policies == in_ledger + skipped(with named reasons)`,
 and that identity is asserted in a test.
+
+---
+
+## Phase 1b — finish the Slack retirement (parallel, independent)
+
+Not commission-specific, but it lands on the same code and two of the residues
+are live defects. Do it alongside Phase 1.
+
+**Already done:** outbound reports route to Nextcloud Talk via the
+`SlackNotifier` → `TeamNotifier` façade. Don't redo it.
+
+**Live defects — a retired system is still load-bearing:**
+
+| Where | Problem |
+|---|---|
+| `hermes/renewals/executor.py:793` | High-impact renewal-failure escalation **returns early unless `SLACK_BOT_TOKEN` is set.** The escalation posts to Talk, so gating it on a Slack credential means removing that stale token silently disables renewal failure alerts. |
+| `hermes/jobs/revenue_sentinel.py:557` | `_missing_required_env()` lists `SLACK_BOT_TOKEN` as **required**. The sentinel refuses to run without a credential for a system it no longer posts to. |
+| `hermes/api.py:2150–2243` | A real `slack_sdk.WebClient`, 503 when the token is missing. The only genuine Slack API path left. Decide: delete, or keep deliberately. |
+
+`SLACK_BOT_TOKEN` is currently **SET** on the box, which is why none of this has
+surfaced. It is a tripwire: the day that token is rotated out, renewal
+escalations go quiet and the sentinel stops.
+
+**Naming debt (cosmetic but actively confusing):**
+
+- Talk rooms are addressed by **Slack channel ids** (`C0ANQUENX4P` → boss).
+  Works, reads like a bug.
+- `slack_registry` (3 rows) and the `SLACK_ALERT` action-type enum in
+  `renewal_tracker.VALID_ACTION_TYPES`.
+- **14 skills still instruct humans in Slack terms** — worst offenders
+  `revenue-sentinel` (14 mentions), `commission-inbox` (10), `renewal-review`
+  (5), `crm-intake-writer` (4).
+
+**Order:** fix the two gating bugs first (they are silent failures), then rename,
+then the skills.
+
+---
 
 ---
 
@@ -229,41 +266,6 @@ nobody noticed. The cost is that two systems write the ledger during the
 transition, which is exactly the failure mode that corrupted
 `canonical_policies`. **Mitigation: the tracker must stop writing
 `reconciliation_status` the day Phase 2 ships.** One writer per column.
-
----
-
-## Phase 1b — finish the Slack retirement (parallel, independent)
-
-Not commission-specific, but it lands on the same code and two of the residues
-are live defects. Do it alongside Phase 1.
-
-**Already done:** outbound reports route to Nextcloud Talk via the
-`SlackNotifier` → `TeamNotifier` façade. Don't redo it.
-
-**Live defects — a retired system is still load-bearing:**
-
-| Where | Problem |
-|---|---|
-| `hermes/renewals/executor.py:793` | High-impact renewal-failure escalation **returns early unless `SLACK_BOT_TOKEN` is set.** The escalation posts to Talk, so gating it on a Slack credential means removing that stale token silently disables renewal failure alerts. |
-| `hermes/jobs/revenue_sentinel.py:557` | `_missing_required_env()` lists `SLACK_BOT_TOKEN` as **required**. The sentinel refuses to run without a credential for a system it no longer posts to. |
-| `hermes/api.py:2150–2243` | A real `slack_sdk.WebClient`, 503 when the token is missing. The only genuine Slack API path left. Decide: delete, or keep deliberately. |
-
-`SLACK_BOT_TOKEN` is currently **SET** on the box, which is why none of this has
-surfaced. It is a tripwire: the day that token is rotated out, renewal
-escalations go quiet and the sentinel stops.
-
-**Naming debt (cosmetic but actively confusing):**
-
-- Talk rooms are addressed by **Slack channel ids** (`C0ANQUENX4P` → boss).
-  Works, reads like a bug.
-- `slack_registry` (3 rows) and the `SLACK_ALERT` action-type enum in
-  `renewal_tracker.VALID_ACTION_TYPES`.
-- **14 skills still instruct humans in Slack terms** — worst offenders
-  `revenue-sentinel` (14 mentions), `commission-inbox` (10), `renewal-review`
-  (5), `crm-intake-writer` (4).
-
-**Order:** fix the two gating bugs first (they are silent failures), then rename,
-then the skills.
 
 ---
 
