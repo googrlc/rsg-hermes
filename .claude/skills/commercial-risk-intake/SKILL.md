@@ -183,8 +183,8 @@ opportunity rather than the account:
 ## Handoff
 
 Return the JSON above. `crm-intake-writer` will wrap it with classification,
-note, source, and duplicate_search blocks, then route through
-`crm-upsert-planner` once approved.
+note, source, and duplicate_search blocks. Once approved, the intake worker
+commits it and per-LOB opportunities are written through `hermes-crm-writer`.
 
 ## References
 
