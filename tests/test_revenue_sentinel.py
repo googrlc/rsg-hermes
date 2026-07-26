@@ -174,7 +174,7 @@ class RevenueSentinelTests(unittest.TestCase):
                 {
                     "HERMES_SENTINEL_STATE_FILE": state_file,
                     "HERMES_SENTINEL_TIMEZONE": "America/New_York",
-                    "SLACK_BOT_TOKEN": "xoxb-test",
+                    "HERMES_TALK_ROOM_BOSS": "talk-room-test",
                     "HERMES_SENTINEL_SLACK_CHANNEL": "#the-boss",
                 },
                 clear=False,
@@ -196,7 +196,7 @@ class RevenueSentinelTests(unittest.TestCase):
                 {
                     "HERMES_SENTINEL_STATE_FILE": state_file,
                     "HERMES_SENTINEL_TIMEZONE": "America/New_York",
-                    "SLACK_BOT_TOKEN": "xoxb-test",
+                    "HERMES_TALK_ROOM_BOSS": "talk-room-test",
                     "HERMES_SENTINEL_SLACK_CHANNEL": "#the-boss",
                 },
                 clear=False,

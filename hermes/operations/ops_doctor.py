@@ -10,11 +10,15 @@ from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientEr
 
 log = logging.getLogger(__name__)
 
+# Tables the health check probes. Keep this honest: a table listed here that
+# does not exist makes --ops-doctor exit 1 forever, which trains people to
+# ignore a red health check. crm_write_queue and crm_receipts were listed for
+# months and have never existed in this schema — they were designed for the
+# Espo-era write path and never built. The real gate is outbound_sync_queue.
 HERMES_TABLES = [
     "slack_registry",
     "hermes_ai_roles",
-    "crm_write_queue",
-    "crm_receipts",
+    "commission_ledger",
     "commission_audits",
     "eom_scorecards",
     "project_85_renewals",

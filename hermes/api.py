@@ -2083,7 +2083,7 @@ async def agency_intake(req: AgencyIntakeRequest):
 async def agency_intake_approve(req: AgencyIntakeApprovalRequest):
     """Apply an approval token to a staged agency intake draft.
 
-    Same shared logic that the Slack interactive button calls.
+    Same shared logic the interactive approval button calls.
     """
     from hermes.operations.agency_intake_approval import ApprovalError, approve_draft
 
@@ -2246,37 +2246,17 @@ async def command(req: DispatchRequest):
     return await dispatch(req)
 
 
-# Slack Web client — retained only for the TTS audio-upload endpoint below; the
-# inbound Slack command webhook was removed. (Outbound Slack removal is a later step.)
-_slack_web_client = None
-
-
-def _get_slack_web_client():
-    global _slack_web_client
-    if _slack_web_client is None:
-        token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
-        from slack_sdk import WebClient
-
-        _slack_web_client = WebClient(token=token)
-    return _slack_web_client
 
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# Voice output — TTS endpoint for Slack voice clips.
+# Voice output — TTS endpoint. Returns the mp3; Slack upload removed 2026-07-26.
 # ---------------------------------------------------------------------------
 
 class TTSRequest(BaseModel):
-    """Text-to-speech request. Posts an audio clip to a Slack channel or DM."""
+    """Text-to-speech request. Returns the audio; delivery is the caller's job."""
     text: str = Field(..., min_length=1, max_length=4000)
-    channel: str = Field(
-        default="",
-        description="Slack channel ID or user ID. Defaults to HERMES_SENTINEL_SLACK_CHANNEL.",
-    )
-    voice: str = Field(
-        default="",
-        description="TTS voice name. Defaults to en-US-AriaNeural (Edge TTS, free).",
-    )
+    voice: str = Field(default="", description="Voice name. Defaults to en-US-AriaNeural.")
 
 
 async def _generate_tts_audio(text: str, voice: str) -> bytes | None:
@@ -2318,10 +2298,15 @@ async def _generate_tts_audio(text: str, voice: str) -> bytes | None:
 
 @app.post("/api/hermes/tts")
 async def hermes_tts(req: TTSRequest, request: Request):
-    """Generate a voice clip from text and post it to Slack.
+    """Generate a voice clip from text and return the audio.
 
     Uses Edge TTS (en-US-AriaNeural) by default — free, no API key.
     Falls back to the LiteLLM/OpenAI TTS API if edge-tts isn't installed.
+
+    This used to upload the clip to a Slack channel via slack_sdk. Slack is
+    retired, so that path could only ever 503; the endpoint now returns the mp3
+    and the caller decides what to do with it. Nothing in the codebase called
+    the Slack version.
 
     Auth: bearer token (HERMES_API_TOKEN) when configured.
     """
@@ -2331,35 +2316,16 @@ async def hermes_tts(req: TTSRequest, request: Request):
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    channel = req.channel.strip() or os.environ.get("HERMES_SENTINEL_SLACK_CHANNEL", "")
-    if not channel:
-        raise HTTPException(status_code=400, detail="no Slack channel configured")
-
     audio = await _generate_tts_audio(text, req.voice)
     if not audio:
         raise HTTPException(status_code=502, detail="TTS generation failed (no provider available)")
 
-    # Post audio to Slack as a file upload.
-    try:
-        import io
-        client = _get_slack_web_client()
-        if client is None:
-            raise HTTPException(status_code=503, detail="Slack web client not configured (SLACK_BOT_TOKEN missing)")
-
-        client.files_upload_v2(
-            channel=channel,
-            file=io.BytesIO(audio),
-            filename="hermes_voice.mp3",
-            title="Hermes",
-            initial_comment=text[:500],
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        log.exception("Slack voice post failed")
-        raise HTTPException(status_code=502, detail=f"Slack post failed: {exc}")
-
-    return {"ok": True, "channel": channel, "chars": len(text)}
+    return Response(
+        content=audio,
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": 'inline; filename="hermes_voice.mp3"',
+                 "X-Hermes-Chars": str(len(text))},
+    )
 
 
 

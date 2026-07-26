@@ -34,9 +34,12 @@ def snapshot_system_health(supa: SupabaseClient) -> list[dict[str, Any]]:
     """Compute and record system health KPIs from live Supabase data."""
     results: list[dict[str, Any]] = []
 
+    # Was crm_write_queue with UPPERCASE statuses — a table that has never
+    # existed in this schema, so this KPI 404'd on every nightly run. The real
+    # write gate is outbound_sync_queue, whose statuses are lowercase.
     open_queue = supa.select(
-        "crm_write_queue",
-        params={"status": "in.(PENDING,PROCESSING,FAILED)"},
+        "outbound_sync_queue",
+        params={"status": "in.(queued,processing,failed)"},
         limit=1000,
     )
     results.append(
