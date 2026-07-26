@@ -248,3 +248,45 @@ def test_withdraw_requires_a_valid_approver(client):
     assert bad.status_code == 400
     assert good.status_code == 200
     assert supa.tables["portal_overrides"][0]["status"] == "retired"
+
+
+
+# --- analytics endpoint (#236) ----------------------------------------------
+
+ANALYTICS_LEDGER = [
+    {"policy_number": "A", "carrier_name": "Progressive", "lob": "Auto",
+     "gross_premium": 1000, "expected_commission": 150, "actual_commission": 150,
+     "delta": 0, "reconciliation_status": "reconciled", "statement_date": "2026-07-08"},
+    {"policy_number": "B", "carrier_name": "Progressive", "lob": "Auto",
+     "gross_premium": 2000, "expected_commission": 300, "actual_commission": 250,
+     "delta": -50, "reconciliation_status": "underpaid", "statement_date": "2026-07-08"},
+    {"policy_number": "C", "carrier_name": "Next", "lob": "Home",
+     "gross_premium": 5000, "expected_commission": 750, "actual_commission": None,
+     "delta": None, "reconciliation_status": "pending", "statement_date": None},
+]
+
+
+def test_analytics_endpoint_returns_per_carrier_and_per_lob(client):
+    with patch("hermes.api._get_supa", return_value=FakeSupa(ANALYTICS_LEDGER)):
+        r = client.get("/api/commissions/analytics")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"by_carrier", "by_lob", "totals"}
+    carriers = {b["key"]: b for b in body["by_carrier"]}
+    assert carriers["Progressive"]["policies"] == 2
+    assert carriers["Progressive"]["expected_commission"] == 450
+    assert carriers["Next"]["actual_commission"] == 0  # None coerced to 0
+    lobs = {b["key"]: b for b in body["by_lob"]}
+    assert lobs["Auto"]["policies"] == 2 and lobs["Home"]["policies"] == 1
+    assert body["totals"]["ledger_rows"] == 3
+    assert body["totals"]["expected_commission"] == 1200
+    assert body["totals"]["counts_by_status"]["pending"] == 1
+
+
+def test_analytics_endpoint_is_honest_on_empty_ledger(client):
+    with patch("hermes.api._get_supa", return_value=FakeSupa([])):
+        r = client.get("/api/commissions/analytics")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["by_carrier"] == [] and body["by_lob"] == []
+    assert body["totals"]["ledger_rows"] == 0
