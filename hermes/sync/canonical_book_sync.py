@@ -43,6 +43,10 @@ log = logging.getLogger(__name__)
 CLIENTS_TABLE = "canonical_clients"
 POLICIES_TABLE = "canonical_policies"
 
+# Defined here rather than imported from hermes.ams.book: that module imports from
+# this one, so the dependency only runs one way.
+OWNER_BOOK_SYNC = "book_sync"
+
 CLIENT_KEY = "nowcerts_insured_guid"
 POLICY_KEY = "policy_guid"
 
@@ -273,7 +277,16 @@ def _sync_policies(
                     supa.update_where(POLICIES_TABLE, payload, filters={POLICY_KEY: f"eq.{pg}"})
                 result.policies_updated += 1
             else:
-                payload = _project({POLICY_KEY: pg, "renewed_policy": None, **volatile}, cols)
+                # Claim ownership on create. Any writer may refresh a row's volatile
+                # fields; only its owner may deactivate it. Stamping here is what
+                # lets a future writer tell "mine to retire" from "someone else's
+                # row I have no business tombstoning" — the distinction whose
+                # absence corrupted 43 rows in July.
+                payload = _project(
+                    {POLICY_KEY: pg, "renewed_policy": None,
+                     "sync_owner": OWNER_BOOK_SYNC, **volatile},
+                    cols,
+                )
                 if not dry_run:
                     supa.insert(POLICIES_TABLE, payload)
                 result.policies_created += 1
