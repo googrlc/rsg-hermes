@@ -25,6 +25,9 @@ def client():
 USERS = [
     {"email": "gretchen@risksolutionsgroup.net", "display_name": "Gretchen", "role": "csr", "active": True},
     {"email": "lamar@risksolutionsgroup.net", "display_name": "Lamar", "role": "administrator", "active": True},
+    # The service account. _service_email() defaults here, so it must be a valid
+    # FK target or every machine-attributed create 400s.
+    {"email": "lc-rsg@risksolutionsgroup.net", "display_name": "RSG Service", "role": "service", "active": True},
 ]
 
 
@@ -59,7 +62,19 @@ def _patch(supa):
 def test_agency_users_lists_active(client):
     with _patch(FakeSupa()):
         r = client.get("/api/agency-users")
-    assert r.status_code == 200 and r.json()["count"] == 2
+    # Both humans plus the service account — all three are valid FK targets.
+    assert r.status_code == 200 and r.json()["count"] == 3
+
+
+def test_assignable_excludes_the_service_account(client):
+    """Offering "RSG Service" in an assignee dropdown invites someone to assign
+    real work to a robot. It stays valid for created_by / approved_by."""
+    with _patch(FakeSupa()):
+        r = client.get("/api/agency-users?assignable=true")
+    emails = [u["email"] for u in r.json()["users"]]
+    assert r.json()["count"] == 2
+    assert "lc-rsg@risksolutionsgroup.net" not in emails
+    assert "lamar@risksolutionsgroup.net" in emails
 
 
 # --- cases -------------------------------------------------------------------

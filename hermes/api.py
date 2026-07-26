@@ -612,7 +612,8 @@ class OpportunityCreateRequest(BaseModel):
     carrier: str | None = None
     lead_source: str | None = None
     # referral_source is READ-ONLY — sourced from NowCerts by the sync, not set here.
-    assigned_to: str | None = None
+    assigned_to: str | None = None           # LEGACY NowCerts display-name array
+    assigned_to_email: str | None = None     # canonical owner (agency_crm_users FK)
     next_action: str | None = None
     description: str | None = None
     probability: int | None = None           # win %; defaults from stage
@@ -637,6 +638,8 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
     """
     from hermes.intake import opportunities as opp
 
+    if req.assigned_to_email:
+        _require_users(_get_supa(), [("assigned_to_email", req.assigned_to_email)])
     ci = req.client_identifier or opp.make_client_identifier(req.insured_name, req.fein)
     otype = (req.opportunity_type or opp.TYPE_NEW_BUSINESS).strip()
     stage = req.stage.strip() if req.stage else None   # None → type's first stage
@@ -655,6 +658,7 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
             carrier=req.carrier,
             lead_source=req.lead_source,
             assigned_to=req.assigned_to,
+            assigned_to_email=req.assigned_to_email,
             next_action=req.next_action,
             description=req.description,
             probability=req.probability,
@@ -722,6 +726,7 @@ class OpportunityUpdateRequest(BaseModel):
     lost_reason: str | None = None
     referral_source: str | None = None
     lead_source: str | None = None
+    assigned_to_email: str | None = None     # canonical owner (agency_crm_users FK)
 
 
 # Fields a user may edit in the CRM. NowCerts ids and sync-control fields stay
@@ -739,16 +744,19 @@ async def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdat
     also re-derives ``status``."""
     from hermes.intake import opportunities as opp
 
+    supa = _get_supa()
     fields = {k: v for k, v in req.model_dump(exclude_unset=True).items() if k in _OPP_EDITABLE}
     if not fields:
         raise HTTPException(status_code=400, detail="no editable fields provided")
     if fields.get("stage"):
         fields["status"] = opp.status_for_stage(str(fields["stage"]).strip())
+    if fields.get("assigned_to_email"):
+        _require_users(supa, [("assigned_to_email", fields["assigned_to_email"])])
     # Mark the row CRM-worked so the inbound AMS sync stops overwriting it — once
     # a deal is being worked in the CRM it doesn't go back to the AMS until terminal.
     fields["sync_source"] = "crm"
     try:
-        row = _get_supa().update("opportunities", opportunity_id, fields)
+        row = supa.update("opportunities", opportunity_id, fields)
     except Exception as exc:
         log.exception("update opportunity failed: %s", opportunity_id)
         raise HTTPException(status_code=502, detail=str(exc))
@@ -1153,12 +1161,21 @@ def _require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
 
 
 @app.get("/api/agency-users")
-async def list_agency_users_endpoint():
-    """Active CRM users — powers owner/assignee pickers (valid FK targets)."""
+async def list_agency_users_endpoint(assignable: bool = False):
+    """Active CRM users — powers owner/assignee pickers (valid FK targets).
+
+    ``assignable=true`` excludes service accounts. lc-rsg@ is the machine identity
+    (0 tasks ever assigned to it, 5 created by it); offering "RSG Service" in an
+    assignee dropdown invites someone to assign real work to a robot. It stays a
+    valid created_by / approved_by / uploaded_by target, which is the whole point
+    of it existing.
+    """
     rows = _get_supa().select(
         "agency_crm_users", columns="email,display_name,role,active",
         params={"active": "eq.true", "order": "display_name.asc"}, limit=200,
     )
+    if assignable:
+        rows = [r for r in rows if str(r.get("role") or "") != "service"]
     return {"users": rows, "count": len(rows)}
 
 
