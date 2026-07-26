@@ -1,8 +1,37 @@
+# Docker build context exclusions.
+#
+# Since #234/#249 removed the `.:/app` bind mount, the image IS the deployed
+# artifact: everything `COPY . .` picks up ships to the box and stays in the
+# layer history. The build context is the live deploy tree at /opt/rsg-hermes,
+# which accumulates ad-hoc `.env` backups and scratch dirs — and the old bare
+# `.env` rule matched only that exact path, so five credential-bearing
+# `.env.bak*` files would have been baked into the image.
+
 .DS_Store
-.env
 .git
 .venv
 .venv-*
 __pycache__/
 *.pyc
 schema_map.json
+
+# Environment files and their ad-hoc backups — secrets, never in the image.
+# The runtime gets its config from compose `env_file:`, not from the context.
+**/.env
+**/.env.*
+**/*.env
+**/*.env.*
+# ...but the committed placeholder templates hold no secrets and can stay.
+!**/*.example
+
+# Backups and scratch that collect in the deploy tree.
+**/*.bak
+**/*.bak.*
+**/*.bak-*
+_codex_backups/
+.pytest_cache/
+
+# Job-idempotency state lives in the named hermes-state volume mounted at
+# /var/lib/hermes (see docker-compose.yml). Never bake a stale copy in at
+# /app/.hermes — a stale watermark re-sends an externally visible report.
+.hermes/
