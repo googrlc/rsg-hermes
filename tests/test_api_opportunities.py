@@ -58,7 +58,7 @@ def test_create_opportunity_from_name(client):
     with patch("hermes.api._get_supa", return_value=supa):
         r = client.post("/api/opportunities", json={
             "insured_name": "Acme LLC", "line_of_business": "General Liability",
-            "stage": "Quoted", "premium_estimate": 1500,
+            "stage": "Quotes Received", "premium_estimate": 1500,
         })
     assert r.status_code == 200
     body = r.json()
@@ -66,12 +66,13 @@ def test_create_opportunity_from_name(client):
     opp = body["opportunity"]
     assert opp["client_identifier"] == "acme-llc"
     assert opp["line_of_business"] == "General Liability"
-    assert opp["stage"] == "Quoted"
+    assert opp["stage"] == "Quotes Received"
 
 
 def test_cross_sell_on_existing_client_creates_separate(client):
     supa = FakeSupa({"opportunities": [
-        {"id": "o1", "client_identifier": "acme-llc", "line_of_business": "General Liability", "stage": "Bound"}
+        {"id": "o1", "client_identifier": "acme-llc", "line_of_business": "General Liability",
+         "opportunity_type": "New Business", "stage": "Bound / Won"}
     ]})
     with patch("hermes.api._get_supa", return_value=supa):
         r = client.post("/api/opportunities", json={
@@ -84,7 +85,8 @@ def test_cross_sell_on_existing_client_creates_separate(client):
 
 def test_create_is_idempotent(client):
     supa = FakeSupa({"opportunities": [
-        {"id": "o1", "client_identifier": "acme-llc", "line_of_business": "General Liability", "stage": "Bound"}
+        {"id": "o1", "client_identifier": "acme-llc", "line_of_business": "General Liability",
+         "opportunity_type": "New Business", "stage": "Bound / Won"}
     ]})
     with patch("hermes.api._get_supa", return_value=supa):
         r = client.post("/api/opportunities", json={
