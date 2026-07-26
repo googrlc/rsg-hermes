@@ -10,9 +10,9 @@ done, and that surface lives in the cockpit.
 
 | Question | Decision |
 |---|---|
-| Date floor | **Keep 2026+ only.** The `HERMES_COMMISSION_SINCE=2026-01-01` floor stays. |
+| Date floor | **Keep 2026+ only** for proactive seeding — but see the collision below. |
 | Definition of done | **Add a real `reconciled` status**, written when actual matches expected within tolerance. |
-| First-build scope | **Read + reconcile in the cockpit.** Statement ingest stays in the standalone tracker. |
+| First-build scope | **Read + reconcile + ingest in the cockpit.** Revised 2026-07-26: no reconciliation has ever been done by hand, so there is no legacy workflow to preserve and no two-writer window to manage. Build it right in one place. |
 
 **Consequence of the date floor, and the rule that follows from it:** 37 active
 policies carrying **$287,506** are deliberately off the surface. That is a
@@ -20,6 +20,27 @@ choice, so it must be *visible* — never a silent gap. Every total the cockpit
 shows carries an "N active policies excluded by the 2026 floor" line. A silent
 exclusion is indistinguishable from a broken pipe, and this codebase has already
 been burned by exactly that (see the tombstone incident).
+
+### ⚠ The floor collides with statement ingest
+
+**Carrier statements do not respect our reporting window.** Of the 90 unmatched
+statement lines already sitting in `commission_transactions`, **53 are dated
+before 2026-01-01** and **74 reference a policy that exists in the book** — they
+failed to match only because the 2026 floor meant no ledger row was ever seeded
+for that policy.
+
+Keeping the floor as-is means real money that actually arrived has nowhere to
+land, every month, forever.
+
+**Resolution — the floor governs seeding, not recording:**
+
+- **Proactive seeding** stays 2026+. We do not speculatively create ledger rows
+  for 37 old policies. The decision holds.
+- **A statement line always lands.** If a parsed transaction matches a policy in
+  the book but has no ledger row, ingest **creates** one, flagged
+  `origin='statement'`, and it appears on the surface.
+
+Money that arrived is a fact. Our reporting window is a preference. The fact wins.
 
 ---
 
@@ -65,7 +86,8 @@ it is 76 policies nobody has reconciled. Do not report it as money owed.
 
 ### The architectural fact that shapes this plan
 
-**Hermes has never written a reconciliation outcome.**
+**Hermes has never written a reconciliation outcome** — but something else has,
+and it worked.
 
 - `hermes/sync/commission_sync.py` writes the *expected* side only, and stamps
   `reconciliation_status='pending'` on insert. By design it never touches
@@ -75,12 +97,58 @@ it is 76 policies nobody has reconciled. Do not report it as money owed.
   read-only.** It parses a statement file, compares against a policy index, and
   posts discrepancies to chat. It contains no insert or update.
 
-Every `overpaid` / `underpaid` / `no_expected` row in the ledger was written by
-the **standalone tracker**, which reads and writes the same Supabase.
+### The ingest model already exists and already ran
 
-**So "reconcile in the cockpit" means Hermes gains its first actuals-write
-path into money data.** That is the real weight of this build, and it is why
-Phase 2 carries an approval gate rather than a save button.
+This is the most important finding, and it changes Phase 2 from "invent a
+pipeline" to "re-home one that works."
+
+`commission_transactions` (182 rows, one Progressive statement, 2026-07-08) is a
+well-designed statement table:
+
+| Column | Role |
+|---|---|
+| `statement_id` | → `commission_statements` |
+| **`ledger_id`** | → **`commission_ledger`, already matched** |
+| `policy_number`, `insured_name`, `carrier_name`, `lob`, `segment` | matching keys |
+| `transaction_code` / `transaction_type` | `Renewal` / `New Business` / `Credit Endorsement` → `renewal` / `new` / `adjustment` |
+| `transaction_date`, `month_key` | period (`202602`) |
+| `gross_premium`, `commission_rate`, `commission_amount`, `is_negative` | the money |
+| `fee_type`, `fee_amount` | fee drag |
+| **`raw_row`** (jsonb) | **the original statement line, preserved** |
+
+**And the rollup is arithmetically sound.** For all 30 matched ledger rows,
+`commission_ledger.actual_commission` equals `SUM(commission_transactions.commission_amount)`
+exactly — `mismatched_actual = 0` across every status. The overpaid / underpaid /
+`no_expected` rows are **real outcomes from a real Progressive statement**, not
+seed garbage. (The `statement_source='seed:canonical_policies:2026-07-07'` label
+is stale and misleading — it records where the *row* came from, not where the
+*actuals* came from. Phase 2 should correct it.)
+
+So the model is: **a ledger row's `actual_commission` is a rollup of its
+transactions.** Reconciliation is not hand-keying a number — it is
+`SUM(commission_amount) GROUP BY ledger_id`, then classify. Build that, not a
+manual entry form.
+
+### The unmatched 90 — the actual ingest problem
+
+| Measure | Value |
+|---|---|
+| Unmatched statement lines | **90** ($3,071.41) |
+| Distinct policies | 18 |
+| **Policy exists in the book** | **74** |
+| Ledger row exists for that policy | 15 ← *a genuine matching bug* |
+| Dated pre-2026 | 53 ← *the floor collision* |
+| Negative lines (credits / chargebacks) | **30** |
+
+Three distinct causes, three different fixes:
+
+1. **~75 lines: no ledger row exists.** The policy is in the book; the 2026 floor
+   meant it was never seeded. Fixed by "a statement line always lands" above.
+2. **15 lines: the ledger row exists but wasn't linked.** A real matching defect.
+   Diagnose the join before patching — likely `policy_number` normalization.
+3. **30 negative lines** are credits, endorsement adjustments and chargebacks —
+   **not underpayments.** They must roll into the same ledger row as a signed
+   amount, never be classified as a discrepancy on their own.
 
 ### Slack is retired — what that does and does not change
 
@@ -184,69 +252,225 @@ then the skills.
 
 ---
 
-## Phase 2 — the work surface (the real build)
+## Phase 2 — the work surface, ingest included (the real build)
 
-A `commissions` view in the cockpit, alongside Pipeline. Reuses the existing
-view registry, `api()` helper, and modal patterns — no new app, no new auth.
+A `commissions` view in the cockpit alongside Pipeline. Reuses the existing view
+registry, `api()` helper and modal patterns — no new app, no new auth.
 
-### 2a. Worklist
+**Reconciliation is a rollup, not data entry.** Nobody types an actual. You
+upload a statement; lines match to ledger rows; the rollup sets the actual; the
+classifier sets the status; a human approves the batch.
 
-Default ordering is exception-first, because that is where the money is:
+### 2a. Ingest — `POST /api/commission-statements`
 
-`underpaid` → `missing_statement` → `overpaid` → `no_expected` → `pending` →
-`reconciled` (collapsed).
-
-Columns: policy, client, carrier, LOB, gross premium, expected, actual, delta,
-status, statement date. Filter by carrier, LOB, status, date range.
-
-### 2b. The reconcile action — new, money-writing, gated
-
-New endpoint, mirroring the sanctioned pattern already used by renewals:
+Multipart upload → parse → stage → review → commit. Port the parser behaviour
+from the tracker (`progressive_v1`, `next_v1`); keep the table design that
+already works.
 
 ```text
-POST /api/commissions/{ledger_id}/reconcile
-{ "actual_commission": 812.44, "statement_date": "2026-07-15",
-  "statement_source": "progressive-2026-07", "approved_by": "<.net email>", "note": "..." }
+upload  → commission_statements   (header: carrier, period, filename, hash)
+        → commission_transactions_staging  (parsed lines, raw_row preserved)
+        → MATCH each line to a ledger row
+        → review card: matched / created / unmatched / negatives
+        → APPROVE (approved_by, .net email)
+        → commit to commission_transactions, roll up, classify
 ```
 
-Rules, non-negotiable because this is money:
+**Dedupe on a content hash** of the uploaded file. Re-uploading the same
+statement must be a no-op, not a double-count. This is money.
 
-- `approved_by` **must** validate against `agency_crm_users` via the existing
-  `_require_users` — the same guard the quote push uses.
-- Recompute `delta` server-side from `actual - expected`. Never trust a
-  client-supplied delta.
-- Derive the status server-side (state machine below). Never accept a
-  caller-supplied status.
-- Write an audit row (`commission_audits`) with before/after. The renewal
-  executor's receipt discipline is the model.
-- **Idempotent:** re-posting the same `(ledger_id, statement_source)` updates
-  rather than double-applying.
+**Matching ladder**, in order, stopping at first hit:
+
+1. `policy_number` exact → ledger row
+2. `policy_number` normalized (trim, case, strip punctuation) → ledger row
+3. `policy_number` → `canonical_policies` → **create** a ledger row
+   (`origin='statement'`), then link
+4. no policy match → leave `ledger_id` null, surface as **unmatched** for a human
+
+Step 3 is what fixes ~75 of the 90 unmatched lines. Step 2 is what fixes the 15.
+
+**Never auto-resolve step 4.** An unmatched line is a question for a person, and
+the review card is where they answer it.
+
+### 2b. Rollup + classify
+
+On commit, for each touched `ledger_id`:
+
+```text
+actual_commission = SUM(commission_transactions.commission_amount)   -- signed
+delta             = actual_commission - expected_commission
+reconciliation_status = classify_reconciliation(expected, actual, policy_state)
+statement_date, statement_source = from the statement header
+```
+
+Signed sum: the 30 negative lines are credits and chargebacks and must reduce
+the actual, never be read as a separate discrepancy.
+
+Recompute — never accumulate. The actual is always derived fresh from the
+transactions so a re-run or a corrected statement converges instead of drifting.
 
 ### 2c. The status state machine
 
-Single source of truth, pure and unit-tested — a `classify_reconciliation()`
-alongside `classify_risk`, not logic scattered in the endpoint:
+Pure and unit-tested — a `classify_reconciliation()` alongside `classify_risk`,
+not logic scattered in an endpoint:
 
 | Condition | Status |
 |---|---|
-| `actual` is null | `pending` |
-| `expected` is null/0 and `actual` > 0 | `no_expected` |
+| no transactions yet | `pending` |
+| `expected` null/0 and `actual` > 0 | `no_expected` |
 | `abs(delta) <= $1.00` | **`reconciled`** ← the new terminal state |
 | `actual < expected` beyond tolerance | `underpaid` |
 | `actual > expected` beyond tolerance | `overpaid` |
 | policy cancelled mid-term | `canceled` |
 | statement expected but absent past due | `missing_statement` |
 
-Tolerance from `commission-reconciliation`: ±$1.00 = matched; the severity bands
-($1–50 low, $50–200 medium, $200–500 high, >$500 critical) drive worklist
-ordering, not the status.
+Severity bands ($1–50 low, $50–200 medium, $200–500 high, >$500 critical) drive
+worklist ordering, not the status. `rolled_up` stays a manual designation for
+carrier-level aggregation.
 
-`rolled_up` is carrier-level aggregation and stays a manual designation.
+### 2d. Worklist
 
-### 2d. Batch reconcile
+Exception-first, because that is where the money is:
 
-Select N rows → one approval → apply. Same gate, one confirmation. Reconciling
-76 pending rows one modal at a time is how a surface goes unused.
+`underpaid` → `missing_statement` → `unmatched lines` → `overpaid` →
+`no_expected` → `pending` → `reconciled` (collapsed).
+
+Columns: policy, client, carrier, LOB, gross premium, expected, actual, delta,
+status, statement date. Filter by carrier, LOB, status, period. Drill into a row
+to see its transactions, including `raw_row` — the statement line is the
+evidence, and a disputed commission is won with it.
+
+### 2e. Manual override
+
+Rare but necessary: a carrier pays outside a statement, or a line is wrong.
+`POST /api/commissions/{ledger_id}/adjust` writes an **adjustment transaction**,
+not a direct edit to the ledger. The rollup stays the only writer of
+`actual_commission`. Same `approved_by` gate, and an audit row.
+
+### Money rules for this phase
+
+- `approved_by` validates against `agency_crm_users` via `_require_users`.
+- Server derives `delta` and status. Never trust a client-supplied value.
+- Idempotent: same file hash, or same `(ledger_id, statement_source)`, updates
+  rather than double-applies.
+- Every commit writes an audit row with before/after.
+- Nothing commits without an explicit approval — the review card is the gate.
+
+## Persistence — what backs this, and the gaps
+
+**Verified 2026-07-26. The schema is already there and it is well designed.**
+This plan adds columns and constraints; it does not add tables.
+
+### The chain that exists
+
+```text
+commission_ingest_batches   UNIQUE(content_hash) · ingest_status CHECK
+  └─ commission_transactions_staging   batch_id FK ON DELETE CASCADE
+       └─ commission_statements        header + carrier-stated totals
+            └─ commission_transactions  statement_id FK CASCADE · ledger_id FK · raw_row jsonb
+                 └─ commission_ledger   the reconciled position
+```
+
+**Dedupe is already enforced in the database.** `commission_ingest_batches`
+has `UNIQUE (content_hash)` — re-uploading the same file cannot double-count.
+
+**The review workflow already has a state machine.**
+`ingest_status CHECK IN ('pending_review','approved','rejected','committed','needs_mapping','skipped','error')`
+— the approval gate this plan needs is already modelled. Use it; don't invent one.
+
+`commission_ingest_batches` also carries the crosscheck fields that catch a bad
+parse before it commits: `parsed_total_premium` / `parsed_total_commission` vs
+`stated_total_premium` / `stated_total_commission` / `stated_net_due`, plus
+`crosscheck_ok` and `flags` jsonb. **Wire the crosscheck — a statement whose
+parsed total disagrees with the carrier's own stated total must not commit.**
+
+Indexes already cover the query paths: ledger on `policy_number`, `carrier_name`,
+`delta`, `statement_date`, `reconciliation_status`; transactions on `ledger_id`,
+`statement_id`, `policy_number`, `carrier_name`, `month_key`, `transaction_type`.
+
+### DDL gaps — one small migration
+
+```sql
+-- 1. Flag rows a statement created, so the 2026-floor exclusion stays legible.
+alter table commission_ledger add column if not exists origin text
+  default 'seed' check (origin in ('seed','statement','manual'));
+
+-- 2. reconciliation_status is currently FREE TEXT — a typo is a silent bug on
+--    money data. Pin it, including the new terminal state.
+alter table commission_ledger add constraint commission_ledger_status_check
+  check (reconciliation_status in (
+    'pending','reconciled','underpaid','overpaid','no_expected',
+    'rolled_up','canceled','missing_statement'));
+
+-- 3. Stop a line committing twice. The batch hash guards whole files; this
+--    guards a line arriving via two different batches.
+create unique index if not exists commission_transactions_line_uq
+  on commission_transactions (statement_id, policy_number, transaction_code,
+                              transaction_date, commission_amount);
+
+-- 4. Slack is retired; these three columns name a dead system.
+alter table commission_ingest_batches rename column slack_channel   to source_channel;
+alter table commission_ingest_batches rename column slack_file_id   to source_file_id;
+alter table commission_ingest_batches rename column slack_message_ts to source_ref;
+
+-- 5. Espo is retired.
+alter table commission_ledger drop column if exists espocrm_opportunity_id;
+alter table commission_ledger drop column if exists espocrm_policy_id;   -- drops idx_commission_ledger_espocrm_policy too
+```
+
+Apply via `supabase/migrations/`, not the dashboard, so it is reviewable.
+
+### Audit
+
+`commission_audits` exists but is a **different grain** — keyed by
+`statement_id` + policy + `snapshot_month`, with its own `commission_status`
+enum (`PENDING | MATCHED | DISCREPANCY | ESCALATED | RECONCILED`). It is a
+per-policy-per-month audit, not a write log.
+
+Decide in Phase 2 and write it down: either reuse it for the reconcile trail, or
+add a narrow `commission_write_log`. **Do not leave it ambiguous** — an audit
+trail nobody can find is the same as none.
+
+---
+
+## Analytics — already built, just starved
+
+**The dimensional layer exists and is sourced from the right grain** —
+`commission_transactions`, not the ledger. That is the correct choice: per-carrier,
+per-LOB and per-month breakdowns need line-level data.
+
+| View | Source | Rows today | Answers |
+|---|---|---|---|
+| `v_comm_by_carrier` | transactions | 1 | **commission per carrier** |
+| `v_comm_by_line` | transactions | 3 | **commission per line of business** |
+| `v_commission_by_carrier_month` | transactions | 14 | carrier × month trend |
+| `v_fee_drag` | transactions | 1 | fees eroding commission |
+| `v_reconciliation_summary` | transactions | 1 | position rollup |
+| `v_reconciliation_exceptions` | transactions | 44 | what needs chasing |
+| `commission_ytd` | ledger | 15 | year-to-date |
+| `chargeback_risk_dashboard` | ledger | — | unearned exposure |
+| `commission_parity_report` | — | — | parity checks |
+
+**They are thin only because one statement has ever been ingested.** They do not
+need building — they need feeding. Every statement that lands through Phase 2
+fills them automatically.
+
+That is the direct answer to "reference total commission, break down per carrier,
+query highest commissions and highest LOB": the queries already exist. Ingest is
+the bottleneck.
+
+### What to add
+
+1. **Expose them.** `GET /api/commissions/analytics?dimension=carrier|lob|month`
+   reading the views, plus totals. Nothing in the API surfaces these today.
+2. **A cockpit Commissions summary strip** above the worklist: total commission
+   YTD, top carrier, top LOB, outstanding delta, fee drag.
+3. **Reconcile the two grains.** `commission_ytd` is ledger-sourced while the
+   breakdowns are transaction-sourced; they can disagree. Pick one as the
+   headline (transactions — it is the grain that survives a re-run) and say so.
+4. **Feed the daily snapshot.** Once statements land regularly, add commission
+   totals to `agency_snapshots` so commission earns a trend line the way the book
+   now does.
 
 ---
 
@@ -295,6 +519,16 @@ transition, which is exactly the failure mode that corrupted
 - [ ] The tracker no longer writes `reconciliation_status`.
 - [ ] Renewal escalation and the sentinel no longer gate on `SLACK_BOT_TOKEN`.
 - [ ] Every chat notification deep-links to `/cockpit#commissions`.
+- [ ] Re-uploading the same statement file is a no-op (batch `content_hash`).
+- [ ] A statement whose parsed totals disagree with the carrier's stated totals
+      does NOT commit — `crosscheck_ok` gates it.
+- [ ] A statement line for a policy in the book with no ledger row CREATES one
+      (`origin='statement'`) rather than landing unmatched.
+- [ ] Negative lines reduce the rollup; they never classify as a discrepancy.
+- [ ] `reconciliation_status` is constrained — an invalid value is rejected by
+      the database, not just by convention.
+- [ ] `GET /api/commissions/analytics` returns per-carrier and per-LOB totals.
+- [ ] The audit grain is decided and documented.
 
 ## Open risks
 
