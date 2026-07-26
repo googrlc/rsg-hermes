@@ -39,6 +39,7 @@ QUEUE_TABLE = "outbound_sync_queue"
 RECEIPTS_TABLE = "renewal_execution_receipts"
 OBJECT_TYPE_RENEWAL = "renewal"
 DESTINATION_NOWCERTS = "nowcerts"
+DESTINATION_CRM = "crm"
 
 QUEUE_QUEUED = "queued"
 QUEUE_PROCESSING = "processing"

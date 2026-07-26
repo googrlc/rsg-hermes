@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hermes.command_center.submission import SubmissionObject
+from hermes.renewals.executor import DESTINATION_CRM, DESTINATION_NOWCERTS
 
 log = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ def stage_routing(supa, plan: dict[str, Any], *, approved_by: str) -> dict[str, 
         supa.insert(QUEUE_TABLE, {
             "object_type": OBJECT_TYPE_CRM,
             "object_id": submission_id,
-            "destination_system": "crm",
+            "destination_system": DESTINATION_CRM,
             "action": "create",
             "payload": {"kind": "opportunity", "opportunity": opp},
             "status": "queued",
@@ -175,7 +176,7 @@ def stage_routing(supa, plan: dict[str, Any], *, approved_by: str) -> dict[str, 
         supa.insert(QUEUE_TABLE, {
             "object_type": OBJECT_TYPE_AMS,
             "object_id": submission_id,
-            "destination_system": "nowcerts",
+            "destination_system": DESTINATION_NOWCERTS,
             "action": "create",
             "payload": {"kind": "insured_bundle", "ams": ams},
             "status": "queued",
