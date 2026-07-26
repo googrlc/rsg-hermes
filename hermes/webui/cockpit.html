@@ -241,7 +241,7 @@ const TABLES = {
   renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Renewal events with win/loss outcome. Click a row to open the insured in NowCerts.',endpoint:'/api/renewals',
     rowClick:(r)=>{ if(r.insured_id&&NOWCERTS_INSURED_URL) window.open(NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(r.insured_id)),'_blank','noopener'); },
     cols:[['client_name','Client'],['policy_number','Policy #'],['line_of_business','LOB'],['renewal_event_date','Renewal'],['risk_status','Urgency',chip],['outcome','Outcome',chip],['premium_current','Premium',money]]},
-  commissions:{title:'Commissions',eyebrow:'Reconciled · click a row to correct it',lede:'Reconciled commissions. Click a row to correct a value in the portal — NowCerts is fixed by hand separately.',endpoint:'/api/commissions',emptyState:commissionsEmpty,rowClick:(r)=>openCommission(r),
+  commissions:{title:'Commissions',eyebrow:'Reconciled · click a row to correct it',lede:'Reconciled commissions. Click a row to correct a value in the portal — NowCerts is fixed by hand separately.',endpoint:'/api/commissions',emptyState:commissionsEmpty,rowClick:(r)=>openCommission(r),action:'uploadStmt',
     cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['delta','Delta',money],['reconciliation_status','Status',chip]]},
   pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies. Click one to send a quote to NowCerts.',endpoint:'/api/opportunities',action:'newOpp',rowClick:(o)=>openOpportunity(o),
     cols:[['insured_name','Client'],['line_of_business','LOB'],['stage','Stage',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']]},
@@ -296,7 +296,7 @@ const kpiTile=(l,n,s)=>`<div class="kpi"><div class="k-label">${l}</div><div cla
 
 /* ---------- Generic table ---------- */
 async function renderTable(host,cfg){
-  const actLabels={newOpp:'+ New Opportunity',newTask:'+ New Task',commTerms:'Commission terms'};
+  const actLabels={newOpp:'+ New Opportunity',newTask:'+ New Task',commTerms:'Commission terms',uploadStmt:'Upload statement'};
   const actionBtn = cfg.action ? `<div class="btns"><button class="btn primary" id="actBtn">${actLabels[cfg.action]||'Action'}</button></div>`:'';
   host.innerHTML = `<section class="view">
     <div class="view-head"><div><div class="eyebrow">${cfg.eyebrow}</div><h1 class="h1">${cfg.title}</h1><p class="lede">${cfg.lede}</p></div>${actionBtn}</div>
@@ -304,6 +304,7 @@ async function renderTable(host,cfg){
   if(cfg.action==='newOpp') $('#actBtn').onclick=openNewOpp;
   if(cfg.action==='newTask') $('#actBtn').onclick=()=>openNewTask();
   if(cfg.action==='commTerms') $('#actBtn').onclick=openCommTerms;
+  if(cfg.action==='uploadStmt') $('#actBtn').onclick=openStatementUpload;
   try{
     const payload = await api(cfg.endpoint);
     const rows = firstArray(payload);
@@ -398,6 +399,101 @@ async function openCommTerms(){
     toast('Commission term saved.');
     ['crCarrier','crLob','crNb','crRen'].forEach(i=>$('#'+i).value='');
     loadRules();
+  });
+}
+
+/* ---------- Statement upload: stage, review, then approve ----------
+   Two guards decide whether the Approve button is even enabled: the content
+   hash (a re-upload of the same bytes is refused) and the crosscheck (a parse
+   that disagrees with the carrier's own printed total is wrong). Neither is
+   advisory — the server refuses the commit too. */
+async function openStatementUpload(){
+  await loadUsers();
+  openModal(`<div class="modal-head"><h3>Upload a commission statement</h3>
+      <p>Parsed and staged for review — <strong>no money moves until you approve</strong>.
+         CSV or .xlsx. Enter the carrier's own printed total if the statement shows one;
+         it's what proves the parse is right.</p></div>
+    <div class="modal-body">
+      <div class="row2">
+        <div class="field"><label>Statement file</label><input id="stFile" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm"/></div>
+        <div class="field"><label>Carrier</label><input id="stCarrier" placeholder="Progressive"/></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Carrier's stated total commission</label><input id="stTotal" placeholder="e.g. 354.59 — leave blank if not printed"/></div>
+        <div class="field"><label>Uploaded by</label><select id="stBy">${userOptions()}</select></div>
+      </div>
+      <div id="stResult"></div>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn primary" id="stUpload">Parse &amp; stage</button></div>`);
+
+  $('#stUpload').onclick=(e)=>submitBtn(e.target,async()=>{
+    const f=$('#stFile').files[0];
+    if(!f) throw new Error('Choose a statement file.');
+    const by=$('#stBy').value; if(!by) throw new Error('Pick who is uploading.');
+    const fd=new FormData();
+    fd.append('file',f); fd.append('uploaded_by',by);
+    fd.append('carrier',$('#stCarrier').value.trim());
+    fd.append('stated_total_commission',$('#stTotal').value.trim());
+    const r=await fetch(`${API}/api/commission-statements`,{method:'POST',body:fd});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.detail||`upload failed (${r.status})`);
+    renderStagedBatch(d);
+  });
+}
+
+function renderStagedBatch(d){
+  const c=d.crosscheck||{}, p=d.preview||{};
+  const blocked=[];
+  if(d.duplicate_of) blocked.push('This exact file has already been uploaded.');
+  if(!d.line_count) blocked.push('Nothing parsed from this file.');
+  if(c.crosscheck_ok===false) blocked.push(`Parsed ${money(c.parsed_total_commission)} but the carrier states ${money(c.stated_total_commission)} — off by ${money(c.commission_delta)}. The parse is wrong; don't approve it.`);
+
+  const crossLine = c.verifiable
+    ? (c.crosscheck_ok
+        ? `<span class="chip safe">crosscheck matched</span> ${money(c.parsed_total_commission)} = carrier's ${money(c.stated_total_commission)}`
+        : `<span class="chip crit">crosscheck FAILED</span> ${money(c.parsed_total_commission)} vs carrier's ${money(c.stated_total_commission)}`)
+    : `<span class="chip warn">unverified</span> ${money(c.parsed_total_commission)} parsed — no carrier total given, so nothing to check it against`;
+
+  $('#stResult').innerHTML=`
+    <div style="border-top:1px solid var(--border-soft);margin-top:16px;padding-top:14px">
+      <div class="eyebrow" style="margin-bottom:8px">Staged — batch ${esc((d.batch_id||'').slice(0,8))}</div>
+      <div class="m-v" style="margin-bottom:10px">${d.line_count} line${d.line_count===1?'':'s'} parsed</div>
+      <div class="t-meta" style="margin-bottom:10px">${crossLine}</div>
+      <div class="meta" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:10px">
+        <div><div class="m-l">Will link</div><div class="m-v">${p.will_link??'—'}</div></div>
+        <div><div class="m-l">New ledger rows</div><div class="m-v">${p.will_create_ledger_rows??'—'}</div></div>
+        <div><div class="m-l">Unmatched</div><div class="m-v">${p.will_be_unmatched??'—'}</div></div>
+        <div><div class="m-l">Credits</div><div class="m-v">${p.negative_lines??'—'}</div></div>
+      </div>
+      ${Object.keys(p.unmatched_policy_numbers||{}).length
+        ? `<div class="t-meta" style="color:var(--warn)">Unmatched policy numbers: ${Object.entries(p.unmatched_policy_numbers).map(([k,v])=>`${esc(k)} (${v})`).join(', ')} — these will need a human.</div>` : ''}
+      ${(d.warnings||[]).length
+        ? `<div class="t-meta" style="margin-top:8px">${d.warnings.map(w=>`• ${esc(w)}`).join('<br/>')}</div>` : ''}
+      ${blocked.length
+        ? `<div class="t-meta" style="margin-top:12px;color:var(--crit)"><strong>Cannot approve:</strong><br/>${blocked.map(b=>`• ${esc(b)}`).join('<br/>')}</div>`
+        : `<div class="btns" style="margin-top:14px">
+             <button class="btn primary" id="stApprove">Approve &amp; commit ${d.line_count} line${d.line_count===1?'':'s'}</button>
+             <button class="btn" id="stReject">Reject</button></div>`}
+    </div>`;
+
+  const approve=$('#stApprove');
+  if(approve) approve.onclick=(e)=>submitBtn(e.target,async()=>{
+    const out=await api(`/api/commission-statements/${d.batch_id}/approve`,
+      {method:'POST',body:JSON.stringify({approved_by:$('#stBy').value})});
+    $('#stResult').innerHTML=`<div class="t-meta" style="margin-top:14px">
+        <span class="chip safe">committed</span> ${out.committed} line(s) ·
+        ${out.linked} linked · ${out.created_ledger_rows} new ledger row(s) ·
+        ${out.unmatched} unmatched<br/>${esc(out.rollup||'')}
+        ${(out.errors||[]).length?`<br/><span style="color:var(--crit)">${out.errors.map(esc).join('<br/>')}</span>`:''}
+      </div>`;
+    toast('Statement committed.'); refreshCommissions();
+  });
+  const reject=$('#stReject');
+  if(reject) reject.onclick=(e)=>submitBtn(e.target,async()=>{
+    await api(`/api/commission-statements/${d.batch_id}/reject`,
+      {method:'POST',body:JSON.stringify({approved_by:$('#stBy').value,reason:'rejected in cockpit'})});
+    toast('Batch rejected.'); closeModal();
   });
 }
 

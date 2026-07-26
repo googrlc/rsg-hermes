@@ -398,3 +398,89 @@ def test_a_batch_where_every_line_failed_is_not_marked_committed(supa, monkeypat
     out = st.commit_statement(supa, batch_id=staged.batch_id, approved_by="a@b.net")
     assert out.committed == 0 and len(out.errors) == 3
     assert supa.tables[st.BATCHES_TABLE][0]["ingest_status"] == st.STATUS_ERROR
+
+
+# --- xlsx + totals rows ------------------------------------------------------
+
+def _workbook(rows, title="Statement", extra_sheet=False):
+    from openpyxl import Workbook
+    import io as _io
+    wb = Workbook(); ws = wb.active; ws.title = title
+    for row in rows:
+        ws.append(row)
+    if extra_sheet:
+        wb.create_sheet("Notes")
+    buf = _io.BytesIO(); wb.save(buf)
+    return buf.getvalue()
+
+
+HEADER = ["Policy #", "Insured Name", "Prod", "Tran Code", "Tran Date",
+          "Gross Premium", "Comm Rate", "Gross Comm"]
+
+
+def test_xlsx_is_parsed():
+    content = _workbook([HEADER,
+                         ["862392084", "HARRIS C.", "Auto", "Renewal", "2026-02-28", 1453, 0.1, 145.30]])
+    lines, warnings = st.parse_statement(content, "s.xlsx")
+    assert len(lines) == 1
+    assert lines[0]["commission_amount"] == Decimal("145.3")
+    assert lines[0]["transaction_type"] == "renewal"
+
+
+def test_xlsx_header_is_found_not_assumed():
+    """Carriers put a title block above the header. Assuming row 1 would parse a
+    banner as column names and yield nothing."""
+    content = _workbook([["PROGRESSIVE COMMISSION STATEMENT"], [], HEADER,
+                         ["862392084", "H.", "Auto", "Renewal", "2026-02-28", 1453, 0.1, 145.30]])
+    lines, warnings = st.parse_statement(content, "s.xlsx")
+    assert len(lines) == 1
+    assert any("header found on row 3" in w for w in warnings)
+
+
+def test_xlsx_with_no_recognisable_header_says_so():
+    content = _workbook([["just", "some", "text"], ["more", "text", "here"]])
+    lines, warnings = st.parse_statement(content, "s.xlsx")
+    assert lines == []
+    assert any("could not find a header row" in w for w in warnings)
+
+
+def test_multiple_sheets_are_flagged():
+    content = _workbook([HEADER, ["P1", "X", "Auto", "Renewal", "2026-01-01", 100, 0.1, 10]],
+                        extra_sheet=True)
+    _, warnings = st.parse_statement(content, "s.xlsx")
+    assert any("only 'Statement' was parsed" in w for w in warnings)
+
+
+def test_a_totals_row_is_excluded_not_counted_as_income():
+    """THE bug this guards: a TOTAL row carries an amount but no policy number.
+    Counting it doubled a 2-line statement from $144.59 to $289.18."""
+    content = _workbook([HEADER,
+                         ["862392084", "H.", "Auto", "Renewal", "2026-02-28", 1453, 0.1, 145.30],
+                         ["864561433", "B.", "Auto", "Credit Endorsement", "2026-03-20", -7.08, 0.1, -0.71],
+                         ["", "", "", "", "TOTAL", "", "", 144.59]])
+    lines, warnings = st.parse_statement(content, "s.xlsx")
+    assert len(lines) == 2
+    assert st.crosscheck(lines, stated_commission="144.59").ok
+    assert any("NO policy number" in w for w in warnings)
+
+
+def test_a_totals_row_in_csv_is_also_excluded():
+    csv_bytes = (b"policy_number,gross_comm\n"
+                 b"P1,100.00\n"
+                 b",100.00\n")
+    lines, warnings = st.parse_statement(csv_bytes, "s.csv")
+    assert len(lines) == 1
+    assert any("NO policy number" in w for w in warnings)
+
+
+def test_excluded_totals_rows_are_named_so_a_human_can_check():
+    csv_bytes = b"policy_number,gross_comm\n,55.00\n"
+    _, warnings = st.parse_statement(csv_bytes, "s.csv")
+    assert any("55.00" in w for w in warnings)
+
+
+def test_legacy_xls_and_pdf_are_refused_with_a_route_forward():
+    _, xls = st.parse_statement(b"x", "s.xls")
+    assert any("re-save as .xlsx" in w for w in xls)
+    _, pdf = st.parse_statement(b"x", "s.pdf")
+    assert any("/api/extract" in w for w in pdf)

@@ -236,6 +236,27 @@ def parse_row(raw: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _policyless_warning(rows: list[str]) -> list[str]:
+    """Rows carrying money but no policy number are EXCLUDED from the parse.
+
+    Almost always a subtotal or grand-total line. Including one double-counts
+    the statement — a generated 3-line test workbook with a TOTAL row parsed as
+    $289.18 against a true $144.59. And a line with no policy number could never
+    match a ledger row anyway, so it has nowhere to go.
+
+    Reported, never silent: if one of these really is a payment, a human needs to
+    see it and fix the statement.
+    """
+    if not rows:
+        return []
+    shown = ", ".join(rows[:5])
+    more = f" (+{len(rows) - 5} more)" if len(rows) > 5 else ""
+    return [
+        f"{len(rows)} row(s) carried a commission amount with NO policy number and "
+        f"were excluded as subtotal/total lines: {shown}{more}"
+    ]
+
+
 def parse_csv(content: bytes) -> tuple[list[dict[str, Any]], list[str]]:
     """Parse a CSV/TSV statement. Returns (lines, warnings)."""
     warnings: list[str] = []
@@ -253,28 +274,110 @@ def parse_csv(content: bytes) -> tuple[list[dict[str, Any]], list[str]]:
 
     lines: list[dict[str, Any]] = []
     skipped = 0
+    policyless: list[str] = []
     for index, raw in enumerate(csv.DictReader(io.StringIO(text), dialect=dialect), start=2):
         parsed = parse_row(raw)
         if parsed is None:
             skipped += 1
             continue
         if not parsed["policy_number"]:
-            warnings.append(f"row {index}: commission amount with no policy number")
+            policyless.append(f"row {index} ({parsed['commission_amount']})")
+            continue
         lines.append(parsed)
     if skipped:
         warnings.append(f"{skipped} row(s) skipped as blank or non-data")
+    warnings.extend(_policyless_warning(policyless))
+    return lines, warnings
+
+
+def parse_xlsx(content: bytes) -> tuple[list[dict[str, Any]], list[str]]:
+    """Parse an .xlsx statement via openpyxl.
+
+    Carriers put the header on whatever row they like, under a title block or a
+    merged logo. So the header is *found* rather than assumed: the first row
+    whose cells look like the columns we need. Assuming row 1 would silently
+    parse a title banner as column names and yield zero lines.
+    """
+    warnings: list[str] = []
+    try:
+        from openpyxl import load_workbook
+    except ImportError:  # pragma: no cover - dependency is declared
+        return [], ["openpyxl is not installed; cannot parse .xlsx"]
+
+    try:
+        book = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except Exception as exc:  # noqa: BLE001
+        return [], [f"could not open workbook: {exc}"]
+
+    sheet = book.active
+    if sheet is None:
+        return [], ["workbook has no active sheet"]
+
+    sheet_count = len(book.sheetnames)
+    sheet_title = sheet.title
+    rows = [
+        ["" if c is None else c for c in row]
+        for row in sheet.iter_rows(values_only=True)
+    ]
+    book.close()
+    if not rows:
+        return [], ["worksheet is empty"]
+
+    # Find the header: the first row containing a recognisable policy column AND
+    # a recognisable amount column.
+    wanted_policy = {_key("policy_number"), *_ALIASES["policy_number"]}
+    wanted_amount = {_key("commission_amount"), *_ALIASES["commission_amount"]}
+    header_at = None
+    for index, row in enumerate(rows[:25]):
+        keys = {_key(cell) for cell in row}
+        if keys & wanted_policy and keys & wanted_amount:
+            header_at = index
+            break
+    if header_at is None:
+        return [], ["could not find a header row with a policy and a commission column"]
+    if header_at:
+        warnings.append(f"header found on row {header_at + 1}, not row 1")
+
+    header = [str(cell).strip() for cell in rows[header_at]]
+    lines: list[dict[str, Any]] = []
+    skipped = 0
+    policyless: list[str] = []
+    for offset, row in enumerate(rows[header_at + 1:], start=header_at + 2):
+        raw = {header[i]: row[i] for i in range(min(len(header), len(row))) if header[i]}
+        parsed = parse_row(raw)
+        if parsed is None:
+            skipped += 1
+            continue
+        if not parsed["policy_number"]:
+            policyless.append(f"row {offset} ({parsed['commission_amount']})")
+            continue
+        lines.append(parsed)
+    if skipped:
+        warnings.append(f"{skipped} row(s) skipped as blank or non-data")
+    warnings.extend(_policyless_warning(policyless))
+    if sheet_count > 1:
+        warnings.append(
+            f"workbook has {sheet_count} sheets; only '{sheet_title}' was parsed"
+        )
     return lines, warnings
 
 
 def parse_statement(content: bytes, filename: str) -> tuple[list[dict[str, Any]], list[str]]:
-    """Dispatch on extension. CSV/TSV today; xlsx and pdf are explicit gaps."""
+    """Dispatch on extension."""
     suffix = (filename.rsplit(".", 1)[-1] if "." in filename else "").lower()
     if suffix in {"csv", "tsv", "txt"}:
         return parse_csv(content)
-    if suffix in {"xlsx", "xlsm", "xls"}:
-        return [], [f"{suffix} statements are not parsed yet — export to CSV"]
+    if suffix in {"xlsx", "xlsm"}:
+        return parse_xlsx(content)
+    if suffix == "xls":
+        return [], ["legacy .xls is not supported — re-save as .xlsx or CSV"]
     if suffix == "pdf":
-        return [], ["PDF statements are not parsed yet — export to CSV"]
+        # Deliberately not attempted. Table extraction from a statement PDF is
+        # unreliable, and a mis-read column on money data is worse than a refusal
+        # — it looks like a successful parse. Route PDFs through the existing
+        # OCR/extract path (POST /api/extract) and upload the reviewed CSV.
+        return [], ["PDF statements are not parsed here — run it through "
+                    "POST /api/extract, check the output, then upload as CSV"]
     return [], [f"unsupported statement format: .{suffix or 'unknown'}"]
 
 
