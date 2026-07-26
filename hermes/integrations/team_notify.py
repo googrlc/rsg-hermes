@@ -18,7 +18,8 @@ import os
 import re
 from typing import Any
 
-# Slack channel id → logical category (kept small + explicit; unknown → boss).
+# LEGACY Slack channel id → category. Retained only for already-deployed callers
+# that still pass an id; new code should pass the category name directly.
 _CHANNEL_CATEGORY: dict[str, str] = {
     "C0ANQUENX4P": "boss",       # #the-boss
     "C09R2CG2KS6": "renewals",   # #renewal-updates
@@ -36,8 +37,20 @@ class TeamNotifyError(RuntimeError):
 
 
 def resolve_room(channel: str | None) -> str:
-    """Map a Slack channel id to a Talk room token. Unknown → the boss room."""
-    category = _CHANNEL_CATEGORY.get((channel or "").strip(), "boss")
+    """Map a category name OR a legacy Slack channel id to a Talk room token.
+
+    Accepting the category name is the fix for a live misroute: every caller that
+    passed "systems" or "renewals" — the obvious thing to pass — fell through to
+    the boss-room default, because only three hardcoded Slack ids were mapped. The
+    two systems-check defaults in the tree (C0ANSEP6SSD in renewals/config.py,
+    C0AFHN83ZE3 in scheduler/runner.py) are not among those three, so scheduler
+    alerts and renewal escalations were ALL landing in the boss room.
+
+    Unknown values still fall back to boss rather than raising: losing a report to
+    a routing typo is worse than posting it somewhere visible.
+    """
+    key = (channel or "").strip()
+    category = key if key in _CATEGORY_ENV else _CHANNEL_CATEGORY.get(key, "boss")
     token = os.environ.get(_CATEGORY_ENV[category], "").strip()
     return token or os.environ.get("HERMES_TALK_ROOM_BOSS", "").strip()
 
