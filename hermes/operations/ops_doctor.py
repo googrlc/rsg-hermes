@@ -11,7 +11,6 @@ from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientEr
 log = logging.getLogger(__name__)
 
 HERMES_TABLES = [
-    "slack_registry",
     "hermes_ai_roles",
     "crm_write_queue",
     "crm_receipts",
@@ -86,10 +85,6 @@ def run_ops_doctor(supa: SupabaseClient) -> OpsDoctorReport:
     if roles:
         report.errors.extend(roles)
 
-    channels = _check_channels(supa)
-    if channels:
-        report.errors.extend(channels)
-
     return report
 
 
@@ -108,18 +103,3 @@ def _check_roles(supa: SupabaseClient) -> list[str]:
     return errors
 
 
-def _check_channels(supa: SupabaseClient) -> list[str]:
-    """Verify at least one active Slack channel exists."""
-    errors: list[str] = []
-    try:
-        rows = supa.select(
-            "slack_registry",
-            columns="channel_id,is_active",
-            params={"is_active": "eq.true"},
-            limit=50,
-        )
-        if not rows:
-            errors.append("No active Slack channels in registry")
-    except SupabaseClientError as exc:
-        errors.append(f"Could not check Slack registry: {exc}")
-    return errors
