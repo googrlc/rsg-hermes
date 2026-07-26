@@ -20,9 +20,14 @@ from typing import TYPE_CHECKING, Any
 
 from hermes.intake.commit import OBJECT_TYPE_INTAKE
 from hermes.casework.executor import OBJECT_TYPE_CASE, OBJECT_TYPE_TASK
-from hermes.command_center.router import OBJECT_TYPE_AMS as OBJECT_TYPE_INTAKE_AMS
+from hermes.command_center.router import OBJECT_TYPE_AMS as OBJECT_TYPE_INTAKE_AMS, OBJECT_TYPE_CRM
 from hermes.quotes.executor import OBJECT_TYPE_QUOTE
-from hermes.renewals.executor import DESTINATION_NOWCERTS, OBJECT_TYPE_RENEWAL, QUEUE_TABLE
+from hermes.renewals.executor import (
+    DESTINATION_CRM,
+    DESTINATION_NOWCERTS,
+    OBJECT_TYPE_RENEWAL,
+    QUEUE_TABLE,
+)
 from hermes.sync.opportunity_writeback import OBJECT_TYPE as OBJECT_TYPE_OPPORTUNITY_WRITEBACK
 
 if TYPE_CHECKING:
@@ -58,13 +63,27 @@ _OBJECT_TYPES = (
     OBJECT_TYPE_TASK,
     OBJECT_TYPE_OPPORTUNITY_WRITEBACK,
     OBJECT_TYPE_INTAKE_AMS,
+    OBJECT_TYPE_CRM,
 )
-# intake_crm is deliberately absent. requeue_or_deadletter filters
-# destination_system = 'nowcerts', and a CRM-destination job carries
-# destination_system = 'crm' — listing it here would look like coverage while the
-# destination filter silently excluded every row. CRM-destination failures are not
-# backed off at ALL today; fixing that means broadening the destination filter,
-# which is a separate change with its own blast radius.
+# Every destination system whose failed/stalled jobs should be requeued or
+# reclaimed. `requeue_or_deadletter` and `reclaim_stalled` filter
+# destination_system against DESTINATIONS below, so any object_type listed here
+# is only acted on if its destination is too — the two sets are a matched pair.
+#
+# intake_crm (destination_system='crm') was absent until 2026-07-26 because the
+# destination filter was hardcoded to 'nowcerts', so listing it would have looked
+# like coverage while every CRM row was silently dropped. The filter now covers
+# both destinations, so CRM-destination failures back off and dead-letter on the
+# same schedule as NowCerts writes. The intake executor already honours
+# scheduled_for (via due_filter), so the backoff is real, not a no-op.
+
+
+# Destination systems whose queue rows the retry pass manages. Adding a
+# new destination here without an executor that honours scheduled_for would
+# make its backoff a no-op — test_every_executor_honours_the_backoff guards that.
+DESTINATIONS = (DESTINATION_NOWCERTS, DESTINATION_CRM)
+
+_DESTINATION_FILTER = f"in.({','.join(DESTINATIONS)})"
 
 
 def due_filter(now: datetime | None = None) -> dict[str, str]:
@@ -100,7 +119,7 @@ def requeue_or_deadletter(supa: "SupabaseClient", *, now: datetime | None = None
             columns="id,object_type,object_id,attempt_count",
             params={
                 "object_type": f"in.({','.join(_OBJECT_TYPES)})",
-                "destination_system": f"eq.{DESTINATION_NOWCERTS}",
+                "destination_system": _DESTINATION_FILTER,
                 "status": f"eq.{QUEUE_FAILED}",
                 "order": "created_at.asc",
             },
@@ -149,7 +168,7 @@ def reclaim_stalled(
             columns="id,object_type,updated_at",
             params={
                 "object_type": f"in.({','.join(_OBJECT_TYPES)})",
-                "destination_system": f"eq.{DESTINATION_NOWCERTS}",
+                "destination_system": _DESTINATION_FILTER,
                 "status": f"eq.{QUEUE_PROCESSING}",
                 "updated_at": f"lt.{cutoff}",
             },

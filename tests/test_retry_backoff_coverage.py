@@ -92,20 +92,26 @@ def test_every_backed_off_object_type_is_claimed_by_some_executor():
         )
 
 
-def test_intake_crm_is_excluded_because_the_destination_filter_would_drop_it():
-    """requeue_or_deadletter filters destination_system='nowcerts'. A CRM-destination
-    job carries 'crm', so listing it would look like coverage while every row was
-    silently excluded."""
+def test_intake_crm_is_backed_off_and_the_destination_filter_covers_it():
+    """CRM-destination jobs (object_type='intake_crm', destination_system='crm') used
+    to be silently dropped by requeue_or_deadletter because it filtered
+    destination_system='nowcerts'. Both the object type and the destination filter
+    must now cover CRM so failures back off and dead-letter like any other."""
     from hermes.command_center.router import OBJECT_TYPE_CRM
 
-    assert OBJECT_TYPE_CRM not in R._OBJECT_TYPES
-    assert "intake_crm is deliberately absent" in _source("hermes.scheduler.retry")
+    assert OBJECT_TYPE_CRM in R._OBJECT_TYPES
+    # The destination filter must include both destinations, not just nowcerts.
+    assert "eq.nowcerts" not in R._DESTINATION_FILTER, (
+        "destination filter still hardcoded to nowcerts — CRM failures would be dropped"
+    )
+    assert "crm" in R._DESTINATION_FILTER
+    assert "nowcerts" in R._DESTINATION_FILTER
 
 
 def test_backoff_covers_the_object_types_that_can_actually_fail():
     """Regression guard on the original gap: these all set status=failed."""
     for expected in ("renewal", "intake", "quote", "case", "task",
-                     "opportunity_writeback", "intake_ams"):
+                     "opportunity_writeback", "intake_ams", "intake_crm"):
         assert expected in R._OBJECT_TYPES
 
 
@@ -188,3 +194,26 @@ def test_a_backed_off_job_is_not_yet_due():
     # The filter admits rows with scheduled_for <= now; this one is in the future.
     assert scheduled > NOW
     assert scheduled <= NOW + timedelta(seconds=R.BACKOFF_CAP_SECONDS)
+
+
+def test_a_crm_destination_job_is_requeued_with_backoff():
+    """A CRM-destination (intake_crm) failure must be requeued on the same backoff
+    schedule as a NowCerts write, not left to sit at status=failed forever."""
+    from hermes.command_center.router import OBJECT_TYPE_CRM
+
+    supa = FakeSupa([{"id": "qc1", "object_type": OBJECT_TYPE_CRM,
+                      "object_id": "sub_1", "attempt_count": 0}])
+    out = R.requeue_or_deadletter(supa, now=NOW)
+    assert out["requeued"] == 1
+    _, payload = supa.updates[-1]
+    assert payload["status"] == R.QUEUE_QUEUED
+    assert payload["attempt_count"] == 1
+    assert datetime.fromisoformat(payload["scheduled_for"]) > NOW
+
+
+def test_reclaim_stalled_uses_the_shared_destination_filter():
+    """reclaim_stalled must not drop CRM-destination stalled jobs either."""
+    src = _source("hermes.scheduler.retry")
+    # reclaim_stalled should reference the shared filter, not a hardcoded nowcerts eq.
+    assert "_DESTINATION_FILTER" in src
+    assert 'eq.{DESTINATION_NOWCERTS}' not in src
