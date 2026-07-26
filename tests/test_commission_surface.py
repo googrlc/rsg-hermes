@@ -224,3 +224,75 @@ def test_overview_survives_a_book_read_failure(monkeypatch):
     ov = surface.commission_overview(FakeSupa([led()]), status="all")
     assert len(ov.rows) == 1
     assert ov.coverage.active_policies == 0
+
+
+
+# --- analytics rollups (#236) -----------------------------------------------
+
+class _Supa:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def select(self, table, *, columns="*", params=None, limit=10000):
+        assert table == surface.LEDGER_TABLE
+        return [dict(r) for r in self._rows][:limit]
+
+
+def test_analytics_rolls_up_by_carrier_and_lob():
+    rows = [
+        led(policy_number="A", carrier_name="Progressive", lob="Auto",
+            gross_premium=1000, expected_commission=150, actual_commission=150,
+            delta=0, reconciliation_status="reconciled"),
+        led(policy_number="B", carrier_name="Progressive", lob="Auto",
+            gross_premium=2000, expected_commission=300, actual_commission=250,
+            delta=-50, reconciliation_status="underpaid"),
+        led(policy_number="C", carrier_name="Next", lob="Home",
+            gross_premium=5000, expected_commission=750, actual_commission=None,
+            delta=None, reconciliation_status="pending"),
+    ]
+    out = surface.commission_analytics(_Supa(rows)).as_dict()
+
+    prog = next(b for b in out["by_carrier"] if b["key"] == "Progressive")
+    assert prog["policies"] == 2
+    assert prog["gross_premium"] == 3000
+    assert prog["expected_commission"] == 450
+    assert prog["actual_commission"] == 400
+    assert prog["delta"] == -50
+    assert prog["statuses"] == {"reconciled": 1, "underpaid": 1}
+
+    auto = next(b for b in out["by_lob"] if b["key"] == "Auto")
+    assert auto["policies"] == 2 and auto["expected_commission"] == 450
+    home = next(b for b in out["by_lob"] if b["key"] == "Home")
+    assert home["policies"] == 1 and home["actual_commission"] == 0  # None -> 0
+
+    assert out["totals"]["ledger_rows"] == 3
+    assert out["totals"]["expected_commission"] == 1200
+    assert out["totals"]["actual_commission"] == 400
+    assert out["totals"]["counts_by_status"] == {"pending": 1, "reconciled": 1, "underpaid": 1}
+
+
+def test_analytics_buckets_unknown_carrier_and_lob_visibly():
+    rows = [led(policy_number="X", carrier_name="", lob=None,
+                expected_commission=100, actual_commission=None)]
+    out = surface.commission_analytics(_Supa(rows)).as_dict()
+    assert out["by_carrier"][0]["key"] == "(unknown)"
+    assert out["by_lob"][0]["key"] == "(unknown)"
+    assert out["by_lob"][0]["actual_commission"] == 0  # None coerced, not summed as null
+
+
+def test_analytics_sorts_carriers_by_expected_desc():
+    rows = [
+        led(policy_number="A", carrier_name="Small", expected_commission=10),
+        led(policy_number="B", carrier_name="Big", expected_commission=1000),
+    ]
+    out = surface.commission_analytics(_Supa(rows)).as_dict()
+    assert [b["key"] for b in out["by_carrier"]] == ["Big", "Small"]
+
+
+def test_analytics_a_read_failure_is_honest_not_a_crash():
+    class BoomSupa:
+        def select(self, table, *, columns="*", params=None, limit=10000):
+            raise RuntimeError("supabase down")
+    out = surface.commission_analytics(BoomSupa()).as_dict()
+    assert out["by_carrier"] == [] and out["by_lob"] == []
+    assert out["totals"]["ledger_rows"] == 0

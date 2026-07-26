@@ -1830,6 +1830,24 @@ async def list_commissions_endpoint(limit: int = 1000, status: str = "reconciled
     return overview.as_dict()
 
 
+@app.get("/api/commissions/analytics")
+async def commission_analytics_endpoint():
+    """Whole-ledger rollups by carrier and by line of business (#236).
+
+    The lens for "is the cockpit sufficient to replace the standalone tracker?"
+    Per-carrier and per-LOB expected/actual/delta plus a status breakdown, over
+    the entire ledger regardless of reconciliation status — a carrier with only
+    `pending` rows still appears with its expected money.
+    """
+    from hermes.commissions.surface import commission_analytics
+
+    try:
+        return commission_analytics(_get_supa()).as_dict()
+    except Exception as exc:
+        log.exception("commissions analytics read failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 class CommissionOverrideRequest(BaseModel):
     """A human correction to a commission row.
 

@@ -289,3 +289,110 @@ def commission_overview(
         total_ledger_rows=len(all_rows),
         active_overrides=len(overrides),
     )
+
+
+
+def _num(value: Any) -> float:
+    """Coerce a ledger numeric to float; None / blanks count as 0.
+
+    ``expected_commission`` is None on no_expected rows, and ``actual_commission``
+    is None until a statement line lands. Sums must not blow up on either.
+    """
+    if value is None or value == "":
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _rollup(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    """Group ledger rows by *key* (carrier_name / lob) and sum the money columns.
+
+    Returns buckets sorted by expected commission desc — the carriers/LOBs that
+    matter most to reconciliation surface first. A blank key is labelled
+    "(unknown)" so it is visible rather than silently bucketed under None.
+    """
+    buckets: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        label = str(r.get(key) or "").strip() or "(unknown)"
+        b = buckets.setdefault(
+            label,
+            {"key": label, "policies": 0, "gross_premium": 0.0,
+             "expected_commission": 0.0, "actual_commission": 0.0,
+             "delta": 0.0, "statuses": Counter()},
+        )
+        b["policies"] += 1
+        b["gross_premium"] += _num(r.get("gross_premium"))
+        b["expected_commission"] += _num(r.get("expected_commission"))
+        b["actual_commission"] += _num(r.get("actual_commission"))
+        b["delta"] += _num(r.get("delta"))
+        b["statuses"][str(r.get("reconciliation_status") or "unknown").strip().lower()] += 1
+
+    out = []
+    for b in buckets.values():
+        out.append({
+            "key": b["key"],
+            "policies": b["policies"],
+            "gross_premium": round(b["gross_premium"], 2),
+            "expected_commission": round(b["expected_commission"], 2),
+            "actual_commission": round(b["actual_commission"], 2),
+            "delta": round(b["delta"], 2),
+            "statuses": dict(sorted(b["statuses"].items(), key=lambda kv: (-kv[1], kv[0]))),
+        })
+    out.sort(key=lambda x: x["expected_commission"], reverse=True)
+    return out
+
+
+@dataclass
+class Analytics:
+    """Per-carrier and per-LOB commission rollups over the whole ledger.
+
+    The lens for "is the cockpit sufficient to replace the tracker?" (#236): you
+    cannot judge that without per-carrier and per-LOB totals visible in the
+    cockpit. Everything is computed over the entire ledger regardless of status,
+    so a carrier with only `pending` rows still shows up with its expected money.
+    """
+    by_carrier: list[dict[str, Any]] = field(default_factory=list)
+    by_lob: list[dict[str, Any]] = field(default_factory=list)
+    totals: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "by_carrier": self.by_carrier,
+            "by_lob": self.by_lob,
+            "totals": self.totals,
+        }
+
+
+def commission_analytics(supa: "SupabaseClient") -> Analytics:
+    """Whole-ledger rollups by carrier and by line of business.
+
+    Reads the same column set as ``commission_overview`` so the analytics and the
+    row view agree on what is on the surface. Never raises on a read failure —
+    an empty analytics is its own (honest) answer.
+    """
+    try:
+        rows = supa.select(
+            LEDGER_TABLE,
+            columns=LEDGER_COLUMNS,
+            params={"order": "statement_date.desc"},
+            limit=20000,
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("commission analytics: ledger read failed")
+        rows = []
+
+    totals = {
+        "ledger_rows": len(rows),
+        "gross_premium": round(sum(_num(r.get("gross_premium")) for r in rows), 2),
+        "expected_commission": round(sum(_num(r.get("expected_commission")) for r in rows), 2),
+        "actual_commission": round(sum(_num(r.get("actual_commission")) for r in rows), 2),
+        "delta": round(sum(_num(r.get("delta")) for r in rows), 2),
+        "counts_by_status": status_counts(rows),
+    }
+    return Analytics(
+        by_carrier=_rollup(rows, "carrier_name"),
+        by_lob=_rollup(rows, "lob"),
+        totals=totals,
+    )
