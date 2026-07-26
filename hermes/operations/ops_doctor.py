@@ -16,7 +16,6 @@ log = logging.getLogger(__name__)
 # months and have never existed in this schema — they were designed for the
 # Espo-era write path and never built. The real gate is outbound_sync_queue.
 HERMES_TABLES = [
-    "slack_registry",
     "hermes_ai_roles",
     "commission_ledger",
     "commission_audits",
@@ -90,10 +89,6 @@ def run_ops_doctor(supa: SupabaseClient) -> OpsDoctorReport:
     if roles:
         report.errors.extend(roles)
 
-    channels = _check_channels(supa)
-    if channels:
-        report.errors.extend(channels)
-
     return report
 
 
@@ -112,18 +107,3 @@ def _check_roles(supa: SupabaseClient) -> list[str]:
     return errors
 
 
-def _check_channels(supa: SupabaseClient) -> list[str]:
-    """Verify at least one active Slack channel exists."""
-    errors: list[str] = []
-    try:
-        rows = supa.select(
-            "slack_registry",
-            columns="channel_id,is_active",
-            params={"is_active": "eq.true"},
-            limit=50,
-        )
-        if not rows:
-            errors.append("No active Slack channels in registry")
-    except SupabaseClientError as exc:
-        errors.append(f"Could not check Slack registry: {exc}")
-    return errors
