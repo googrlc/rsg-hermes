@@ -331,3 +331,19 @@ def test_a_rejected_batch_keeps_its_staged_lines_for_diagnosis(supa):
     staged = _stage(supa)
     st.reject_statement(supa, batch_id=staged.batch_id, reviewed_by="a@b.net")
     assert len(supa.tables[st.STAGING_TABLE]) == 3
+
+
+def test_lines_inherit_the_statements_carrier(supa):
+    """carrier_name is NOT NULL on staging and on commission_transactions, but
+    statement lines rarely repeat it — it's a property of the statement. Caught
+    live 2026-07-26 by a 23502 not-null violation."""
+    st.stage_statement(supa, content=PROGRESSIVE_CSV, filename="p.csv",
+                       uploaded_by="a@b.net", carrier="Progressive")
+    assert all(r["carrier_name"] == "Progressive"
+               for r in supa.tables[st.STAGING_TABLE])
+
+
+def test_lines_never_stage_a_null_carrier_even_with_none_supplied(supa):
+    st.stage_statement(supa, content=PROGRESSIVE_CSV, filename="p.csv",
+                       uploaded_by="a@b.net", carrier=None)
+    assert all(r["carrier_name"] for r in supa.tables[st.STAGING_TABLE])
