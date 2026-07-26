@@ -1233,6 +1233,224 @@ async def create_case_endpoint(req: CaseCreateRequest):
     return {"ok": True, "case": case}
 
 
+@app.get("/api/case-templates")
+async def list_case_templates_endpoint():
+    """The case-template menu (onboarding, off-boarding, endorsement, COI, ...).
+
+    Static definitions, not a table — a checklist is code the agency reviews in a
+    PR, not data somebody can quietly edit into meaninglessness.
+    """
+    from hermes.casework import templates as T
+
+    return {"templates": T.list_templates()}
+
+
+class CaseFromTemplateRequest(BaseModel):
+    """Open a case from a template, with its whole checklist attached."""
+    template_key: str
+    owner_email: str
+    insured_name: str | None = None
+    insured_database_id: str | None = None
+    policy_number: str | None = None
+    created_by_email: str | None = None
+    assigned_to_email: str | None = None   # default assignee for the checklist
+    title: str | None = None               # override the template's title
+    description: str | None = None
+    priority: str | None = None
+    due_at: str | None = None
+
+
+@app.post("/api/cases/from-template")
+async def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
+    """Create a case AND its checklist in one call.
+
+    This is the whole point of templates: an onboarding that exists as a case
+    with no tasks is the same half-onboarded client we already had. If the tasks
+    cannot be written the case is rolled back, so a caller never ends up with a
+    bare case it believes is a full checklist.
+    """
+    import uuid
+
+    from hermes.casework import templates as T
+    from hermes.renewals import cases as C
+
+    tpl = T.get_template(req.template_key)
+    if not tpl:
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown template '{req.template_key}'; "
+                   f"valid: {', '.join(sorted(T.CASE_TEMPLATES))}",
+        )
+
+    supa = _get_supa()
+    creator = req.created_by_email or C._service_email()
+    _require_users(supa, [
+        ("owner_email", req.owner_email),
+        ("created_by_email", creator),
+        ("assigned_to_email", req.assigned_to_email),
+    ])
+
+    now = datetime.utcnow()
+    case_type = tpl["case_type"]
+    case_number = (
+        f"{case_type[:3].upper()}-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    )
+    case_due = req.due_at or (
+        (now + timedelta(days=tpl["due_days"])).isoformat() if tpl.get("due_days") else None
+    )
+
+    try:
+        case = supa.insert("agency_crm_cases", C._compact({
+            "case_type": case_type,
+            "case_number": case_number,
+            "template_key": req.template_key,
+            "title": req.title or T.render_title(req.template_key, req.insured_name),
+            "description": req.description or tpl.get("description"),
+            "status": "open",
+            "priority": req.priority or tpl.get("priority") or "medium",
+            "owner_email": req.owner_email,
+            "created_by_email": creator,
+            "insured_name": req.insured_name,
+            "insured_database_id": req.insured_database_id,
+            "policy_number": req.policy_number,
+            "due_at": case_due,
+        }))
+    except Exception as exc:
+        log.exception("create case from template failed: %s", req.template_key)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    case_id = str(case.get("id"))
+    try:
+        created = C.create_tasks(
+            supa,
+            case_id=case_id,
+            insured_database_id=req.insured_database_id,
+            default_assignee_email=req.assigned_to_email or req.owner_email,
+            created_by_email=creator,
+            tasks=[{
+                "title": t["title"],
+                "description": t.get("description"),
+                "priority": t.get("priority", "medium"),
+                "is_required": bool(t.get("required")),
+                "sort_order": i,
+                "template_key": req.template_key,
+                "due_at": (now + timedelta(days=t.get("due_days", 0))).isoformat(),
+            } for i, t in enumerate(tpl["tasks"])],
+        )
+    except Exception as exc:
+        # Roll the case back rather than leave a checklist-less shell behind.
+        log.exception("template tasks failed for %s; rolling back case", case_number)
+        try:
+            supa.delete("agency_crm_cases", params={"id": f"eq.{case_id}"})
+        except Exception:  # noqa: BLE001
+            log.exception("rollback of case %s failed — orphaned case left behind", case_number)
+        raise HTTPException(status_code=502, detail=f"checklist creation failed: {exc}")
+
+    C.log_case_event(
+        supa, case_id=case_id, event_type="case_created",
+        summary=f"{tpl['label']} opened from template with {len(created)} tasks",
+        actor_email=creator,
+    )
+    return {"ok": True, "case": case, "tasks": created, "task_count": len(created)}
+
+
+@app.get("/api/cases/{case_id}/progress")
+async def case_progress_endpoint(case_id: str):
+    """Checklist progress plus whether every required task is satisfied."""
+    rows = _get_supa().select(
+        "v_case_progress", columns="*", params={"case_id": f"eq.{case_id}"}, limit=1
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="case not found")
+    return rows[0]
+
+
+class CaseCloseRequest(BaseModel):
+    """Close a case. ``resolution`` is what goes to the AMS — the checklist does not."""
+    resolution: str
+    resolved_by_email: str | None = None
+    push_to_ams: bool = True
+
+
+@app.post("/api/cases/{case_id}/close")
+async def close_case_endpoint(case_id: str, req: CaseCloseRequest):
+    """Close a case, refusing while required tasks are open.
+
+    The database enforces the same rule (trigger, migration 20260727000000) so
+    closing straight through PostgREST cannot bypass it. This endpoint checks
+    first anyway, to return a list of what is actually blocking rather than a
+    raw constraint error.
+
+    On close the resolution summary is pushed to the AMS; the per-task detail
+    stays in the CRM, which is the system that needs it.
+    """
+    from hermes.casework import templates as T
+    from hermes.renewals import cases as C
+
+    supa = _get_supa()
+    actor = req.resolved_by_email or C._service_email()
+    _require_users(supa, [("resolved_by_email", req.resolved_by_email)])
+
+    cases = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
+    if not cases:
+        raise HTTPException(status_code=404, detail="case not found")
+    case = cases[0]
+
+    tasks = supa.select(
+        "agency_crm_tasks", columns="*",
+        params={"case_id": f"eq.{case_id}", "order": "sort_order.asc"}, limit=500,
+    )
+    blocking = [
+        t for t in tasks
+        if t.get("is_required") and t.get("status") not in ("completed", "cancelled")
+    ]
+    if blocking:
+        raise HTTPException(status_code=409, detail={
+            "error": "required tasks still open",
+            "case_number": case.get("case_number"),
+            "blocking": [{"id": t.get("id"), "title": t.get("title"),
+                          "status": t.get("status")} for t in blocking],
+            "hint": "complete them, or cancel the ones that did not apply to this case",
+        })
+
+    closed_at = datetime.utcnow().isoformat()
+    try:
+        updated = supa.update("agency_crm_cases", {
+            "status": "closed",
+            "closed_at": closed_at,
+            "resolution": req.resolution,
+            "resolved_by_email": actor,
+        }, params={"id": f"eq.{case_id}"})
+    except Exception as exc:
+        log.exception("close case %s failed", case_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    case = (updated[0] if isinstance(updated, list) and updated else {**case,
+            "status": "closed", "closed_at": closed_at, "resolution": req.resolution})
+    summary = T.build_summary(case, tasks)
+
+    ams = {"pushed": False, "reason": "not requested"}
+    if req.push_to_ams:
+        try:
+            from hermes.casework.executor import push_case_summary_to_ams
+
+            ams = push_case_summary_to_ams(supa, case=case, summary=summary)
+            if ams.get("pushed"):
+                supa.update("agency_crm_cases", {"ams_summary_sent_at": datetime.utcnow().isoformat()},
+                            params={"id": f"eq.{case_id}"})
+        except Exception as exc:  # noqa: BLE001
+            # A closed case is closed. An AMS hiccup is a sync problem, not a
+            # reason to refuse the close and make somebody redo the work.
+            log.exception("AMS summary push failed for case %s", case_id)
+            ams = {"pushed": False, "reason": str(exc)}
+
+    C.log_case_event(
+        supa, case_id=case_id, event_type="case_closed",
+        summary=f"Closed: {req.resolution}", actor_email=actor,
+    )
+    return {"ok": True, "case": case, "summary": summary, "ams": ams}
+
+
 @app.get("/api/cases")
 async def list_cases_endpoint(status: str | None = None, case_type: str | None = None, limit: int = 100):
     """List cases, newest first."""

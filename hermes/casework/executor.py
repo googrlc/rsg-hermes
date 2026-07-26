@@ -105,6 +105,41 @@ def stage_case_job(supa: "SupabaseClient", *, case: dict[str, Any], approved_by:
                   target_id=str(case["id"]), task_payload=map_case_to_task(case), approved_by=approved_by)
 
 
+def map_case_close_to_task(case: dict[str, Any], summary: str) -> dict[str, Any]:
+    """NowCerts body for a CLOSED case.
+
+    The AMS gets the outcome, not the checklist: one closed task carrying the
+    resolution summary. The per-task detail and timings stay in the CRM, which is
+    the system that needs them for reporting and for training the data.
+    """
+    body = map_case_to_task(case)
+    body["status"] = "Closed"
+    body["description"] = summary
+    return body
+
+
+def push_case_summary_to_ams(supa: "SupabaseClient", *, case: dict[str, Any],
+                             summary: str) -> dict[str, Any]:
+    """Stage the closing summary for NowCerts.
+
+    Staged, not written directly — the AMS write path is the approved
+    outbound_sync_queue drained by the executor, with retry and dead-lettering.
+    A case with no linked insured cannot be pushed; that is reported rather than
+    raised, because failing to sync must never block closing a finished case.
+    """
+    if not case.get("insured_database_id"):
+        return {"pushed": False, "reason": "case has no insured_database_id — nothing to attach in NowCerts"}
+    job = _stage(
+        supa,
+        object_type=OBJECT_TYPE_CASE,
+        target_table=CASES_TABLE,
+        target_id=str(case["id"]),
+        task_payload=map_case_close_to_task(case, summary),
+        approved_by=case.get("resolved_by_email") or "system",
+    )
+    return {"pushed": True, "queued": True, "queue_id": job.get("id"), "job": job}
+
+
 def stage_task_job(supa: "SupabaseClient", *, task: dict[str, Any], insured_database_id: str,
                    approved_by: str, policy_number: str | None = None) -> dict[str, Any]:
     if not task.get("id"):
