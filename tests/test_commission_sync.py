@@ -145,10 +145,37 @@ def test_renewing_excluded():
     assert supa.tables.get(cs.LEDGER_TABLE, []) == []
 
 
-def test_zero_premium_skipped():
+def test_zero_premium_and_no_commission_skipped():
     supa = supa_with([cpol("P1", premium=0.0)])
     res = cs.run_commission_sync(supa)
-    assert res.skipped_no_premium == 1 and res.inserted == 0
+    assert res.skipped_no_value == 1 and res.inserted == 0
+
+
+def test_zero_premium_but_known_ams_commission_is_still_seeded():
+    """Regression: three live policies carried $0 premium in the book and a real
+    agency_commission_amount, and were silently dropped — ~$1,074 of commission
+    off the surface. The commission is what we track; premium is context."""
+    supa = supa_with([cpol("P1", premium=0.0, agency_commission_amount=535.65)])
+    res = cs.run_commission_sync(supa)
+    assert res.inserted == 1 and res.skipped_no_value == 0
+    row = supa.tables[cs.LEDGER_TABLE][0]
+    assert row["expected_commission"] == 535.65
+    assert row["gross_premium"] == 0.0
+
+
+def test_every_scanned_policy_is_accounted_for():
+    """The identity: nothing falls off the map unexplained."""
+    supa = supa_with([
+        cpol("P1", premium=1000.0),                                  # inserted
+        cpol("P2", status="Renewing"),                               # not commissionable
+        cpol("P3", premium=0.0),                                     # no value
+        cpol("P4", premium=1000.0, eff="2020-01-01"),                # out of window
+        cpol("P5", premium=0.0, agency_commission_amount=100.0),     # inserted via commission
+    ])
+    res = cs.run_commission_sync(supa)
+    assert res.policies_scanned == 5
+    assert res.balanced, res.message
+    assert res.accounted == 5
 
 
 def test_no_rule_and_no_direct_still_inserts_with_null_expected():

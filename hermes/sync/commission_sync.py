@@ -59,10 +59,12 @@ class CommissionSyncResult:
     policies_scanned: int = 0
     inserted: int = 0
     updated: int = 0
+    skipped_no_policy_number: int = 0
     skipped_not_commissionable: int = 0
-    skipped_no_premium: int = 0
+    skipped_no_value: int = 0        # neither premium nor an AMS commission amount
     skipped_out_of_window: int = 0
-    no_expected: int = 0
+    skipped_no_date: int = 0         # statement_date is NOT NULL and nothing to seed it
+    no_expected: int = 0             # seeded, but no expected commission could be derived
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -70,13 +72,37 @@ class CommissionSyncResult:
         return not self.errors
 
     @property
+    def accounted(self) -> int:
+        """Every policy scanned must land in exactly one outcome."""
+        return (
+            self.inserted
+            + self.updated
+            + self.skipped_no_policy_number
+            + self.skipped_not_commissionable
+            + self.skipped_no_value
+            + self.skipped_out_of_window
+            + self.skipped_no_date
+        )
+
+    @property
+    def balanced(self) -> bool:
+        """No policy may fall off the map unexplained.
+
+        ``no_expected`` is deliberately excluded — it counts rows that WERE
+        seeded, so adding it would double-count.
+        """
+        return self.accounted == self.policies_scanned - len(self.errors)
+
+    @property
     def message(self) -> str:
         return (
             f"commission ledger (from book): scanned={self.policies_scanned} "
             f"inserted={self.inserted} updated={self.updated} "
+            f"no_policy_number={self.skipped_no_policy_number} "
             f"not_commissionable={self.skipped_not_commissionable} "
-            f"no_premium={self.skipped_no_premium} out_of_window={self.skipped_out_of_window} "
-            f"no_expected={self.no_expected} errors={len(self.errors)}"
+            f"no_value={self.skipped_no_value} out_of_window={self.skipped_out_of_window} "
+            f"no_date={self.skipped_no_date} no_expected={self.no_expected} "
+            f"balanced={self.balanced} errors={len(self.errors)}"
         )
 
 
@@ -93,6 +119,27 @@ def _num(value: Any) -> float | None:
 
 def _premium(policy: dict[str, Any]) -> float | None:
     return _num(policy.get("premium_amount")) or _num(policy.get("annualized_premium"))
+
+
+def _direct_commission(policy: dict[str, Any]) -> float | None:
+    """NowCerts' own agency commission amount, when it carries one."""
+    return _num(policy.get("agency_commission_amount"))
+
+
+def _has_commissionable_value(policy: dict[str, Any]) -> bool:
+    """Is there anything to ledger?
+
+    Premium OR a direct AMS commission amount is enough. Requiring premium alone
+    silently dropped live policies whose premium never made it into the book but
+    whose agency commission is known — three of them, ~$1,074 of real commission,
+    found 2026-07-26. The commission is the thing being tracked; premium is
+    context for it.
+    """
+    prem = _premium(policy)
+    if prem and prem > 0:
+        return True
+    direct = _direct_commission(policy)
+    return bool(direct and direct > 0)
 
 
 def _expected(policy: dict[str, Any], rule: dict[str, Any] | None, is_renewal: bool) -> float | None:
@@ -175,15 +222,16 @@ def run_commission_sync(
     for p in policies:
         pn = str(p.get("policy_number") or "").strip()
         if not pn:
+            result.skipped_no_policy_number += 1
             continue
         status = elig.normalize_status(p.get("status"))
         if status not in LEDGER_STATUSES:
             result.skipped_not_commissionable += 1
             continue
-        prem = _premium(p)
-        if not prem or prem <= 0:
-            result.skipped_no_premium += 1
+        if not _has_commissionable_value(p):
+            result.skipped_no_value += 1
             continue
+        prem = _premium(p) or 0.0
 
         # WON + in-window only: effective in [since, today]. Drops future-effective
         # (2027 staged renewals — not won yet) and pre-since old book.
@@ -237,7 +285,7 @@ def run_commission_sync(
                 }
                 if not (eff or exp):
                     # No date at all — cannot satisfy NOT NULL statement_date.
-                    result.skipped_no_premium += 1
+                    result.skipped_no_date += 1
                     continue
                 if not dry_run:
                     row = supa.insert(LEDGER_TABLE, _project(insert, ledger_cols))
