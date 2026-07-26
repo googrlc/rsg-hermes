@@ -1,21 +1,28 @@
 # MUTABLE STATE LIVES IN A VOLUME, NOT IN THE CODE TREE.
 #
-# `.:/app` bind-mounts the git working tree into every container, which means
-# anything the container writes lands in the repo. That surface caused two
-# incidents on 2026-07-26: a `docker cp` restore wrote an older image copy of
-# api.py over the host tree (silently reverting the box below its committed HEAD),
-# and a bad `-v` flag created a directory named `hermes/operations/staleness.py`
-# inside the repo. It is also why the bridge's app.py shows owner dnsmasq:1000 —
-# container writes, from more than one process.
+# The repo is NO LONGER bind-mounted into the containers. The Dockerfile does
+# `COPY . .`, so the image carries the code and personas/; the old `.:/app` mount
+# only shadowed it with the host tree. That mount caused two incidents on
+# 2026-07-26: a `docker cp` restore wrote an older image copy of api.py over the
+# host tree (silently reverting the box below its committed HEAD), and a bad `-v`
+# flag created a directory named `hermes/operations/staleness.py` inside the repo.
+# It was also why the bridge's app.py showed owner dnsmasq:1000 — container writes
+# from more than one process.
 #
-# The mount could not simply be dropped, because three job-idempotency files lived
-# INSIDE the tree at .hermes/ and were referenced by RELATIVE paths, resolving
-# against WORKDIR /app. Removing the mount would have made them ephemeral, so
-# every container recreate would reset the sentinel's "already sent today" memory
-# and re-post the daily briefing.
+# DEPLOYS ARE NOW BUILD-ONLY. `git pull` alone no longer updates running code;
+# every deploy must rebuild the image:
+#   docker compose up -d --build            # hermes / hermes-api / intake worker
+#   docker compose --profile scheduler up -d --build hermes-scheduler
+# Cron entries already use `docker compose run --rm hermes ...`, which uses the
+# image, so they are unaffected.
 #
-# So state moved to the hermes-state volume first. That is the prerequisite; the
-# code mount can go once nothing writes to /app.
+# Prerequisite that made this safe: the three job-idempotency files that used to
+# live at .hermes/ (relative paths resolving against WORKDIR /app) moved to the
+# named hermes-state volume at /var/lib/hermes, and are pointed at below via
+# HERMES_*_STATE_FILE env overrides. Nothing else writes under /app at runtime
+# (INTAKE_FOLDER_PATH is not used; HERMES_PERSONA_FILE is read-only from the
+# image). Compose prefixes named volumes with the project name, so on the box the
+# volume is rsg-hermes_hermes-state, not hermes-state.
 services:
   hermes:
     build:
@@ -26,7 +33,6 @@ services:
     env_file:
       - .env
     volumes:
-      - .:/app
       - hermes-state:/var/lib/hermes
     environment:
       # Absolute paths into the state volume. These OVERRIDE the relative paths in
@@ -48,7 +54,6 @@ services:
     env_file:
       - .env
     volumes:
-      - .:/app
       - hermes-state:/var/lib/hermes
     environment:
       # Absolute paths into the state volume. These OVERRIDE the relative paths in
@@ -76,7 +81,6 @@ services:
     env_file:
       - .env
     volumes:
-      - .:/app
       - hermes-state:/var/lib/hermes
     restart: unless-stopped
     command: ["hermes", "--run-intake-worker", "--intake-poll-seconds", "5"]
@@ -89,7 +93,6 @@ services:
     env_file:
       - .env
     volumes:
-      - .:/app
       - hermes-state:/var/lib/hermes
     restart: unless-stopped
     # Executor scheduler: renewal, intake, quote, casework and
