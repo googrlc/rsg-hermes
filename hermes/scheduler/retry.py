@@ -19,7 +19,11 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from hermes.intake.commit import OBJECT_TYPE_INTAKE
+from hermes.casework.executor import OBJECT_TYPE_CASE, OBJECT_TYPE_TASK
+from hermes.command_center.router import OBJECT_TYPE_AMS as OBJECT_TYPE_INTAKE_AMS
+from hermes.quotes.executor import OBJECT_TYPE_QUOTE
 from hermes.renewals.executor import DESTINATION_NOWCERTS, OBJECT_TYPE_RENEWAL, QUEUE_TABLE
+from hermes.sync.opportunity_writeback import OBJECT_TYPE as OBJECT_TYPE_OPPORTUNITY_WRITEBACK
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient
@@ -37,7 +41,41 @@ QUEUE_PROCESSING = "processing"
 QUEUE_FAILED = "failed"
 QUEUE_DEAD = "dead"
 
-_OBJECT_TYPES = (OBJECT_TYPE_RENEWAL, OBJECT_TYPE_INTAKE)
+# Every object_type whose failures should back off. This tuple and
+# `due_filter()` below are a matched pair: a type listed here gets scheduled_for
+# set on failure, and ONLY an executor that honours scheduled_for will then wait.
+#
+# Until 2026-07-26 this held just (renewal, intake) — which happened to be exactly
+# the two executors that honour it, so the system was accidentally consistent.
+# Adding a type here without its executor honouring the column means a failing job
+# is retried immediately, every scheduler cycle, forever: an exponential backoff
+# that silently does nothing. test_retry_backoff_is_honoured_everywhere guards it.
+_OBJECT_TYPES = (
+    OBJECT_TYPE_RENEWAL,
+    OBJECT_TYPE_INTAKE,
+    OBJECT_TYPE_QUOTE,
+    OBJECT_TYPE_CASE,
+    OBJECT_TYPE_TASK,
+    OBJECT_TYPE_OPPORTUNITY_WRITEBACK,
+    OBJECT_TYPE_INTAKE_AMS,
+)
+# intake_crm is deliberately absent. requeue_or_deadletter filters
+# destination_system = 'nowcerts', and a CRM-destination job carries
+# destination_system = 'crm' — listing it here would look like coverage while the
+# destination filter silently excluded every row. CRM-destination failures are not
+# backed off at ALL today; fixing that means broadening the destination filter,
+# which is a separate change with its own blast radius.
+
+
+def due_filter(now: datetime | None = None) -> dict[str, str]:
+    """The PostgREST filter every executor must apply to respect a backoff.
+
+    One home for it. It existed as a copy-pasted `or=(...)` string in two
+    executors and was absent from the other five, so honouring the backoff was a
+    property of where you happened to look rather than of the queue.
+    """
+    stamp = (now or _utcnow()).isoformat()
+    return {"or": f"(scheduled_for.is.null,scheduled_for.lte.{stamp})"}
 
 
 def _utcnow() -> datetime:

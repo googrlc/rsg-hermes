@@ -98,7 +98,13 @@ def propose_writeback(
 def list_pending(
     supa: "SupabaseClient", *, policy_number: str | None = None, limit: int = 50
 ) -> list[dict[str, Any]]:
-    """Proposed-but-unapproved NowCerts renewal rows (the human review set)."""
+    """Proposed-but-unapproved NowCerts renewal rows (the human review set).
+
+    Deliberately does NOT apply retry.due_filter(): this lists rows awaiting a
+    human decision (approved_at is null), it does not claim work. Hiding a
+    backed-off row from the review list would make it invisible to the person who
+    needs to approve or cancel it.
+    """
     params: dict[str, str] = {
         "object_type": f"eq.{OBJECT_TYPE_RENEWAL}",
         "destination_system": f"eq.{DESTINATION_NOWCERTS}",
