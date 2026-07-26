@@ -1,6 +1,57 @@
 # Plan — AMS policies → commission surface, in the cockpit
 
 **Written 2026-07-26**, measured against the live system.
+
+## Status — updated 2026-07-26 after deploy
+
+| Phase | State |
+|---|---|
+| 0 — stop the surface lying | **DONE, live.** Coverage + counts on every read; honest empty state; tracker link fixed. |
+| 1 — close the intake gap | **DONE, live.** 3 policies (~$1,074) recovered; every scanned policy attributable; `balanced` asserted. |
+| 1b — Slack retirement | **DONE, live.** Both gating bugs closed (PR #217). Sweeping them found two live defects nobody had noticed: `kpi_writer` had been querying `crm_write_queue` — a table that never existed — so the nightly 6am KPI job had been 404ing for months; and `ops-doctor` probed two phantom tables, which is why it exited 1 permanently. |
+| Portal corrections | **DONE, live.** `portal_overrides` + `portal_write_log`, self-retiring, approval-gated, cockpit edit UI. |
+| Migration | **DONE.** `origin`, status CHECK, line dedupe, Slack/Espo column cleanup. |
+| 2 — rollup + classify | **DONE, live.** Term-scoped. After the line relink: 6 reconciled / 19 missing_statement / 7 no_expected / 2 overpaid / 1 underpaid / 78 pending / 3 rolled_up. |
+| **2a — statement ingest** | **DONE, live** (PRs #222/#223). Matching ladder, xlsx parsing, cockpit upload with approval gate. |
+| 3 — subordinate the tracker | not started — the remaining piece |
+
+Also live: `HERMES_AMS_LIVE_READS=1` (retention 60.78% from the AMS, not the
+mirror's inflated 66.66%), and the daily `agency_snapshots` writer with its
+5:45am cron — the trend has two rows for the first time.
+
+### Corrections to this plan, found by building it
+
+- **The rollup grain was wrong in the original draft.** Summing a policy's whole
+  transaction history against one term's expected classified 23 of 30 rows as
+  overpaid. Term-scoping gives 2. See `hermes/commissions/reconcile.py`.
+- **`commission_ledger.delta` is a GENERATED column** and cannot be written;
+  Postgres derives it from actual − expected.
+- **The in-window gap is 5, not 6** — the original SQL used overlapping predicates.
+- **`no_expected`/`underpaid`/`canceled` counts in the tables below are stale.**
+  They were graded against expected values the nightly seed has since
+  re-sourced; the rollup corrected them.
+
+### Corrections found finishing 2a (statement ingest)
+
+- **90 orphaned statement lines were not one problem but three.** 15 were a pure
+  linking defect (the ledger row existed; the original ingest never set
+  `ledger_id`). 47 needed a ledger row created from the book — the seeding floor
+  is a reporting preference and arriving money is a fact, so `origin='statement'`
+  records the difference. 28 correctly stay unmatched.
+- **The two $0.00 policy numbers are statement filler, not policies.** `99999999`
+  (13 lines) and `874308795` (3) are absent from the book. Anything clever enough
+  to "resolve" them is clever enough to attach real money to the wrong client.
+- **Three policies are in the mirror but NOT in the live AMS** (`960689667`,
+  `980043890`, `980057774`). Creating ledger rows for them would invent policies.
+  Only visible because `HERMES_AMS_LIVE_READS=1` — against the mirror they look
+  real.
+- **A totals row silently doubled a statement.** A trailing `TOTAL` line carries an
+  amount and no policy number; counting it turned $144.59 into $289.18. Rows with
+  money and no policy number are now excluded and reported. This would have sailed
+  past the crosscheck on any statement whose carrier prints no total.
+- **9 normalized policy keys are ambiguous** — two ledger rows folding to the same
+  key. They are dropped, not guessed.
+
 **Goal:** every commissionable policy reaches a surface where the work can be
 done, and that surface lives in the cockpit.
 
