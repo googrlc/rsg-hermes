@@ -191,11 +191,15 @@ def approve_draft(
       APPROVE ALL                → transition awaiting_approval -> approved
                                    (worker picks up, enqueues CRM writes,
                                    walks writing -> written -> complete)
-      APPROVE CRM ONLY           → same as APPROVE ALL for now; worker
-                                   handles both paths uniformly. The
-                                   token is preserved in status_history.
-      APPROVE SUPABASE ONLY      → ditto
-      APPROVE TASKS ONLY         → ditto
+      APPROVE CRM ONLY           → approved; worker skips the Supabase
+                                   retrieval/RAG rows and only creates the
+                                   CRM opportunities (+ stages the AMS
+                                   insured). Token persisted on the row.
+      APPROVE SUPABASE ONLY      → approved; worker skips the CRM/AMS
+                                   writes and only inserts retrieval rows.
+      APPROVE TASKS ONLY         → approved; no task entity exists yet, so
+                                   the worker completes the row with no
+                                   writes (deliberate no-op).
       REVISE                     → transition to failed with note
                                    "marked revised by approver"
                                    (intake_submissions enum has no
@@ -262,10 +266,11 @@ def approve_draft(
             summary=f"Submission {submission_id} marked failed (revise). Resubmit with corrections.",
         )
 
-    # Any APPROVE* token → transition to 'approved'. The worker handles
-    # the rest. Partial-scope tokens (CRM ONLY / SUPABASE ONLY / TASKS
-    # ONLY) currently behave identically to APPROVE ALL — the token is
-    # preserved in status_history for audit + future scope control.
+    # Any APPROVE* token → transition to 'approved'. The token is persisted
+    # on the row (approval_token column) so the worker can branch on it:
+    # CRM ONLY skips retrieval rows, SUPABASE ONLY skips CRM/AMS writes,
+    # TASKS ONLY is a no-op until a task entity exists. APPROVE ALL does
+    # everything. The token is also echoed in the status_history note for audit.
     approved_at_iso = datetime.now(timezone.utc).isoformat()
     try:
         transition(
@@ -274,6 +279,7 @@ def approve_draft(
             extra_fields={
                 "approved_by": approver_label,
                 "approved_at": approved_at_iso,
+                "approval_token": token,
             },
         )
     except IntakeError as exc:

@@ -575,6 +575,17 @@ class TestApproveDraftRewrite:
         assert result.status == "approved"
         assert "APPROVE CRM ONLY" in supa.update.call_args.args[2]["status_history"][-1]["note"]
 
+    def test_approval_token_is_persisted_on_the_row(self) -> None:
+        """The token must land in the approval_token column so the worker can branch
+        on it, not only in the status_history note."""
+        from hermes.operations.agency_intake_approval import approve_draft
+
+        for token in ("APPROVE ALL", "APPROVE CRM ONLY", "APPROVE SUPABASE ONLY", "APPROVE TASKS ONLY"):
+            supa = self._supa_with_submission()
+            approve_draft(supa, draft_id="sub-1", token=token, approver="U-X")
+            update = supa.update.call_args.args[2]
+            assert update["approval_token"] == token
+
     def test_cancel_transitions_to_failed(self) -> None:
         from hermes.operations.agency_intake_approval import approve_draft
 
@@ -692,6 +703,109 @@ class TestProcessOneApproved:
         update = supa.update.call_args.args[2]
         assert update["status"] == "failed"
         assert update["error_log"][-1]["stage"] == "commit-nowcerts-intake"
+
+    # --- partial-scope approval tokens (FOLLOWUPS #1) -----------------------
+
+    def _claimed_supa(self, token: str | None) -> MagicMock:
+        supa = MagicMock()
+        row = {
+            "id": "sub-1",
+            "status_history": [],
+            "draft_summary": {"account": {"account_name": "Acme"}},
+            "approved_by": "U-LAMAR",
+        }
+        if token is not None:
+            row["approval_token"] = token
+        supa.select.return_value = [row]
+        supa.update_where.return_value = [{"id": "sub-1", "status": "writing", "status_history": []}]
+        supa.update.return_value = {"id": "sub-1"}
+        return supa
+    def test_approve_all_runs_both_crm_and_retrieval(self) -> None:
+        from hermes.operations.intake_worker import process_one_approved
+
+        supa = self._claimed_supa("APPROVE ALL")
+        with patch("hermes.intake.commit.commit_draft") as commit_draft, \
+             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
+                   return_value={}) as insert_retrieval, \
+             patch.object(intake_worker, "_post_alert"):
+            commit_draft.return_value = {"opportunities": [{"id": "opp-1"}],
+                                         "opportunity_count": 1, "intake_job_id": "job-1",
+                                         "nextcloud_folder": None}
+            assert process_one_approved(supa) is True
+        assert commit_draft.called
+        assert insert_retrieval.called
+        # records_created stashes the token that drove the scope.
+        stash = supa.update.call_args.args[2]
+        assert stash["records_created"]["approval_token"] == "APPROVE ALL"
+
+    def test_approve_crm_only_skips_retrieval_rows(self) -> None:
+        from hermes.operations.intake_worker import process_one_approved
+
+        supa = self._claimed_supa("APPROVE CRM ONLY")
+        with patch("hermes.intake.commit.commit_draft") as commit_draft, \
+             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
+                   return_value={}) as insert_retrieval, \
+             patch.object(intake_worker, "_post_alert"):
+            commit_draft.return_value = {"opportunities": [{"id": "opp-1"}],
+                                         "opportunity_count": 1, "intake_job_id": "job-1",
+                                         "nextcloud_folder": None}
+            assert process_one_approved(supa) is True
+        assert commit_draft.called, "CRM ONLY must still create opportunities"
+        assert not insert_retrieval.called, "CRM ONLY must skip retrieval/RAG rows"
+        assert supa.update.call_args.args[2]["records_created"]["approval_token"] == "APPROVE CRM ONLY"
+
+    def test_approve_supabase_only_skips_crm_writes(self) -> None:
+        from hermes.operations.intake_worker import process_one_approved
+
+        supa = self._claimed_supa("APPROVE SUPABASE ONLY")
+        with patch("hermes.intake.commit.commit_draft") as commit_draft, \
+             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
+                   return_value={"client_entities": ["e1"]}) as insert_retrieval, \
+             patch.object(intake_worker, "_post_alert"):
+            assert process_one_approved(supa) is True
+        assert not commit_draft.called, "SUPABASE ONLY must skip CRM/AMS writes"
+        assert insert_retrieval.called, "SUPABASE ONLY must still insert retrieval rows"
+        stash = supa.update.call_args.args[2]
+        assert stash["records_created"]["opportunities"] == []
+        assert stash["records_created"]["approval_token"] == "APPROVE SUPABASE ONLY"
+
+    def test_approve_tasks_only_is_a_noop_that_still_completes(self) -> None:
+        from hermes.operations.intake_worker import process_one_approved
+
+        supa = self._claimed_supa("APPROVE TASKS ONLY")
+        with patch("hermes.intake.commit.commit_draft") as commit_draft, \
+             patch("hermes.integrations.intake_submissions.transition") as transition, \
+             patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
+                   return_value={}) as insert_retrieval, \
+             patch.object(intake_worker, "_post_alert"):
+            assert process_one_approved(supa) is True
+        assert not commit_draft.called, "TASKS ONLY must not write CRM/AMS"
+        assert not insert_retrieval.called, "TASKS ONLY must not write retrieval rows"
+        # The row must still walk through to complete so it is not stranded.
+        statuses = [call.args[2] for call in transition.call_args_list]
+        assert "written" in statuses
+        assert "complete" in statuses
+
+    def test_null_token_defaults_to_approve_all(self) -> None:
+        """Old rows without an approval_token column value keep historical behaviour."""
+        from hermes.operations.intake_worker import process_one_approved
+
+        supa = self._claimed_supa(None)
+        with patch("hermes.intake.commit.commit_draft") as commit_draft, \
+             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
+                   return_value={}) as insert_retrieval, \
+             patch.object(intake_worker, "_post_alert"):
+            commit_draft.return_value = {"opportunities": [{"id": "opp-1"}],
+                                         "opportunity_count": 1, "intake_job_id": "job-1",
+                                         "nextcloud_folder": None}
+            assert process_one_approved(supa) is True
+        assert commit_draft.called
+        assert insert_retrieval.called
+        assert supa.update.call_args.args[2]["records_created"]["approval_token"] == "APPROVE ALL"
 
 
 class TestTickAllArcs:
