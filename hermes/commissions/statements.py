@@ -472,11 +472,17 @@ def stage_statement(
     batch_id = str(batch.get("id"))
 
     for line in lines:
-        supa.insert(STAGING_TABLE, {
+        payload = {
             "batch_id": batch_id,
-            **{k: (float(v) if isinstance(v, Decimal) else v)
-               for k, v in line.items()},
-        })
+            **{k: (float(v) if isinstance(v, Decimal) else v) for k, v in line.items()},
+        }
+        # carrier_name is NOT NULL on staging AND on commission_transactions, but
+        # statement LINES rarely repeat the carrier — it is a property of the
+        # statement, supplied on upload. Fall back to it rather than failing the
+        # whole batch on a column the line was never going to carry.
+        if not payload.get("carrier_name"):
+            payload["carrier_name"] = carrier or "Unknown"
+        supa.insert(STAGING_TABLE, payload)
 
     staged = StagedBatch(
         batch_id=batch_id, status=status, filename=filename,
@@ -557,6 +563,8 @@ def commit_statement(
     for line in staged:
         payload = {k: v for k, v in line.items() if k not in drop}
         payload["statement_id"] = result.statement_id
+        if not payload.get("carrier_name"):
+            payload["carrier_name"] = batch.get("carrier_name") or "Unknown"
         payload["is_negative"] = (line.get("commission_amount") or 0) < 0
         try:
             supa.insert(TRANSACTIONS_TABLE, payload)
