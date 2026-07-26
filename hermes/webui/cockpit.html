@@ -245,9 +245,16 @@ const TABLES = {
     cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['delta','Delta',money],['reconciliation_status','Status',chip]]},
   pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies. Click one to send a quote to NowCerts.',endpoint:'/api/opportunities',action:'newOpp',rowClick:(o)=>openOpportunity(o),
     cols:[['insured_name','Client'],['line_of_business','LOB'],['stage','Stage',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']]},
-  tasks:{title:'Tasks',eyebrow:'Case-linked execution',lede:'Tasks across all cases.',endpoint:'/api/tasks',action:'newTask',
-    cols:[['title','Task'],['status','Status',chip],['priority','Priority'],['assigned_to_email','Assignee'],['due_at','Due']]},
+  tasks:{title:'Tasks',eyebrow:'Case work and internal follow-up',lede:'Every task — client case work and standalone internal items. Click one to update it.',endpoint:'/api/tasks',action:'newTask',rowClick:(t)=>openTask(t),
+    cols:[['title','Task'],['scope','Scope',scopeChip],['status','Status',chip],['priority','Priority'],['assigned_to_email','Assignee'],['due_at','Due']]},
 };
+/* A task is case work, client work with no case, or purely internal. Showing
+   which is the difference between a task list and a pile. */
+function scopeChip(_v,row){
+  if(row.case_id) return `<span class="chip">case</span>`;
+  if(row.insured_database_id) return `<span class="chip warn">client</span>`;
+  return `<span class="chip safe">internal</span>`;
+}
 function chip(v){ if(!v)return '—'; const s=String(v).toLowerCase(); let cls=''; if(/crit|lost/.test(s))cls='crit'; else if(/risk|warn|pending|open|not_started/.test(s))cls='warn'; else if(/safe|reconciled|won|synced|completed/.test(s))cls='safe'; return `<span class="chip ${cls}">${esc(v)}</span>`; }
 
 /* ---------- Router ---------- */
@@ -318,7 +325,9 @@ async function renderTable(host,cfg){
     const head = cfg.cols.map(c=>`<th>${c[1]}</th>`).join('');
     const body = rows.map((r,i)=>`<tr${cfg.rowClick?` data-i="${i}" style="cursor:pointer"`:''}>`+cfg.cols.map(c=>{
       const fmt=c[2]; const raw=r[c[0]];
-      const cell = fmt?fmt(raw):(raw==null||raw===''?'<span class="muted">—</span>':esc(raw));
+      // Formatters get the whole row too: some cells (scope) are derived from
+      // sibling fields rather than from a column of their own.
+      const cell = fmt?fmt(raw,r):(raw==null||raw===''?'<span class="muted">—</span>':esc(raw));
       const num = fmt===money?' class="num"':'';
       // A portal correction is marked in place: the value shown is a human's,
       // not the AMS's, and hovering says what it replaced.
@@ -1305,21 +1314,75 @@ async function openNewCase(){
     closeModal(); toast('Case '+(r.case&&r.case.case_number?r.case.case_number:'')+' opened.'); show('cases');
   });
 }
+/* ---------- Task detail: open it, change it, save it ----------
+   Tasks were create-only and view-only (issue #195): 18 tasks sat open in
+   production because nothing could close one. completed_at is derived server
+   side from status, so this form never sends it. */
+async function openTask(t){
+  await loadUsers();
+  const parentCase = (CASES||[]).find(c=>c.id===t.case_id);
+  const scope = t.case_id ? `Case ${esc(parentCase?.case_number||t.case_id.slice(0,8))}`
+              : t.insured_database_id ? 'Client task — no case'
+              : 'Internal task — no case, no client';
+  openModal(`<div class="modal-head"><h3>${esc(t.title||'Task')}</h3><p>${scope}</p></div>
+   <div class="modal-body">
+     <div class="field"><label>Title</label><input id="tkTitle" value="${esc(t.title||'')}"/></div>
+     <div class="row2">
+       <div class="field"><label>Status</label><select id="tkStatus">${
+         ['not_started','in_progress','waiting','completed','cancelled']
+           .map(s=>`<option value="${s}"${t.status===s?' selected':''}>${s.replace('_',' ')}</option>`).join('')}</select></div>
+       <div class="field"><label>Priority</label><select id="tkPrio">${
+         ['low','medium','high','urgent']
+           .map(s=>`<option value="${s}"${t.priority===s?' selected':''}>${s}</option>`).join('')}</select></div>
+     </div>
+     <div class="row2">
+       <div class="field"><label>Assignee</label><select id="tkAssignee">${userOptions(t.assigned_to_email)}</select></div>
+       <div class="field"><label>Due</label><input id="tkDue" type="date" value="${esc((t.due_at||'').slice(0,10))}"/></div>
+     </div>
+     <div class="field"><label>Description</label><textarea id="tkDesc">${esc(t.description||'')}</textarea></div>
+     <div class="t-meta">Created ${esc((t.created_at||'').slice(0,10))}${t.created_by_email?' by '+esc(t.created_by_email):''}${
+        t.completed_at?` · closed ${esc(t.completed_at.slice(0,10))}`:''}</div>
+   </div>
+   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn primary" id="tkSave">Save changes</button></div>`);
+
+  $('#tkSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const title=$('#tkTitle').value.trim();
+    if(!title) throw new Error('Title is required.');
+    const due=$('#tkDue').value;
+    // Only send what actually changed — a PATCH that resends everything turns an
+    // unrelated stale field into a silent overwrite.
+    const body={};
+    const set=(k,v,orig)=>{ if(v!==(orig??'')) body[k]=v||null; };
+    set('title',title,t.title);
+    set('status',$('#tkStatus').value,t.status);
+    set('priority',$('#tkPrio').value,t.priority);
+    set('assigned_to_email',$('#tkAssignee').value,t.assigned_to_email);
+    set('description',$('#tkDesc').value,t.description);
+    if(due!==(t.due_at||'').slice(0,10)) body.due_at = due||null;
+    if(!Object.keys(body).length){ closeModal(); toast('Nothing changed.'); return; }
+    await api(`/api/tasks/${t.id}`,{method:'PATCH',body:JSON.stringify(body)});
+    closeModal(); toast('Task updated.'); show('tasks');
+  });
+}
+
 async function openNewTask(preCase){
   await loadUsers(); if(!CASES.length){ try{CASES=firstArray(await api('/api/cases'))}catch{} }
   const caseOpts = CASES.map(c=>`<option value="${esc(c.id)}"${preCase&&preCase.id===c.id?' selected':''}>${esc(c.case_number||'')} — ${esc(c.insured_name||c.title||'')}</option>`).join('');
-  openModal(`<div class="modal-head"><h3>New task</h3><p>Add a task under a case.</p></div>
+  openModal(`<div class="modal-head"><h3>New task</h3><p>A task can hang off a case, or stand alone — "update commission percentage" is nobody's client work.</p></div>
    <div class="modal-body">
-     <div class="field"><label>Case</label><select id="taskCase">${caseOpts||'<option value="">No cases yet</option>'}</select></div>
+     <div class="field"><label>Case <span class="muted">— leave as “No case” for internal work</span></label>
+       <select id="taskCase"><option value="">No case (internal task)</option>${caseOpts}</select></div>
      <div class="field"><label>Title</label><input id="taskTitle" placeholder="Call the client"/></div>
      <div class="row2"><div class="field"><label>Assignee</label><select id="taskAssignee">${userOptions()}</select></div>
-       <div class="field"><label>Priority</label><select id="taskPrio">${['low','medium','high'].map(s=>`<option${s==='medium'?' selected':''}>${s}</option>`).join('')}</select></div></div>
+       <div class="field"><label>Priority</label><select id="taskPrio">${['low','medium','high','urgent'].map(s=>`<option${s==='medium'?' selected':''}>${s}</option>`).join('')}</select></div></div>
      <div class="field"><label>Description</label><textarea id="taskDesc"></textarea></div></div>
    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="taskSave">Create task</button></div>`);
   $('#taskSave').onclick=(e)=>submitBtn(e.target,async()=>{
     const cid=$('#taskCase').value, title=$('#taskTitle').value.trim();
-    if(!cid){throw new Error('Pick a case.')} if(!title){throw new Error('Title is required.')}
-    const r=await api('/api/tasks',{method:'POST',body:JSON.stringify({case_id:cid,title,assigned_to_email:$('#taskAssignee').value,priority:$('#taskPrio').value,description:$('#taskDesc').value||null})});
+    if(!title){throw new Error('Title is required.')}
+    // No case is a legitimate choice now, not a validation failure.
+    const r=await api('/api/tasks',{method:'POST',body:JSON.stringify({case_id:cid||null,title,assigned_to_email:$('#taskAssignee').value,priority:$('#taskPrio').value,description:$('#taskDesc').value||null})});
     closeModal(); toast(r.created===false?'Task already existed.':'Task created.'); show($('#viewTitle').textContent.toLowerCase()==='cases'?'cases':'tasks');
   });
 }
