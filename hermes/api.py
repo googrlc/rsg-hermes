@@ -1491,6 +1491,118 @@ async def run_intake_writebacks(req: CaseworkRunRequest):
     return {"ok": True, **summary}
 
 
+# Case attachments (issue #195). Case-level only, deliberately: every task already
+# belongs to a case or a client, so a second home for documents would just be a
+# place for them to hide. A renewal worksheet attached to a task but invisible on
+# its case is worse than no attachment feature at all.
+#
+# Filing category follows the case type, so a renewal's paperwork lands in the
+# client's "Renewal Reviews" folder rather than a generic dump.
+_CASE_TYPE_CATEGORY = {
+    "renewal": "Renewal Reviews",
+    "marketing": "Quotes",
+    "service": "Correspondence",
+}
+_CASE_DOC_MAX_BYTES = 25 * 1024 * 1024
+
+
+@app.post("/api/cases/{case_id}/documents")
+async def upload_case_document(
+    case_id: str,
+    file: UploadFile = File(...),
+    uploaded_by: str = Form(""),
+    category: str = Form(""),
+    title: str = Form(""),
+):
+    """Attach a file to a case: Nextcloud for the bytes, a doc-link row for the CRM.
+
+    Same path the renewal PDF filer already uses (file_document -> link_document),
+    so a hand-attached document lands in the same client folder tree as a generated
+    one instead of a parallel store.
+    """
+    from hermes.integrations.nextcloud_client import CLIENT_CATEGORIES, NextcloudClient
+    from hermes.renewals import cases as C
+
+    supa = _get_supa()
+    rows = []
+    try:
+        rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
+    except Exception:
+        rows = []  # malformed uuid -> not found
+    if not rows:
+        raise HTTPException(status_code=404, detail="case not found")
+    case = rows[0]
+
+    uploader = uploaded_by.strip() or C._service_email()
+    _require_users(supa, [("uploaded_by", uploader)])
+
+    if category and category not in CLIENT_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown category '{category}'; must be one of {list(CLIENT_CATEGORIES)}",
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="uploaded file is empty")
+    if len(content) > _CASE_DOC_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file is {len(content) // 1024 // 1024}MB; the limit is "
+                   f"{_CASE_DOC_MAX_BYTES // 1024 // 1024}MB",
+        )
+
+    filename = (file.filename or "attachment").strip()
+    folder = category or _CASE_TYPE_CATEGORY.get(
+        str(case.get("case_type") or ""), "Correspondence"
+    )
+    client_name = case.get("insured_name") or None
+
+    try:
+        filed = NextcloudClient().file_document(
+            content=content,
+            filename=filename,
+            content_type=file.content_type or "application/octet-stream",
+            # No insured on the case -> Internal/Case Files rather than a client
+            # folder. Guessing a client name would misfile it under someone.
+            client=client_name,
+            category=folder,
+            internal_folder=None if client_name else "Case Files",
+        )
+    except Exception as exc:
+        log.exception("case document upload failed: case=%s file=%s", case_id, filename)
+        raise HTTPException(status_code=502, detail=f"Nextcloud upload failed: {exc}")
+
+    try:
+        link = C.link_document(
+            supa,
+            case_id=case_id,
+            title=title.strip() or filename,
+            nextcloud_path=filed["path"],
+            nextcloud_url=filed.get("url"),
+            insured_id=case.get("insured_database_id"),
+            content_type=file.content_type,
+            uploaded_by_email=uploader,
+        )
+    except Exception as exc:
+        # The bytes are safely in Nextcloud; only the CRM link failed. Say so —
+        # "upload failed" would send someone hunting for a file that is right there.
+        log.exception("case document link failed: case=%s path=%s", case_id, filed["path"])
+        raise HTTPException(
+            status_code=502,
+            detail=f"File stored at {filed['path']} but linking it to the case failed: {exc}",
+        )
+
+    # Keep the case's folder pointer current, as the renewal filer does.
+    try:
+        supa.update("agency_crm_cases", case_id,
+                    {"nextcloud_folder_url": filed.get("url") or filed["path"]})
+    except Exception:  # noqa: BLE001 — a pointer refresh must not fail the upload
+        log.exception("case folder pointer update failed: %s", case_id)
+
+    return {"ok": True, "document": link, "filed_to": filed["path"]}
+
+
 @app.get("/api/cases/{case_id}/documents")
 async def case_documents_endpoint(case_id: str):
     """Nextcloud document links filed against a case (agency_crm_document_links)."""
