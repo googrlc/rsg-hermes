@@ -120,9 +120,6 @@ BAND_REVIEW_MAX = 25.0
 # --- Webhook auth ---
 SERVICE_WEBHOOK_SECRET = os.environ.get("SERVICE_WEBHOOK_SECRET", "")
 
-# --- EspoCRM base URL ---
-ESPO_BASE_URL = os.environ.get("ESPO_URL", "").rstrip("/")
-
 # --- Worksheet checkbox fields (legacy Renewal-side booleans; deprecated in v6) ---
 CHECKBOX_FIELDS = [
     "renewal_reviewed",

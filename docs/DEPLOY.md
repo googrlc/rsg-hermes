@@ -10,7 +10,7 @@ The form now supports automatic configuration via environment variables for prod
 |----------|-------------|---------|
 | `HERMES_SUPABASE_URL` | Supabase Function URL | `https://xyz.supabase.co/functions/v1/hermes-crm-proxy` |
 | `HERMES_SUPABASE_KEY` | Supabase Anon/Publishable Key | `eyJhbGciOiJIUzI1NiIs...` |
-| `HERMES_WEBHOOK_URL` | Direct EspoCRM Webhook URL | `https://crm.example.com/api/v1/...` |
+| `HERMES_WEBHOOK_URL` | Direct the CRM Webhook URL | `https://crm.example.com/api/v1/...` |
 | `HERMES_TRANSPORT_MODE` | Transport mode: `proxy` or `direct` | `proxy` |
 
 ### Deployment Methods

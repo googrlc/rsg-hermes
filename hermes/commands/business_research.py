@@ -6,13 +6,11 @@ import json
 import logging
 import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from hermes.core.dispatcher import DispatchResult
+from hermes.integrations import retrieval_client
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-
-if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
 
 log = logging.getLogger(__name__)
 
@@ -283,32 +281,6 @@ def _apply_spine_defaults(research: dict[str, Any], spine: dict[str, Any]) -> No
             research["sic"] = sic["sic_code"]
 
 
-def _entity_fields(client: "EspoClient", entity: str) -> dict[str, Any]:
-    metadata = client.get_metadata()
-    if not isinstance(metadata, dict):
-        return {}
-    entity_def = metadata.get("entityDefs", {}).get(entity, {})
-    fields = entity_def.get("fields", {}) if isinstance(entity_def, dict) else {}
-    return fields if isinstance(fields, dict) else {}
-
-
-def _first_existing(fields: dict[str, Any], *names: str) -> str | None:
-    for name in names:
-        if name in fields:
-            return name
-    return None
-
-
-def _find_or_create_account(client: "EspoClient", business_name: str, *, create_if_missing: bool) -> dict[str, Any] | None:
-    hits = client.search("Account", business_name, max_size=1, select="id,name,website,intel_website,intel_linkedin_url")
-    if hits:
-        return hits[0]
-    if not create_if_missing:
-        return None
-    record = client.create("Account", {"name": business_name})
-    return record if isinstance(record, dict) else None
-
-
 def _source_lines(research: dict[str, Any]) -> list[str]:
     lines: list[str] = []
     for source in research.get("sources") or []:
@@ -374,41 +346,68 @@ def _note_body(research: dict[str, Any], query: str) -> str:
     return "\n".join(lines)
 
 
-def _write_account_research(client: "EspoClient", research: dict[str, Any], query: str) -> dict[str, Any]:
-    fields = _entity_fields(client, "Account")
+# Research facts worth pinning to the client record, in (research key, label) form.
+_RESEARCH_FACT_LABELS: tuple[tuple[str, str], ...] = (
+    ("website_url", "website"),
+    ("linkedin_company_url", "linkedin_url"),
+    ("naics", "naics"),
+    ("sic", "sic"),
+)
+
+
+def _save_research(supa: SupabaseClient, research: dict[str, Any], query: str) -> dict[str, Any]:
+    """Pin a research result to the retrieval tables the fact retriever reads.
+
+    One `client_entities` row per business (reused when it already exists), the
+    identifying codes and URLs as `client_facts`, and the full write-up as a
+    `client_notes` row.
+    """
     business_name = str(research.get("business_name") or query).strip()
-    account = _find_or_create_account(client, business_name, create_if_missing=True)
-    if not account or not account.get("id"):
-        raise RuntimeError("Could not find or create Account for research result.")
+    if not business_name:
+        raise RuntimeError("Research result has no business name to file under.")
 
-    payload: dict[str, Any] = {}
-    website_field = _first_existing(fields, "intel_website", "website", "websiteUrl")
-    if website_field and research.get("website_url"):
-        payload[website_field] = research["website_url"]
-    linkedin_field = _first_existing(fields, "intel_linkedin_url", "linkedin_url")
-    if linkedin_field and research.get("linkedin_company_url"):
-        payload[linkedin_field] = research["linkedin_company_url"]
-    notes_field = _first_existing(fields, "intel_website_notes", "intel_linkedin_notes", "description")
-    if notes_field:
-        services = ", ".join(research.get("claimed_services") or [])
-        summary = research.get("short_summary") or ""
-        payload[notes_field] = f"{summary}\n\nClaimed services: {services}".strip()
-    if "intel_naics" in fields and research.get("naics"):
-        payload["intel_naics"] = research["naics"]
-    if "intel_sic" in fields and research.get("sic"):
-        payload["intel_sic"] = research["sic"]
+    existing = retrieval_client.search_entities(supa, name=business_name, limit=1)
+    if existing:
+        entity = existing[0]
+    else:
+        entity = retrieval_client.upsert_entity(
+            supa,
+            entity_type="account",
+            entity_name=business_name,
+            tags=["business-research"],
+        )
+    entity_id = str(entity.get("id") or "")
+    if not entity_id:
+        raise RuntimeError(f"Could not resolve a client_entities row for {business_name!r}.")
 
-    updated = client.update("Account", str(account["id"]), payload) if payload else account
-    note_payload = {
-        "post": _note_body(research, query),
-        "parentType": "Account",
-        "parentId": str(account["id"]),
-    }
-    note = client.create("Note", note_payload)
+    facts = [
+        {
+            "entity": business_name,
+            "fact_label": label,
+            "fact_value": str(research[key]),
+            "source": "hermes-business-research",
+        }
+        for key, label in _RESEARCH_FACT_LABELS
+        if research.get(key)
+    ]
+    inserted_facts = retrieval_client.bulk_insert_facts(
+        supa, facts=facts, entity_id_lookup={business_name: entity_id},
+    ) if facts else []
+
+    note = retrieval_client.insert_note(
+        supa,
+        entity_id=entity_id,
+        note_type="research",
+        title=f"Business research: {business_name}",
+        summary=str(research.get("short_summary") or "")[:1000],
+        full_text=_note_body(research, query),
+        source="hermes-business-research",
+    )
     return {
-        "account": updated if isinstance(updated, dict) else account,
-        "note": note if isinstance(note, dict) else {"result": note},
-        "fields_updated": sorted(payload.keys()),
+        "entity": entity,
+        "facts": inserted_facts,
+        "note": note,
+        "fields_updated": sorted(f["fact_label"] for f in facts),
     }
 
 
@@ -453,7 +452,7 @@ def _format_result(research: dict[str, Any], crm_result: dict[str, Any] | None =
     return "\n".join(lines)
 
 
-def handle(client: "EspoClient", text: str) -> DispatchResult:
+def handle(text: str, *, supa: SupabaseClient | None = None) -> DispatchResult:
     query = _clean_query(text)
     if len(query) < 2:
         return DispatchResult(False, "Tell me the business to research. Example: research business Acme Plumbing Atlanta")
@@ -464,7 +463,9 @@ def handle(client: "EspoClient", text: str) -> DispatchResult:
             "Business research needs an OpenAI key with web search support. Set OPENAI_API_KEY/HERMES_OPENAI_API_KEY and try again.",
         )
     save = _wants_save(text)
-    crm_result = _write_account_research(client, research, query) if save else None
+    if save and supa is None:
+        supa = SupabaseClient()
+    crm_result = _save_research(supa, research, query) if save else None
     return DispatchResult(
         True,
         _format_result(research, crm_result),

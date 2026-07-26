@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 from hermes.operations.write_gate import parse_approval_token
 
 if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
@@ -37,10 +36,6 @@ _BROAD_REPORT_HINTS: dict[str, re.Pattern[str]] = {
     "report personal": re.compile(r"\b(report\s*[- ]?personal|cleanup)\b", re.I),
     "bulk normalize": re.compile(r"\b(normalize|normalization)\b", re.I),
 }
-
-
-def _looks_like_data_quality(text: str) -> bool:
-    return bool(_DATA_QUALITY_HINT.search(text.strip()))
 
 
 def _looks_like_sync_status_question(text: str) -> bool:
@@ -93,15 +88,13 @@ class DispatchResult:
     data: dict[str, Any] | None = None
 
 
-Handler = Callable[["EspoClient", str], DispatchResult]
+Handler = Callable[[str], DispatchResult]
 
 
 class Dispatcher:
     """Order matters: first matching pattern wins."""
 
     def __init__(self, *, use_openai: bool = False) -> None:
-        from hermes.commands import business_research, data_entry, lookup, merge, revenue
-
         self.use_openai = use_openai
         self.supa: SupabaseClient | None = None
         self._slack_ctx: dict[str, Any] = {}
@@ -115,32 +108,6 @@ class Dispatcher:
             # --- Core operational commands (#108: restored after the PR #107 de-dup
             # dropped them). All specific/anchored, so none intercept renewal routes. ---
             (re.compile(r"^\s*(ping|health|status)\s*$", re.I), "ping"),
-            (re.compile(r"\b(changelog|crm\s+changes|nightly\s+report|daily\s+changes|what\s+changed)\b", re.I), "changelog"),
-            (re.compile(r"\bsync\b.*\b(nowcerts|status|conflicts?|errors?|runs?)\b", re.I), "sync"),
-            (re.compile(r"^\s*sync\s", re.I), "sync"),
-            (
-                re.compile(r"\b(repair|fix|link)\b.*\b(policy|policies)\b.*\b(account|accounts)\b", re.I),
-                "policy_repair",
-            ),
-            (re.compile(r"^\s*merge\s+", re.I), merge.handle),
-            (re.compile(r"\bcan\s+be\s+merged\b", re.I), merge.handle),
-            # CRM change proposal approval — must precede research/intake/lookup.
-            (
-                re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+(?P<id>\S+)\s*$", re.I),
-                "change_proposals",
-            ),
-            (
-                re.compile(r"^\s*(?:APPROVE|COMMIT)\s+CHANGE\s+ALL\s*$", re.I),
-                "change_proposals",
-            ),
-            (
-                re.compile(r"^\s*(?:LIST|SHOW)\s+CHANGES?\s*$", re.I),
-                "change_proposals",
-            ),
-            (
-                re.compile(r"^\s*(?:REJECT|CANCEL)\s+CHANGE\s+(?P<id>\S+)", re.I),
-                "change_proposals",
-            ),
             # Renewal exposure review — MUST precede business_research so that
             # "research renewal client / exposures" isn't treated as intake NAICS research.
             (
@@ -152,7 +119,7 @@ class Dispatcher:
                 ),
                 "renewal_research",
             ),
-            # Renewal case + tasks — MUST precede the data_entry "^create" route
+            # Renewal case + tasks route.
             # so "create a renewal case and tasks" isn't captured as a generic create.
             (
                 re.compile(r"\b(create|open|start)\s+(a\s+)?renewal\s+case\b", re.I),
@@ -163,7 +130,7 @@ class Dispatcher:
                 "renewal_tasks_create",
             ),
             # Renewal PDF generate + file-to-Nextcloud (both verbs -> same generate+file
-            # handler). Before data_entry ("create … pdf") and revenue ("file … renewal …").
+            # handler).
             (
                 re.compile(r"\b(generate|create|build|make)\s+(the\s+)?(renewal\s+)?(worksheet\s+)?pdf\b", re.I),
                 "renewal_pdf",
@@ -178,11 +145,8 @@ class Dispatcher:
             ),
             (
                 re.compile(r"^\s*(research|enrich|investigate|look\s+up|web\s+research)\s+(business|account|company)?\b", re.I),
-                business_research.handle,
+                "business_research",
             ),
-            (re.compile(r"^\s*(create|update)\s+", re.I), data_entry.handle),
-            (re.compile(r"^\s*add\s+", re.I), data_entry.handle),
-            (re.compile(r"^\s*move\s+opportunit(?:y|ie)\s+", re.I), data_entry.handle),
             # Agency intake — explicit verbs that mean "stage a draft from this summary".
             (
                 re.compile(
@@ -203,7 +167,6 @@ class Dispatcher:
             ),
             # Fact retrieval — narrow: question word + recognized fact label,
             # OR short-form "<label> for <entity>". Must precede the broad
-            # `lookup.handle` route below.
             (
                 re.compile(
                     # Form A: "what/who/find/tell me … <label>"
@@ -223,8 +186,6 @@ class Dispatcher:
                 ),
                 "agency_fact",
             ),
-            (re.compile(r"\b(total\s+premium|sum\s+premium|premium\s+for)\b", re.I), lookup.handle),
-            (re.compile(r"^\s*(what|who|find|lookup|search)\b", re.I), lookup.handle),
             # Renewal worksheet — MUST precede the broad renewal/revenue route so that
             # "prepare a renewal worksheet for <client>" does not fall through to revenue.handle.
             (
@@ -285,33 +246,11 @@ class Dispatcher:
                 "renewal_wb_confirm",
             ),
             (
-                re.compile(r"\b(expir(?:e|ing|y)|renewal[-\s]?audit|renewals?|cross-?sell|revenue|opportunit)", re.I),
-                revenue.handle,
-            ),
-            # Data quality BEFORE reports — intent LLM sometimes rewrites "data quality" as "kpi".
-            (
-                re.compile(
-                    r"\b(data\s+quality|dq\s+report|audit\s+crm|crm\s+audit|quality\s+check)\b",
-                    re.I,
-                ),
-                "data_quality",
-            ),
-            (
-                re.compile(
-                    r"\b(pipeline|lob\s+break|premium\s+by\s+lob|kpi|dashboard"
-                    r"|commission\s+snap|stale|account\s*list|my\s+accounts"
-                    r"|report\s*[- ]?personal|personal\s*report|cleanup\s*report"
-                    r"|bulk\s*[- ]?normalize|normalize\s*preview)\b",
-                    re.I,
-                ),
-                "reports",
-            ),
-            (
                 re.compile(
                     r"^\s*(met|talked|spoke|just\s+met|new\s+lead|log\s+lead|intake)\b",
                     re.I,
                 ),
-                "intake",
+                "agency_intake",
             ),
         ]
 
@@ -357,79 +296,50 @@ class Dispatcher:
     def _call_handler(
         self,
         handler: Handler | str,
-        client: "EspoClient",
         text: str,
     ) -> DispatchResult:
-        if handler == "intake":
-            from hermes.commands.intake import handle as intake_handle
-            return intake_handle(
-                client, text,
-                supa=self.supa,
-                **self._slack_ctx,
-            )
-        if handler == "reports":
-            from hermes.commands.reports import handle as reports_handle
-            return reports_handle(client, text, supa=self.supa)
-        if handler == "data_quality":
-            from hermes.commands.data_quality import handle as dq_handle
-            return dq_handle(client, text, supa=self.supa)
         if handler == "ping":
             return DispatchResult(True, "Hermes is online and connected to CRM.")
-        if handler == "sync":
-            from hermes.commands.sync import handle as sync_handle
-            return sync_handle(client, text, supa=self.supa)
-        if handler == "changelog":
-            from hermes.commands.changelog import handle as changelog_handle
-            return changelog_handle(client, text)
-        if handler == "policy_repair":
-            from hermes.commands.policy_repair import handle as policy_repair_handle
-            return policy_repair_handle(client, text)
+        if handler == "business_research":
+            from hermes.commands.business_research import handle as research_business_handle
+            return research_business_handle(text, supa=self.supa)
         if handler == "agency_intake":
             from hermes.commands.agency_intake import handle as ai_handle
-            return ai_handle(client, text, supa=self.supa, **self._slack_ctx)
+            return ai_handle(text, supa=self.supa, **self._slack_ctx)
         if handler == "agency_fact":
             from hermes.commands.fact_retriever import handle as fact_handle
-            return fact_handle(client, text, supa=self.supa)
+            return fact_handle(text, supa=self.supa)
         if handler == "renewal_worksheet":
             from hermes.commands.renewal_worksheet import handle as rw_handle
-            return rw_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return rw_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_queue":
             from hermes.commands.renewal_desk import queue_handle
-            return queue_handle(client, text, supa=self.supa)
+            return queue_handle(text, supa=self.supa)
         if handler == "renewal_open":
             from hermes.commands.renewal_desk import open_handle
-            return open_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return open_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_research":
             from hermes.commands.renewal_desk import research_handle
-            return research_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return research_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_wb_propose":
             from hermes.commands.renewal_writeback import propose_handle
-            return propose_handle(client, text, supa=self.supa)
+            return propose_handle(text, supa=self.supa)
         if handler == "renewal_wb_show":
             from hermes.commands.renewal_writeback import show_handle
-            return show_handle(client, text, supa=self.supa)
+            return show_handle(text, supa=self.supa)
         if handler == "renewal_wb_confirm":
             from hermes.commands.renewal_writeback import confirm_handle
-            return confirm_handle(client, text, supa=self.supa)
+            return confirm_handle(text, supa=self.supa)
         if handler == "renewal_case_create":
             from hermes.commands.renewal_cases import create_case_handle
-            return create_case_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return create_case_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler == "renewal_tasks_create":
             from hermes.commands.renewal_cases import create_tasks_handle
-            return create_tasks_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+            return create_tasks_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
         if handler in ("renewal_pdf", "renewal_file"):
             from hermes.commands.renewal_documents import generate_pdf_handle
-            return generate_pdf_handle(client, text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
-        if handler == "change_proposals":
-            from hermes.commands.change_proposals import handle as cp_handle
-            return cp_handle(client, text, supa=self.supa)
-        if (
-            callable(handler)
-            and getattr(handler, "__module__", "") == "hermes.commands.data_entry"
-            and getattr(handler, "__name__", "") == "handle"
-        ):
-            return handler(client, text, **self._slack_ctx)
-        return handler(client, text)
+            return generate_pdf_handle(text, supa=self.supa, nowcerts=self._get_shared_nowcerts())
+        return handler(text)
 
     def _capture_write_intent(self, result: DispatchResult) -> None:
         data = result.data if isinstance(result.data, dict) else {}
@@ -439,14 +349,8 @@ class Dispatcher:
         if isinstance(write_intent, dict):
             self._pending_write = write_intent
             return
-        if data.get("write_status") == "NOT_WRITTEN_AWAITING_CONFIRMATION":
-            self._pending_write = {
-                "kind": "intake_drafts",
-                "espo_drafts": data.get("espo_drafts") or {},
-                "supabase_drafts": data.get("supabase_drafts") or {},
-            }
 
-    def _handle_approval(self, client: "EspoClient", approval: Any) -> DispatchResult:
+    def _handle_approval(self, approval: Any) -> DispatchResult:
         pending = self._pending_write
         if not pending:
             return DispatchResult(False, "No pending draft update found to approve.")
@@ -456,46 +360,10 @@ class Dispatcher:
         if approval.revise_requested:
             return DispatchResult(True, "Revision requested. Send updated instructions and I will regenerate the draft.")
 
-        kind = pending.get("kind")
-        if kind == "intake_drafts":
-            from hermes.commands.intake import execute_approved_drafts
-
-            results = execute_approved_drafts(
-                client,
-                self.supa,
-                espo_drafts=pending.get("espo_drafts") or {},
-                supabase_drafts=pending.get("supabase_drafts") or {},
-                approve_crm=approval.approve_crm,
-                approve_supabase=approval.approve_supabase,
-            )
-            self._pending_write = None
-            return DispatchResult(True, "Approved updates were written successfully.", {"results": results})
-        if kind == "data_entry":
-            from hermes.commands.data_entry import execute_approved_data_entry
-
-            if not approval.approve_crm:
-                return DispatchResult(False, "This pending draft only has CRM operations. Use APPROVE CRM ONLY or APPROVE ALL.")
-            results = execute_approved_data_entry(client, pending.get("operations") or [])
-            self._pending_write = None
-            return DispatchResult(True, "Approved CRM updates were written successfully.", {"results": results})
-        if kind == "merge":
-            from hermes.commands.merge import execute_approved_merge
-
-            if not approval.approve_crm:
-                return DispatchResult(False, "This pending draft is a CRM merge. Use APPROVE CRM ONLY or APPROVE ALL.")
-            result = execute_approved_merge(
-                client,
-                entity_type=str(pending.get("entity_type") or ""),
-                source_id=str(pending.get("source_id") or ""),
-                target_id=str(pending.get("target_id") or ""),
-            )
-            self._pending_write = None
-            return DispatchResult(True, "Approved CRM merge was executed successfully.", {"result": result})
         return DispatchResult(False, "Pending draft type is not executable yet.")
 
     def dispatch(
         self,
-        client: "EspoClient",
         line: str,
         *,
         _allow_intent: bool = True,
@@ -507,19 +375,16 @@ class Dispatcher:
         # Process approval tokens before route matching.
         approval = parse_approval_token(text)
         if approval:
-            return self._handle_approval(client, approval)
-        # Never route "data quality" through OpenAI intent as "kpi" — handle explicitly first.
-        if _looks_like_data_quality(text):
-            return self._call_handler("data_quality", client, text)
+            return self._handle_approval(approval)
         for pattern, handler in self._routes:
             if pattern.search(text):
-                result = self._call_handler(handler, client, text)
+                result = self._call_handler(handler, text)
                 if (
                     self.use_openai
                     and _allow_intent
                     and _should_retry_with_intent(text, result)
                 ):
-                    intent_result = self._dispatch_from_intent(client, text)
+                    intent_result = self._dispatch_from_intent(text)
                     if intent_result is not None:
                         return intent_result
                 self._capture_write_intent(result)
@@ -527,13 +392,13 @@ class Dispatcher:
         if self.use_openai and _allow_intent:
             from hermes.core.nl_agent import ask as nl_ask
 
-            return nl_ask(client, text, confirmed=confirmed)
+            return nl_ask(text, confirmed=confirmed)
         return DispatchResult(
             True,
             _clarification_message(text),
         )
 
-    def _dispatch_from_intent(self, client: "EspoClient", text: str) -> DispatchResult | None:
+    def _dispatch_from_intent(self, text: str) -> DispatchResult | None:
         from hermes.core.intent_openai import command_from_intent
 
         command = command_from_intent(text)
@@ -546,4 +411,4 @@ class Dispatcher:
             return None
         if _intent_translation_needs_clarification(text, normalized):
             return DispatchResult(True, _clarification_message(text))
-        return self.dispatch(client, command, _allow_intent=False)
+        return self.dispatch(command, _allow_intent=False)

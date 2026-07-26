@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -29,6 +30,12 @@ EVENTS_TABLE = "agency_crm_case_events"
 CASE_TYPE_RENEWAL = "renewal"
 CASE_STATUS_OPEN = "open"           # agency_crm_cases.status vocabulary
 TASK_STATUS_OPEN = "not_started"    # agency_crm_tasks.status vocabulary
+# The full vocabulary, mirroring the agency_crm_tasks_status_check constraint.
+# Kept here so a write can be validated before Postgres rejects it — a 400 that
+# names the valid values beats a 502 wrapping a constraint violation.
+TASK_STATUSES = ("not_started", "in_progress", "waiting", "completed", "cancelled")
+TASK_STATUS_CLOSED = ("completed", "cancelled")
+TASK_PRIORITIES = ("low", "medium", "high", "urgent")
 PRIORITY_DEFAULT = "medium"
 
 # Standard renewal task set (mirrors the 90/60/30 renewal cadence + worksheet).
@@ -48,9 +55,11 @@ DEFAULT_TASK_TEMPLATES: list[tuple[str, str]] = [
 
 def _service_email() -> str:
     # created_by_email / actor_email are FK'd to agency_crm_users — must be a real
-    # user. No hermes bot user exists yet, so default to the admin; override with
-    # HERMES_SERVICE_EMAIL once a hermes@ user is added to agency_crm_users.
-    return os.environ.get("HERMES_SERVICE_EMAIL", "lamar@risksolutionsgroup.net")
+    # user. lc-rsg@ IS the service account (role 'service'): it was already the
+    # machine identity, created_by on 5 tasks and assigned_to on zero, it just wore
+    # Lamar's display name until 2026-07-26. Defaulting here means a machine write
+    # no longer looks like something Lamar did by hand.
+    return os.environ.get("HERMES_SERVICE_EMAIL", "lc-rsg@risksolutionsgroup.net")
 
 
 def _default_owner_email() -> str:
@@ -211,16 +220,51 @@ def list_tasks(supa: "SupabaseClient", case_id: str) -> list[dict[str, Any]]:
     )
 
 
+def _open_titles_in_scope(
+    supa: "SupabaseClient",
+    *,
+    case_id: str | None,
+    insured_id: str | None,
+) -> set[str]:
+    """Titles of OPEN tasks in the same scope, for idempotent create.
+
+    Scope is the parent: a case, else a client, else the internal bucket. And
+    only OPEN tasks count — "update commission percentage" is a thing that
+    legitimately recurs, and a completed one from last month must not block this
+    month's. Deduping on all-time titles would make a real task silently vanish.
+    """
+    if case_id:
+        return {t.get("title") for t in list_tasks(supa, case_id)}
+
+    params: dict[str, str] = {"status": f"not.in.({','.join(TASK_STATUS_CLOSED)})"}
+    if insured_id:
+        params["insured_database_id"] = f"eq.{insured_id}"
+        params["case_id"] = "is.null"
+    else:
+        params["case_id"] = "is.null"
+        params["insured_database_id"] = "is.null"
+    try:
+        rows = supa.select(TASKS_TABLE, columns="title", params=params, limit=500)
+    except Exception:  # noqa: BLE001 — a dedupe read must not block a create
+        return set()
+    return {r.get("title") for r in rows}
+
+
 def create_tasks(
     supa: "SupabaseClient",
     *,
-    case_id: str,
+    case_id: str | None = None,
     tasks: list[dict[str, Any]],
     default_assignee_email: str | None = None,
     created_by_email: str | None = None,
+    insured_database_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Insert tasks under a case, skipping titles that already exist (idempotent)."""
-    existing = {t.get("title") for t in list_tasks(supa, case_id)}
+    """Insert tasks, skipping titles already open in the same scope (idempotent).
+
+    ``case_id`` is optional as of issue #195: a task may be case work, client
+    work with no case, or purely internal.
+    """
+    existing = _open_titles_in_scope(supa, case_id=case_id, insured_id=insured_database_id)
     created: list[dict[str, Any]] = []
     for t in tasks:
         title = (t.get("title") or "").strip()
@@ -230,6 +274,7 @@ def create_tasks(
             TASKS_TABLE,
             _compact({
                 "case_id": case_id,
+                "insured_database_id": insured_database_id,
                 "title": title,
                 "description": t.get("description") or t.get("detail"),
                 "status": TASK_STATUS_OPEN,
@@ -242,6 +287,44 @@ def create_tasks(
         created.append(row)
         existing.add(title)
     return created
+
+
+def update_task(
+    supa: "SupabaseClient",
+    task_id: str,
+    fields: dict[str, Any],
+) -> dict[str, Any]:
+    """Update an editable task field set (issue #195).
+
+    Validates status and priority against the DB check constraints first so a bad
+    value returns a message naming the valid ones instead of a wrapped 500.
+
+    ``completed_at`` is derived, never passed in: moving to a closed status stamps
+    it, moving back out clears it. A task showing "in_progress" with a completion
+    timestamp is the kind of contradiction that makes a queue untrustworthy.
+    """
+    status = fields.get("status")
+    if status is not None and status not in TASK_STATUSES:
+        raise ValueError(f"unknown status '{status}'; must be one of {list(TASK_STATUSES)}")
+    priority = fields.get("priority")
+    if priority is not None and priority not in TASK_PRIORITIES:
+        raise ValueError(f"unknown priority '{priority}'; must be one of {list(TASK_PRIORITIES)}")
+
+    payload = dict(fields)
+    if status is not None:
+        payload["completed_at"] = (
+            datetime.now(timezone.utc).isoformat() if status in TASK_STATUS_CLOSED else None
+        )
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return supa.update(TASKS_TABLE, task_id, payload)
+
+
+def get_task(supa: "SupabaseClient", task_id: str) -> dict[str, Any] | None:
+    try:
+        rows = supa.select(TASKS_TABLE, columns="*", params={"id": f"eq.{task_id}"}, limit=1)
+    except Exception:  # noqa: BLE001 — malformed uuid reads as not found
+        return None
+    return rows[0] if rows else None
 
 
 def link_document(

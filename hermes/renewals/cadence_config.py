@@ -51,8 +51,9 @@ SEGMENTS = (
 )
 
 # --- Cadence (BRIEF verbatim) — the human-tunable day thresholds --------------
-# Tune touch timing HERE. `TOUCH_SPEC` below enriches each day with its EspoCRM
-# field slot + template; `cadence.py` asserts the two stay in sync at import.
+# Tune touch timing HERE. `TOUCH_SPEC` below enriches each day with its
+# touch-tracking field slot + template; `cadence.py` asserts the two stay in
+# sync at import.
 CADENCE = {
     SEGMENT_AUTO_6MO:         {"touches": [30]},        # single touch; see full-review rule
     SEGMENT_PERSONAL_12MO:    {"touches": [45, 15]},
@@ -61,7 +62,7 @@ CADENCE = {
     SEGMENT_BENEFITS:         {"touches": [90, 60, 30]},
 }
 
-# --- EspoCRM Renewal touch-tracking date fields (BRIEF §EspoCRM Changes) -------
+# --- Renewal touch-tracking date fields ---------------------------------------
 # Four date fields, one slot per touch phase. A touch fires only if its slot is
 # empty; the slot is stamped `queued` on card post and `sent` on ✅ reaction.
 FIELD_TOUCH_EARLY = "touch_early_sent"        # T-90 / T-45 / T-40

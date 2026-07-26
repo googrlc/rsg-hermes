@@ -10,35 +10,29 @@ from unittest.mock import patch
 from hermes.jobs import commission_reconciliation
 
 
-class FakeClient:
-    def __init__(self) -> None:
-        self.created: list[tuple[str, dict]] = []
+class FakeSupa:
+    """Stands in for SupabaseClient — serves the commission_ledger rows."""
 
-    def get(self, entity: str, **kwargs):
+    LEDGER = [
+        {
+            "id": "led-1",
+            "policy_number": "AB-12345",
+            "carrier_name": "Progressive",
+            "expected_commission": "504",   # 4200 premium @ 12%
+            "gross_premium": "4200",
+        },
+        {
+            "id": "led-2",
+            "policy_number": "88888",
+            "carrier_name": "Travelers",
+            "expected_commission": "300",
+            "gross_premium": "2500",
+        },
+    ]
+
+    def select(self, table: str, **kwargs):
         _ = kwargs
-        if entity == "Policy":
-            return {
-                "list": [
-                    {
-                        "id": "pol-1",
-                        "policyNumber": "AB-12345",
-                        "carrier": "Progressive",
-                        "premiumAmount": "4200",
-                        "commissionRate": "12",
-                    },
-                    {
-                        "id": "pol-2",
-                        "policyNumber": "88888",
-                        "carrier": "Travelers",
-                        "commissionAmount": "300",
-                    },
-                ]
-            }
-        return {"list": []}
-
-    def create(self, entity: str, payload: dict):
-        self.created.append((entity, payload))
-        return {"id": "task-1", **payload}
+        return list(self.LEDGER) if table == "commission_ledger" else []
 
 
 class FakeNotifier:
@@ -58,7 +52,7 @@ class CommissionReconciliationTests(unittest.TestCase):
                 "policy_number,carrier,commission_paid\nAB12345,Progressive,420\n88888,Travelers,290\n40404,Unknown,100\n"
             )
             result = commission_reconciliation.run_reconciliation(
-                FakeClient(),
+                FakeSupa(),
                 statement_path=str(statement),
                 dry_run=True,
             )
@@ -83,7 +77,7 @@ class CommissionReconciliationTests(unittest.TestCase):
                 clear=False,
             ):
                 result = commission_reconciliation.run_reconciliation(
-                    FakeClient(),
+                    FakeSupa(),
                     statement_path=str(statement),
                     dry_run=True,
                 )
@@ -92,29 +86,13 @@ class CommissionReconciliationTests(unittest.TestCase):
         self.assertEqual(result.matched_count, 1)
         self.assertEqual(result.unmatched_count, 0)
 
-    def test_dispute_action_creates_task(self) -> None:
-        client = FakeClient()
-        value = commission_reconciliation.build_dispute_action_value(
-            policy_id="pol-1",
-            policy_number="12345",
-            carrier="Progressive",
-        )
-        result = commission_reconciliation.handle_dispute_action(
-            client=client,
-            action="commission_create_dispute",
-            action_value=value,
-        )
-        self.assertIn("created", result.lower())
-        self.assertEqual(client.created[0][0], "Task")
-        self.assertIn("12345", client.created[0][1]["name"])
-
     def test_reconcile_posts_to_slack(self) -> None:
         notifier = FakeNotifier()
         with tempfile.TemporaryDirectory() as tmp:
             statement = Path(tmp) / "carrier.csv"
             statement.write_text("policy_number,carrier,commission_paid\nAB12345,Progressive,420\n")
             result = commission_reconciliation.run_reconciliation(
-                FakeClient(),
+                FakeSupa(),
                 statement_path=str(statement),
                 notifier=notifier,
                 dry_run=False,

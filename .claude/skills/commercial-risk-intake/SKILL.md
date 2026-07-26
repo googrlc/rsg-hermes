@@ -139,7 +139,6 @@ Hand off to:
 - **`entity_type`** — pick from `Sole Proprietor`, `LLC`, `Corporation`,
   `S-Corp`, `Partnership`, `Non-Profit`, `Other`. Don't invent.
 - **`industry`** — pick from the canonical enum in
-  `hermes-training/espocrm/field_dictionary.md` (50+ values).
 - **`naics`** — 6-digit code if available; leave null if you only have a
   description.
 - **`operations_summary`** — one sentence, plain English, no marketing
@@ -184,12 +183,11 @@ opportunity rather than the account:
 ## Handoff
 
 Return the JSON above. `crm-intake-writer` will wrap it with classification,
-note, source, and duplicate_search blocks, then route through
-`crm-upsert-planner` once approved.
+note, source, and duplicate_search blocks. Once approved, the intake worker
+commits it and per-LOB opportunities are written through `hermes-crm-writer`.
 
 ## References
 
 - `docs/agency-memory-plan.md`
-- `hermes-training/espocrm/field_dictionary.md` — Account / Opportunity field enums
 - `crm-intake-writer`
 - `carrier-appetite` — for which carriers will write the risk

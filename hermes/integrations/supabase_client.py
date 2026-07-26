@@ -159,8 +159,8 @@ class SupabaseClient:
     ) -> list[dict[str, Any]]:
         """PATCH rows matching arbitrary PostgREST filter params.
 
-        Example: ``supa.update_where("crm_accounts", {"nowcerts_id": "nc-1"},
-                                     filters={"espocrm_id": "eq.espo-1"})``
+        Example: ``supa.update_where("canonical_clients", {"active": False},
+                                     filters={"nowcerts_insured_guid": "eq.nc-1"})``
         """
         resp = self.session.patch(
             f"{self.url}/rest/v1/{table}",

@@ -15,11 +15,9 @@ from hermes.core.dispatcher import DispatchResult
 def _reset_singletons():
     """Reset lazy singletons between tests."""
     import hermes.api as api_mod
-    api_mod._espo = None
     api_mod._dispatcher = None
     api_mod._supa = None
     yield
-    api_mod._espo = None
     api_mod._dispatcher = None
     api_mod._supa = None
 
@@ -50,8 +48,7 @@ class TestHealth:
 
 class TestDispatch:
     @patch("hermes.api._get_dispatcher")
-    @patch("hermes.api._get_espo")
-    def test_ping(self, mock_espo, mock_dispatcher, client) -> None:
+    def test_ping(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             True, "Hermes is online and connected to CRM.",
         )
@@ -62,8 +59,7 @@ class TestDispatch:
         assert "online" in data["message"]
 
     @patch("hermes.api._get_dispatcher")
-    @patch("hermes.api._get_espo")
-    def test_sync_status(self, mock_espo, mock_dispatcher, client) -> None:
+    def test_sync_status(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             True, "No sync runs found yet.",
         )
@@ -72,8 +68,7 @@ class TestDispatch:
         assert resp.json()["ok"] is True
 
     @patch("hermes.api._get_dispatcher")
-    @patch("hermes.api._get_espo")
-    def test_dispatch_error(self, mock_espo, mock_dispatcher, client) -> None:
+    def test_dispatch_error(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             False, "No handler matched.",
         )
@@ -91,57 +86,35 @@ class TestDispatch:
         assert resp.status_code == 400
 
     @patch("hermes.api._get_dispatcher")
-    @patch("hermes.api._get_espo")
-    def test_server_error(self, mock_espo, mock_dispatcher, client) -> None:
+    def test_server_error(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.side_effect = RuntimeError("boom")
         resp = client.post("/dispatch", json={"command": "ping"})
         assert resp.status_code == 500
 
 
 class TestDashboardDispatch:
-    @patch("hermes.api._get_supa")
-    def test_dashboard_dispatch_queues_crm_write(self, mock_get_supa, client) -> None:
-        supa = MagicMock()
-        mock_get_supa.return_value = supa
-        supa.insert.return_value = {"id": "crm-q-1"}
-
-        resp = client.post(
-            "/api/hermes/dispatch",
-            json={
-                "crm_write": {
-                    "entity_type": "Task",
-                    "entity_id": "task-1",
-                    "created_by_role": "dashboard",
-                    "priority": 1,
-                    "payload": {
-                        "action_type": "update_status",
-                        "context": {"status": "Completed"},
-                    },
-                }
-            },
-        )
-        assert resp.status_code == 202
-        data = resp.json()
-        assert data["queue_name"] == "crm_write_queue"
-        assert data["task_id"] == "crm-q-1"
+    def test_dashboard_dispatch_requires_a_command(self, client) -> None:
+        resp = client.post("/api/hermes/dispatch", json={})
+        assert resp.status_code == 400
 
     @patch("hermes.api._get_supa")
     def test_sync_health_payload(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         mock_get_supa.return_value = supa
         supa.select.side_effect = [
-            [{"id": "1"}],  # crm pending
-            [],  # crm processing
-            [{"id": "2"}, {"id": "3"}],  # crm failed
-            [{"id": "run-1", "status": "success", "workflow_name": "insured_to_account", "finished_at": "2026-01-01T00:00:00Z"}],
+            [{"id": "1"}],  # queued
+            [{"id": "2"}, {"id": "3"}],  # failed
+            [],  # dead
+            [{"id": "job-1", "object_type": "renewal",
+              "destination_system": "nowcerts", "updated_at": "2026-01-01T00:00:00Z"}],
         ]
 
         resp = client.get("/api/hermes/sync-health")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["crm_write_queue"]["pending"] == 1
-        assert data["crm_write_queue"]["failed"] == 2
-        assert data["latest_sync_run"]["id"] == "run-1"
+        assert data["outbound_sync_queue"]["queued"] == 1
+        assert data["outbound_sync_queue"]["failed"] == 2
+        assert data["latest_completed"]["id"] == "job-1"
 
 
 def test_requires_confirmation_for_write_like_commands() -> None:
@@ -460,14 +433,14 @@ class TestTransitionHelper:
         supa = self._supa_with_row(existing)
         transition(
             supa, "sub-1", "failed",
-            error={"message": "espo 400", "field": "phoneNumber"},
+            error={"message": "ams 400", "field": "phoneNumber"},
         )
 
         sent = supa.update.call_args.args[2]
         assert sent["status"] == "failed"
         assert len(sent["error_log"]) == 2
         last = sent["error_log"][-1]
-        assert last["message"] == "espo 400"
+        assert last["message"] == "ams 400"
         assert last["field"] == "phoneNumber"
         assert last["status_at_failure"] == "writing"
 

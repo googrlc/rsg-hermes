@@ -12,5 +12,6 @@ COPY hermes ./hermes
 RUN pip install --no-cache-dir pip setuptools wheel \
     && pip install --no-cache-dir .
 
-# Default: Socket Mode bot (override with docker compose command)
-CMD ["hermes", "--slack"]
+# Default: harmless read-only check (override with docker compose command).
+# Was `--slack` (Socket Mode bot) until that listener was retired.
+CMD ["hermes", "--ops-doctor"]

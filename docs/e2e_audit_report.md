@@ -49,7 +49,7 @@ delivery**, which is config, not logic.
 | Summary generation | ✅ PASS | Quote-ready `hermes_blocks` (account + 2 contacts + 2 opps) + structured `draft_summary`. |
 | **Slack notification** | ❌ **FAIL** | `SlackNotifierError: … channel D0B2PJYLGQG: {"error":"channel_not_found"}`. Draft never delivered. Row still settled `awaiting_approval` (non-fatal by design). |
 | Status page | ❌ MISSING | `/api/intake/{id}/status` URL is returned but **no GET handler exists** (404). |
-| CRM log / write | ⏸️ NOT EXERCISED | Deliberately did **not** click APPROVE — that enqueues real EspoCRM writes, which the audit's "no real record" rule forbids. The `approved→writing→complete` arc is unit-tested but not run here. |
+| CRM log / write | ⏸️ NOT EXERCISED | Deliberately did **not** click APPROVE — that enqueues real the CRM writes, which the audit's "no real record" rule forbids. The `approved→writing→complete` arc is unit-tested but not run here. |
 
 System **failure alerts DO deliver** (backlog failures posted to `C0ANSEP6SSD`/systems-check fine) — only the **Gretchen-facing draft channel** is broken.
 
@@ -166,7 +166,7 @@ input the synthesizer **does not fabricate** to fill gaps.
 - Test rows created this run: `ff62ef4c…` (Webb), `e61d8025…` (incomplete),
   `8545714d…` (deploy-verify), plus the `422`-rejected empty (never inserted).
   **Purged** from `intake_submissions` after this report (none were approved → **no
-  EspoCRM records created**, per the no-real-record rule).
+  the CRM records created**, per the no-real-record rule).
 - **Intake worker left running** as a compose service (`rsg-hermes-intake-worker`) — it
   was the missing piece (submissions previously stalled at `received`). This is the one
   intentional pipeline change made during the audit; committed as `af4664d`.

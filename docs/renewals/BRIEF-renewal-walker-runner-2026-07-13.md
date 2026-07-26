@@ -6,14 +6,19 @@
 **Companion docs:** `BRIEF-renewal-cadence-2026-07-09.md` · RSG Renewal Walker GPT Setup Kit v2 · RSG Renewal Worksheet template
 **Priority:** Revenue-critical. This is the 54.92% → 80% retention machine.
 
-> **⚠️ Superseded for the EXECUTION path (2026-07-15).** The *write* model here
-> ("no new Supabase tables · state on the Espo Opportunity · the `/walker/*` API is
-> the write path") is replaced by the **Hermes Renewal Executor — Job Contract v2**:
-> a queue-driven worker (`hermes/renewals/executor.py`) that executes only
-> human-approved instructions staged in `outbound_sync_queue` and writes receipts to
-> `renewal_execution_receipts`. See [`README.md`](./README.md) → *Renewal Executor —
-> Job Contract v2*. The Walker's **read + draft** workstation role below still stands;
-> only "who writes and from where" changed.
+> **⚠️ HISTORICAL — this design is retired (2026-07-24).** Read it for the cadence,
+> segment, and classification reasoning, which still hold. Do not build from it.
+>
+> - **The execution path was superseded 2026-07-15** by the **Hermes Renewal Executor
+>   — Job Contract v2**: a queue-driven worker (`hermes/renewals/executor.py`) that
+>   executes only human-approved instructions staged in `outbound_sync_queue` and
+>   writes receipts to `renewal_execution_receipts`.
+> - **The read + draft path was retired 2026-07-24.** The `/walker/*` API kept its
+>   whole retain layer in EspoCRM `Opportunity` custom fields; with EspoCRM removed as
+>   a data source the service was deleted rather than rebuilt. Renewals are worked in
+>   the cockpit.
+>
+> See [`README.md`](./README.md) for what actually runs.
 
 **What changed in v3:** ChatGPT Business is the agency workstation — everything sits on it. So the paste-block bridge dies, the Walker GPT gets an **Action wired to the Hermes bridge**, the worksheet stops being a file anywhere (Drive and canvas are both out — it's CRM state rendered by the Walker on demand), and Slack is demoted to doorbell + siren.
 
@@ -24,7 +29,7 @@
 One system, four roles:
 
 - **Renewal Walker GPT (ChatGPT Business) = the workstation.** Gretchen AND Lamar work renewals here. It pulls the queue from Hermes, walks one step at a time, renders and patches the worksheet, and posts every outcome back. It never invents data — it only knows what the Hermes API returns.
-- **Hermes = the runner and the API.** Nightly classify → compute due touches → serve the Walker API → write every touch, flag, handoff, and outcome to EspoCRM/NowCerts → fire doorbells and escalations → compute the scoreboard. Hermes never talks to a client.
+- **Hermes = the runner and the API.** Nightly classify → compute due touches → serve the Walker API → write every touch, flag, handoff, and outcome to the CRM/NowCerts → fire doorbells and escalations → compute the scoreboard. Hermes never talks to a client.
 - **Slack = the notification wire only.** Morning doorbell DM to Gretchen ("3 renewals due — open the Walker"), 🚨 escalations and 📋 handoffs to `#lamar-alerts`, Monday digest. No data-bearing cards, no paste blocks, no reply grammar as the primary path.
 - **Gretchen = the only hands that touch clients.** The Walker drafts; she sends.
 
@@ -35,13 +40,13 @@ One system, four roles:
 ## Standing Rules (carried forward — do not relitigate)
 
 1. **No new agents.** Module extension of `hermes/renewals/` (7 files, 14 tests).
-2. **No new Supabase tables.** Source = `canonical_policies`. State = fields on the EspoCRM renewal Opportunity. Hermes re-derives due work from CRM state every morning.
+2. **No new Supabase tables.** Source = `canonical_policies`. State = fields on the CRM renewal Opportunity. Hermes re-derives due work from CRM state every morning.
 3. **Draft-and-approve.** Hermes and the Walker draft; a human sends.
 4. **Gretchen's pings are DMs, never channel posts.** Escalations/handoffs → `#lamar-alerts` (ID resolved by name at startup, fail loud).
 5. **Touch timing keys to `expiration_date`** in `canonical_policies`.
 6. **Medicare excluded from all automated client touches.** T-65 watcher stays internal-only, separate brief. Never age-reference a client in writing.
 7. **Git-first deploy.** No live edits on the VPS. `hermes` account keeps `nologin`.
-8. **NEW — The GPT talks to Hermes only.** Never NowCerts direct, never EspoCRM direct. One Action, one scoped API key, one owner of writes.
+8. **NEW — The GPT talks to Hermes only.** Never NowCerts direct, never the CRM direct. One Action, one scoped API key, one owner of writes.
 
 ---
 
@@ -52,7 +57,7 @@ One system, four roles:
 3. **7:35a doorbell:** Slack DM to Gretchen — one line, no client data: "☀️ 3 renewals due today (2 yours, 1 handoff prep). Open the Renewal Walker → type queue."
 4. **Gretchen opens the Walker, types `queue`** → Action `GET /walker/queue` → today's list. She picks one: `work {client}`.
 5. **Walker pulls the snapshot** (`GET /walker/renewal/{id}`), runs the data quality check, and walks her one task card at a time. She sends every client message herself.
-6. **Touch done →** Walker confirms, then `POST /touch`. Hermes stamps `cDay1SentAt`, arms the D4/D7/D14 ladder, advances stage to **Renewal Notice Sent**, logs to NowCerts + EspoCRM.
+6. **Touch done →** Walker confirms, then `POST /touch`. Hermes stamps `cDay1SentAt`, arms the D4/D7/D14 ladder, advances stage to **Renewal Notice Sent**, logs to NowCerts + the CRM.
 7. **Client responds →** she tells the Walker; it posts the outcome and stops the ladder. **Client silent →** doorbell at D4 and D7; at D14 Hermes fires 🚨 to `#lamar-alerts`.
 8. **Complexity appears** (upset client, exposure change, gap, remarket) → she tells the Walker → `POST /flag` → owner flips to Lamar → Walker switches to prep-and-push: finish worksheet, send first questionnaire touch, then `handoff` → `POST /handoff` → Hermes posts 📋 to `#lamar-alerts` AND the renewal lands in Lamar's Walker queue.
 9. **Lamar types `handoffs` in the same Walker** → his prepped queue, worksheets rendered inline. He works it; outcomes post the same way.
@@ -164,7 +169,7 @@ The v2 Slack thread-reply grammar (`done` / `log:` / `flag:` / `handoff` / `rene
 5. **Manual fires:** Perez (date passed), Gray 7/20, Nubian Clean 7/24, Richards 7/26 — confirm each got a human touch.
 **Hard gate stands: a proactive touch on a stale renewal date is worse than silence.**
 
-**Phase 1 — Walker API + shadow (build week 1):** classifier + owner + auto-flags · EspoCRM field additions · `/walker/*` endpoints + scoped key · Action wired into the GPT · **Lamar is the only user for 5 business days** — he works his own queue in the Walker daily. Gate: zero wrong dates, zero ghost renewals, segment/owner correct on every card, every POST lands in the CRM.
+**Phase 1 — Walker API + shadow (build week 1):** classifier + owner + auto-flags · the CRM field additions · `/walker/*` endpoints + scoped key · Action wired into the GPT · **Lamar is the only user for 5 business days** — he works his own queue in the Walker daily. Gate: zero wrong dates, zero ghost renewals, segment/owner correct on every card, every POST lands in the CRM.
 
 **Phase 2 — Gretchen live (week 2):** doorbell DMs on · escalations + D-ladder + T-15 confirm · Monday digest · 30-minute walkthrough with one real renewal · GPT shared to the workspace.
 

@@ -26,6 +26,8 @@ from hermes.sync.nowcerts_client import NowCertsClient
 from . import eligibility as elig
 from .eligibility import LineageContext
 
+from hermes.ams import book as ams_book
+
 log = logging.getLogger(__name__)
 
 CANDIDATES_TABLE = "renewal_candidates"
@@ -396,7 +398,9 @@ def run_refresh(
     today = today or date.today()
     now_iso = _utcnow_iso()
 
-    policies = supa.select("canonical_policies", limit=10000)
+    # Live AMS book (facts) joined to policy_lineage (renewed_policy) — the AMS
+    # exposes no renewal pointer, so lineage stays Supabase-owned.
+    policies = ams_book.select_policies(supa, limit=10000)
     insured = _insured_index(nowcerts)
     rows = build_candidates(policies, insured, today=today, now_iso=now_iso)
 

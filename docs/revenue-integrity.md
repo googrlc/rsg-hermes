@@ -9,7 +9,7 @@ Hermes Revenue Integrity jobs protect commission visibility and accounting hygie
 - Policy status in `Bound` or `Active`
 - Commission rate/percentage missing or `0`
 
-Slack output includes an `Update Commission %` button per policy. Button actions are handled by Hermes Socket Mode and create an Espo `Task`.
+Slack output includes an `Update Commission %` button per policy. Button actions are handled by Hermes Socket Mode and create an the CRM `Task`.
 
 ## Commands
 

@@ -11,23 +11,19 @@ entirely by environment. This runbook is the deploy + verification procedure.
 | `HERMES_MEMORY_SCOPE` | `hermes-lamar` | `hermes-gretch` (isolated Supermemory) |
 | `HERMES_DISABLED_TOOLS` | _(none)_ | `web_research` — CRM-only, no public-web research |
 | Slack app | Hermes app | dedicated **hermes-gretch** app + tokens |
-| EspoCRM user | `api` | dedicated **hermes-gretch** API user |
 | NowCerts | (gated queue) | **none** — no `NOWCERTS_*`, no mcp/nowcerts mount |
 
 ---
 
 ## 0. Prerequisites (do these once, in the dashboards — cannot be scripted from here)
 
-1. **Slack app `hermes-gretch`** — create at api.slack.com/apps:
-   - Socket Mode ON → generate an **App-Level token** (`xapp-…`, scope `connections:write`).
-   - Bot scopes: `chat:write`, `app_mentions:read`, `im:history`, `im:read`, `channels:history`.
+1. **Slack app `hermes-gretch`** — create at api.slack.com/apps. **Outbound
+   posting only** — the inbound Socket Mode listener is retired, so no
+   App-Level (`xapp-`) token and no `connections:write`.
+   - Bot scope: `chat:write`.
    - Install to workspace → copy **Bot User OAuth token** (`xoxb-…`).
    - Invite the bot to **#gretchen-tasks** (`C0AMWAZBBJP`).
-   - Note the bot's **own user id** (`U…`) for `HERMES_BOT_USER_ID`.
-2. **EspoCRM API user `hermes-gretch`** — Administration → API Users:
-   - Same `api` role (or a Gretchen-scoped role). Generate an API key.
-   - **Store the key in 1Password → "RSG Infrastructure" vault** (item: `hermes-gretch EspoCRM API key`).
-3. **Supermemory** — reuse the existing `SUPERMEMORY_API_KEY`. Isolation is by
+2. **Supermemory** — reuse the existing `SUPERMEMORY_API_KEY`. Isolation is by
    **scope tag**, not by account: the compose sets `HERMES_MEMORY_SCOPE=hermes-gretch`,
    so every memory this instance writes is tagged `scope:hermes-gretch` and reads are
    constrained to it. No bleed into Lamar's `scope:hermes-lamar`, and vice versa.
@@ -35,7 +31,7 @@ entirely by environment. This runbook is the deploy + verification procedure.
    name + CRM link + task context ONLY. Enforced in `hermes/core/phi.py` —
    `build_medicare_memory()` is an allowlist, and `add_document` redacts MBI / SSN /
    eligibility detail from any Medicare-tagged write as a backstop.
-4. **Supabase migration** — apply once (adds the `agent_id` column the writes stamp):
+3. **Supabase migration** — apply once (adds the `agent_id` column the writes stamp):
    `supabase/migrations/20260611120000_agent_id_stamping.sql`.
 
 ## 1. Apply the agent_id migration
@@ -44,24 +40,25 @@ entirely by environment. This runbook is the deploy + verification procedure.
 # via Supabase CLI (or paste the SQL in the dashboard SQL editor)
 supabase db push
 # verify
-#   select column_name from information_schema.columns
-#   where table_name='crm_write_queue' and column_name='agent_id';
+#   select table_name from information_schema.columns
+#   where column_name='agent_id'
+#     and table_name in ('agency_intake_drafts','cc_submissions');
 ```
 
 ## 2. Create the env file
 
 ```bash
 cp deploy/hermes-gretch/.env.hermes-gretch.example .env.hermes-gretch
-# fill every <...> with hermes-gretch-DEDICATED values (Slack tokens, Espo key, Supabase, Supermemory)
+# fill every <...> with hermes-gretch-DEDICATED values (Slack tokens, Supabase, Supermemory)
 ```
 
 `.env.hermes-gretch` is gitignored — it never gets committed.
 
 ### 2a. Set SERVICE_WEBHOOK_SECRET (required for /renewals/complete)
 
-The `SERVICE_WEBHOOK_SECRET` must be set and must match the value in EspoCRM
-**Administration → Integration → serviceWebhookSecret** exactly. If it is missing
-or blank, every incoming service webhook (renewal task completions, etc.) will be
+The `SERVICE_WEBHOOK_SECRET` must be set and must match the value configured in
+whatever calls `/renewals/complete`. If it is missing or blank, every incoming
+service webhook (renewal task completions, etc.) will be
 silently rejected with 401 — no worksheet filed, no Slack win/loss post.
 
 ```bash
@@ -71,8 +68,7 @@ openssl rand -hex 32
 # 2. Paste the output into .env (the main shared env, loaded by hermes-api):
 #    SERVICE_WEBHOOK_SECRET=<the hex string>
 
-# 3. Set the same value in EspoCRM:
-#    Administration → Integration → serviceWebhookSecret
+# 3. Set the same value in the caller that posts to /renewals/complete.
 
 # 4. Recreate hermes-api so the new env is loaded
 #    (docker compose restart does NOT reload env_file — use up -d):
@@ -89,11 +85,17 @@ docker compose up -d hermes-api
 
 ```bash
 docker compose -f deploy/hermes-gretch/docker-compose.yml up -d --build
-docker logs -f rsg-hermes-gretch        # watch it connect to Slack
+docker logs -f rsg-hermes-gretch
 ```
 
-This runs `hermes --slack` (Socket Mode). It builds the same `Dockerfile` as the
-main stack; `personas/SOUL-GRETCHEN.md` is baked into the image at `/app/personas/`.
+> ⚠️ This instance existed to run the Slack Socket Mode listener, which is
+> retired. Its compose command is now a harmless `--ops-doctor` read, so
+> starting it does nothing useful — decide what this instance is *for* before
+> enabling it. The persona and memory-scope isolation below still work; it just
+> has no inbound surface to serve.
+
+It builds the same `Dockerfile` as the main stack;
+`personas/SOUL-GRETCHEN.md` is baked into the image at `/app/personas/`.
 
 ---
 
@@ -115,14 +117,25 @@ confirming.
 Then confirm a small, safe write and let it run.
 
 ### 4c. CRM receipt shows hermes-gretch
-After the confirmed write flows through the queue, check attribution:
+
+This used to read `agent_id` off `crm_write_queue`, which was dropped in the
+EspoCRM decommission. Attribution still works — check whichever table the write
+landed in:
+
 ```sql
-select agent_id, entity_type, status, created_at
-from crm_write_queue order by created_at desc limit 5;
+select agent_id, status, created_at from agency_intake_drafts
+order by created_at desc limit 5;
+-- or, for a Command Center submission:
+select agent_id, status, created_at from cc_submissions
+order by created_at desc limit 5;
 ```
+
 - ✅ PASS: the new row's `agent_id` = `hermes-gretch`.
-- Also confirm in EspoCRM the record's stream/modifiedBy shows the **hermes-gretch**
-  API user (not `api` / not Lamar).
+
+Note the gap: `outbound_sync_queue` — the queue that replaced `crm_write_queue`
+for AMS-bound writes — has **no** `agent_id` column, so writes that go straight
+to the queue are not attributable. Only the two tables above are stamped
+(`hermes/command_center/store.py`, `hermes/commands/agency_intake.py`).
 
 Memory isolation spot-check (optional):
 ```
@@ -140,7 +153,7 @@ docker compose -f deploy/hermes-gretch/docker-compose.yml down   # stop + remove
 - Lamar's instance is a separate container and is **unaffected** by anything here.
 - The `agent_id` columns are additive with a default — leaving them in place is
   harmless. To fully revert the schema (rarely needed):
-  `alter table crm_write_queue drop column agent_id;` (repeat for
-  `agency_intake_drafts`, `cc_submissions`).
-- Revoke the hermes-gretch Slack tokens and EspoCRM API key in their dashboards if
+  `alter table agency_intake_drafts drop column agent_id;` (repeat for
+  `cc_submissions`; `crm_write_queue` no longer exists).
+- Revoke the hermes-gretch Slack tokens in their dashboards if
   decommissioning for good.

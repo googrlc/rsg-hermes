@@ -6,14 +6,16 @@ Wired to live data where it's cheap and honest:
   - Approval queue from cc_submissions still in review (Phase 1 output).
   - Feed from cc_review_events (the real intake activity).
 
-Pipeline stays None until the Espo opportunity read is wired (Phase 4). We show
+Pipeline stays None: the Supabase `opportunities` rollup for this card is not
+wired yet (`opportunity_summary` below serves the LOB view). We show
 real premium/clients, not a placeholder, and compare retention to RSG's standing
 75% target (the book was 54.92%) rather than an invented goal.
 """
 from __future__ import annotations
 
-import os
 from typing import Any
+
+from hermes.ams import book as ams_book
 
 RETENTION_GOAL = 75.0   # RSG standing target
 
@@ -31,8 +33,8 @@ def _premium(p: dict) -> float:
 
 def kpi_summary(supa) -> dict[str, Any]:
     clients = supa.select("canonical_clients", columns="nowcerts_insured_guid", limit=5000)
-    policies = supa.select(
-        "canonical_policies",
+    policies = ams_book.select_policies(
+        supa,
         columns="active,annualized_premium,current_term_amount,premium_amount",
         limit=5000,
     )
@@ -48,7 +50,7 @@ def kpi_summary(supa) -> dict[str, Any]:
         "retention_rate": s.get("retention_rate"),
         "retention_goal": RETENTION_GOAL,
         "retention_snapshot_date": s.get("snapshot_date"),
-        "pipeline": None,   # Phase 4 — Espo opportunities
+        "pipeline": None,   # not wired — see module docstring
     }
 
 
@@ -136,43 +138,21 @@ def retention_trend(supa, limit: int = 24) -> dict[str, Any]:
     }
 
 
-# LOB is not a column on canonical_policies; opportunities carry it in the
-# description/name, matched heuristically (same list reports.py uses).
-_KNOWN_LOBS = [
-    "Commercial Auto", "GL/BOP", "Workers Comp", "Personal Lines",
-    "Medicare", "Life", "Property", "Umbrella",
-]
 
-# RSG opportunities leave the stock ``amount`` field empty — premium lives in
-# the custom ``writtenPremium`` (bound) and ``estimatedPremium`` (open) fields.
-# Coalesce per row: written first (actuals on closed deals), then estimated,
-# then amount. HERMES_PREMIUM_FIELD, if set, is tried before these.
-_PREMIUM_FIELDS = ["writtenPremium", "estimatedPremium", "amount"]
+def pipeline_report(supa) -> dict[str, Any]:
+    """Open pipeline from the Supabase `opportunities` table, aggregated by stage
+    and by line of business.
 
-
-def _premium_fields() -> list[str]:
-    env = os.environ.get("HERMES_PREMIUM_FIELD")
-    return ([env] if env else []) + [f for f in _PREMIUM_FIELDS if f != env]
-
-
-def pipeline_report(espo) -> dict[str, Any]:
-    """Open pipeline from EspoCRM opportunities, aggregated by stage and by
-    line of business. One Opportunity read, both rollups — mirrors the logic in
-    commands/reports.py but returns JSON for the dashboard.
+    Previously read EspoCRM Opportunities. That CRM is decommissioned, so the
+    endpoint 503'd on every call; opportunities now live in Supabase and carry a
+    real `line_of_business` column, so the LOB rollup no longer has to guess by
+    substring-matching the description.
     """
-    fields = _premium_fields()
-    body = espo.get("Opportunity", params={
-        "maxSize": 500,
-        "select": "id,name,stage,accountName,description," + ",".join(fields),
-    })
-    rows = body.get("list", []) if isinstance(body, dict) else []
-
-    def _row_premium(r: dict) -> float:
-        for f in fields:
-            v = _to_float(r.get(f))
-            if v:
-                return v
-        return 0.0
+    rows = supa.select(
+        "opportunities",
+        columns="id,insured_name,line_of_business,stage,status,premium_estimate",
+        limit=1000,
+    )
 
     stages: dict[str, dict] = {}
     lob: dict[str, dict] = {}
@@ -180,18 +160,13 @@ def pipeline_report(espo) -> dict[str, Any]:
     for r in rows:
         if not isinstance(r, dict):
             continue
-        amt = _row_premium(r)
+        amt = _to_float(r.get("premium_estimate"))
         total += amt
         st = r.get("stage") or "Unknown"
-        s = stages.setdefault(st, {"stage": st, "count": 0, "premium": 0.0})
-        s["count"] += 1
-        s["premium"] += amt
-        desc = str(r.get("description") or r.get("name") or "")
-        matched = "Other"
-        for l in _KNOWN_LOBS:
-            if l.lower() in desc.lower():
-                matched = l
-                break
+        sd = stages.setdefault(st, {"stage": st, "count": 0, "premium": 0.0})
+        sd["count"] += 1
+        sd["premium"] += amt
+        matched = r.get("line_of_business") or "Other"
         b = lob.setdefault(matched, {"lob": matched, "count": 0, "premium": 0.0})
         b["count"] += 1
         b["premium"] += amt

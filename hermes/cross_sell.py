@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from hermes.ams import book as ams_book
+
 
 def _num(v: Any) -> float:
     try:
@@ -40,8 +42,8 @@ def search_cross_sell(supa: Any, *, query: str, limit: int = 25) -> dict[str, An
 
     active_by_guid: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for batch in _chunks([g for g in guids if g]):
-        rows = supa.select(
-            "canonical_policies",
+        rows = ams_book.select_policies(
+            supa,
             columns="nowcerts_insured_guid,lines_of_business,active,annualized_premium,premium_amount",
             params={"nowcerts_insured_guid": f"in.({','.join(batch)})"},
             limit=5000,

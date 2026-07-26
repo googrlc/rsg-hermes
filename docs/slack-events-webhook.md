@@ -1,8 +1,23 @@
 # Slack `#crm-entry` → n8n → Hermes webhook
 
+> ## ⚠️ HISTORICAL — this transport was never deployed (as of 2026-07-26)
+>
+> **n8n does not exist in this stack.** It was removed from
+> `docker-compose.yml` during the LiteLLM consolidation (see
+> `litellm-consolidation-guide.md`, "Remove n8n from the running stack"), and
+> there is no `rsg-n8n` container on the box. Every webhook path below is dead.
+>
+> **What runs today:** the Socket Mode listener is the only Slack intake path,
+> and inbound work is staged through `intake_submissions` →
+> `approve_draft` → the intake worker. Outbound writes go through
+> `outbound_sync_queue`, drained by the scheduler every 5 minutes.
+>
+> Kept for the dedupe-by-message-`ts` design, which the Socket Mode path still
+> follows. Do not build against the n8n half.
+
 Second transport for Slack-driven CRM intake. Lives alongside the existing
 Socket Mode listener; both can deliver the same `#crm-entry` message and
-Hermes dedupes by message `ts` so EspoCRM only gets written once.
+Hermes dedupes by message `ts` so the CRM only gets written once.
 
 ```
 Slack #crm-entry post
@@ -11,7 +26,7 @@ n8n "Hermes Trigger" workflow
    ↓ (filter: contains "Hermes:" block)
 HTTP POST → /api/hermes/slack/crm-entry
    ↓
-Hermes verifies signature, parses block, writes to EspoCRM, posts ack
+Hermes verifies signature, parses block, writes to the CRM, posts ack
 ```
 
 ## Why a second Slack app?
@@ -114,7 +129,7 @@ remove the IF pre-filter for the verification leg if you want.
    MODULE: intake
    account: Acme Test
    ```
-   Expect: one EspoCRM Account create and one ack reply (not two of either).
+   Expect: one CRM Account create and one ack reply (not two of either).
 4. Tail logs: `docker compose logs -f hermes-api` should show
    `claim_event` decisions and dispatcher output.
 

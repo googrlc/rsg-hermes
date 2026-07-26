@@ -40,7 +40,7 @@ delegate to the right skill.
 ## Output shape
 
 Return both the note metadata block and the rendered body. The body is what
-goes into Espo `ClientNote.description` (or `note.body` in an intake payload).
+goes into the CRM `ClientNote.description` (or `note.body` in an intake payload).
 
 ```json
 {
@@ -125,7 +125,6 @@ One sentence on what this is and why it matters.
 7. **Markdown only.** No HTML, no emojis (unless the user explicitly asks),
    no images.
 8. **Mirror the canonical LOB vocabulary** from
-   `hermes-training/espocrm/workflows.md` — don't paraphrase ("Commercial
    Auto" not "company vehicles coverage").
 
 ## Companion outputs
@@ -138,7 +137,6 @@ retrieval layer.
 ## References
 
 - `docs/agency-memory-plan.md` — the agency memory architecture
-- `hermes-training/espocrm/workflows.md` — canonical LOB vocabulary
 - `crm-intake-writer` — receives `note.body` as part of the unified payload
 - `crm-fact-retriever` — consumes `facts[]` produced alongside the note
 
@@ -150,7 +148,7 @@ Documents** (under the client's folder) + Holographic Memory:
 ```bash
 hermes --doc-add \
   --doc-title "<client> — <headline>" \
-  --doc-account "<EspoCRM account name>" \
+  --doc-account "<CRM account name>" \
   --doc-type note \
   --doc-file <path>          # or pipe the note body via stdin
 ```

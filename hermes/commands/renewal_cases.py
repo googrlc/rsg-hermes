@@ -21,7 +21,6 @@ from hermes.core.dispatcher import DispatchResult
 from hermes.renewals import cases, resolve
 
 if TYPE_CHECKING:
-    from hermes.core.client import EspoClient
     from hermes.integrations.supabase_client import SupabaseClient
     from hermes.sync.nowcerts_client import NowCertsClient
 
@@ -90,7 +89,6 @@ def _ensure_case(resolved: resolve.ResolvedPolicy, supa: "SupabaseClient") -> tu
 
 
 def create_case_handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,
@@ -139,7 +137,6 @@ def create_case_handle(
 
 
 def create_tasks_handle(
-    client: "EspoClient",
     text: str,
     *,
     supa: "SupabaseClient | None" = None,

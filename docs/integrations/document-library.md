@@ -21,7 +21,7 @@ references. It renders as **folders → documents**.
 
 ## Folder model
 
-- **Client space** — one folder per EspoCRM account (`account_name`), e.g.
+- **Client space** — one folder per CRM account (`account_name`), e.g.
   `1195 Holdings LLC`. Supermemory tag: `client:<slug>`.
 - **Internal space** — freeform folders for internal references
   (`folder`, default `General`). Supermemory tag: `internal` + `folder:<slug>`.

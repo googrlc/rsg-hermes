@@ -45,8 +45,7 @@ def _utcnow() -> datetime:
 def map_opportunity_to_quote(o: dict[str, Any]) -> dict[str, Any]:
     """Build a NowCerts Policy/Insert payload (IsQuote=true) from an opportunity.
 
-    Field names match field_mapper.map_commission_to_nowcerts_policy (the proven
-    Policy/Insert shape): InsuredDatabaseId, Number, CarrierName,
+    Uses the proven Policy/Insert shape: InsuredDatabaseId, Number, CarrierName,
     LineOfBusinessName, Premium, EffectiveDate, ExpirationDate.
     """
     payload: dict[str, Any] = {"IsQuote": True}
@@ -191,6 +190,10 @@ def _extract_quote_ref(resp: Any) -> tuple[str | None, str | None]:
 
 
 def _eligible_jobs(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
+    # Local import: retry.py imports OBJECT_TYPE_QUOTE from here, so a module-level
+    # import would be circular.
+    from hermes.scheduler.retry import due_filter
+
     return supa.select(
         QUEUE_TABLE, columns="*",
         params={
@@ -198,6 +201,7 @@ def _eligible_jobs(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
             "destination_system": f"eq.{DESTINATION_NOWCERTS}",
             "status": f"eq.{QUEUE_QUEUED}",
             "order": "created_at.asc",
+            **due_filter(),
         },
         limit=limit,
     )

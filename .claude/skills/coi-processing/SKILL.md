@@ -21,7 +21,7 @@ is the primary tool.
 ## What to collect for every COI request
 
 1. Named insured (must match the policy exactly)
-2. Policy number (if available — look up in EspoCRM via find_account or
+2. Policy number (if available — look up in the CRM via find_account or
    lookup)
 3. Certificate holder name
 4. Certificate holder address
@@ -59,7 +59,7 @@ Common gaps:
    before issuing.
 9. Save and deliver to the client (Gretchen reviews and sends).
 
-Note: Policy data in EspoCRM may have amsLockState = Synced, meaning it
+Note: Policy data in the CRM may have amsLockState = Synced, meaning it
 was synced from NowCerts and is locked from manual edits. The CRM Policy
 record is for reference — the actual COI is processed in NowCerts.
 
@@ -106,7 +106,7 @@ record is for reference — the actual COI is processed in NowCerts.
   approval may be needed).
 - COI requiring new endorsement: 3-5 business days (carrier dependent).
 
-## EspoCRM activity note for COI
+## the CRM activity note for COI
 
 ```
 Date:

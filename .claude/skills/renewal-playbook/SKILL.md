@@ -20,19 +20,19 @@ with the step-by-step workflow, templates, and scripts Gretchen uses.
 
 ## The 90/60/30 workflow
 
-The Revenue Sentinel monitors EspoCRM Renewal records and posts alerts
+The Revenue Sentinel monitors CRM Renewal records and posts alerts
 to Slack at 90, 60, and 30 days before expiration.
 
 ### 90 days out (commercial) / 60 days out (personal)
 
-1. Pull the renewal list from EspoCRM (Renewal records due in 90 days).
+1. Pull the renewal list from the CRM (Renewal records due in 90 days).
 2. For each renewal, identify: client, line of business, current carrier,
    current premium, expiration date.
-3. Create an EspoCRM Renewal record (if not already created):
+3. Create an CRM Renewal record (if not already created):
    - Link to Account, Contact, Policy
    - stage = Identified
    - expiration_date, current_premium, line_of_business, carrier
-4. Create an EspoCRM Opportunity (if not already created):
+4. Create an CRM Opportunity (if not already created):
    `[Client Name] - [LOB] Renewal - [Year]`
 5. Create a task: "Review renewal for [Client]" due in 7 days.
 
@@ -199,7 +199,7 @@ Common reasons for increases, in plain English:
 6. Present options to the client.
 7. If the client switches, set up the new policy and cancel the old one
    (coordinate effective dates).
-8. Update EspoCRM with the new carrier and policy number.
+8. Update the CRM with the new carrier and policy number.
 
 ## Cross-sell checklist
 
@@ -212,4 +212,4 @@ After every renewal review, check:
 - [ ] Commercial client with no commercial auto? Offer commercial auto.
 - [ ] Commercial client with no workers comp? Offer workers comp.
 
-If any apply, create a cross-sell opportunity in EspoCRM.
+If any apply, create a cross-sell opportunity in the CRM.

@@ -13,7 +13,7 @@ confirm before quote/bind.
 Extensions over the freshhermes spine (for personal-lines renewal lanes):
   - ``current_policy_expiration`` — the **XDATE** (expiring policy's expiration).
     The whole Gretchen lane revolves around it, so it's first-class, not buried
-    inside ``prior_carriers``. Maps to EspoCRM ``x_date`` / ``next_x_date``.
+    inside ``prior_carriers``.
   - ``current_carrier`` / ``current_premium`` — the incumbent being remarketed.
   - ``FIELD_ALIASES`` — lane configs reference human-readable field names
     ("xdate", "property_details") that resolve to real spine paths. The lane
@@ -192,7 +192,7 @@ class SubmissionObject(BaseModel):
     # Incumbent / renewal spine (the XDATE-first additions).
     current_carrier: Optional[str] = None
     current_premium: Optional[float] = None
-    current_policy_expiration: Optional[date] = None   # XDATE -> Espo x_date
+    current_policy_expiration: Optional[date] = None   # XDATE
 
     intake: IntakeMeta
     applicant: Applicant = Field(default_factory=Applicant)
@@ -207,7 +207,7 @@ class SubmissionObject(BaseModel):
     enrichment: Enrichment = Field(default_factory=Enrichment)
     gate: GateResult = Field(default_factory=GateResult)
 
-    espocrm_account_id: Optional[str] = None
+    crm_account_id: Optional[str] = None
     created_at: datetime = Field(default_factory=_utcnow)
 
 

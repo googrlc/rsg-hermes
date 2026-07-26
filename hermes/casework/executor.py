@@ -117,12 +117,16 @@ def stage_task_job(supa: "SupabaseClient", *, task: dict[str, Any], insured_data
 
 
 def _eligible_jobs(supa, limit):
+    # Local import: retry.py imports OBJECT_TYPE_CASE/TASK from here.
+    from hermes.scheduler.retry import due_filter
+
     return supa.select(
         QUEUE_TABLE, columns="*",
         params={
             "object_type": f"in.({OBJECT_TYPE_CASE},{OBJECT_TYPE_TASK})",
             "destination_system": f"eq.{DESTINATION_NOWCERTS}",
             "status": f"eq.{QUEUE_QUEUED}",
+            **due_filter(),
             "order": "created_at.asc",
         },
         limit=limit,

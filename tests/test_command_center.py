@@ -261,9 +261,8 @@ class TestPhase2Endpoints:
 
 
 class TestAskHermes:
-    @patch("hermes.api._get_espo")
     @patch("hermes.core.nl_agent.ask")
-    def test_ask_non_renewal_routes_to_agent(self, mock_ask, mock_espo, client) -> None:
+    def test_ask_non_renewal_routes_to_agent(self, mock_ask, client) -> None:
         from hermes.core.dispatcher import DispatchResult
         mock_ask.return_value = DispatchResult(True, "We have 554 accounts.")
         resp = client.post("/api/command-center/ask", json={"prompt": "How many accounts do we have?"})
@@ -410,79 +409,107 @@ class TestNlAgentTools:
                  "premium_current": 5000, "risk_status": "CRITICAL"},
             ]
             cls.return_value = inst
-            res = _EXECUTORS["renewals_overview"](None, {"scope": "upcoming", "within_days": 30})
+            res = _EXECUTORS["renewals_overview"]({"scope": "upcoming", "within_days": 30})
             assert res.ok and "Acme" in res.message
 
     def test_list_skills_tool(self):
         from hermes.core.nl_agent import _EXECUTORS
-        res = _EXECUTORS["list_skills"](None, {})
+        res = _EXECUTORS["list_skills"]({})
         assert res.ok and "tools I can run" in res.message
 
 
 class TestTeamQueue:
     TODAY = date(2026, 6, 2)
 
-    def _body(self):
+    def _rows(self):
         t = self.TODAY
-        return {"list": [
-            {"id": "t1", "name": "Call Centeno about fleet", "status": "Not Started",
-             "dateEnd": (t + timedelta(days=2)).isoformat() + " 17:00:00", "priority": "High",
-             "assignedUserName": "Gretchen", "parentName": "Centeno Logistics", "parentType": "Account"},
-            {"id": "t2", "name": "Upload loss runs", "status": "Started",
-             "dateEnd": (t - timedelta(days=1)).isoformat() + " 17:00:00", "priority": "Normal",
-             "assignedUserName": "Gretchen", "parentName": None, "parentType": None},
-            {"id": "t3", "name": "No due date task", "status": "Not Started",
-             "dateEnd": None, "priority": "Low", "assignedUserName": "Lamar"},
-        ]}
+        return [
+            {"id": "t1", "title": "Call Centeno about fleet", "status": "open",
+             "due_at": (t + timedelta(days=2)).isoformat() + "T17:00:00Z", "priority": "high",
+             "assigned_to_email": "gretchen@risksolutionsgroup.net", "case_id": "case-1"},
+            {"id": "t2", "title": "Upload loss runs", "status": "in_progress",
+             "due_at": (t - timedelta(days=1)).isoformat() + "T17:00:00Z", "priority": "medium",
+             "assigned_to_email": "gretchen@risksolutionsgroup.net", "case_id": None},
+            {"id": "t3", "title": "No due date task", "status": "open",
+             "due_at": None, "priority": "low",
+             "assigned_to_email": "lamar@risksolutionsgroup.net", "case_id": None},
+        ]
 
     def test_list_open_tasks_shapes_and_sorts(self):
         from hermes.operations.team_queue import list_open_tasks
-        client = MagicMock(); client.get.return_value = self._body()
-        tasks = list_open_tasks(client, today=self.TODAY)
+        supa = MagicMock(); supa.select.return_value = self._rows()
+        tasks = list_open_tasks(supa, today=self.TODAY)
         # overdue first, no-due-date last
         assert [t["id"] for t in tasks] == ["t2", "t1", "t3"]
         assert tasks[0]["due_label"] == "overdue 1d"
         assert tasks[1]["due_label"] == "due in 2d"
         assert tasks[2]["due_label"] == "no due date"
-        # excludes closed statuses via where-clause
-        where = client.get.call_args.kwargs["params"]["where"][0]
-        assert where["type"] == "notIn" and "Completed" in where["value"]
+        # closed statuses are excluded in the query, not after the fact
+        params = supa.select.call_args.kwargs["params"]
+        assert params["status"].startswith("not.in.(")
+        assert "completed" in params["status"]
 
     def test_group_by_assignee(self):
         from hermes.operations.team_queue import group_by_assignee, list_open_tasks
-        client = MagicMock(); client.get.return_value = self._body()
-        grouped = group_by_assignee(list_open_tasks(client, today=self.TODAY))
+        supa = MagicMock(); supa.select.return_value = self._rows()
+        grouped = group_by_assignee(list_open_tasks(supa, today=self.TODAY))
         assert set(grouped) == {"Gretchen", "Lamar"} and len(grouped["Gretchen"]) == 2
 
     def test_complete_task_writes_status(self):
         from hermes.operations.team_queue import complete_task
-        client = MagicMock(); client.update.return_value = {"id": "t1", "status": "Completed"}
-        complete_task(client, "t1")
-        client.update.assert_called_once_with("Task", "t1", {"status": "Completed"})
+        supa = MagicMock(); supa.update.return_value = {"id": "t1", "status": "completed"}
+        complete_task(supa, "t1")
+        supa.update.assert_called_once_with("agency_crm_tasks", "t1", {"status": "completed"})
+
+    def test_complete_task_returns_none_when_missing(self):
+        from hermes.operations.team_queue import complete_task
+        supa = MagicMock(); supa.update.return_value = None
+        assert complete_task(supa, "nope") is None
 
 
 class TestTeamQueueEndpoints:
-    @patch("hermes.api._get_espo")
-    def test_tasks_endpoint(self, mock_espo, client) -> None:
-        c = MagicMock()
-        c.get.return_value = {"list": [
-            {"id": "t1", "name": "Call client", "status": "Started",
-             "dateEnd": (date.today() + timedelta(days=1)).isoformat() + " 17:00:00",
-             "assignedUserName": "Gretchen", "priority": "High"},
-        ]}
-        mock_espo.return_value = c
+    @patch("hermes.api._get_supa")
+    def test_tasks_endpoint(self, mock_get_supa, client) -> None:
+        """Reads agency_crm_tasks, not EspoCRM — Espo was decommissioned
+        2026-07-23, and a dead-host call on a polled endpoint hung the pool."""
+        supa = MagicMock()
+        supa.select.return_value = [
+            {"id": "t1", "title": "Call client", "status": "open", "priority": "high",
+             "due_at": (date.today() + timedelta(days=1)).isoformat(),
+             "assigned_to_email": "gretchen@risksolutionsgroup.net", "case_id": "c1"},
+        ]
+        mock_get_supa.return_value = supa
         r = client.get("/api/command-center/tasks")
         assert r.status_code == 200
         data = r.json()
         assert data["count"] == 1 and "Gretchen" in data["by_assignee"]
+        assert data["source"] == "agency_crm_tasks"
+        assert supa.select.call_args.args[0] == "agency_crm_tasks"
 
-    @patch("hermes.api._get_espo")
-    def test_complete_endpoint(self, mock_espo, client) -> None:
-        c = MagicMock(); c.update.return_value = {"id": "t1", "status": "Completed"}
-        mock_espo.return_value = c
+    @patch("hermes.api._get_supa")
+    def test_tasks_endpoint_maps_unknown_assignee(self, mock_get_supa, client) -> None:
+        supa = MagicMock()
+        supa.select.return_value = [
+            {"id": "t2", "title": "Review", "assigned_to_email": "dana@example.com"},
+            {"id": "t3", "title": "Orphan", "assigned_to_email": None},
+        ]
+        mock_get_supa.return_value = supa
+        data = client.get("/api/command-center/tasks").json()
+        assert set(data["by_assignee"]) == {"Dana", "Unassigned"}
+
+    @patch("hermes.api._get_supa")
+    def test_complete_endpoint(self, mock_get_supa, client) -> None:
+        supa = MagicMock(); supa.update.return_value = {"id": "t1", "status": "completed"}
+        mock_get_supa.return_value = supa
         r = client.post("/api/command-center/tasks/t1/complete")
         assert r.status_code == 200 and r.json()["ok"] is True
-        c.update.assert_called_once_with("Task", "t1", {"status": "Completed"})
+        supa.update.assert_called_once_with("agency_crm_tasks", "t1", {"status": "completed"})
+
+    @patch("hermes.api._get_supa")
+    def test_complete_endpoint_404s_for_unknown_task(self, mock_get_supa, client) -> None:
+        supa = MagicMock(); supa.update.return_value = None
+        mock_get_supa.return_value = supa
+        assert client.post("/api/command-center/tasks/nope/complete").status_code == 404
 
 
 class TestSkillsCatalog:

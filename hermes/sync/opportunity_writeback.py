@@ -38,12 +38,13 @@ STAGE_BOUND_WON = "Bound / Won"
 STAGE_LOST = "Lost"
 
 # OpportunityIntegrationModel write fields to round-trip from a fresh read so the
-# InsertOpportunity upsert doesn't blank the required ones.
+# InsertOpportunity upsert doesn't blank the required ones. insuredDatabaseId is
+# deliberately EXCLUDED: this is always an update (databaseId is set), and re-sending
+# the insured makes NowCerts try to re-assign it → 400 "Can't assign to Insured/Prospect".
 _WRITE_FIELDS = (
     "lineOfBusinessName", "neededBy", "opportunityStageName", "currentStageDueDate",
     "referralSourceName", "referralSourceContactName", "winProbability", "agencyCommission",
-    "assignedTo", "description", "insuredDatabaseId", "createdFromRenewal",
-    "dispositionDatabaseId", "costOfLead",
+    "assignedTo", "description", "createdFromRenewal", "dispositionDatabaseId", "costOfLead",
 )
 
 
@@ -113,12 +114,16 @@ def _writeback_payload(fresh: dict[str, Any], target_stage: str) -> dict[str, An
 
 
 def _eligible(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
+    # Local import: retry.py imports OBJECT_TYPE from here (circular otherwise).
+    from hermes.scheduler.retry import due_filter
+
     return supa.select(
         QUEUE_TABLE,
         params={
             "object_type": f"eq.{OBJECT_TYPE}",
             "destination_system": f"eq.{DESTINATION_NOWCERTS}",
             "status": f"eq.{QUEUE_QUEUED}",
+            **due_filter(),
             "approved_by": "not.is.null",
             "approved_at": "not.is.null",
             "order": "created_at.asc",

@@ -11,8 +11,6 @@ from dotenv import load_dotenv
 
 import os
 
-from hermes.core.auditor import SchemaAuditor, crm_readiness, quick_kpis
-from hermes.core.client import EspoClient, EspoClientError
 from hermes.core.dispatcher import Dispatcher
 
 COMMAND_CATALOG = """Hermes command catalog
@@ -65,15 +63,13 @@ Commissions:
 - Compare expected vs posted commission for this policy
 
 CRM draft commands:
-- Prepare an EspoCRM account update draft
-- Prepare an EspoCRM opportunity update draft
-- Show me exactly what you would write to EspoCRM
+- Stage intake: [paste the account summary]
+- New commercial prospect: [paste the account summary]
+- Show me the proposed NowCerts changes for policy [number]
 
 Policy data repair:
 - Repair policy accounts dry run
 - Repair policy accounts apply
-- hermes --repair-policy-accounts-dry-run
-- hermes --repair-policy-accounts
 """
 
 
@@ -84,19 +80,11 @@ def main() -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
-    parser = argparse.ArgumentParser(description="Hermes — EspoCRM coordinator")
+    parser = argparse.ArgumentParser(description="Hermes — agency CRM coordinator")
     parser.add_argument("command", nargs="*", help="One-shot command (omit for REPL)")
-    parser.add_argument("--commands", action="store_true", help="Print Open WebUI command catalog and exit")
-    parser.add_argument("--ping", action="store_true", help="Test API key and exit")
-    parser.add_argument("--doctor", action="store_true", help="Run non-mutating CRM readiness checks")
-    parser.add_argument("--kpi", action="store_true", help="Print quick entity counts")
-    parser.add_argument("--audit-fields", action="store_true", help="Build schema_map.json field audit")
-    parser.add_argument("--audit-schema", action="store_true", help="Build schema_map.json schema audit")
-    parser.add_argument(
-        "--inventory-metadata",
-        action="store_true",
-        help="Build live Espo metadata inventory (writable/read-only/required fields)",
-    )
+    parser.add_argument("--commands", action="store_true", help="Print the Hermes command catalog and exit")
+    parser.add_argument("--ping", action="store_true", help="Check that Hermes itself is up and exit")
+    parser.add_argument("--kpi", action="store_true", help="Print canonical book counts (clients, policies, premium)")
     parser.add_argument(
         "--revenue-sentinel",
         action="store_true",
@@ -118,17 +106,6 @@ def main() -> int:
         help="Check sentinel freshness/config status without posting",
     )
     parser.add_argument(
-        "--renewal-sweep",
-        action="store_true",
-        help="Create renewal prep tasks for Identified renewals (Gretchen)",
-    )
-    parser.add_argument(
-        "--renewal-sweep-limit",
-        type=int,
-        default=None,
-        help="Cap renewal-sweep candidates (use 1 for a safe first live run)",
-    )
-    parser.add_argument(
         "--renewal-refresh",
         action="store_true",
         help="Rebuild renewal_candidates from the live book (eligibility engine) + project eligible to project_85_renewals",
@@ -137,6 +114,17 @@ def main() -> int:
         "--renewal-refresh-dry-run",
         action="store_true",
         help="Preview renewal eligibility (eligible/needs_verification/excluded counts) without writing",
+    )
+    parser.add_argument(
+        "--agency-snapshot",
+        action="store_true",
+        help="Compute and write today's agency_snapshots row (book size + trailing-12mo retention) "
+             "from the live book. Idempotent per day — replaces the same-day row.",
+    )
+    parser.add_argument(
+        "--agency-snapshot-dry-run",
+        action="store_true",
+        help="Preview the agency snapshot (computed numbers, no write)",
     )
     parser.add_argument(
         "--renewal-classify",
@@ -277,32 +265,6 @@ def main() -> int:
         help="Bypass daily idempotency guard for commission audit",
     )
     parser.add_argument(
-        "--commission-ingest",
-        action="store_true",
-        help="Ingest commissionable policies from crm_commissions into commission_ledger",
-    )
-    parser.add_argument(
-        "--commission-ingest-dry-run",
-        action="store_true",
-        help="Preview commission ingest without writing to commission_ledger",
-    )
-    parser.add_argument(
-        "--espo-writeback",
-        action="store_true",
-        help="Write EspoCRM service Cases back to the NowCerts task ledger (AMS)",
-    )
-    parser.add_argument(
-        "--espo-writeback-dry-run",
-        action="store_true",
-        help="Preview Cases->NowCerts write-back without writing to NowCerts/Espo",
-    )
-    parser.add_argument(
-        "--espo-writeback-hours",
-        type=int,
-        default=24,
-        help="Look-back window (hours) for modified Cases in --espo-writeback",
-    )
-    parser.add_argument(
         "--eom-scorecard",
         action="store_true",
         help="Post end-of-month revenue scorecard for previous month",
@@ -320,7 +282,7 @@ def main() -> int:
     parser.add_argument(
         "--commission-reconcile-file",
         type=str,
-        help="Reconcile a carrier statement file (csv/xlsx/pdf) against Espo commissions",
+        help="Reconcile a carrier statement file (csv/xlsx/pdf) against commission_ledger",
     )
     parser.add_argument(
         "--commission-reconcile-dry-run",
@@ -338,45 +300,7 @@ def main() -> int:
         default=8484,
         help="Port for the REST API server (default: 8484)",
     )
-    # --- NowCerts ↔ EspoCRM Sync commands ---
-    parser.add_argument(
-        "--sync-nowcerts",
-        action="store_true",
-        help="Run NowCerts → EspoCRM sync pipeline (Insured → Account)",
-    )
-    parser.add_argument(
-        "--sync-nowcerts-dry-run",
-        action="store_true",
-        help="Preview NowCerts sync without writing to EspoCRM",
-    )
-    parser.add_argument(
-        "--sync-nowcerts-since",
-        type=str,
-        default=None,
-        help="Only sync records changed since this ISO datetime (e.g. 2026-05-01T00:00:00)",
-    )
-    parser.add_argument(
-        "--sync-policies",
-        action="store_true",
-        help="Run NowCerts → EspoCRM POLICIES-ONLY sync (upsert Policy by policy_number; never touches Accounts/Contacts)",
-    )
-    parser.add_argument(
-        "--sync-policies-dry-run",
-        action="store_true",
-        help="Preview the policies-only sync without writing to EspoCRM",
-    )
-    parser.add_argument(
-        "--sync-policies-since",
-        type=str,
-        default=None,
-        help="Only sync policies changed since this ISO datetime (e.g. 2026-06-01T00:00:00)",
-    )
-    parser.add_argument(
-        "--sync-policies-limit",
-        type=int,
-        default=None,
-        help="Cap the number of policies processed (useful for a first dry-run)",
-    )
+    # --- NowCerts → Supabase sync commands ---
     parser.add_argument(
         "--sync-canonical-book",
         action="store_true",
@@ -465,77 +389,6 @@ def main() -> int:
         help="Earliest policy effective_date to ledger (YYYY-MM-DD; default 2026-01-01). "
              "Excludes future-effective + older-than-since business.",
     )
-    parser.add_argument(
-        "--enrich-nowcerts",
-        type=str,
-        default=None,
-        metavar="ACCOUNT_ID",
-        help="Syncback: enrich the linked NowCerts insured from one ACTIVE EspoCRM account (upsert by DatabaseId)",
-    )
-    parser.add_argument(
-        "--enrich-nowcerts-dry-run",
-        action="store_true",
-        help="Preview the NowCerts enrichment payload for --enrich-nowcerts without writing to the AMS",
-    )
-    # --- Nightly CRM Changelog ---
-    parser.add_argument(
-        "--changelog",
-        action="store_true",
-        help="Run nightly CRM changelog: post changes to Slack + log in EspoCRM",
-    )
-    parser.add_argument(
-        "--changelog-dry-run",
-        action="store_true",
-        help="Render CRM changelog without posting to Slack or logging to CRM",
-    )
-    parser.add_argument(
-        "--changelog-force",
-        action="store_true",
-        help="Bypass daily idempotency guard for changelog",
-    )
-    parser.add_argument(
-        "--changelog-hours",
-        type=int,
-        default=None,
-        help="Lookback window in hours (default: 24)",
-    )
-    # --- Bidirectional Sync ---
-    parser.add_argument(
-        "--sync-bidirectional",
-        action="store_true",
-        help="Run full bidirectional sync: NowCerts↔Supabase↔EspoCRM",
-    )
-    parser.add_argument(
-        "--sync-bidirectional-dry-run",
-        action="store_true",
-        help="Preview bidirectional sync without writing to any system",
-    )
-    parser.add_argument(
-        "--sync-crm-to-hub",
-        action="store_true",
-        help="Mirror EspoCRM changes to Supabase golden record",
-    )
-    parser.add_argument(
-        "--sync-crm-to-hub-dry-run",
-        action="store_true",
-        help="Preview CRM-to-hub mirror without writing",
-    )
-    parser.add_argument(
-        "--sync-hub-to-nowcerts",
-        action="store_true",
-        help="Push Supabase outbound queue to NowCerts AMS",
-    )
-    parser.add_argument(
-        "--sync-hub-to-nowcerts-dry-run",
-        action="store_true",
-        help="Preview hub-to-NowCerts push without writing",
-    )
-    parser.add_argument(
-        "--sync-hours",
-        type=int,
-        default=24,
-        help="Lookback window in hours for sync (default: 24)",
-    )
     # --- Hermes Operations Center commands ---
     # --- Document library (Supermemory + index; freeform internal refs) ---
     parser.add_argument(
@@ -561,27 +414,6 @@ def main() -> int:
         help="Check Supabase connectivity and Hermes table health",
     )
     parser.add_argument(
-        "--process-crm-queue",
-        action="store_true",
-        help="Dequeue pending CRM writes and apply to EspoCRM",
-    )
-    parser.add_argument(
-        "--process-crm-queue-dry-run",
-        action="store_true",
-        help="Preview CRM queue processing without writing to EspoCRM",
-    )
-    parser.add_argument(
-        "--run-crm-queue-worker",
-        action="store_true",
-        help="Continuously poll crm_write_queue every N seconds (systemd worker mode)",
-    )
-    parser.add_argument(
-        "--crm-queue-poll-seconds",
-        type=float,
-        default=5.0,
-        help="Poll interval for --run-crm-queue-worker (default: 5s)",
-    )
-    parser.add_argument(
         "--run-intake-worker",
         action="store_true",
         help="Continuously poll intake_submissions every N seconds (Phase 3 rsg-intake worker)",
@@ -593,17 +425,6 @@ def main() -> int:
         help="Poll interval for --run-intake-worker (default: 5s)",
     )
     parser.add_argument(
-        "--run-outbound-drain-worker",
-        action="store_true",
-        help="Continuously drain outbound_sync_queue (Hermes's single scheduler; pg_cron stays disabled)",
-    )
-    parser.add_argument(
-        "--outbound-drain-poll-seconds",
-        type=float,
-        default=900.0,
-        help="Poll interval for --run-outbound-drain-worker (default: 900s = 15 min)",
-    )
-    parser.add_argument(
         "--snapshot-kpis",
         action="store_true",
         help="Record system health, finance, and renewal KPI snapshots",
@@ -613,93 +434,12 @@ def main() -> int:
         action="store_true",
         help="Report-only age audit of .claude/skills (flags stale/review candidates; never deletes)",
     )
-    parser.add_argument(
-        "--repair-policy-accounts",
-        action="store_true",
-        help="Link Policies to Accounts by insuredMomentumId -> Account.momentum_client_id",
-    )
-    parser.add_argument(
-        "--repair-policy-accounts-dry-run",
-        action="store_true",
-        help="Preview Policy account-link repairs without writing to EspoCRM",
-    )
     args = parser.parse_args()
 
     if args.commands:
         print(COMMAND_CATALOG)
         return 0
 
-    # --- NowCerts sync (requires NowCerts + Supabase + EspoCRM) ---
-    if args.sync_nowcerts or args.sync_nowcerts_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-        from hermes.sync.pipeline import run_insured_to_account_sync
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-        try:
-            nc = NowCertsClient()
-        except NowCertsClientError as e:
-            print(f"NowCerts connection failed: {e}", file=sys.stderr)
-            return 2
-        try:
-            espo = EspoClient()
-        except EspoClientError as e:
-            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
-            return 2
-
-        sync_result = run_insured_to_account_sync(
-            nc,
-            espo,
-            supa,
-            dry_run=args.sync_nowcerts_dry_run,
-            since=args.sync_nowcerts_since,
-        )
-        print(sync_result.message)
-        if sync_result.errors:
-            print("Errors:")
-            for err in sync_result.errors:
-                print(f"- {err}")
-        return 0 if sync_result.ok else 1
-
-    # --- NowCerts → EspoCRM policies-only sync (no Supabase, no account writes) ---
-    if args.sync_policies or args.sync_policies_dry_run:
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-        from hermes.sync.policy_sync import run_policy_sync
-
-        try:
-            nc = NowCertsClient()
-        except NowCertsClientError as e:
-            print(f"NowCerts connection failed: {e}", file=sys.stderr)
-            return 2
-        try:
-            espo = EspoClient()
-        except EspoClientError as e:
-            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
-            return 2
-
-        pol_result = run_policy_sync(
-            nc,
-            espo,
-            since=args.sync_policies_since,
-            dry_run=args.sync_policies_dry_run,
-            limit=args.sync_policies_limit,
-        )
-        print(pol_result.message)
-        if pol_result.skipped_accounts:
-            print(f"\nSkipped — no EspoCRM account ({len(pol_result.skipped_accounts)} insureds):")
-            for nm in pol_result.skipped_accounts[:50]:
-                print(f"- {nm}")
-            if len(pol_result.skipped_accounts) > 50:
-                print(f"... +{len(pol_result.skipped_accounts) - 50} more")
-        if pol_result.errors:
-            print("\nErrors:")
-            for err in pol_result.errors[:50]:
-                print(f"- {err}")
-        return 0 if pol_result.ok else 1
 
     # --- NowCerts → Supabase canonical book sync (feeds --renewal-refresh) ---
     if args.sync_canonical_book or args.sync_canonical_book_dry_run:
@@ -819,81 +559,6 @@ def main() -> int:
         return 0 if comm_result.ok else 1
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
-    if args.enrich_nowcerts:
-        import json as _json
-
-        from hermes.sync.enrich import enrich_insured_from_account
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-
-        try:
-            espo = EspoClient()
-            nc = NowCertsClient()
-        except (EspoClientError, NowCertsClientError) as e:
-            print(f"connection failed: {e}", file=sys.stderr)
-            return 2
-        res = enrich_insured_from_account(
-            espo, nc, args.enrich_nowcerts, dry_run=args.enrich_nowcerts_dry_run,
-        )
-        print(_json.dumps(res, indent=2, default=str))
-        return 0 if res.get("ok") or res.get("action") == "skip" else 1
-
-    # --- Bidirectional sync (requires NowCerts + Supabase + EspoCRM) ---
-    _bidi = args.sync_bidirectional or args.sync_bidirectional_dry_run
-    _crm_hub = args.sync_crm_to_hub or args.sync_crm_to_hub_dry_run
-    _hub_nc = args.sync_hub_to_nowcerts or args.sync_hub_to_nowcerts_dry_run
-    if _bidi or _crm_hub or _hub_nc:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-        try:
-            espo = EspoClient()
-        except EspoClientError as e:
-            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
-            return 2
-
-        if _crm_hub:
-            from hermes.sync.bidirectional import run_crm_to_hub
-            bidi_result = run_crm_to_hub(
-                espo, supa,
-                dry_run=args.sync_crm_to_hub_dry_run,
-                since_hours=args.sync_hours,
-            )
-        elif _hub_nc:
-            from hermes.sync.bidirectional import run_hub_to_nowcerts
-            from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-            try:
-                nc = NowCertsClient()
-            except NowCertsClientError as e:
-                print(f"NowCerts connection failed: {e}", file=sys.stderr)
-                return 2
-            bidi_result = run_hub_to_nowcerts(
-                nc, supa,
-                dry_run=args.sync_hub_to_nowcerts_dry_run,
-            )
-        else:
-            from hermes.sync.bidirectional import run_bidirectional
-            from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
-            try:
-                nc = NowCertsClient()
-            except NowCertsClientError as e:
-                print(f"NowCerts connection failed: {e}", file=sys.stderr)
-                return 2
-            bidi_result = run_bidirectional(
-                nc, espo, supa,
-                dry_run=args.sync_bidirectional_dry_run,
-                since_hours=args.sync_hours,
-            )
-        print(bidi_result.message)
-        if bidi_result.errors:
-            print("Errors:")
-            for err in bidi_result.errors:
-                print(f"- {err}")
-        return 0 if bidi_result.ok else 1
-
     # --- Email triage (requires the provider client + Supabase) ---
     if args.doc_folders:
         from hermes.documents.store import list_folders
@@ -930,7 +595,7 @@ def main() -> int:
         print(f"Saved '{row['title']}' to [{row['space']}] {where} (id={row['id']})")
         return 0
 
-    # --- Supabase-only commands (no EspoCRM credentials required) ---
+    # --- Supabase-only commands ---
     if args.ops_doctor:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.operations.ops_doctor import run_ops_doctor
@@ -970,28 +635,6 @@ def main() -> int:
         print(f"Recorded {len(results)} KPI data points.")
         return 0
 
-    # --- Nightly CRM Changelog (requires EspoCRM + Slack) ---
-    if args.changelog or args.changelog_dry_run:
-        from hermes.jobs import nightly_changelog
-
-        try:
-            espo = EspoClient()
-        except EspoClientError as e:
-            print(f"EspoCRM connection failed: {e}", file=sys.stderr)
-            return 2
-
-        result = nightly_changelog.run(
-            espo,
-            dry_run=args.changelog_dry_run,
-            force=getattr(args, "changelog_force", False),
-            lookback_hours=args.changelog_hours,
-        )
-        print(result.message)
-        if result.warnings:
-            print("Warnings:")
-            for w in result.warnings:
-                print(f"- {w}")
-        return 0 if result.ok else 1
 
     # --- API server (manages its own clients lazily) ---
     if args.api:
@@ -1002,53 +645,36 @@ def main() -> int:
         uvicorn.run(api_app, host="0.0.0.0", port=args.api_port)
         return 0
 
-    # --- Commands requiring EspoCRM ---
-    try:
-        client = EspoClient()
-    except EspoClientError as e:
-        print(e, file=sys.stderr)
-        return 2
-
-    if args.audit_fields or args.audit_schema:
-        schema = SchemaAuditor(client).run_field_audit()
-        print(f"Schema audit wrote {os.environ.get('HERMES_SCHEMA_MAP', 'schema_map.json')}")
-        print(schema)
-        return 0
-    if args.inventory_metadata:
-        schema = SchemaAuditor(client).run_live_metadata_inventory()
-        print(f"Metadata inventory wrote {os.environ.get('HERMES_SCHEMA_MAP', 'schema_map.json')}")
-        print(f"Entity count: {schema.get('entity_count', 0)}")
-        return 0
-
     if args.ping:
-        print(client.ping())
+        print("Hermes is online.")
         return 0
-
-    if args.doctor:
-        report = crm_readiness(client)
-        print("\n".join(report.format_lines()))
-        return 0 if report.ok else 1
 
     if args.kpi:
-        for r in quick_kpis(client):
-            print(f"{r.label}: {r.value}" + (f" — {r.detail}" if r.detail else ""))
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(e, file=sys.stderr)
+            return 2
+        rows = supa.select("agency_snapshots", params={"order": "snapshot_date.desc"}, limit=1)
+        if not rows:
+            print("No agency snapshot on file yet — run --snapshot-kpis first.", file=sys.stderr)
+            return 1
+        s = rows[0]
+        print(f"As of {s.get('snapshot_date')}:")
+        for label, key in (("Clients", "client_count"), ("Policies", "policy_count")):
+            print(f"  {label}: {s.get(key) if s.get(key) is not None else 'n/a'}")
+        premium = s.get("active_premium")
+        retention = s.get("retention_rate")
+        print(f"  Active premium: ${float(premium):,.0f}" if premium is not None else "  Active premium: n/a")
+        print(f"  Retention: {retention}%" if retention is not None else "  Retention: n/a")
         return 0
-
-    if args.repair_policy_accounts or args.repair_policy_accounts_dry_run:
-        from hermes.commands.policy_repair import run_policy_account_repair
-
-        result = run_policy_account_repair(
-            client,
-            dry_run=args.repair_policy_accounts_dry_run or not args.repair_policy_accounts,
-        )
-        print(result.format_message())
-        return 0 if result.ok else 1
 
     if args.revenue_sentinel or args.revenue_sentinel_dry_run:
         from hermes.jobs import revenue_sentinel
 
         result = revenue_sentinel.run(
-            client,
             dry_run=args.revenue_sentinel_dry_run,
             force=args.revenue_sentinel_force,
         )
@@ -1058,14 +684,6 @@ def main() -> int:
             for warning in result.warnings:
                 print(f"- {warning}")
         return 0 if result.ok else 1
-
-    if args.renewal_sweep:
-        from hermes.renewals.sweep import run as renewal_sweep
-
-        result = renewal_sweep(limit=args.renewal_sweep_limit)
-        print(f"Renewal sweep: {result['created']} task(s) created of "
-              f"{result['candidates']} candidate(s)")
-        return 0
 
     if args.renewal_refresh or args.renewal_refresh_dry_run:
         from hermes.renewals.candidate_refresh import run_refresh
@@ -1083,6 +701,19 @@ def main() -> int:
         for s in summary.get("sample_eligible", []):
             print(f"  {s['branch']}: {s['policy_number']} {s['event_date']} seg={s['segment']} "
                   f"queue={s['in_working_queue']} risk={s['risk_status']}")
+        return 0
+
+    if args.agency_snapshot or args.agency_snapshot_dry_run:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.jobs.agency_snapshot import format_summary, run_snapshot
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        summary = run_snapshot(supa=supa, dry_run=args.agency_snapshot_dry_run)
+        print(format_summary(summary))
         return 0
 
     if args.renewal_classify or args.renewal_classify_dry_run:
@@ -1234,7 +865,6 @@ def main() -> int:
         from hermes.jobs import revenue_integrity
 
         result = revenue_integrity.run_commission_audit(
-            client,
             dry_run=args.commission_audit_dry_run,
             force=args.commission_audit_force,
         )
@@ -1245,39 +875,10 @@ def main() -> int:
                 print(f"- {warning}")
         return 0 if result.ok else 1
 
-    if args.commission_ingest or args.commission_ingest_dry_run:
-        from hermes.jobs.commission_ingest import run_ingest
-
-        result = run_ingest(dry_run=args.commission_ingest_dry_run)
-        print(result.message)
-        if result.errors:
-            print("Errors:")
-            for err in result.errors[:10]:
-                print(f"- {err}")
-        return 0 if result.ok else 1
-
-    if args.espo_writeback or args.espo_writeback_dry_run:
-        from hermes.jobs.espo_to_nowcerts_writeback import run_writeback
-        from hermes.jobs.espo_account_writeback import run_account_writeback
-
-        dry = args.espo_writeback_dry_run
-        hours = args.espo_writeback_hours
-        r_tasks = run_writeback(dry_run=dry, since_hours=hours)
-        r_accts = run_account_writeback(dry_run=dry, since_hours=hours)
-        print(r_tasks.message)
-        print(r_accts.message)
-        errors = r_tasks.errors + r_accts.errors
-        if errors:
-            print("Errors:")
-            for err in errors[:10]:
-                print(f"- {err}")
-        return 0 if (r_tasks.ok and r_accts.ok) else 1
-
     if args.eom_scorecard or args.eom_scorecard_dry_run:
         from hermes.jobs import revenue_integrity
 
         result = revenue_integrity.run_eom_scorecard(
-            client,
             dry_run=args.eom_scorecard_dry_run,
             force=args.eom_scorecard_force,
         )
@@ -1287,44 +888,6 @@ def main() -> int:
             for warning in result.warnings:
                 print(f"- {warning}")
         return 0 if result.ok else 1
-
-    if args.process_crm_queue or args.process_crm_queue_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.operations.crm_queue_worker import process_queue
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-        result = process_queue(
-            supa,
-            client,
-            dry_run=args.process_crm_queue_dry_run,
-        )
-        print(result.message)
-        if result.errors:
-            print("Errors:")
-            for err in result.errors:
-                print(f"- {err}")
-        return 0 if result.ok else 1
-
-    if args.run_crm_queue_worker:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.operations.crm_queue_worker import run_worker_loop
-
-        try:
-            supa = SupabaseClient()
-        except SupabaseClientError as e:
-            print(f"Supabase connection failed: {e}", file=sys.stderr)
-            return 2
-        print(f"Starting CRM queue worker loop every {args.crm_queue_poll_seconds}s...")
-        run_worker_loop(
-            supa,
-            client,
-            poll_seconds=args.crm_queue_poll_seconds,
-        )
-        return 0
 
     if args.run_intake_worker:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
@@ -1339,31 +902,17 @@ def main() -> int:
         run_intake_worker_loop(supa, poll_seconds=args.intake_poll_seconds)
         return 0
 
-    if args.run_outbound_drain_worker:
+    if args.commission_reconcile_file:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.sync.pipeline import run_outbound_drain_loop
+        from hermes.jobs import commission_reconciliation
 
         try:
             supa = SupabaseClient()
         except SupabaseClientError as e:
             print(f"Supabase connection failed: {e}", file=sys.stderr)
             return 2
-        print(
-            f"Starting outbound drain loop every {args.outbound_drain_poll_seconds}s "
-            "(pg_cron outbound path is retired)..."
-        )
-        run_outbound_drain_loop(
-            supa,
-            client,
-            poll_seconds=args.outbound_drain_poll_seconds,
-        )
-        return 0
-
-    if args.commission_reconcile_file:
-        from hermes.jobs import commission_reconciliation
-
         result = commission_reconciliation.run_reconciliation(
-            client,
+            supa,
             statement_path=args.commission_reconcile_file,
             dry_run=args.commission_reconcile_dry_run,
         )
@@ -1378,7 +927,7 @@ def main() -> int:
     dispatcher = Dispatcher(use_openai=use_openai)
     if args.command:
         line = " ".join(args.command)
-        result = dispatcher.dispatch(client, line)
+        result = dispatcher.dispatch(line)
         print(result.message)
         return 0 if result.ok else 1
 
@@ -1391,7 +940,7 @@ def main() -> int:
             break
         if not line:
             break
-        result = dispatcher.dispatch(client, line)
+        result = dispatcher.dispatch(line)
         print(result.message)
     return 0
 

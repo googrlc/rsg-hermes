@@ -116,7 +116,7 @@ def test_generate_and_file_ok():
     ncloud.file_document.return_value = {"path": "Clients/Acme LLC/Renewal Reviews/TST-0001-renewal-worksheet.pdf",
                                          "url": "https://nc/x"}
     r = rd.generate_pdf_handle(
-        None, "generate the renewal pdf for policy TST-0001",
+        "generate the renewal pdf for policy TST-0001",
         supa=supa, nowcerts=_nc_ams(_detail()), nextcloud=ncloud,
     )
     assert r.ok and r.data["filed"] is True
@@ -130,7 +130,7 @@ def test_generate_without_nextcloud_configured():
     ncloud = MagicMock()
     ncloud.is_configured.return_value = False
     r = rd.generate_pdf_handle(
-        None, "generate the renewal pdf for policy TST-0001",
+        "generate the renewal pdf for policy TST-0001",
         supa=supa, nowcerts=_nc_ams(_detail()), nextcloud=ncloud,
     )
     assert r.ok and r.data["filed"] is False
@@ -149,12 +149,12 @@ def _dispatcher():
 def test_generate_pdf_routes():
     with patch("hermes.commands.renewal_documents.generate_pdf_handle") as h:
         h.return_value = DispatchResult(True, "pdf")
-        _dispatcher().dispatch(MagicMock(), "generate the renewal pdf for policy TST-0001")
+        _dispatcher().dispatch("generate the renewal pdf for policy TST-0001")
         h.assert_called_once()
 
 
 def test_file_to_nextcloud_routes():
     with patch("hermes.commands.renewal_documents.generate_pdf_handle") as h:
         h.return_value = DispatchResult(True, "filed")
-        _dispatcher().dispatch(MagicMock(), "file the renewal worksheet to nextcloud for policy TST-0001")
+        _dispatcher().dispatch("file the renewal worksheet to nextcloud for policy TST-0001")
         h.assert_called_once()

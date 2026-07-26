@@ -1,3 +1,21 @@
+# MUTABLE STATE LIVES IN A VOLUME, NOT IN THE CODE TREE.
+#
+# `.:/app` bind-mounts the git working tree into every container, which means
+# anything the container writes lands in the repo. That surface caused two
+# incidents on 2026-07-26: a `docker cp` restore wrote an older image copy of
+# api.py over the host tree (silently reverting the box below its committed HEAD),
+# and a bad `-v` flag created a directory named `hermes/operations/staleness.py`
+# inside the repo. It is also why the bridge's app.py shows owner dnsmasq:1000 —
+# container writes, from more than one process.
+#
+# The mount could not simply be dropped, because three job-idempotency files lived
+# INSIDE the tree at .hermes/ and were referenced by RELATIVE paths, resolving
+# against WORKDIR /app. Removing the mount would have made them ephemeral, so
+# every container recreate would reset the sentinel's "already sent today" memory
+# and re-post the daily briefing.
+#
+# So state moved to the hermes-state volume first. That is the prerequisite; the
+# code mount can go once nothing writes to /app.
 services:
   hermes:
     build:
@@ -9,8 +27,19 @@ services:
       - .env
     volumes:
       - .:/app
-    restart: unless-stopped
-    command: ["hermes", "--slack"]
+      - hermes-state:/var/lib/hermes
+    environment:
+      # Absolute paths into the state volume. These OVERRIDE the relative paths in
+      # .env (.hermes/*.json), which resolved into the bind-mounted code tree.
+      HERMES_SENTINEL_STATE_FILE: /var/lib/hermes/sentinel_state.json
+      HERMES_COMMISSION_AUDIT_STATE_FILE: /var/lib/hermes/commission_audit_state.json
+      HERMES_EOM_SCORECARD_STATE_FILE: /var/lib/hermes/eom_scorecard_state.json
+    # Per-cron runner, not a listener: jobs run as
+    #   docker compose run --rm hermes hermes --<job>
+    # Default command is a harmless read-only check so a plain `up -d`
+    # cannot crash-loop. restart: no for the same reason.
+    restart: "no"
+    command: ["hermes", "--ops-doctor"]
   hermes-api:
     build:
       context: .
@@ -20,6 +49,13 @@ services:
       - .env
     volumes:
       - .:/app
+      - hermes-state:/var/lib/hermes
+    environment:
+      # Absolute paths into the state volume. These OVERRIDE the relative paths in
+      # .env (.hermes/*.json), which resolved into the bind-mounted code tree.
+      HERMES_SENTINEL_STATE_FILE: /var/lib/hermes/sentinel_state.json
+      HERMES_COMMISSION_AUDIT_STATE_FILE: /var/lib/hermes/commission_audit_state.json
+      HERMES_EOM_SCORECARD_STATE_FILE: /var/lib/hermes/eom_scorecard_state.json
     restart: unless-stopped
     ports:
       - "8788:8787"
@@ -41,23 +77,9 @@ services:
       - .env
     volumes:
       - .:/app
+      - hermes-state:/var/lib/hermes
     restart: unless-stopped
     command: ["hermes", "--run-intake-worker", "--intake-poll-seconds", "5"]
-  hermes-outbound-drain:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: rsg-hermes-outbound-drain
-    network_mode: "host"
-    env_file:
-      - .env
-    volumes:
-      - .:/app
-    restart: unless-stopped
-    # Hermes's single outbound scheduler: drains outbound_sync_queue every 15
-    # min. Replaces the retired pg_cron rsg-sync outbound path (pg_cron stays
-    # disabled).
-    command: ["hermes", "--run-outbound-drain-worker", "--outbound-drain-poll-seconds", "900"]
   hermes-scheduler:
     build:
       context: .
@@ -68,8 +90,10 @@ services:
       - .env
     volumes:
       - .:/app
+      - hermes-state:/var/lib/hermes
     restart: unless-stopped
-    # Executor scheduler: intake + renewal every 5 min with single-instance
+    # Executor scheduler: renewal, intake, quote, casework and
+    # opportunity-writeback every 5 min with single-instance
     # locking, backoff/dead-letter, stalled-queue reclaim, and #systems-check
     # alerts. DISABLED by default TWO ways:
     #   1. compose profile "scheduler" — a plain `docker compose up -d` skips it;
@@ -79,6 +103,12 @@ services:
     # Let the in-flight cycle finish on SIGTERM so no claimed job is abandoned.
     stop_grace_period: 60s
     command: ["hermes", "--run-scheduler", "--scheduler-interval", "300", "--scheduler-batch", "10"]
+
+volumes:
+  # Job-idempotency state: sentinel "already sent today", commission-audit and
+  # EOM-scorecard watermarks. Named so it survives compose down/up and container
+  # recreates — losing it makes a report re-send, which is externally visible.
+  hermes-state:
 
 networks:
   hermes-shared:

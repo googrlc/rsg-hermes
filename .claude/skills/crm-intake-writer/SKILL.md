@@ -1,14 +1,38 @@
 ---
 name: crm-intake-writer
-description: Turn any insurance-related summary, document, transcript, email, quote proposal, or Slack note into a structured, duplicate-safe CRM intake payload (Account + Contacts + per-LOB Opportunities + Note + Facts) for EspoCRM. Drafts the payload and asks for an approval token — never writes directly. Trigger whenever the user pastes an intake summary, says "put this into CRM," "draft an intake," "create the account for...", or attaches an underwriting/quote/transcript document for ingestion.
+description: Turn any insurance-related summary, document, transcript, email, quote proposal, or Slack note into a structured, duplicate-safe CRM intake payload (Account + Contacts + per-LOB Opportunities + Note + Facts) for the CRM. Drafts the payload and asks for an approval token — never writes directly. Trigger whenever the user pastes an intake summary, says "put this into CRM," "draft an intake," "create the account for...", or attaches an underwriting/quote/transcript document for ingestion.
 ---
 
 # CRM Intake Writer
 
 The author skill for any CRM intake. This skill **prepares** a complete intake
-payload — it never writes. Writes are mediated by the `crm-upsert-planner`
-skill, the `crm_write_queue` worker, or an explicit n8n webhook, only after
-the user returns an approval token.
+payload — it never writes.
+
+> **Write path corrected 2026-07-26.** The prior version routed approved
+> payloads through `crm-upsert-planner` → `crm_write_queue` → worker →
+> `crm_receipts`, or an n8n webhook. **None of that exists**: there is no
+> `crm_write_queue` table, no `crm_receipts` table, no n8n container, and
+> `crm-upsert-planner` has been deleted. The real path is below.
+
+## The real write path
+
+```
+this skill drafts  →  intake_submissions row (status awaiting_approval)
+                   →  approve_draft(token)         [hermes/operations/agency_intake_approval.py]
+                   →  intake_worker commits        [hermes/operations/intake_worker.py]
+                        ├── opportunities          (per-LOB rows)
+                        ├── staged NowCerts insured
+                        └── retrieval rows: client_entities / client_facts / client_notes
+```
+
+`intake_submissions` (176 rows) is the source of truth, keyed by submission id.
+`agency_intake_drafts` (16 rows) is the older draft table — the `draft_id`
+parameter name survives for back-compat but now carries a submission id.
+
+For **opportunity writes specifically**, the sanctioned door is
+`hermes-crm-writer` (`POST /api/opportunities`) — it owns the client slug,
+dedupe against `uq_opportunities_client_lob_type`, stage defaults, and the
+background insured link. Don't hand-roll opportunity inserts.
 
 ## When to use
 
@@ -22,7 +46,7 @@ Use this skill when:
 - Another skill (e.g. `commercial-risk-intake`, `personal-lines-intake`,
   `life-insurance-intake`, `benefits-intake`) needs a unified output envelope.
 - An email or Slack message is forwarded that describes a real prospect,
-  client, or service request that should land in EspoCRM.
+  client, or service request that should land in the CRM.
 
 Do **not** use this skill for:
 
@@ -52,11 +76,12 @@ Identify one or more of:
   `Service Request`, `Claim`, `Quote Summary`, `Underwriting Submission`,
   `Carrier Appetite Note`.
 
-Identify line(s) of business from the canonical vocabulary in
-`hermes-training/espocrm/workflows.md` (General Liability, Workers Comp,
-Commercial Auto, BOP, Inland Marine, Pollution, Professional, Cyber,
-Umbrella, Home, Auto, Dwelling Fire, Life, Disability, Medicare, Group
-Health, Dental, Vision, Supplemental).
+Identify line(s) of business. The pipeline stores the LOB verbatim, so match the
+values already in use where you can — live `opportunities` LOBs are: Personal
+Auto, Commercial Auto, Homeowners, General Liability, Worker's Compensation,
+Professional Liability, Commercial Property, Motorcycle. Other valid lines:
+BOP, Inland Marine, Pollution, Cyber, Umbrella, Dwelling Fire, Life,
+Disability, Medicare, Group Health, Dental, Vision, Supplemental.
 
 ### 2. Extract entities
 
@@ -73,8 +98,8 @@ assembles the final payload.
 
 ### 3. Search before create
 
-Before producing the final payload, populate `duplicate_search` so the
-upserter/n8n can dedupe. Always search by:
+Before producing the final payload, populate `duplicate_search` so the intake
+worker can dedupe. Always search by:
 
 - **Account:** legal name, DBA, FEIN, phone, email, street address,
   principal/contact name.
@@ -113,7 +138,6 @@ Each opportunity must include:
 - `primary_contact`
 - `opportunity_name`
 - `line_of_business` (single value)
-- `stage` (use the canonical enum — see `hermes-training/espocrm/guardrails.md`)
 - `proposed_effective_date` or `target_date`
 - `producer`
 - `opportunity_type` (`New Business`, `Renewal`, `Cross-Sell`, `Remarket`)
@@ -128,8 +152,8 @@ Stage defaults when only some LOBs are quoted:
 
 | Situation | Stage |
 |-----------|-------|
-| Quote number present | `Quote / Market Review` (Espo: `Quoting`) |
-| LOB requested but no quote yet | `Market / Submission Needed` (Espo: `Discovery`) |
+| Quote number present | `Quote / Market Review` |
+| LOB requested but no quote yet | `Market / Submission Needed` |
 | Carrier already declined | `Closed Lost` with reason |
 | Bound | `Closed Won` with policy reference |
 
@@ -277,14 +301,17 @@ Reply with one of:
 
 ## Hard rules
 
-1. **Never write.** This skill produces drafts. Writes only happen after an
-   approval token is returned and routed through `crm-upsert-planner` →
-   `crm_write_queue` → worker → `crm_receipts`.
-2. **One opportunity per LOB.** Never bundle.
+1. **Never write.** This skill produces drafts. Writes happen only after an
+   approval token moves the `intake_submissions` row and the intake worker
+   commits it. See "The real write path" above.
+2. **One opportunity per LOB.** Never bundle. This is enforced in the database
+   by `uq_opportunities_client_lob_type UNIQUE (client_identifier,
+   line_of_business, opportunity_type)` — a bundled row isn't just bad practice,
+   a second row for the same client and type cannot be inserted at all.
 3. **Search first.** Always populate `duplicate_search`; never create when a
    confident match exists — mark `needs_human_review` instead.
-4. **Snake_case for new fields.** Existing camelCase fields stay until
-   migrated; see `espocrm-field-reference`.
+4. **Use snake_case field names.** The Espo-era camelCase entity conventions no
+   longer apply anywhere in the stack.
 5. **No invented EINs, policy numbers, quote numbers, premiums, or DOBs.**
    If the source doesn't contain it, leave it null.
 6. **Mark sensitivity.** EIN, DOB, DL #, SSN, health notes, beneficiary
@@ -297,16 +324,22 @@ Reply with one of:
 
 - `crm-fact-retriever` — answers "what is X's Y?" using facts + CRM.
 - `crm-note-structurer` — formats the `note.body` portion of the payload.
-- `crm-upsert-planner` — converts an approved payload into specific
-  EspoCRM API calls / `crm_write_queue` rows.
+- `hermes-crm-writer` — the sanctioned write path for per-LOB opportunities.
 - `commercial-risk-intake`, `personal-lines-intake`, `life-insurance-intake`,
   `benefits-intake` — specialty extractors.
 
+## Known gaps
+
+- **Retrieval is nearly empty**: `client_facts` 11 rows, `client_notes` 2,
+  `quote_facts` **0**. The "agency memory" this skill feeds barely exists yet, so
+  don't promise that a fact will be retrievable later — emit it, and say it's new.
+- `cc_submissions` has 1 row; the Command Center review lane is essentially
+  unused.
+
 ## References
 
-- `docs/agency-memory-plan.md` — full plan and rationale
-- `docs/hermes-builder-spec.md` — confirm-before-write contract
-- `docs/hermes-router-contract.md` — unified specialist envelope
-- `hermes-training/espocrm/guardrails.md` — enum vocab and write safety
-- `hermes-training/espocrm/field_dictionary.md` — field types and enums
-- `hermes/commands/intake.py` — existing lightweight intake handler
+- `hermes/operations/agency_intake_approval.py` — `approve_draft`, the tokens
+- `hermes/operations/intake_worker.py` — what actually commits a draft
+- `hermes/command_center/router.py` — the three-way CRM / AMS / PDF split
+- `docs/agency-memory-plan.md` — original plan (historical; the transport
+  sections describe n8n and `crm_write_queue`, neither of which shipped)

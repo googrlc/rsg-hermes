@@ -1,10 +1,16 @@
-# Bidirectional Sync: EspoCRM ↔ Supabase ↔ NowCerts
+# Bidirectional Sync: the CRM ↔ Supabase ↔ NowCerts
+
+> **HISTORICAL (EspoCRM decommissioned 2026-07-23).** The "CRM" in every diagram below is
+> EspoCRM. The proposed schema (`espocrm_id`, `raw_espo_payload`,
+> `source_system = 'espocrm'`) was partly built and is now being dropped — see
+> `supabase/migrations/20260725000000_drop_dead_espo_columns.sql`. Kept for the
+> golden-record and conflict-resolution design, which the canonical book still follows.
 
 ## Architecture: Supabase as Golden Record
 
 ```
 ┌──────────┐         ┌──────────────┐         ┌──────────┐
-│ NowCerts │ ──(A)──▶│   Supabase   │◀──(B)── │ EspoCRM  │
+│ NowCerts │ ──(A)──▶│   Supabase   │◀──(B)── │ the CRM  │
 │  (AMS)   │ ◀──(D)──│ Golden Record│──(C)──▶ │  (CRM)   │
 └──────────┘         └──────────────┘         └──────────┘
 ```
@@ -13,22 +19,22 @@
 
 | Flow | Direction | What | Trigger |
 |------|-----------|------|---------|
-| **A** | NowCerts → Supabase → EspoCRM | Policy details, insured facts | `sync nowcerts` (already built, PR #6) |
-| **B** | EspoCRM → Supabase | New clients, account details, commissions | `sync crm-to-hub` (new) |
-| **C** | Supabase → EspoCRM | Already handled by Flow A's outbound queue | — |
+| **A** | NowCerts → Supabase → the CRM | Policy details, insured facts | `sync nowcerts` (already built, PR #6) |
+| **B** | the CRM → Supabase | New clients, account details, commissions | `sync crm-to-hub` (new) |
+| **C** | Supabase → the CRM | Already handled by Flow A's outbound queue | — |
 | **D** | Supabase → NowCerts | New clients + commissions from CRM | `sync hub-to-nowcerts` (new) |
 
-## Flow B: EspoCRM → Supabase (CRM Mirror)
+## Flow B: the CRM → Supabase (CRM Mirror)
 
-**Purpose:** Capture new clients and commission data from EspoCRM into Supabase golden record.
+**Purpose:** Capture new clients and commission data from the CRM into Supabase golden record.
 
 ### What gets mirrored:
-1. **New Accounts** (clients) — created in EspoCRM that don't have a `momentumClientId` (no NowCerts link yet)
+1. **New Accounts** (clients) — created in the CRM that don't have a `momentumClientId` (no NowCerts link yet)
 2. **Account updates** — address, contact info, business details edited in CRM
 3. **Commission data** — from Opportunity/Policy records with commission rates/amounts
 
 ### How it works:
-1. Query EspoCRM for Accounts modified since last mirror run
+1. Query the CRM for Accounts modified since last mirror run
 2. For each Account:
    - Check if it exists in `sync_mappings` (has a NowCerts link)
    - If no NowCerts link: this is a CRM-originated client → stage for NowCerts push
@@ -93,8 +99,8 @@ CREATE TABLE IF NOT EXISTS crm_commissions (
 - `POST /api/Policy/Insert` — Create/update policy with commission fields
 - `PATCH /api/Policy/PartialUpdate` — Update specific policy fields
 
-### Reverse field mapping (EspoCRM Account → NowCerts Insured):
-| EspoCRM Field | NowCerts Field | Notes |
+### Reverse field mapping (CRM Account → NowCerts Insured):
+| the CRM Field | NowCerts Field | Notes |
 |---------------|----------------|-------|
 | name | CommercialName | |
 | primaryFirstName | FirstName | |
@@ -110,7 +116,7 @@ CREATE TABLE IF NOT EXISTS crm_commissions (
 | businessEntity | TypeOfBusiness | |
 
 ### Commission fields (Policy → NowCerts Policy):
-| EspoCRM Field | NowCerts Field | Notes |
+| the CRM Field | NowCerts Field | Notes |
 |---------------|----------------|-------|
 | premium | Premium | |
 | commissionRate | AgencyCommissionPercent | |
@@ -123,7 +129,7 @@ CREATE TABLE IF NOT EXISTS crm_commissions (
 When the same record is modified in both systems between syncs:
 
 1. **NowCerts wins on:** Policy facts (effective/expiration dates, premium, carrier)
-2. **EspoCRM wins on:** CRM-only fields (pipeline stage, tasks, notes, assignments)
+2. **the CRM wins on:** CRM-only fields (pipeline stage, tasks, notes, assignments)
 3. **Conflict logged:** When both change the same field → `sync_conflicts` table
 4. **Human review:** Conflicts queue visible via `sync conflicts` command
 
@@ -131,7 +137,7 @@ When the same record is modified in both systems between syncs:
 
 | Command | Description |
 |---------|-------------|
-| `sync crm-to-hub` | Mirror EspoCRM changes to Supabase golden record |
+| `sync crm-to-hub` | Mirror the CRM changes to Supabase golden record |
 | `sync hub-to-nowcerts` | Push Supabase outbound queue to NowCerts |
 | `sync bidirectional` | Run both directions: NowCerts→Hub + CRM→Hub + Hub→NowCerts |
 | `sync bidirectional dry-run` | Preview all directions without writing |
@@ -139,9 +145,9 @@ When the same record is modified in both systems between syncs:
 ## Implementation Order
 
 1. **Supabase migration** — `crm_accounts` + `crm_commissions` tables
-2. **Reverse field mapper** — EspoCRM Account → NowCerts Insured payload
+2. **Reverse field mapper** — CRM Account → NowCerts Insured payload
 3. **NowCerts write methods** — `create_insured()`, `update_policy_commission()` on NowCertsClient
-4. **EspoCRM → Supabase pipeline** — mirror Accounts + commission data
+4. **the CRM → Supabase pipeline** — mirror Accounts + commission data
 5. **Supabase → NowCerts pipeline** — dequeue and push via bearer token
 6. **Bidirectional orchestrator** — runs all three directions in sequence
 7. **Tests** — unit + integration for each direction

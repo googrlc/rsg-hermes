@@ -85,18 +85,18 @@ def test_propose_handle_stages():
     supa = MagicMock()
     supa.select.return_value = []          # no project_85 renewal_id
     supa.insert.return_value = {"id": "q-123456"}
-    r = rw.propose_handle(None, "propose nowcerts write-back for policy TST-0001: request terms", supa=supa)
+    r = rw.propose_handle("propose nowcerts write-back for policy TST-0001: request terms", supa=supa)
     assert r.ok and r.data["approved"] is False
     supa.insert.assert_called_once()
 
 
 def test_propose_handle_needs_policy():
-    r = rw.propose_handle(None, "propose nowcerts write-back: request terms", supa=MagicMock())
+    r = rw.propose_handle("propose nowcerts write-back: request terms", supa=MagicMock())
     assert not r.ok and r.data.get("need_identifier") is True
 
 
 def test_propose_handle_update_ams_directed_to_worksheet():
-    r = rw.propose_handle(None, "propose nowcerts write-back for policy TST-0001: update ams premium=5000", supa=MagicMock())
+    r = rw.propose_handle("propose nowcerts write-back for policy TST-0001: update ams premium=5000", supa=MagicMock())
     assert not r.ok
     assert "worksheet" in r.message.lower()
 
@@ -106,7 +106,7 @@ def test_show_handle_lists_pending():
     supa.select.return_value = [
         {"id": "q1", "object_id": "P1", "payload": {"action": "request_terms", "policy_number": "P1", "note": "call"}}
     ]
-    r = rw.show_handle(None, "show me the proposed nowcerts changes for policy P1", supa=supa)
+    r = rw.show_handle("show me the proposed nowcerts changes for policy P1", supa=supa)
     assert r.ok and r.data["count"] == 1
     assert "request_terms" in r.message
 
@@ -114,19 +114,19 @@ def test_show_handle_lists_pending():
 def test_confirm_handle_approves():
     supa = MagicMock()
     supa.update_where.return_value = [{"id": "q1", "payload": {"action": "request_terms"}}]
-    r = rw.confirm_handle(None, "approve the proposed nowcerts write-back for policy TST-0001", supa=supa)
+    r = rw.confirm_handle("approve the proposed nowcerts write-back for policy TST-0001", supa=supa)
     assert r.ok and r.data["approved"] == 1
 
 
 def test_confirm_handle_needs_policy():
-    r = rw.confirm_handle(None, "approve the proposed nowcerts write-back", supa=MagicMock())
+    r = rw.confirm_handle("approve the proposed nowcerts write-back", supa=MagicMock())
     assert not r.ok and r.data.get("need_identifier") is True
 
 
 def test_confirm_handle_nothing_pending():
     supa = MagicMock()
     supa.update_where.return_value = []
-    r = rw.confirm_handle(None, "approve the proposed nowcerts write-back for policy TST-0001", supa=supa)
+    r = rw.confirm_handle("approve the proposed nowcerts write-back for policy TST-0001", supa=supa)
     assert not r.ok and r.data["approved"] == 0
 
 
@@ -135,14 +135,14 @@ def test_confirm_handle_nothing_pending():
 def test_propose_routes():
     with patch("hermes.commands.renewal_writeback.propose_handle") as h:
         h.return_value = DispatchResult(True, "proposed")
-        _make_dispatcher().dispatch(MagicMock(), "propose nowcerts write-back for policy TST-0001: request terms")
+        _make_dispatcher().dispatch("propose nowcerts write-back for policy TST-0001: request terms")
         h.assert_called_once()
 
 
 def test_show_routes():
     with patch("hermes.commands.renewal_writeback.show_handle") as h:
         h.return_value = DispatchResult(True, "shown")
-        _make_dispatcher().dispatch(MagicMock(), "show me the proposed nowcerts changes for policy P1")
+        _make_dispatcher().dispatch("show me the proposed nowcerts changes for policy P1")
         h.assert_called_once()
 
 
@@ -150,12 +150,12 @@ def test_confirm_routes_and_not_swallowed_by_approval_token():
     """The phrase must reach the writeback confirm route, not the generic APPROVE token path."""
     with patch("hermes.commands.renewal_writeback.confirm_handle") as h:
         h.return_value = DispatchResult(True, "approved")
-        _make_dispatcher().dispatch(MagicMock(), "approve the proposed nowcerts write-back for policy P1")
+        _make_dispatcher().dispatch("approve the proposed nowcerts write-back for policy P1")
         h.assert_called_once()
 
 
 def test_bare_approve_all_still_hits_approval_token_not_writeback():
     with patch("hermes.commands.renewal_writeback.confirm_handle") as h:
-        result = _make_dispatcher().dispatch(MagicMock(), "APPROVE ALL")
+        result = _make_dispatcher().dispatch("APPROVE ALL")
         h.assert_not_called()
         assert "No pending draft" in result.message

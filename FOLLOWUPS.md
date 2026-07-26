@@ -9,48 +9,7 @@ once it's actually resolved (not just "in flight").
 
 ---
 
-## 1. Silent CRM field drops + free-text-to-enum mapper gap
-
-**Source:** Phase 3 Step 1 retry of Draft 1 (3D Pumps LLC), 2026-05-22.
-
-**Symptom:** Several fields the synthesizer extracted are silently dropped on
-EspoCRM writes — the queue worker reports `SUCCESS` but the field isn't
-persisted. Confirmed for:
-
-- `legalName`
-- `accountType`
-- `accountStatus`
-- `tags`
-- `producer`
-- `industry` (enum-constrained: "Water Infrastructure / Specialty Contracting"
-  isn't in the live enum, gets written as `NULL`)
-
-**Bug class:** same as the LOB / phoneNumber validation issues fixed in commit
-`42d2c79`. The synthesizer outputs human-readable strings; the
-`agency_intake_approval` mapper field-maps them to Espo names; the live Espo
-install rejects (or silently drops) anything that doesn't match the live
-metadata.
-
-**Impact:** Every CRM record written through this pipeline is missing fields
-the synthesizer extracted. Real data quality erosion — renewals, commissions,
-segmentation queries all degraded.
-
-**Fix outline:**
-1. Audit every field in `_map_account_to_espo`, `_map_contact_to_espo`,
-   `_map_opportunity_to_espo` against live `entityDefs` metadata.
-2. For every enum-constrained field, add an alias map (like `_LOB_ALIASES`)
-   or — better — teach the synthesizer prompt to output canonical enum values
-   directly by feeding it the field-reference enum list. Eliminates alias-map
-   maintenance long-term.
-3. Add round-trip regression tests: assert every alias value ∈ live enum
-   (existing pattern from `test_every_LOB_alias_value_is_in_live_enum`).
-4. Cover Account/Contact/Opportunity/Policy write paths.
-
-**Estimate:** 3-5 hrs
-
----
-
-## 2. Partial-token regression in approve_draft()
+## 1. Partial-token regression in approve_draft()
 
 **Source:** End-of-Step-5 review, Phase 3.
 
@@ -79,7 +38,7 @@ calls out of RAG context).
 
 ---
 
-## 3. Supabase: 91 tables without RLS
+## 2. Supabase: 91 tables without RLS
 
 **Source:** Phase 1 advisors run on project `wibscqhkvpijzqbhjphg`.
 
@@ -109,7 +68,7 @@ distributed.
 
 ---
 
-## 4. PROJECT-CONTEXT.md doc drift
+## 3. PROJECT-CONTEXT.md doc drift
 
 **Source:** Phase 3 recon (2026-05-22) discovered the doc has diverged from
 reality in three places.
@@ -118,7 +77,7 @@ reality in three places.
 
 1. **"synthesizer → dedup probes → drafting"** — no dedup probes exist.
    The synthesizer declares a `duplicate_search` bundle in its output JSON,
-   but nothing in the write path actually queries EspoCRM with it.
+   but nothing in the write path ever runs those searches.
    `drafting` is a pure pass-through transition in the Phase 3 worker.
    Update the architecture diagram (Section 3) and the state-machine
    description (Section 6).
@@ -142,7 +101,7 @@ reality in three places.
 
 ---
 
-## 5. Retire agency_intake_drafts entirely
+## 4. Retire agency_intake_drafts entirely
 
 **Source:** Phase 3 migration directive ("Stop writing to
 agency_intake_drafts entirely"), partially executed in Step 5 of Phase 3.
@@ -178,7 +137,7 @@ not formally retired.
 
 ---
 
-## 6. PAT scope tightening on hermes-elestio
+## 5. PAT scope tightening on hermes-elestio
 
 **Source:** Phase 2.5 hardening session, 2026-05-22.
 
@@ -215,7 +174,7 @@ don't repeat)
 
 ---
 
-## 7. Team comms hub — Nextcloud Talk embed
+## 6. Team comms hub — Nextcloud Talk embed
 
 **Source:** Team communication portal request, 2026-07-22.
 
@@ -281,4 +240,62 @@ per-client deep-link ≈ a few hrs.
 
 ## Closed
 
-_(none yet)_
+### Silent CRM field drops + free-text-to-enum mapper gap — MOOT (2026-07-25)
+
+Closed by the EspoCRM decommission rather than by fixing it. The symptom was
+fields silently dropped on EspoCRM writes because the mapper's names didn't match
+live `entityDefs`. `_map_account_to_espo`, `_map_contact_to_espo` and
+`_map_opportunity_to_espo` no longer exist — intake now writes NowCerts (via the
+approval-gated `outbound_sync_queue`) plus Supabase `opportunities`, so there is
+no Espo metadata to drift from.
+
+What did NOT carry over and is still worth doing: the *enum-canonicalization*
+half. `ALLOWED_STAGES` in `hermes/commands/agency_intake.py` is still validated
+after the fact rather than fed to the synthesizer prompt, so a free-text stage can
+still be rejected late. Point 2 of the old fix outline (teach the prompt the
+canonical enum list) applies unchanged to the NowCerts path.
+
+<details><summary>Original entry</summary>
+
+#### (archived) Silent CRM field drops + free-text-to-enum mapper gap
+
+**Source:** Phase 3 Step 1 retry of Draft 1 (3D Pumps LLC), 2026-05-22.
+
+**Symptom:** Several fields the synthesizer extracted are silently dropped on
+EspoCRM writes — the queue worker reports `SUCCESS` but the field isn't
+persisted. Confirmed for:
+
+- `legalName`
+- `accountType`
+- `accountStatus`
+- `tags`
+- `producer`
+- `industry` (enum-constrained: "Water Infrastructure / Specialty Contracting"
+  isn't in the live enum, gets written as `NULL`)
+
+**Bug class:** same as the LOB / phoneNumber validation issues fixed in commit
+`42d2c79`. The synthesizer outputs human-readable strings; the
+`agency_intake_approval` mapper field-maps them to Espo names; the live Espo
+install rejects (or silently drops) anything that doesn't match the live
+metadata.
+
+**Impact:** Every CRM record written through this pipeline is missing fields
+the synthesizer extracted. Real data quality erosion — renewals, commissions,
+segmentation queries all degraded.
+
+**Fix outline:**
+1. Audit every field in `_map_account_to_espo`, `_map_contact_to_espo`,
+   `_map_opportunity_to_espo` against live `entityDefs` metadata.
+2. For every enum-constrained field, add an alias map (like `_LOB_ALIASES`)
+   or — better — teach the synthesizer prompt to output canonical enum values
+   directly by feeding it the field-reference enum list. Eliminates alias-map
+   maintenance long-term.
+3. Add round-trip regression tests: assert every alias value ∈ live enum
+   (existing pattern from `test_every_LOB_alias_value_is_in_live_enum`).
+4. Cover Account/Contact/Opportunity/Policy write paths.
+
+**Estimate:** 3-5 hrs
+
+---
+
+</details>

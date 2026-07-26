@@ -18,7 +18,7 @@ surrogate ``id`` and differ from the phase-0 migration):
 Design guarantees:
   * **Additive.** Upsert-by-natural-key only; never deletes rows. (The
     ``nowcerts_insured_mirror`` golden/crosswalk table is intentionally left
-    alone — it is an EspoCRM↔NowCerts record the renewal engine does not read.)
+    alone — it is a legacy crosswalk record the renewal engine does not read.)
   * **Preserves ``renewed_policy`` lineage.** The NowCerts API exposes no renewal
     lineage pointer (see ``candidate_refresh`` docstring); the CSV-loaded value is
     irreplaceable, so an update never overwrites it — only volatile fields
@@ -36,12 +36,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hermes.renewals import eligibility as elig
-from hermes.sync.field_mapper import _strip_date
+from hermes.core.field_utils import strip_date
 
 log = logging.getLogger(__name__)
 
 CLIENTS_TABLE = "canonical_clients"
 POLICIES_TABLE = "canonical_policies"
+
+# Defined here rather than imported from hermes.ams.book: that module imports from
+# this one, so the dependency only runs one way.
+OWNER_BOOK_SYNC = "book_sync"
 
 CLIENT_KEY = "nowcerts_insured_guid"
 POLICY_KEY = "policy_guid"
@@ -160,8 +164,8 @@ def _map_policy_volatile(p: dict[str, Any]) -> dict[str, Any]:
         "carrier": p.get("carrierName") or p.get("CarrierName") or p.get("carrier") or None,
         "status": status,
         "active": _policy_active(p, status),
-        "effective_date": _strip_date(p.get("effectiveDate") or p.get("EffectiveDate")),
-        "expiration_date": _strip_date(p.get("expirationDate") or p.get("ExpirationDate")),
+        "effective_date": strip_date(p.get("effectiveDate") or p.get("EffectiveDate")),
+        "expiration_date": strip_date(p.get("expirationDate") or p.get("ExpirationDate")),
         "current_term_amount": premium,
         "premium_amount": premium,
         "annualized_premium": premium,
@@ -273,7 +277,16 @@ def _sync_policies(
                     supa.update_where(POLICIES_TABLE, payload, filters={POLICY_KEY: f"eq.{pg}"})
                 result.policies_updated += 1
             else:
-                payload = _project({POLICY_KEY: pg, "renewed_policy": None, **volatile}, cols)
+                # Claim ownership on create. Any writer may refresh a row's volatile
+                # fields; only its owner may deactivate it. Stamping here is what
+                # lets a future writer tell "mine to retire" from "someone else's
+                # row I have no business tombstoning" — the distinction whose
+                # absence corrupted 43 rows in July.
+                payload = _project(
+                    {POLICY_KEY: pg, "renewed_policy": None,
+                     "sync_owner": OWNER_BOOK_SYNC, **volatile},
+                    cols,
+                )
                 if not dry_run:
                     supa.insert(POLICIES_TABLE, payload)
                 result.policies_created += 1

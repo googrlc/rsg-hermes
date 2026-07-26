@@ -1,8 +1,8 @@
 """Hermes Command Center — agency intake + review-gate + lane engine.
 
 The new Command Center (approved spec 2026-06-10). Built fresh; reuses pieces
-from the wider `hermes` package (Supabase client, EspoClient, crm_write_queue
-gated writes, renewal/retention reads) and the submissions spine/extraction
+from the wider `hermes` package (Supabase client, outbound_sync_queue gated
+writes, renewal/retention reads) and the submissions spine/extraction
 ported from the archived `freshhermes` repo.
 
 Layers:

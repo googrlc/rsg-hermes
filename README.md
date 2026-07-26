@@ -1,8 +1,24 @@
 # Hermes (rsg-hermes)
 
-Python coordinator for **EspoCRM** over the REST API: REPL / one-shot CLI, optional **Slack** Socket Mode, and pluggable commands (lookup, data entry, revenue views).
+Python operations engine for Risk Solutions Group's **custom CRM / Command
+Center**, backed by **NowCerts** (the AMS system of record) and **Supabase**
+(the Command Center database — analytics, queues, KPIs, renewal state). It ships
+two entry points:
 
-The **EspoCRM customization repo** (PHP metadata, hooks, field reference) stays separate: [googrlc/rsg-espocrm](https://github.com/googrlc/rsg-espocrm). This repo only talks to Espo via HTTP; it does not ship Espo source or custom PHP.
+- **`hermes`** — a one-shot / REPL CLI that runs the scheduled jobs (sync,
+  renewals, revenue sentinel, commissions, scorecards, intake execution).
+- **`hermes-api`** — the private HTTP backend for the Command Center
+  (`rsg-hermes-api:8787`). In production the **`rsg-hermes` MCP bridge** (a
+  separate thin facade container) is the public "one door" in front of it; this
+  repo is what sits behind that door.
+
+> **Migration state (July 2026).** RSG ran on EspoCRM; it has been
+> **decommissioned**, and the inbound **Slack Socket Mode** listener has been
+> **retired**. Data now lives in **NowCerts + Supabase**. The Espo client and its
+> CLI flags have now been **deleted** from the tree; a few Espo-era `.env` keys
+> remain but are unused — see
+> [Legacy / decommissioned](#legacy--decommissioned) so a fresh reader does not
+> mistake them for live paths.
 
 ## Setup
 
@@ -10,121 +26,164 @@ The **EspoCRM customization repo** (PHP metadata, hooks, field reference) stays 
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-cp .env.example .env   # then set ESPO_URL and ESPO_API_KEY
+cp .env.example .env
 ```
+
+The credentials that matter now are:
+
+| Purpose | Vars |
+|---|---|
+| **NowCerts (AMS, system of record)** | `NOWCERTS_API_URL`, `NOWCERTS_USERNAME`, `NOWCERTS_PASSWORD` |
+| **Supabase (Command Center DB)** | `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+| **`hermes-api` bearer** | `HERMES_API_TOKEN`, `HERMES_API_HOST`, `HERMES_API_PORT` |
+| **LLM (advisor / NL agent)** | `HERMES_OPENAI_API_KEY` / `LITELLM_API_KEY` + `LITELLM_BASE_URL` |
+| **Slack posting** (outbound only) | `SLACK_THE_BOSS`, `HERMES_SENTINEL_SLACK_CHANNEL`, bot token |
+| **Nextcloud (file storage)** | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_APP_PASSWORD` |
+
+The `ESPO_*` keys are gone from `.env.example` — nothing reads them. See
+[`docs/DEPLOY.md`](docs/DEPLOY.md) for the box layout.
 
 ## Run
 
+Current, live job families (all NowCerts / Supabase backed):
+
 ```bash
-hermes --ping
-hermes --doctor       # auth + core CRM read + metadata readiness
-hermes --kpi
-hermes --commands      # print Open WebUI command catalog
-hermes --audit-schema  # writes schema_map.json
-hermes --slack        # needs SLACK_* tokens in .env
-hermes-api            # private HTTP bridge for Open WebUI/tools
-hermes --revenue-sentinel
-hermes --revenue-sentinel-dry-run
-hermes --revenue-sentinel-health
-hermes --commission-audit
-hermes --commission-audit-dry-run
-hermes --eom-scorecard
-hermes --eom-scorecard-dry-run
+# Health & metrics
+hermes --ops-doctor              # Supabase connectivity + all Hermes tables (the readiness check)
+hermes --snapshot-kpis           # record system/finance/renewal KPIs → dashboard_kpis
+hermes --commands                # print the command catalog
+
+# NowCerts → Supabase ingest / enrich
+hermes --sync-nowcerts           # pull AMS insureds/policies into the Command Center
+hermes --sync-canonical-book     # rebuild the canonical book of business
+hermes --enrich-nowcerts         # backfill/enrich NowCerts-sourced records
+
+# Command Center → NowCerts (outbound)
+hermes --sync-hub-to-nowcerts    # push queued Command Center changes to the AMS
+
+# Renewals (Project 85)
+hermes --renewal-refresh         # refresh renewal pipeline state from the book
+hermes --renewal-classify        # classify upcoming renewals into cadence buckets
+hermes --renewal-executor        # execute queued, approved renewal actions
+hermes --run-renewal-executor-worker
+
+# Revenue Sentinel (reads Supabase since July 2026)
+hermes --revenue-sentinel                # proactive briefing → Slack
+hermes --revenue-sentinel-dry-run        # preview without posting
+hermes --revenue-sentinel-health         # freshness + config check
+hermes --revenue-sentinel-force          # bypass same-day idempotency
+
+# Commissions
+hermes --commission-audit                # audit expected vs actual → Slack
+hermes --commission-ingest               # ingest a staged commission batch
 hermes --commission-reconcile-file ./statements/carrier.csv
-hermes --ops-doctor             # check Supabase + Hermes table health
-hermes --espo-db-doctor         # check read-only direct-Postgres lane to EspoCRM (read-only)
-hermes --process-crm-queue      # dequeue pending CRM writes → EspoCRM
-hermes --process-crm-queue-dry-run
-hermes --curate-skills          # report-only age audit of .claude/skills (never deletes)
-hermes --snapshot-kpis          # record system/finance/renewal KPIs
-hermes 'What is Jane phone'
-hermes 'total premium for Acme'
+hermes --sync-commissions
+
+# Scorecards / changelog
+hermes --eom-scorecard                   # end-of-month scorecard → Slack
+hermes --changelog                       # recent-activity changelog
+
+# Intake / casework executors (queue → NowCerts/Supabase)
+hermes --run-intake-worker --intake-poll-seconds 5
+hermes --intake-executor
+hermes --casework-executor
+hermes --quote-executor
+
+# Executor scheduler (single-instance, backoff, dead-letter) — off by default
+hermes --run-scheduler --scheduler-interval 300 --scheduler-batch 10
+
+# Natural-language one-shots (LLM agent)
 hermes 'renewal audit'
+hermes 'total premium for Acme'
 hermes 'research business Acme Plumbing Atlanta'
-hermes 'research business Acme Plumbing Atlanta and save to crm'
 ```
+
+Most `--*` jobs accept a matching `--*-dry-run` (and executors an `--*-limit`).
+Run `hermes --commands` for the full catalog.
 
 ## Docker
 
+`docker-compose.yml` defines the containers that run on the hermes-gretch box:
+
+| Container | Service | Role | Restart |
+|---|---|---|---|
+| `rsg-hermes` | `hermes` | Per-cron runner — jobs run as `docker compose run --rm hermes hermes --<job>`. Default command is a harmless read-only check; **not** an always-on listener. | `no` |
+| `rsg-hermes-api` | `hermes-api` | The Command Center HTTP backend, `8788:8787`, on the external `hermes-shared` network. | `unless-stopped` |
+| `rsg-hermes-intake-worker` | `hermes-intake-worker` | Polls the intake queue (`--run-intake-worker`, 5s). | `unless-stopped` |
+| `rsg-hermes-scheduler` | `hermes-scheduler` | Executor scheduler — drains `outbound_sync_queue` → NowCerts (renewal, intake, quote, casework, opportunity-writeback). **Disabled by default** — gated behind the `scheduler` compose profile *and* `SCHEDULER_ENABLED`. | `unless-stopped` |
+
 ```bash
-docker compose up -d --build
-docker compose logs -f hermes
+docker compose up -d --build                              # api + workers (no scheduler, no listener)
+docker compose --profile scheduler up -d hermes-scheduler # opt into the scheduler
+docker compose run --rm hermes hermes --ops-doctor        # one-shot job / cron pattern
+docker compose logs -f hermes-api
 ```
 
-The container defaults to `hermes --slack`, reads `.env`, and uses host networking so it can reach Tailscale/IP-only services from the VPS host.
+Because Slack Socket Mode is retired and `restart` on the `hermes` service is
+`no`, a plain `docker compose up -d` no longer keeps a listener container alive —
+recurring work is driven by **scheduled `docker compose run` invocations**, not a
+24/7 loop.
 
-Use `docker exec rsg-hermes hermes --doctor` after credential or permission changes. `--ping` only proves the API key can authenticate; `--doctor` proves Hermes can read Account, Contact, Opportunity, and metadata without writing anything.
+> The `hermes-crm-queue-worker` service was **removed 2026-07-21** — it drained
+> the EspoCRM-era `crm_write_queue`, which no longer exists.
 
-Slack fallback replies default to `#systems-check` (`C0AFHN83ZE3`). Set `HERMES_SLACK_FALLBACK_CHANNEL` when moving Hermes to a dedicated CRM officer channel.
+## Private API bridge (`hermes-api`)
 
-If you run `hermes --audit-schema` outside the Slack service, run it in the same mounted project directory or copy the generated `schema_map.json` beside the running container. The file is intentionally gitignored because it is runtime cache.
-
-## Private API Bridge
-
-`hermes-api` exposes a small Tailnet-only HTTP API for tools like Open WebUI:
+`hermes-api` is the Command Center backend and the surface the `rsg-hermes` MCP
+bridge proxies:
 
 ```bash
 hermes-api --host 127.0.0.1 --port 8787
 curl http://127.0.0.1:8787/health
-curl http://127.0.0.1:8787/openapi.json
-curl -X POST http://127.0.0.1:8787/command \
-  -H 'Content-Type: application/json' \
-  -d '{"command":"find Acme"}'
+curl http://127.0.0.1:8787/api/hermes/sync-health   # queue depth / freshness (MCP `sync_health`)
+curl http://127.0.0.1:8787/api/carriers             # read-only carrier appetite
 ```
 
-Commands that may write CRM data, such as `create`, `add`, `update`, `move opportunity`, and `intake`, return `requires_confirmation` unless called with `confirm=true`. Set `HERMES_API_TOKEN` to require `Authorization: Bearer <token>`.
+Set `HERMES_API_TOKEN` to require `Authorization: Bearer <token>`. Write
+commands return `requires_confirmation` unless called with `confirm=true`.
 
-## Project 85 Sentinel (Revenue Guardrail)
+> **MCP-over-HTTP gotcha:** the bridge always returns HTTP 200; auth failures
+> come back in the JSON-RPC body (`-32001 Unauthorized`). Never key a smoke test
+> on the HTTP status — read the body.
 
-`hermes --revenue-sentinel` runs one proactive briefing that:
-- flags stale opportunities (14+ days),
-- surfaces active renewals at 90/60/30-day checkpoints,
-- surfaces x-date opportunities at 60 days,
-- bubbles whale accounts to the top,
-- posts to `HERMES_SENTINEL_SLACK_CHANNEL` with interactive buttons.
+## Operations Center (Supabase governance)
 
-Recommended schedule (outside Hermes): weekdays at 08:00 `America/New_York`.
-Example cron:
+Hermes carries a Supabase-backed governance layer (the "Operating Constitution").
+See [`docs/hermes-operating-constitution.md`](docs/hermes-operating-constitution.md).
 
-```bash
-0 8 * * 1-5 cd /path/to/rsg-hermes && /path/to/venv/bin/hermes --revenue-sentinel
-```
+Key live capabilities:
+- **`--ops-doctor`** — verifies Supabase connectivity and the Hermes tables.
+- **`--snapshot-kpis`** — records system/finance/renewal metrics to `dashboard_kpis`.
+- **Slack Router** — registry-aware posting that refuses unregistered channels.
+- **Renewal Tracker** — Project 85 lifecycle state in Supabase.
 
-Use `--revenue-sentinel-force` to bypass idempotency and post again on the same day.
-Use `--revenue-sentinel-dry-run` to preview output without posting.
-Use `--revenue-sentinel-health` to verify freshness and required config.
+Schema lives in `supabase/migrations/`; operations modules in `hermes/operations/`.
 
-## Hermes Operations Center
+## Legacy / decommissioned
 
-Hermes now includes a Supabase-backed governance layer (the "Operating Constitution"). See [`docs/hermes-operating-constitution.md`](docs/hermes-operating-constitution.md) for the full blueprint.
+The **EspoCRM code path is gone**, not merely inert. `hermes/core/client.py`
+(the Espo REST client), `hermes/core/auditor.py`, and `hermes/core/schema_map.py`
+were deleted, along with the flags that only made sense against Espo metadata
+(`--doctor`, `--audit-fields`, `--audit-schema`, `--inventory-metadata`) and the
+write-back/queue flags (`--espo-writeback`, `--process-crm-queue`,
+`--espo-db-doctor`). The two survivors were repointed:
 
-Key capabilities:
-- **`--ops-doctor`** — verifies Supabase connectivity and all 11 Hermes tables
-- **`--process-crm-queue`** — dequeues staged CRM writes and applies them to EspoCRM with receipt logging
-- **`--snapshot-kpis`** — records system health, finance, and renewal metrics to `dashboard_kpis`
+- `--ping` reports on Hermes itself; it no longer proves a CRM connection.
+- `--kpi` prints the latest `agency_snapshots` row (clients, policies, active
+  premium, retention) instead of Espo entity counts.
 
-The schema lives in `supabase/migrations/` and seed data in `supabase/seeds/`. The operations modules (`hermes/operations/`) provide:
-- **Guardrails** — channel drift prevention, blocked-action logging
-- **Slack Router** — registry-aware posting (refuses unregistered channels)
-- **CRM Queue Worker** — queue → EspoCRM → receipt pipeline
-- **KPI Writer** — snapshot metrics for dashboards
-- **Renewal Tracker** — Project 85 lifecycle management via Supabase
+For readiness checks use **`--ops-doctor`** (Supabase connectivity + Hermes
+tables). `docs/espocrm-read-lane.md` is historical (the direct-Postgres read lane
+was removed in PR #191).
 
-## EspoCRM Read Lane (direct Postgres)
+Still in the tree but retired:
 
-Hermes can read EspoCRM's backend directly for fast fuzzy matching, duplicate
-detection, and analytics — **read-only by construction** (SELECT-only role + a
-read-only session). Writes still go through Espo's REST API so all hooks, ACL, and
-Stream logic fire. See [`docs/espocrm-read-lane.md`](docs/espocrm-read-lane.md) for
-setup; the lane is optional and off unless the `ESPO_DB_*` env vars are set.
-
-```bash
-pip install -e '.[db]'
-hermes --espo-db-doctor   # validate connectivity, read-only guard, pg_trgm, schema
-```
+- **Slack Socket Mode** (`--slack`) — the inbound listener was retired July 2026.
+  Slack **outbound posting** (sentinel, scorecards, alerts) via the bot token is
+  still live.
 
 ## TLS Note
 
-Hermes defaults `HERMES_VERIFY_TLS=false` to preserve the current Tailscale/IP HTTPS behavior. Set it to `true` only when EspoCRM is reachable with a matching certificate chain.
-
-See `docs/espocrm.md` for how this relates to the RSG EspoCRM repo.
+Hermes defaults `HERMES_VERIFY_TLS=false` to preserve the Tailscale/IP HTTPS
+behavior for tailnet services. Set it to `true` only when the target is reachable
+with a matching certificate chain.

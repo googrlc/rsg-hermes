@@ -1,6 +1,11 @@
 # Hermes Builder Spec (RSG)
 
-Builder-ready implementation reference for Open WebUI + Hermes routed specialist workflows.
+Builder-ready implementation reference for Hermes routed specialist workflows.
+
+> **Note:** the Open WebUI front end this spec was written against has been
+> retired. The command families below are still the routing contract; the
+> surface is now the Command Center (`/command-center/`) plus the `rsg-hermes`
+> MCP door.
 
 ## Guardrails (required)
 
@@ -70,7 +75,7 @@ Builder-ready implementation reference for Open WebUI + Hermes routed specialist
 - Compare expected vs posted where ledger data exists.
 - Flag discrepancy reasons and recommended tasks.
 
-## Open WebUI command coverage
+## Command coverage
 
 The system should map the provided command families to these handlers:
 - Property research commands -> `property.*`

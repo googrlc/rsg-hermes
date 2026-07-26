@@ -5,7 +5,6 @@ import pytest
 
 from hermes.core import identity
 from hermes.command_center import store
-from hermes.operations import crm_queue_worker
 from hermes.integrations import supermemory_client
 from hermes.deliverables import acord25
 
@@ -71,7 +70,7 @@ def test_web_research_is_gateable():
     disabled = frozenset({"web_research"})
     active = [t for t in nl_agent._TOOLS if t["function"]["name"] not in disabled]
     assert "web_research" not in {t["function"]["name"] for t in active}
-    assert "search_records" in {t["function"]["name"] for t in active}  # CRM tools remain
+    assert "find_client" in {t["function"]["name"] for t in active}  # CRM tools remain
 
 
 # ── persona overlay in the system prompt ─────────────────────────────────────
@@ -95,15 +94,6 @@ def test_compose_system_prompt_uses_persona(monkeypatch, tmp_path):
 
 
 # ── agent_id stamping on writes ──────────────────────────────────────────────
-def test_enqueue_crm_write_stamps_agent_id(monkeypatch):
-    monkeypatch.setenv("HERMES_AGENT_ID", "hermes-gretch")
-    supa = FakeSupa()
-    row = crm_queue_worker.enqueue_crm_write(
-        supa, entity_type="Contact", payload={"name": "X"}, created_by_role="gretchen",
-    )
-    assert row["agent_id"] == "hermes-gretch"
-
-
 def test_create_submission_stamps_agent_id(monkeypatch):
     monkeypatch.setenv("HERMES_AGENT_ID", "hermes-gretch")
     supa = FakeSupa()
@@ -218,7 +208,7 @@ def test_add_document_leaves_non_medicare_untouched():
 
 
 # ── ACORD 25 ─────────────────────────────────────────────────────────────────
-def test_from_espo_policy_maps_and_uses_endorsement_flags():
+def test_from_policy_records_maps_and_uses_endorsement_flags():
     account = {"name": "Acme LLC", "billing_address_city": "Atlanta", "billing_address_state": "GA"}
     policies = [{
         "lineOfBusiness": "General Liability",
@@ -228,7 +218,7 @@ def test_from_espo_policy_maps_and_uses_endorsement_flags():
         acord25.POLICY_FIELD_ADDITIONAL_INSURED: True,
         acord25.POLICY_FIELD_WAIVER_OF_SUB: False,
     }]
-    coi = acord25.from_espo_policy(policies, account, holder_name="City of Atlanta")
+    coi = acord25.from_policy_records(policies, account, holder_name="City of Atlanta")
     assert coi.insured_name == "Acme LLC"
     assert coi.holder_name == "City of Atlanta"
     assert len(coi.coverages) == 1

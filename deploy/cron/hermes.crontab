@@ -15,10 +15,13 @@
 #
 # >>> hermes automations (managed by deploy/cron/install-cron.sh) >>>
 CRON_TZ=America/New_York
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --sync-nowcerts writes EspoCRM Accounts
+# (nightly 400 PUT / 409 POST "EspoCRM request failed"). Disabled; no valid target.
 # Account Sync v2 — daily 2:00am ET (NowCerts Insured → EspoCRM Account)
-0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
+# 0 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-nowcerts >> /root/hermes-cron.log 2>&1
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --sync-policies writes EspoCRM Policies. Disabled.
 # Policy Sync v2  — daily 2:10am ET (NowCerts Policy → EspoCRM Policy; no Account writes)
-10 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-policies >> /root/hermes-cron.log 2>&1
+# 10 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-policies >> /root/hermes-cron.log 2>&1
 # OPT-IN 2026-07-16 — Canonical book sync — daily 2:20am ET (BEFORE renewal refresh).
 # Pulls live NowCerts insureds+policies into canonical_clients (key nowcerts_insured_guid)
 # and canonical_policies (key policy_guid) — the book --renewal-refresh reads. This
@@ -27,6 +30,19 @@ CRON_TZ=America/New_York
 # deletes; preserves the renewed_policy lineage pointer. Uncommenting is the deliberate
 # go-live step. Dry-run to preview with zero writes: hermes --sync-canonical-book-dry-run
 # ENABLED 2026-07-16 after a verified full run (+249 clients / +157 policies, 0 errors).
+# WARNING 2026-07-24 — canonical_policies has TWO writers with different scopes, and
+# that mismatch corrupts the book. This job is the SAFE one (additive upsert only; it
+# never calls mark_canonical_inactive) and pulls the full 439-record book INCLUDING
+# quotes. The unsafe one is the `rsg-import` Supabase edge function (pg_cron
+# `rsg-import-daily`, 0 7 * * * UTC): it pulls only is_quote=false (329 records) and
+# then passes that short list to mark_canonical_inactive(), which tombstones every
+# active row outside it as "Inactive: not in NowCerts <date>". candidate_refresh then
+# drops active=false rows, so live renewals silently vanish from the desk.
+# Because the two jobs disagree on scope, the damage swung 0 / 5 / 47 / 90 per night.
+# The 07-24 run tombstoned 47 policies verified present in the live AMS by policy_guid.
+# rsg-import-daily was DISABLED 2026-07-24 (cron.alter_job(3, active := false)).
+# Repair for the 47: scripts/repair_tombstones.sql (already applied to prod).
+# Do NOT re-enable rsg-import until canonical_policies has exactly ONE writer.
 20 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-canonical-book >> /root/hermes-cron.log 2>&1
 # Commission ledger seed — daily 2:25am ET (after the book sync). Writes EXPECTED
 # commission per commissionable policy into commission_ledger (NowCerts agency
@@ -44,10 +60,26 @@ CRON_TZ=America/New_York
 # client+LOB; never resets a human-advanced stage; additive. Full pull each run
 # (safe — re-runs just backfill NowCerts ids on existing rows, no duplicates).
 35 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-quotes >> /root/hermes-cron.log 2>&1
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --email-triage was removed from the CLI in
+# commit 967e8c5 ("remove ... --email-triage (dead Espo jobs)"); the current image errors with
+# "unrecognized arguments: --email-triage". Outlook->intake now runs in the rsg-hermes-intake-worker
+# service (hermes --run-intake-worker), not via cron. Disabled to stop 48 failed runs/day.
 # Outlook -> intake triage — every 30 min, 2h lookback (idempotent via Hermes Triaged category)
-*/30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
+# */30 * * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --email-triage --email-provider ms365 --email-since-hours 2 >> /root/hermes-cron.log 2>&1
 # Dashboard KPI history — daily 6:00am ET (Supabase dashboard_kpis, no Slack)
 0 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --snapshot-kpis >> /root/hermes-cron.log 2>&1
+# Agency snapshot — daily 5:45am ET (after the 2:20am book sync, before the 6:00am KPIs).
+# Writes ONE agency_snapshots row/day: active premium, policy + client counts, per-LOB
+# split, open pipeline, and trailing-12-month retention computed from policy lineage.
+# Until 2026-07-26 this table held a single hand-typed baseline (2026-03-31, retention
+# 54.92%) and nothing ever wrote a second one — so every "how's the book?" answer quoted
+# a stale manual number and no trend existed. Supabase-only, no client/AMS writes,
+# idempotent per day (a re-run replaces the same-day row rather than stacking).
+# Accuracy depends on HERMES_AMS_LIVE_READS: with it set the numbers come from NowCerts;
+# without it they come from the canonical_policies mirror, which carries ~178 stale rows
+# and overstates retention by ~6 points. The row's `notes` says which source was used.
+# Preview with zero writes: hermes --agency-snapshot-dry-run
+45 5 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --agency-snapshot >> /root/hermes-cron.log 2>&1
 # OPT-IN 2026-07-15 — Renewal Executor (Job Contract v2). Processes human-approved
 # renewal jobs from outbound_sync_queue → NowCerts, idempotent (guarded claim), writes
 # receipts to renewal_execution_receipts. Uncommenting is the deliberate go-live step
@@ -66,8 +98,13 @@ CRON_TZ=America/New_York
 0 7 * * 1 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-audit >> /root/hermes-cron.log 2>&1
 # End-of-month revenue scorecard — 1st of month 7:00am ET -> Slack
 0 7 1 * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --eom-scorecard >> /root/hermes-cron.log 2>&1
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --changelog QUERIES EspoCRM for 24h changes
+# and logs an EspoCRM Task (nightly 400 POST Task "validationFailure"). Both read + write are
+# Espo-only, so the job has no valid target. Disabled.
 # Nightly CRM changelog -> #the-boss — 8:00pm ET
-0 20 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --changelog >> /root/hermes-cron.log 2>&1
+# 0 20 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --changelog >> /root/hermes-cron.log 2>&1
+# RETIRED 2026-07-23 — EspoCRM decommissioned. --espo-writeback reads EspoCRM Cases/Tasks
+# (also "unrecognized arguments" since the 07-14 build dropped the flag). Disabled.
 # Cases -> NowCerts task ledger write-back — daily 7:00pm ET (AMS = source of truth; additive, idempotent via Case.momentumTaskId)
-0 19 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --espo-writeback >> /root/hermes-cron.log 2>&1
+# 0 19 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --espo-writeback >> /root/hermes-cron.log 2>&1
 # <<< hermes automations <<<
