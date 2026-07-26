@@ -190,3 +190,65 @@ def test_limit_caps_records():
     )
     res = run(supa, nc, limit=2)
     assert res.insureds_fetched == 2 and res.policies_fetched == 2
+
+
+
+# --- audit trail (#232) ------------------------------------------------------
+def _audit_rows(supa):
+    return supa.tables.get(cbs.AUDIT_TABLE, [])
+
+
+def test_audit_logs_create_and_update_for_clients():
+    supa = FakeSupabase({cbs.CLIENTS_TABLE: [_live_client_row(nowcerts_insured_guid="ins1")]})
+    nc = FakeNowCerts(insureds=[nc_insured("ins1", "Updated"), nc_insured("ins2", "Brand New")])
+    run(supa, nc)
+    rows = _audit_rows(supa)
+    actions = {(r["source_object_id"], r["action"]) for r in rows
+               if r["object_type"] == cbs.AUDIT_OBJECT_CLIENT}
+    assert ("ins1", "update") in actions
+    assert ("ins2", "create") in actions
+    # Every audit row is a success and carries the object type.
+    assert all(r["status"] == "success" for r in rows)
+
+
+def test_audit_logs_create_and_update_for_policies():
+    supa = FakeSupabase({cbs.POLICIES_TABLE: [_live_policy_row(policy_guid="pg-P1")]})
+    nc = FakeNowCerts(policies=[nc_policy("P1", "ins1", guid="pg-P1"),
+                                nc_policy("P2", "ins1", guid="pg-P2")])
+    run(supa, nc)
+    rows = _audit_rows(supa)
+    actions = {(r["source_object_id"], r["action"]) for r in rows
+               if r["object_type"] == cbs.AUDIT_OBJECT_POLICY}
+    assert ("pg-P1", "update") in actions
+    assert ("pg-P2", "create") in actions
+
+
+def test_audit_logs_skip_for_missing_guid():
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[{"number": "NOGUID", "insuredDatabaseId": "ins1", "status": "Active"}])
+    run(supa, nc)
+    skips = [r for r in _audit_rows(supa) if r["action"] == "skip"]
+    assert skips and skips[0]["object_type"] == cbs.AUDIT_OBJECT_POLICY
+    assert "guid" in skips[0]["message"]
+
+
+def test_audit_logs_error_when_a_write_fails():
+    class BoomSupa(FakeSupabase):
+        def insert(self, table, payload):
+            if table == cbs.POLICIES_TABLE:
+                raise RuntimeError("supabase 500")
+            return super().insert(table, payload)
+    supa = BoomSupa()
+    nc = FakeNowCerts(policies=[nc_policy("P1", "ins1", guid="pg-P1")])
+    run(supa, nc)
+    errs = [r for r in _audit_rows(supa) if r["action"] == "error"]
+    assert errs and errs[0]["status"] == "failed"
+    assert "supabase 500" in errs[0]["message"]
+    assert errs[0]["object_type"] == cbs.AUDIT_OBJECT_POLICY
+
+
+def test_dry_run_writes_no_audit_rows():
+    supa = FakeSupabase()
+    nc = FakeNowCerts(insureds=[nc_insured("ins1")], policies=[nc_policy("P1", "ins1")])
+    run(supa, nc, dry_run=True)
+    assert _audit_rows(supa) == []
