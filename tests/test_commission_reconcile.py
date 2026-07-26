@@ -170,7 +170,15 @@ class TestClassify:
     def test_as_update_only_touches_derived_fields(self):
         r = rc.rollup(led(), [txn(1000, "2026-02-01")])
         patch = rc.classify_reconciliation(1000, r).as_update()
-        assert set(patch) == {"actual_commission", "delta", "reconciliation_status"}
+        assert set(patch) == {"actual_commission", "reconciliation_status"}
+
+    def test_as_update_never_writes_the_generated_delta_column(self):
+        """commission_ledger.delta is GENERATED ALWAYS AS (actual - expected).
+        Writing it fails with 428C9. Caught live 2026-07-26."""
+        r = rc.rollup(led(), [txn(600, "2026-02-01")])
+        v = rc.classify_reconciliation(1000, r, term_ended=True)
+        assert v.delta == Decimal("-400")        # still computed, for the status
+        assert "delta" not in v.as_update()      # but never written back
 
 
 # --- severity ----------------------------------------------------------------

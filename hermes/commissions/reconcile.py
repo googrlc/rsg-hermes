@@ -183,10 +183,16 @@ class Classification:
     reason: str = ""
 
     def as_update(self) -> dict[str, Any]:
-        """The ledger patch. Only derived fields — never touches identity."""
+        """The ledger patch. Only derived fields — never touches identity.
+
+        ``delta`` is deliberately absent: commission_ledger.delta is
+        GENERATED ALWAYS AS (actual_commission - expected_commission). Postgres
+        computes it, and including it errors with 428C9 "can only be updated to
+        DEFAULT". We still carry delta on the Classification because that is
+        what the status is derived from — we just don't write it back.
+        """
         return {
             "actual_commission": float(self.actual) if self.actual is not None else None,
-            "delta": float(self.delta) if self.delta is not None else None,
             "reconciliation_status": self.status,
         }
 
@@ -308,21 +314,18 @@ def run_rollup(
         result.by_status[verdict.status] = result.by_status.get(verdict.status, 0) + 1
 
         patch = verdict.as_update()
-        current = {
-            "actual_commission": row.get("actual_commission"),
-            "delta": row.get("delta"),
-            "reconciliation_status": row.get("reconciliation_status"),
-        }
-        if all(_dec(patch[k]) == _dec(current[k])
-               if k != "reconciliation_status" else patch[k] == current[k]
-               for k in patch):
+        unchanged = (
+            _dec(patch["actual_commission"]) == _dec(row.get("actual_commission"))
+            and patch["reconciliation_status"] == row.get("reconciliation_status")
+        )
+        if unchanged:
             result.unchanged += 1
             continue
 
         result.changed += 1
         result.details.append({
             "policy_number": row.get("policy_number"),
-            "from": current["reconciliation_status"],
+            "from": row.get("reconciliation_status"),
             "to": verdict.status,
             "actual": patch["actual_commission"],
             "expected": row.get("expected_commission"),
