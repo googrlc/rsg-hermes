@@ -42,6 +42,43 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# --- Canonical book ownership -------------------------------------------------
+# canonical_policies had two writers and no way to say which owned a row.
+# `rsg-import` (pg_cron) pulled only is_quote=false and tombstoned everything
+# absent from that pull — including rows it never created. 43 of the 48 tombstoned
+# rows belong to the csv-import load, against 5 of its own. Disabled 2026-07-24.
+#
+# The rule, now that sync_owner exists: ANY writer may refresh volatile fields on
+# any row; only the OWNER may deactivate or tombstone one.
+TOMBSTONE_PREFIX = "Inactive: not in NowCerts"
+
+OWNER_BOOK_SYNC = "book_sync"
+OWNER_RSG_IMPORT = "rsg-import"
+OWNER_CSV_IMPORT = "csv-import"
+
+
+def is_tombstoned(policy: dict[str, Any]) -> bool:
+    """True for the phantom 'not in NowCerts' rows the disabled importer wrote.
+
+    Single home for this check. It previously existed as two independent copies —
+    agency_snapshot.py and commissions/surface.py each carried the magic string —
+    which means any consumer that forgot to check silently counted phantom rows as
+    real book.
+    """
+    return str(policy.get("status") or "").startswith(TOMBSTONE_PREFIX)
+
+
+def may_deactivate(policy: dict[str, Any], writer: str) -> bool:
+    """Whether *writer* is allowed to tombstone or deactivate *policy*.
+
+    An unowned row (sync_owner null, pre-migration) is claimable — refusing there
+    would freeze legacy rows permanently. A row owned by someone else is not: that
+    is the exact write that corrupted the book in July.
+    """
+    owner = str(policy.get("sync_owner") or "").strip()
+    return not owner or owner == writer
+
+
 LINEAGE_TABLE = "policy_lineage"
 LINEAGE_FIELD = "renewed_policy"
 

@@ -48,8 +48,10 @@ OPPORTUNITIES_TABLE = "opportunities"
 RETENTION_WINDOW_DAYS = 365
 SUCCESSOR_GRACE_DAYS = 45
 
-# Written by the disabled `rsg-import` pg_cron path; not a real AMS state.
-TOMBSTONE_PREFIX = "Inactive: not in NowCerts"
+# Single home: hermes.ams.book owns the tombstone vocabulary. Two independent
+# copies of this string existed, so a consumer that forgot the check counted
+# phantom rows as real book.
+from hermes.ams.book import TOMBSTONE_PREFIX  # noqa: F401  (re-exported)
 
 STATUS_RENEWED = "renewed"
 
@@ -104,7 +106,9 @@ def policy_premium(policy: dict[str, Any]) -> float:
 
 def is_tombstoned(policy: dict[str, Any]) -> bool:
     """True for the phantom 'not in NowCerts' rows the disabled importer wrote."""
-    return str(policy.get("status") or "").startswith(TOMBSTONE_PREFIX)
+    from hermes.ams.book import is_tombstoned as _shared
+
+    return _shared(policy)
 
 
 def lob_bucket(lines_of_business: Any) -> str:

@@ -51,7 +51,10 @@ OVERRIDABLE_FIELDS = frozenset({
 # commission_sync: only won, in-force business ledgers a commission.
 COMMISSIONABLE_STATUSES = frozenset({"active", "renewed"})
 
-TOMBSTONE_PREFIX = "Inactive: not in NowCerts"
+# Single home: hermes.ams.book owns the tombstone vocabulary. Two independent
+# copies of this string existed, so a consumer that forgot the check counted
+# phantom rows as real book.
+from hermes.ams.book import TOMBSTONE_PREFIX  # noqa: F401  (re-exported)
 
 _PREMIUM_FIELDS = ("annualized_premium", "current_term_amount", "premium_amount")
 
@@ -75,7 +78,9 @@ def _premium(policy: dict[str, Any]) -> float:
 
 
 def _is_tombstoned(policy: dict[str, Any]) -> bool:
-    return str(policy.get("status") or "").startswith(TOMBSTONE_PREFIX)
+    from hermes.ams.book import is_tombstoned as _shared
+
+    return _shared(policy)
 
 
 def _parse_date(value: Any) -> date | None:
