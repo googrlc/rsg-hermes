@@ -104,7 +104,10 @@ DOC_TYPE_RENEWAL = "renewal"
 SLACK_GRETCHEN_TASKS = os.environ.get("SLACK_GRETCHEN_TASKS", "C0AUP125PRU")  # #gretchen-tasks
 SLACK_THE_BOSS = os.environ.get("SLACK_THE_BOSS", "C0ANQUENX4P")              # #the-boss
 SLACK_RSG_WINS = os.environ.get("SLACK_RSG_WINS", "C0ANFKMDRUH")              # #rsg-wins
-SLACK_SYSTEMS_CHECK = os.environ.get("HERMES_SYSTEMS_CHECK_CHANNEL", "C0ANSEP6SSD")
+# Category name, not a Slack channel id. The old default "C0ANSEP6SSD" was not in
+# team_notify's legacy id map, so every renewal escalation silently resolved to the
+# BOSS room instead of systems-check.
+SLACK_SYSTEMS_CHECK = os.environ.get("HERMES_SYSTEMS_CHECK_CHANNEL", "systems")
 
 # --- Task assignee (Gretchen) ---
 GRETCHEN_USERNAME = os.environ.get("HERMES_RENEWALS_GRETCHEN_USERNAME", "gretchcoates")

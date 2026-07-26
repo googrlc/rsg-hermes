@@ -44,10 +44,17 @@ def _utcnow() -> datetime:
 
 
 def _systems_check_channel() -> str:
+    """The systems-check destination, as a CATEGORY name.
+
+    The old default "C0AFHN83ZE3" was a Slack channel id absent from team_notify's
+    legacy id map, so it resolved to the boss room — dead-lettered jobs, failed
+    executors and stalled-queue reclaims were all alerting Lamar's boss room rather
+    than a systems feed.
+    """
     return (
         os.environ.get("HERMES_SYSTEMS_CHECK_CHANNEL")
         or os.environ.get("HERMES_SLACK_FALLBACK_CHANNEL")
-        or "C0AFHN83ZE3"
+        or "systems"
     )
 
 
