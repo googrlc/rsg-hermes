@@ -9,7 +9,16 @@ once it's actually resolved (not just "in flight").
 
 ---
 
-## 1. Partial-token regression in approve_draft()
+## 1. Partial-token regression in approve_draft() — ✅ RESOLVED
+
+> **Resolved.** The approval token is now persisted on the
+> `intake_submissions.approval_token` column (migration
+> `20260726230000_intake_submissions_approval_token.sql`) and the intake
+> worker branches on it: `APPROVE CRM ONLY` skips retrieval/RAG rows,
+> `APPROVE SUPABASE ONLY` skips CRM/AMS writes, `APPROVE TASKS ONLY` is a
+> no-op that still walks the row to `complete`. NULL tokens default to
+> `APPROVE ALL` (historical behaviour). See PR #247.
+
 
 **Source:** End-of-Step-5 review, Phase 3.
 

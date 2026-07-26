@@ -277,7 +277,7 @@ def _claim_next_approved(supa: SupabaseClient) -> dict[str, Any] | None:
     """
     candidates = supa.select(
         TABLE,
-        columns="id,status_history,draft_summary,approved_by",
+        columns="id,status_history,draft_summary,approved_by,approval_token",
         params={"status": "eq.approved", "order": "created_at.asc"},
         limit=1,
     )
@@ -305,20 +305,32 @@ def _claim_next_approved(supa: SupabaseClient) -> dict[str, Any] | None:
     # we already SELECTed on candidate.
     row.setdefault("draft_summary", candidate.get("draft_summary"))
     row.setdefault("approved_by", candidate.get("approved_by"))
+    row.setdefault("approval_token", candidate.get("approval_token"))
     return row
 
 
 def process_one_approved(supa: SupabaseClient) -> bool:
     """Commit one approved submission to NowCerts + Supabase.
 
-    Walks the row approved -> writing -> written -> complete in a single pass:
-    ``commit_draft`` creates the opportunities and stages the NowCerts insured,
-    then the retrieval rows (client_entities / client_facts / client_notes) are
-    inserted so a lookup answers from this submission the moment it lands.
+    Walks the row approved -> writing -> written -> complete in a single pass,
+    branching on the approver's token (persisted on the row by ``approve_draft``):
+
+    * APPROVE ALL          → ``commit_draft`` (CRM opportunities + gated AMS
+                             insured) **and** retrieval rows. The historical path.
+    * APPROVE CRM ONLY     → ``commit_draft`` only; skip the Supabase
+                             retrieval/RAG rows.
+    * APPROVE SUPABASE ONLY → retrieval rows only; skip the CRM/AMS writes.
+    * APPROVE TASKS ONLY   → no task entity exists yet, so a deliberate no-op:
+                             the row still walks through to ``complete`` with
+                             zero writes so it is not left stuck at ``writing``.
+
+    A missing/NULL token (old rows, or any path that did not set it) defaults to
+    APPROVE ALL so the worker keeps doing what it always did.
     """
     from hermes.integrations.intake_submissions import transition
     from hermes.intake.commit import commit_draft
     from hermes.operations.agency_intake_approval import _insert_retrieval_rows
+    from hermes.operations.write_gate import APPROVE_ALL, parse_approval_token
 
     claimed = _claim_next_approved(supa)
     if claimed is None:
@@ -329,41 +341,72 @@ def process_one_approved(supa: SupabaseClient) -> bool:
 
     draft_summary = claimed.get("draft_summary") or {}
     approver = claimed.get("approved_by") or "system"
+    token = (claimed.get("approval_token") or APPROVE_ALL).strip().upper()
+    decision = parse_approval_token(token)
+    if decision is None:  # defensive: unknown token → historical APPROVE ALL behaviour
+        decision = parse_approval_token(APPROVE_ALL)
+    log.info("Submission %s approval scope: %s (crm=%s supabase=%s tasks=%s)",
+             submission_id, token, decision.approve_crm,
+             decision.approve_supabase, decision.approve_tasks)
 
-    try:
-        result = commit_draft(supa, draft_summary, approved_by=approver)
-    except Exception as exc:
-        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="commit-nowcerts-intake")
-        return True
+    # --- CRM side: opportunities + gated NowCerts insured staging ---
+    # commit_draft creates the Supabase opportunities (the sales pipeline) and
+    # stages the approval-gated NowCerts create_insured job. SUPABASE ONLY and
+    # TASKS ONLY skip it.
+    result: dict[str, Any] = {
+        "opportunities": [],
+        "opportunity_count": 0,
+        "intake_job_id": None,
+        "nextcloud_folder": None,
+    }
+    if decision.approve_crm:
+        try:
+            result = commit_draft(supa, draft_summary, approved_by=approver)
+        except Exception as exc:
+            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="commit-nowcerts-intake")
+            return True
+    else:
+        log.info("Submission %s: skipping CRM/AMS writes (token=%s)", submission_id, token)
 
     records_created: dict[str, Any] = {
         "target": "nowcerts",
+        "approval_token": token,
         "opportunities": [r.get("id") for r in result.get("opportunities", [])],
         "intake_job_id": result.get("intake_job_id"),
         "nextcloud_folder": result.get("nextcloud_folder"),
     }
     try:
         supa.update(TABLE, submission_id, {"records_created": records_created})
-        # writing -> written (opportunities created now; the NowCerts insured
-        # create is a separate approval-gated executor job).
+        # writing -> written (opportunities created now, or skipped by scope;
+        # the NowCerts insured create is a separate approval-gated executor job).
         transition(supa, submission_id, "written",
                    note="intake opportunities created; NowCerts insured staged")
     except Exception as exc:
         _safe_transition_to_failed(supa, submission_id, exc=exc, stage="written-transition")
         return True
 
+    # --- Supabase side: retrieval/RAG rows (client_entities / facts / notes) ---
+    # CRM ONLY and TASKS ONLY skip it. The rows are written eagerly so retrieval
+    # answers from this submission the moment it lands.
     retrieval_ids: dict[str, list[str]] = {}
-    try:
-        retrieval_ids = _insert_retrieval_rows(supa, draft_summary)
-        records_created["retrieval_row_ids"] = retrieval_ids
-    except Exception as exc:
-        log.exception("Retrieval insert failed for submission %s", submission_id)
-        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="retrieval-inserts")
-        return True
+    if decision.approve_supabase:
+        try:
+            retrieval_ids = _insert_retrieval_rows(supa, draft_summary)
+            records_created["retrieval_row_ids"] = retrieval_ids
+        except Exception as exc:
+            log.exception("Retrieval insert failed for submission %s", submission_id)
+            _safe_transition_to_failed(supa, submission_id, exc=exc, stage="retrieval-inserts")
+            return True
+    else:
+        log.info("Submission %s: skipping retrieval/RAG rows (token=%s)", submission_id, token)
+
+    # --- Tasks side: no task entity exists yet, so APPROVE TASKS ONLY is a
+    # deliberate no-op. We still walk the row through to complete so it is not
+    # left stuck at 'writing'; the records_created stash above records the scope. ---
 
     try:
         transition(supa, submission_id, "complete",
-                   note=f"intake committed to NowCerts+Supabase by {approver}",
+                   note=f"intake committed to NowCerts+Supabase by {approver} ({token})",
                    extra_fields={"records_created": records_created})
     except Exception as exc:
         _safe_transition_to_failed(supa, submission_id, exc=exc, stage="complete-nowcerts-intake")
@@ -379,7 +422,7 @@ def process_one_approved(supa: SupabaseClient) -> bool:
         f"{k}={len(v)}" for k, v in retrieval_ids.items() if v
     ) or "(none)"
     _post_alert(
-        f":white_check_mark: Hermes intake complete\n"
+        f":white_check_mark: Hermes intake complete ({token})\n"
         f"- submission_id: {submission_id}\n"
         f"- opportunities: {result.get('opportunity_count', 0)}\n"
         f"- Retrieval rows: {retrieval_summary}",
