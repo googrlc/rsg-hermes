@@ -1,0 +1,37 @@
+-- Drop slack_registry (2026-07-26).
+-- ⚠ ALREADY APPLIED to prod via Supabase MCP (migration "drop_slack_registry").
+-- This file backfills the repo so migrations stay the single source of truth.
+--
+-- Slack is retired; outbound reports go to Nextcloud Talk via TeamNotifier,
+-- which routes on a hardcoded channel->category map and env room tokens, never
+-- this table.
+--
+-- The three rows, preserved here because the table was small and the content is
+-- the only part worth keeping:
+--
+--   C09RSGHMSAUD  #rsg-hermes-commission-audit
+--                 "Commission variance alerts, discrepancy threads, auditor
+--                  handoffs."  roles: HermesCommissionAuditor, HermesFinanceOps
+--   C09RSGHMSOPS  #rsg-hermes-operations
+--                 "Daily digest, cron health, non-sensitive ops KPI pings."
+--                 roles: HermesOpsRouter, HermesFinanceOps
+--   C09RSGHMSREN  #rsg-hermes-project85-renewals
+--                 "Project 85 renewal work queue, SLA nudges, carrier
+--                  escalations."  roles: HermesRenewalSpecialist, HermesOpsRouter
+--
+-- Code dependencies removed FIRST, in the same commit:
+--   guardrails.validate_slack_channel  - had NO callers. The channel allowlist
+--                                        it "enforced" was never once invoked.
+--   kpi_writer                         - slack_registry_channels_active metric
+--   ops_doctor._check_channels         - plus the table in HERMES_TABLES
+--
+-- CASCADE dropped one inbound FK: reporting_schedules.target_slack_channel
+-- (ON DELETE SET NULL). That table is itself dead — 3 rows, last_run frozen at
+-- 2026-04-30, no code reads it. Its column keeps its now-meaningless values
+-- rather than being silently nulled; retiring reporting_schedules is a separate
+-- decision, not a side effect of this one.
+--
+-- Post-apply verification: slack_registry gone, 0 inbound FKs remain,
+-- reporting_schedules still has its 3 rows and its column.
+
+drop table if exists public.slack_registry cascade;

@@ -66,21 +66,6 @@ def snapshot_system_health(supa: SupabaseClient) -> list[dict[str, Any]]:
         )
     )
 
-    active_channels = supa.select(
-        "slack_registry",
-        columns="id",
-        params={"is_active": "eq.true"},
-        limit=100,
-    )
-    results.append(
-        record_kpi(
-            supa,
-            metric_name="slack_registry_channels_active",
-            metric_value=len(active_channels),
-            category="SYSTEM_HEALTH",
-        )
-    )
-
     log.info("System health snapshot recorded: %d KPIs", len(results))
     return results
 
