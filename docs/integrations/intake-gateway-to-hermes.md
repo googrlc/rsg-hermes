@@ -157,7 +157,7 @@ field-by-field. Flatten it into one human sentence:
 Source: <kind> "<reference>" captured <captured_at>. <n> field(s) needed review: <field list>.
 ```
 
-Do not JSON-stuffed the citation objects into `description`. A human reads this.
+Do not JSON-stuff the citation objects into `description`. A human reads this.
 
 ### Unresolved fields
 
