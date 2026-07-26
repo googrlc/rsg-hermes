@@ -207,3 +207,24 @@ def test_check_staleness_never_raises_on_a_broken_database():
     assert not rpt.ok
     assert all(c.verdict == S.VERDICT_UNKNOWN for c in rpt.checks)
     assert len(rpt.checks) == len(S.RULES)
+
+
+# --- the mirror rule (retires the vestigial sync_audit_log rule) -------------
+
+def test_the_mirror_rule_points_at_the_live_book_surface():
+    """#232: the old "AMS sync activity" rule watched sync_audit_log, an Espo-era
+    table whose writer was deleted with the NowCerts↔EspoCRM pipeline (commit
+    7ee2787). It can never move again, so it was permanently STALE — a red light
+    that trains people to ignore red lights. The mirror surface that the surviving
+    canonical book sync actually stamps is canonical_clients.updated_at."""
+    mirror = next((r for r in S.RULES if r.name == "NowCerts book mirror"), None)
+    assert mirror is not None, "the NowCerts book mirror movement rule is missing"
+    assert mirror.table == "canonical_clients"
+    assert mirror.column == "updated_at"
+    assert mirror.max_age_days > 0
+
+
+def test_no_shipped_rule_watches_the_vestigial_sync_audit_log():
+    """sync_audit_log is reachable but dead; no movement rule should point at it,
+    or ops-doctor is permanently red on a table nothing will ever write again."""
+    assert all(r.table != "sync_audit_log" for r in S.RULES)
