@@ -1,12 +1,31 @@
 # CRM MCP Training Profile
 
-> System prompt and reference guide for any AI agent (Hermes NL agent, MCP
-> server, Slack bot, or external copilot) that reads or writes RSG's the CRM.
-> Load this document as a system/profile instruction before the first CRM
-> interaction in any session.
+> ## ⚠️ HISTORICAL — DO NOT LOAD AS A SYSTEM PROMPT (as of 2026-07-26)
 >
-> for the split-file version with dedicated schema, field dictionary,
-> relationships, query patterns, workflows, and guardrails files.
+> This profile describes the **EspoCRM entity model**, decommissioned
+> 2026-07-23. The entities it validates against (`Account`, `Contact`, `Lead`,
+> `Opportunity`, `Policy`, `Renewal`, `ActivityLog`, `OpportunityDriver`, …),
+> the camelCase fields (`amsLockState`, `caDotNumber`, `momentumTaskId`), and
+> the `crm_write_queue` → `crm_receipts` governance chain **no longer exist**.
+> Archived Espo columns live in `espo_column_archive` (2,570 rows).
+>
+> **What is true now:**
+>
+> - The CRM is the custom Command Center backed by Supabase. Pipeline rows live
+>   in `opportunities`; tasks in `agency_crm_tasks`; cases in `agency_crm_cases`.
+> - Writes are gated by **`outbound_sync_queue`** (`queued` → `processing` →
+>   `completed` / `failed`), with `approved_by` + `approved_at` set, drained by
+>   the scheduler every 5 minutes. There is no `crm_write_queue` and no
+>   `crm_receipts` table.
+> - Receipts are per-domain: `renewal_execution_receipts`. Guardrails are logged
+>   to `guardrail_logs` (564 rows); sync history to `sync_audit_log` (3,778).
+> - Approval tokens **are** still real — `APPROVE ALL`, `APPROVE CRM ONLY`,
+>   `APPROVE SUPABASE ONLY`, `APPROVE TASKS ONLY`, `REVISE`, `CANCEL` — but they
+>   move an `intake_submissions` row, not a queue row.
+>
+> **Use instead:** the `hermes-crm-writer`, `crm-intake-writer`, `nowcerts-skill`
+> and `renewal-desk` skills under `.claude/skills/`. Kept here for the field
+> dictionary and the glossary, which still explain RSG's vocabulary.
 
 ---
 
@@ -180,8 +199,8 @@ When using the CRM MCP or any Hermes interface:
 | **DOT Number** | Department of Transportation number (trucking) | `caDotNumber` on Opportunity |
 | **MC Number** | Motor Carrier number | `caMcNumber` on Opportunity |
 | **Project 85** | RSG's retention initiative targeting 85% retention | Renewals tracked via the `project_85_renewals` Supabase table and CRM Renewal entity |
-| **Golden Record** | Supabase-hosted source of truth for synced data | `leads_staging`, `crm_write_queue`, etc. in Supabase |
-| **Write Gate** | Safety mechanism requiring approval before CRM mutations | `crm_write_queue` with approval tokens (APPROVE ALL, APPROVE CRM ONLY, etc.) |
+| **Golden Record** | Supabase-hosted source of truth for synced data | `canonical_clients`, `canonical_policies`, `leads_staging` in Supabase |
+| **Write Gate** | Safety mechanism requiring approval before CRM mutations | `outbound_sync_queue` (`approved_by` + `approved_at`); intake approval tokens on `intake_submissions` |
 | **Intel Fields** | AI-populated research fields on Account | `ai_assessment`, `bbb_rating`, `intel_confidence`, `intel_entity_type`, etc. |
 | **AMS Lock** | Policy synced from NowCerts AMS, protected from manual edits | `amsLockState` on Policy (enum: Pending Sync, Synced) |
 | **Momentum** | NowCerts task/activity sync system | `momentumLastSynced`, `momentumTaskId` on Task |
@@ -228,7 +247,7 @@ Standard commission types on the Commission entity.
 
 ### Write Safety
 - **Never overwrite CRM data unless the user explicitly asks.** For any update, summarize the proposed change before executing.
-- **All mutations go through `crm_write_queue`.** No direct PATCH/PUT from AI completions alone. The queue enforces: `PENDING` → worker executes → `SUCCESS` / `FAILED` / `BLOCKED_BY_GUARDRAIL`.
+- **All mutations go through `outbound_sync_queue`.** (Historically `crm_write_queue`, which never existed in the current schema.) No direct PATCH/PUT from AI completions alone. The queue enforces `queued` → `processing` → `completed` / `failed`, and requires `approved_by` + `approved_at`.
 - **Require approval tokens for writes.** Valid tokens: `APPROVE ALL`, `APPROVE CRM ONLY`, `APPROVE SUPABASE ONLY`, `APPROVE TASKS ONLY`, `REVISE`, `CANCEL`.
 - **Never invent record IDs.** Always search first, confirm the match, then reference the real ID.
 - **Never skip pipeline stages.** Opportunity and Renewal stages follow a strict progression. Moving backwards requires explicit user confirmation.
@@ -255,7 +274,7 @@ Hermes uses Supabase as a governance and staging layer alongside the CRM:
 
 | Domain | Key Tables |
 |--------|-----------|
-| CRM Governance | `crm_write_queue`, `crm_receipts`, `guardrail_logs` |
+| CRM Governance | `outbound_sync_queue`, `guardrail_logs`, `sync_audit_log`, `renewal_execution_receipts` |
 | Intake / Documents | `leads_staging`, `documents`, `review_queue`, `stg_slack_intake_notes` |
 | Underwriting | `risk_assessments`, `uw_submission_profile`, `carrier_appetite` |
 | Commission | `commission_audits`, `eom_scorecards`, `commission_ledger` |

@@ -62,12 +62,27 @@ def test_list_policies(client):
 
 
 def test_list_commissions(client):
+    """A row with no reconciliation_status is not 'reconciled', so the default
+    filter returns nothing — but the response still reports that the row exists.
+
+    This test previously asserted count == 1 against the default filter and had
+    been failing; it encoded the bug where an empty view looked like an empty
+    ledger. Fixed with the endpoint 2026-07-26.
+    """
     supa = FakeSupa({"commission_ledger": [
         {"policy_number": "P1", "expected_commission": 150},
     ]})
-    with _patch(supa):
+    with _patch(supa), patch("hermes.ams.book.select_policies", return_value=[]):
         r = client.get("/api/commissions")
-    assert r.status_code == 200 and r.json()["count"] == 1
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 0                    # nothing is reconciled
+    assert body["total_ledger_rows"] == 1        # but the ledger is not empty
+    assert body["counts_by_status"] == {"unknown": 1}
+
+    with _patch(supa), patch("hermes.ams.book.select_policies", return_value=[]):
+        r = client.get("/api/commissions?status=all")
+    assert r.json()["count"] == 1
 
 
 def test_workspace_stats(client):

@@ -4,7 +4,7 @@ This note captures key data-field and table gaps for the Hermes expansion scope 
 
 ## What exists already (live Supabase)
 
-- Core write governance: `crm_write_queue`, `crm_receipts`, `guardrail_logs`
+- Core write governance: `outbound_sync_queue`, `guardrail_logs`, `sync_audit_log`, `renewal_execution_receipts` (corrected 2026-07-26 — `crm_write_queue` / `crm_receipts` were never built)
 - Intake/document staging: `leads_staging`, `stg_slack_intake_notes`, `stg_underwriting_documents`, `stg_underwriting_requests`, `commercial_documents`, `documents`
 - Underwriting and risk: `risk_assessments`, `client_assessments`, `client_reports`, `uw_submission_profile`, `uw_missing_items`, `uw_touchpoint_log`
 - Medicare: `medicare_master_plan_index`, `medicare_plans`, `medicare_underwriting_rules`, `medicare_carriers`, and supporting footprint/provider/rx tables

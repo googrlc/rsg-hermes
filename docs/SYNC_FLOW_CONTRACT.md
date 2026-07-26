@@ -34,7 +34,7 @@ Ordered steps (same run / same `sync_runs.id`):
 7. **`outbound_sync_queue`** — One row per the CRM write intent: must include **`run_id`**, **`mapping_id`** (nullable), **`attempt_count`** (start at `0`), `object_type`, `action`, `payload`, `status` = `queued`.  
    - Hermes **`pipeline.py`** depends on these columns; drift (e.g. column `attempts` only) breaks enqueue and leaves **`sync_audit_log` / `sync_errors` empty**.  
    - Apply migration: `supabase/migrations/20260511120000_outbound_sync_queue_hermes_alignment.sql`.
-8. **Hermes** — Worker drains `outbound_sync_queue` / `crm_write_queue` and applies writes to the CRM.
+8. **Hermes** — The scheduler's executors drain `outbound_sync_queue` (approved rows only) and apply the writes. (`crm_write_queue`, named here originally, was never built.)
 9. **`sync_audit_log`** — Append success/failure per logical object.
 10. **`sync_errors`** — Append retryable/non-retryable failures with `queue_id` / `staging_id` when known.
 11. **`sync_conflicts`** — Field-level disagreements or unmapped keys awaiting human resolution.

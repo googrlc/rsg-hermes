@@ -119,6 +119,8 @@
   .task .t-status{font-size:12.5px;color:var(--muted);margin-left:auto}
 
   .empty,.loading{padding:44px;text-align:center;color:var(--muted);font-size:14px}
+  .corrected{border-bottom:1.5px dotted var(--warn);cursor:help}
+  .corrected::after{content:'*';color:var(--warn);font-weight:700;margin-left:2px}
 
   /* modal */
   .overlay{position:fixed;inset:0;background:rgba(20,46,55,.34);display:none;align-items:flex-start;justify-content:center;padding:60px 20px;z-index:40;overflow:auto}
@@ -183,7 +185,7 @@
       <a data-view="cases"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Cases</a>
       <a data-view="tasks"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>Tasks</a>
       <a data-view="hermes"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>Ask Hermes</a>
-      <a class="external" href="https://rsg-commission-tracker-339396843209.us-east1.run.app/" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>Commission Tracker</a>
+      <a class="external" href="https://hermes-gretch.tail1cbc83.ts.net:8446/" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>Commission Tracker</a>
     </nav>
     <div class="side-foot"><div class="row"><span class="dot"></span>Supabase connected</div><div>Hermes mirrors + CRM workflow</div></div>
   </aside>
@@ -239,7 +241,7 @@ const TABLES = {
   renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Renewal events with win/loss outcome. Click a row to open the insured in NowCerts.',endpoint:'/api/renewals',
     rowClick:(r)=>{ if(r.insured_id&&NOWCERTS_INSURED_URL) window.open(NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(r.insured_id)),'_blank','noopener'); },
     cols:[['client_name','Client'],['policy_number','Policy #'],['line_of_business','LOB'],['renewal_event_date','Renewal'],['risk_status','Urgency',chip],['outcome','Outcome',chip],['premium_current','Premium',money]]},
-  commissions:{title:'Commissions',eyebrow:'Reconciled · read-only',lede:'Reconciled commissions only (read-only). Ingest and reconcile in the standalone Commission Tracker.',endpoint:'/api/commissions',
+  commissions:{title:'Commissions',eyebrow:'Reconciled · click a row to correct it',lede:'Reconciled commissions. Click a row to correct a value in the portal — NowCerts is fixed by hand separately.',endpoint:'/api/commissions',emptyState:commissionsEmpty,rowClick:(r)=>openCommission(r),
     cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['delta','Delta',money],['reconciliation_status','Status',chip]]},
   pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies. Click one to send a quote to NowCerts.',endpoint:'/api/opportunities',action:'newOpp',rowClick:(o)=>openOpportunity(o),
     cols:[['insured_name','Client'],['line_of_business','LOB'],['stage','Stage',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']]},
@@ -303,19 +305,69 @@ async function renderTable(host,cfg){
   if(cfg.action==='newTask') $('#actBtn').onclick=()=>openNewTask();
   if(cfg.action==='commTerms') $('#actBtn').onclick=openCommTerms;
   try{
-    const rows = firstArray(await api(cfg.endpoint));
+    const payload = await api(cfg.endpoint);
+    const rows = firstArray(payload);
     const wrap = host.querySelector('.table-wrap');
-    if(!rows.length){ wrap.innerHTML=`<div class="empty">Nothing here yet.</div>`; return; }
+    if(!rows.length){
+      wrap.innerHTML = cfg.emptyState ? cfg.emptyState(payload) : `<div class="empty">Nothing here yet.</div>`;
+      wrap.querySelectorAll('[data-goto]').forEach(el=>el.onclick=()=>show(el.dataset.goto));
+      const all = wrap.querySelector('#commAll'); if(all) all.onclick = showAllCommissions;
+      return;
+    }
     const head = cfg.cols.map(c=>`<th>${c[1]}</th>`).join('');
     const body = rows.map((r,i)=>`<tr${cfg.rowClick?` data-i="${i}" style="cursor:pointer"`:''}>`+cfg.cols.map(c=>{
       const fmt=c[2]; const raw=r[c[0]];
       const cell = fmt?fmt(raw):(raw==null||raw===''?'<span class="muted">—</span>':esc(raw));
       const num = fmt===money?' class="num"':'';
+      // A portal correction is marked in place: the value shown is a human's,
+      // not the AMS's, and hovering says what it replaced.
+      const ovr = r._overridden || {};
+      if(Object.prototype.hasOwnProperty.call(ovr,c[0])){
+        const was = ovr[c[0]];
+        const wasTxt = fmt?fmt(was):(was==null||was===''?'blank':String(was));
+        return `<td${num}><span class="corrected" title="Corrected in the portal — was ${esc(wasTxt)}. NowCerts still needs the same fix.">${cell}</span></td>`;
+      }
       return `<td${num}>${cell}</td>`;
     }).join('')+'</tr>').join('');
     wrap.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     if(cfg.rowClick){ wrap.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>cfg.rowClick(rows[+tr.dataset.i])); }
   }catch(e){ host.querySelector('.table-wrap').innerHTML=`<div class="empty">Couldn’t load — ${esc(e.message)}</div>`; }
+}
+
+/* ---------- Commissions: an empty view must explain itself ----------
+   Nothing has ever carried reconciliation_status='reconciled', so the default
+   filter matched zero rows and rendered a blank grid — which reads as "there is
+   no commission data". There were 108 rows. Say what's actually there. */
+function commissionsEmpty(payload){
+  const counts = payload?.counts_by_status || {};
+  const cov = payload?.coverage || {};
+  const total = payload?.total_ledger_rows || 0;
+  const floor = cov.excluded_by_date_floor || {};
+  const gap = cov.missing_in_window || {};
+  if(!total) return `<div class="empty">No commission ledger rows yet.</div>`;
+  const EXCEPTIONS = ['underpaid','overpaid','no_expected','missing_statement'];
+  const exceptions = EXCEPTIONS.reduce((n,k)=>n+(counts[k]||0),0);
+  const chips = Object.entries(counts)
+    .map(([k,v])=>`<span class="chip ${EXCEPTIONS.includes(k)?'crit':(k==='pending'?'warn':'')}">${esc(k)} ${v}</span>`)
+    .join(' ');
+  const lines = [
+    `<div style="font-size:15px;color:var(--fg);margin-bottom:6px">Nothing reconciled yet — but ${total} ledger row${total===1?'':'s'} exist.</div>`,
+    `<div style="margin:12px 0">${chips}</div>`,
+    exceptions ? `<div style="margin-bottom:6px"><strong>${exceptions}</strong> row${exceptions===1?'':'s'} need attention.</div>` : '',
+    floor.policies ? `<div class="t-meta">${floor.policies} active policies (${money(floor.premium)}) are excluded by the ${esc(floor.since)} commission floor — by policy, not by fault.</div>` : '',
+    gap.policies ? `<div class="t-meta" style="color:var(--warn)">${gap.policies} in-window policies (${money(gap.premium)}) qualify but have no ledger row — that is a gap.</div>` : '',
+    `<div class="btns" style="justify-content:center;margin-top:16px"><button class="btn primary" id="commAll">Show all commissions</button></div>`,
+  ];
+  return `<div class="empty" style="text-align:left;max-width:640px;margin:0 auto">${lines.join('')}</div>`;
+}
+async function showAllCommissions(){
+  const cfg = Object.assign({}, TABLES.commissions, {
+    endpoint:'/api/commissions?status=all',
+    eyebrow:'All rows · read-only',
+    lede:'Every ledger row — expected, pending and exceptions.',
+    emptyState:null,
+  });
+  return renderTable($('#viewHost'), cfg);
 }
 
 /* ---------- Commission terms editor ---------- */
@@ -347,6 +399,112 @@ async function openCommTerms(){
     ['crCarrier','crLob','crNb','crRen'].forEach(i=>$('#'+i).value='');
     loadRules();
   });
+}
+
+/* ---------- Commission row: correct it here, fix the AMS by hand ----------
+   An override outranks the synced value until NowCerts reports the same thing,
+   at which point the nightly reconcile retires it. Nothing here writes to the
+   AMS. Fields match the server's OVERRIDABLE_FIELDS allowlist — reconciliation
+   status is derived from statement transactions and is deliberately not here. */
+const COMM_EDITABLE = [
+  ['gross_premium','Gross premium','number'],
+  ['expected_commission','Expected commission','number'],
+  ['carrier_name','Carrier','text'],
+  ['lob','Line of business','text'],
+  ['client_name','Client','text'],
+  ['policy_effective_date','Effective date','date'],
+  ['policy_expiration_date','Expiration date','date'],
+  ['notes','Notes','text'],
+];
+
+async function openCommission(row){
+  await loadUsers();
+  const ovr = row._overridden || {};
+  const wasOverridden = (f)=> Object.prototype.hasOwnProperty.call(ovr,f);
+  const fmt = (f,v)=> (f.includes('premium')||f.includes('commission')) ? money(v) : (v==null||v===''?'—':esc(v));
+
+  const facts = [
+    ['Policy', row.policy_number],['Client', row.client_name],['Carrier', row.carrier_name],
+    ['Line of business', row.lob],['Gross premium', money(row.gross_premium)],
+    ['Expected', money(row.expected_commission)],['Actual', money(row.actual_commission)],
+    ['Delta', money(row.delta)],['Status', row.reconciliation_status],
+    ['Statement date', row.statement_date],
+  ].map(([l,v])=>`<div><div class="m-l">${l}</div><div class="m-v">${v==null||v===''?'—':esc(v)}</div></div>`).join('');
+
+  const overriddenNote = Object.keys(ovr).length
+    ? `<div class="t-meta" style="margin-top:12px;color:var(--warn)">Corrected in the portal:
+        ${Object.entries(ovr).map(([f,orig])=>`<strong>${esc(f)}</strong> was ${fmt(f,orig)}`).join(' · ')}.
+        NowCerts still needs the same fix by hand.</div>`
+    : '';
+
+  openModal(`<div class="modal-head"><h3>${esc(row.policy_number||'Commission row')}</h3>
+      <p>Correct a value here so the numbers are right today. This does <strong>not</strong> write to NowCerts —
+         fix the AMS separately and the correction retires itself once they agree.</p></div>
+    <div class="modal-body">
+      <div class="meta" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px">${facts}</div>
+      ${overriddenNote}
+      <div style="border-top:1px solid var(--border-soft);margin-top:16px;padding-top:14px">
+        <div class="eyebrow" style="margin-bottom:10px">Correct a field</div>
+        <div class="row2">
+          <div class="field"><label>Field</label><select id="ovField">
+            ${COMM_EDITABLE.map(([f,l])=>`<option value="${f}"${wasOverridden(f)?' data-ov="1"':''}>${l}${wasOverridden(f)?' (corrected)':''}</option>`).join('')}
+          </select></div>
+          <div class="field"><label>Correct value</label><input id="ovValue" placeholder="the right number"/></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>Approved by</label><select id="ovBy">${userOptions()}</select></div>
+          <div class="field"><label>Why</label><input id="ovReason" placeholder="e.g. premium missing from the AMS"/></div>
+        </div>
+        <div id="ovExisting"></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn primary" id="ovSave">Save correction</button></div>`);
+
+  const syncType=()=>{ const f=$('#ovField').value;
+    const spec=COMM_EDITABLE.find(c=>c[0]===f); $('#ovValue').type = spec?spec[2]:'text'; };
+  $('#ovField').onchange=syncType; syncType();
+
+  async function loadExisting(){
+    try{
+      const rows=(await api('/api/commissions/overrides?status=all')).overrides||[];
+      const mine=rows.filter(o=>o.entity_key===row.policy_number);
+      $('#ovExisting').innerHTML = mine.length
+        ? `<div class="eyebrow" style="margin:14px 0 8px">Corrections on this policy</div>` + mine.map(o=>`
+            <div class="t-meta" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0">
+              <span><strong>${esc(o.field_name)}</strong> → ${esc(String(o.override_value))}
+                <span class="chip ${o.status==='conflicted'?'crit':(o.status==='active'?'warn':'')}">${esc(o.status)}</span>
+                ${o.status==='conflicted'?`<br/><span style="color:var(--crit)">The AMS now says ${esc(String(o.conflict_value))} — neither the original nor your correction. Resolve it.</span>`:''}
+              </span>
+              ${o.status==='active'?`<button class="btn" data-withdraw="${o.id}" style="padding:4px 10px;font-size:12px">Withdraw</button>`:''}
+            </div>`).join('')
+        : '';
+      $('#ovExisting').querySelectorAll('[data-withdraw]').forEach(b=>b.onclick=(e)=>submitBtn(e.target,async()=>{
+        const by=$('#ovBy').value;
+        await api(`/api/commissions/overrides/${b.dataset.withdraw}?approved_by=${encodeURIComponent(by)}`,{method:'DELETE'});
+        toast('Correction withdrawn.'); loadExisting(); refreshCommissions();
+      }));
+    }catch(e){ $('#ovExisting').innerHTML=`<div class="t-meta">Couldn't load corrections — ${esc(e.message)}</div>`; }
+  }
+  loadExisting();
+
+  $('#ovSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const field=$('#ovField').value, raw=$('#ovValue').value.trim(), by=$('#ovBy').value;
+    if(!raw) throw new Error('Enter the correct value.');
+    if(!by) throw new Error('Pick who is approving this.');
+    const spec=COMM_EDITABLE.find(c=>c[0]===field);
+    let value=raw;
+    if(spec && spec[2]==='number'){ value=Number(raw); if(Number.isNaN(value)) throw new Error('That is not a number.'); }
+    await api(`/api/commissions/${row.id}/override`,{method:'POST',body:JSON.stringify({
+      field_name:field, value, approved_by:by, reason:$('#ovReason').value.trim()||null})});
+    toast('Corrected here. NowCerts still needs the same fix.');
+    $('#ovValue').value=''; $('#ovReason').value='';
+    loadExisting(); refreshCommissions();
+  });
+}
+
+function refreshCommissions(){
+  if(document.querySelector('.nav a.active')?.dataset.view==='commissions') show('commissions');
 }
 
 /* ---------- Pipeline Kanban ---------- */

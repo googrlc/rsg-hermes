@@ -27,7 +27,7 @@ do I put this?" and "where is that file?"
 | CRM records (accounts, contacts, opportunities, tasks, notes) | the CRM |
 | Bound policy data (insureds, premiums, policy details) | NowCerts (mirrored to Supabase `canonical_policies`) |
 | Daily assistant / commands | Hermes |
-| Automations and workflows | n8n (defined in docker-compose, check if running) |
+| Automations and workflows | Hermes scheduler + `outbound_sync_queue` (n8n was never deployed and is not in docker-compose) |
 | Analytics, snapshots, commission ledger | Supabase |
 | Slack messages and alerts | Slack |
 | Agency login links | Command Center dashboard (`/command-center/`) |

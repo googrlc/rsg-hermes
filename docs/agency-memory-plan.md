@@ -9,6 +9,28 @@ This document is the index for the agency-memory skill family. The
 skills themselves live under `.claude/skills/` and each carries its own
 frontmatter + playbook.
 
+> ## ⚠️ Transport sections are HISTORICAL (reviewed 2026-07-26)
+>
+> The **goal, the payload shapes, and the extraction discipline below still
+> hold.** The *transport* half never shipped:
+>
+> - **`crm_write_queue` and `crm_receipts` do not exist.** No such tables were
+>   ever created. Sections 105–112, 251–252, and the §5 transport options
+>   describe a design, not a system.
+> - **n8n was never deployed** and was removed from `docker-compose.yml` during
+>   the LiteLLM consolidation. Option A is dead; `n8n-developer` is deleted.
+> - **`crm-upsert-planner` is deleted** — it existed only to emit plans for that
+>   dead transport.
+>
+> **What actually runs:** `intake_submissions` (176 rows) →
+> `approve_draft(token)` → the intake worker, which commits opportunities, the
+> staged NowCerts insured, and the retrieval rows. Outbound writes to CRM/AMS go
+> through `outbound_sync_queue`, drained by the scheduler every 5 minutes. See
+> the `crm-intake-writer` and `hermes-crm-writer` skills.
+>
+> **Retrieval is barely populated:** `client_facts` 11 rows, `client_notes` 2,
+> `quote_facts` 0. The memory layer this plan describes is largely still ahead.
+
 ---
 
 ## 1. Objective
@@ -57,7 +79,7 @@ All skills live under `.claude/skills/<name>/SKILL.md`.
 | `crm-intake-writer` | Unified intake payload builder (Account + Contacts + per-LOB Opportunities + Note + Facts), confirm-before-write. |
 | `crm-note-structurer` | Canonical CRM ClientNote body format. |
 | `crm-fact-retriever` | Answers direct retrieval questions, cites source + confidence, never invents. |
-| `crm-upsert-planner` | Turns an approved payload into an ordered, deterministic write plan with duplicate searches first. |
+| ~~`crm-upsert-planner`~~ | **Deleted 2026-07-26** — emitted plans for the `crm_write_queue`/n8n transport, which was never built. |
 
 ### Specialty intake extractors
 
@@ -102,18 +124,20 @@ crm-intake-writer
 USER returns approval token  (APPROVE ALL | CRM ONLY | SUPABASE ONLY | TASKS ONLY | REVISE | CANCEL)
    │
    ▼
-crm-upsert-planner
-   ├──► Search every entity first
-   ├──► CREATE_NEW | UPDATE_EXISTING | ATTACH_ONLY | NEEDS_HUMAN_REVIEW | SKIP
-   ├──► Account → Contacts → Opportunities → Note → Facts
-   └──► Transport: n8n webhook OR crm_write_queue OR supabase_insert
+approve_draft(token)                       [agency_intake_approval.py]
+   └──► moves the intake_submissions row to `approved`
    │
    ▼
-crm_write_queue worker  →  the CRM API  →  crm_receipts
-Supabase insert         →  client_facts / client_notes / quote_facts / client_documents
+intake worker                              [operations/intake_worker.py]
+   ├──► opportunities        (per-LOB, via POST /api/opportunities)
+   ├──► staged NowCerts insured
+   └──► retrieval rows: client_entities / client_facts / client_notes
    │
    ▼
-Confirmation summary back to Slack
+outbound_sync_queue  →  scheduler (5 min)  →  executor  →  per-domain receipt
+   │
+   ▼
+Confirmation summary
 ```
 
 For retrieval the flow is much simpler:
@@ -180,26 +204,30 @@ reporting back into a junk drawer.
 
 Use only the canonical enums in
 
-- Opportunity: `Discovery → Quoting → Markets Out / Shopping →
-  Proposal Presented → Negotiation → Closed Won | Closed Lost`
-- Renewal: `Identified → Outreach Sent → Quote Requested → Proposal
-  Sent → Negotiating → Renewed - Won | Lost`
+> Corrected 2026-07-26: the enums below were Espo-era and never existed in the
+> live pipeline. The real vocabulary comes from NowCerts and lives in
+> `hermes/intake/opportunities.py` — see the `hermes-crm-writer` skill.
+
+- New business: `Not Assigned → Preparing Application → Sent For Quoting →
+  Quotes Received → Sent Proposal → Request to Bind → Bound / Won | Lost`
+- Renewal: `Renewal in 90 days → 60 days → 30 days → Requote Renewal →
+  Annual Policy Review → Complete/Auto-Renewal | Bound / Won | Not Renewed`
 
 Default mappings inside intakes:
 
 | Situation | Stage |
 |-----------|-------|
-| Quote number present | `Quoting` |
-| LOB in scope, no quote yet | `Discovery` |
-| Carrier declined | `Closed Lost` with reason |
-| Bound | `Closed Won` |
+| Quote number present | `Quotes Received` |
+| LOB in scope, no quote yet | `Preparing Application` |
+| Carrier declined | `Lost` with a `lost_reason` |
+| Bound | `Bound / Won` |
 
 ---
 
 ## 6. Retrieval layer (planned tables)
 
 These tables are referenced by `crm-fact-retriever`,
-`crm-upsert-planner`, and the specialty intakes. They will land in a
+and the specialty intakes. They will land in a
 follow-up Supabase migration:
 
 | Table | Purpose |
@@ -248,9 +276,10 @@ Hermes asks approval before:
 - Adding Policy records
 - Sending client messages
 
-All actual writes go through `crm_write_queue` → worker →
-`crm_receipts` (or direct Supabase insert for retrieval tables). No
-skill writes from a completion.
+All actual writes go through the approval gate — `intake_submissions` +
+`approve_draft` for intake, `outbound_sync_queue` + the scheduler's executors
+for anything reaching the CRM or AMS (or a direct Supabase insert for the
+retrieval tables). No skill writes from a completion.
 
 ---
 
@@ -287,23 +316,21 @@ Restricted values **must not** appear in:
 
 ## 9. Tooling options (future work)
 
-The skills are tool-agnostic; the actual write path will be one of:
+> **Resolved 2026-07-26 — this section is settled, not open.** Three options
+> were weighed; the outcome was a blend of B and C, and Option A is dead.
 
-- **Option A — n8n webhook layer.** Hermes posts JSON to n8n
-  (`/search-account`, `/upsert-account`, `/create-fact`, …); n8n
-  talks to the CRM and Supabase. Best near-term option;
-  see `n8n-developer`.
-- **Option B — direct the CRM API.** Faster but riskier; guardrails
-  must be strict.
-- **Option C — `rsg-crm-mcp` MCP server.** Cleanest long-term
-  architecture once tools stabilize:
-  `crm.searchAccount`, `crm.searchContact`,
-  `crm.searchOpportunity`, `crm.upsertAccount`, `crm.upsertContact`,
-  `crm.upsertOpportunity`, `crm.createNote`, `crm.searchFacts`,
-  `crm.createFact`, `crm.attachDocumentSummary`.
+- ~~**Option A — n8n webhook layer.**~~ **Abandoned.** n8n was never deployed
+  and was removed from `docker-compose.yml`; `n8n-developer` is deleted.
+- **Option B — direct API.** *This is what shipped.* The CRM half writes
+  through `rsg-hermes-api` (`POST /api/opportunities`, `PATCH`, `/stage`),
+  which centralises the guardrails — client-identifier slug, dedupe against
+  `uq_opportunities_client_lob_type`, stage defaults, insured priming.
+- **Option C — MCP server.** *Partly shipped.* The `rsg-hermes` bridge exposes
+  AMS + task + case + document tools, but **no pipeline tools** — opportunity
+  writes still go over HTTP. Adding them is the natural next step.
 
-Whichever transport ships, `crm-upsert-planner` emits the same plan;
-only the `transport.type` value changes.
+AMS-bound writes are additive and approval-gated through `outbound_sync_queue`,
+never synchronous. See the `hermes-crm-writer` and `renewal-desk` skills.
 
 ---
 
@@ -311,11 +338,11 @@ only the `transport.type` value changes.
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
-| 1 | Planning / payload skills (`crm-intake-writer`, `crm-fact-retriever`, `crm-note-structurer`, `crm-upsert-planner`, specialty intakes) | **Done (this PR)** |
+| 1 | Planning / payload skills (`crm-intake-writer`, `crm-fact-retriever`, `crm-note-structurer`, specialty intakes) | **Done** |
 | 2 | Operational skills (`renewal-review`, `carrier-appetite`, `proposal-builder`, `revenue-sentinel`) | **Done (this PR)** |
 | 3 | Supabase retrieval tables (`client_facts`, `client_notes`, `client_documents`, `quote_facts`, `policy_facts`, `client_entities`, `client_relationships`, `underwriting_facts`) | Pending — separate migration PR |
-| 4 | n8n webhook layer (`/search-*`, `/upsert-*`, `/create-fact`, `/search-facts`) | Pending |
-| 5 | CRM write approval loop wired end-to-end through `crm_write_queue` + worker + Slack confirmations | In progress (worker exists; planner output not yet consumed) |
+| 4 | ~~n8n webhook layer~~ | **Abandoned** — n8n removed from the stack |
+| 5 | Write approval loop end-to-end | **Live** via `intake_submissions` + `approve_draft` + intake worker; outbound via `outbound_sync_queue` |
 | 6 | Retrieval / query exercises against real CRM data | Pending |
 
 ---
@@ -325,7 +352,6 @@ only the `transport.type` value changes.
 - `.claude/skills/crm-intake-writer/SKILL.md`
 - `.claude/skills/crm-note-structurer/SKILL.md`
 - `.claude/skills/crm-fact-retriever/SKILL.md`
-- `.claude/skills/crm-upsert-planner/SKILL.md`
 - `.claude/skills/commercial-risk-intake/SKILL.md`
 - `.claude/skills/personal-lines-intake/SKILL.md`
 - `.claude/skills/life-insurance-intake/SKILL.md`
