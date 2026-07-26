@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from hermes.integrations import team_notify as T
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.team_notify import TeamNotifier, TeamNotifyError
 
 
 def _rooms(monkeypatch):
@@ -56,12 +56,12 @@ def test_notifier_posts_to_resolved_room(monkeypatch):
     import hermes.integrations.nextcloud_client as nc
     monkeypatch.setattr(nc, "NextcloudClient", lambda *a, **k: FakeNC())
 
-    res = SlackNotifier(channel="C0ANQUENX4P").post_message(text="hi", blocks=None)
+    res = TeamNotifier(channel="C0ANQUENX4P").post_message(text="hi", blocks=None)
     assert res["ok"] and sent["token"] == "boss1" and sent["message"] == "hi"
 
 
 def test_notifier_raises_slack_error_when_no_room(monkeypatch):
     monkeypatch.delenv("HERMES_TALK_ROOM_BOSS", raising=False)
     monkeypatch.delenv("HERMES_TALK_ROOM_SYSTEMS", raising=False)
-    with pytest.raises(SlackNotifierError):
-        SlackNotifier(channel="C0B6MPN1U3U").post_message(text="x")
+    with pytest.raises(TeamNotifyError):
+        TeamNotifier(channel="C0B6MPN1U3U").post_message(text="x")

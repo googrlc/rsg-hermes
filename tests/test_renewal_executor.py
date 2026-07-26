@@ -290,7 +290,7 @@ def test_update_ams_noop_short_circuits_without_write():
 # process_job — failure / block paths
 # ---------------------------------------------------------------------------
 def test_update_ams_verify_mismatch_fails_and_escalates(monkeypatch):
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("HERMES_TALK_ROOM_SYSTEMS", "room-test")
     supa = FakeSupa(renewals=renewal_map())
     before = dict(POLICY)  # 4000
     after = dict(POLICY)   # still 4000 — the write did not persist

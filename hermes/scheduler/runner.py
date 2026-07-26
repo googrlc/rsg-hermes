@@ -43,20 +43,17 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _systems_check_channel() -> str:
-    return (
-        os.environ.get("HERMES_SYSTEMS_CHECK_CHANNEL")
-        or os.environ.get("HERMES_SLACK_FALLBACK_CHANNEL")
-        or "C0AFHN83ZE3"
-    )
+def _systems_check_room() -> str:
+    """Talk destination for cycle alerts. Category name, resolved by team_notify."""
+    return os.environ.get("HERMES_ALERT_ROOM", "systems").strip() or "systems"
 
 
 def _alert(text: str) -> None:
-    """Best-effort alert to #systems-check. Never raises into the cycle."""
+    """Best-effort alert to the systems Talk room. Never raises into the cycle."""
     try:
-        from hermes.integrations.slack_notifier import SlackNotifier
+        from hermes.integrations.team_notify import TeamNotifier
 
-        SlackNotifier(channel=_systems_check_channel()).post_message(text=text)
+        TeamNotifier(channel=_systems_check_room()).post_message(text=text)
     except Exception:
         log.exception("scheduler: alert to #systems-check failed: %s", text)
 

@@ -14,7 +14,7 @@ hermes/jobs/revenue_sentinel.py) and canonical-book jobs use:
     canonical_policies.agency_commission_amount.
 
 The emitted row/summary shapes are preserved so the Slack/Talk rendering is
-unchanged; delivery is already Slack-free (SlackNotifier is a shim onto
+unchanged; delivery is already Slack-free (TeamNotifier is a shim onto
 Nextcloud Talk team_notify).
 """
 
@@ -28,7 +28,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.team_notify import TeamNotifier, TeamNotifyError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 # Chargeback / clawback ledger rows are not commission blind spots — exclude them.
@@ -58,7 +58,7 @@ class EomScorecardResult:
 def run_commission_audit(
     *,
     supa: SupabaseClient | None = None,
-    notifier: SlackNotifier | None = None,
+    notifier: TeamNotifier | None = None,
     now: datetime | None = None,
     dry_run: bool = False,
     force: bool = False,
@@ -86,10 +86,10 @@ def run_commission_audit(
             rows=rows,
             warnings=warnings,
         )
-    active_notifier = notifier or SlackNotifier(channel=os.environ.get("HERMES_COMMISSION_AUDIT_CHANNEL", "").strip() or None)
+    active_notifier = notifier or TeamNotifier(channel=os.environ.get("HERMES_COMMISSION_AUDIT_CHANNEL", "").strip() or None)
     try:
         active_notifier.post_message(text=text, blocks=blocks)
-    except SlackNotifierError as e:
+    except TeamNotifyError as e:
         return CommissionAuditResult(
             ok=False,
             posted=False,
@@ -112,7 +112,7 @@ def run_commission_audit(
 def run_eom_scorecard(
     *,
     supa: SupabaseClient | None = None,
-    notifier: SlackNotifier | None = None,
+    notifier: TeamNotifier | None = None,
     now: datetime | None = None,
     dry_run: bool = False,
     force: bool = False,
@@ -145,10 +145,10 @@ def run_eom_scorecard(
             summary=summary,
             warnings=warnings,
         )
-    active_notifier = notifier or SlackNotifier(channel=os.environ.get("HERMES_EOM_SCORECARD_CHANNEL", "").strip() or None)
+    active_notifier = notifier or TeamNotifier(channel=os.environ.get("HERMES_EOM_SCORECARD_CHANNEL", "").strip() or None)
     try:
         active_notifier.post_message(text=text, blocks=blocks)
-    except SlackNotifierError as e:
+    except TeamNotifyError as e:
         return EomScorecardResult(
             ok=False,
             posted=False,

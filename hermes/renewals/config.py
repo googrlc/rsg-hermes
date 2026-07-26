@@ -100,11 +100,11 @@ TASK_SYNC_SOURCE = "Hermes"  # NOTE: must be added to Task.syncSource enum first
 # --- Document store (confirmed hermes/documents/store.py VALID_DOC_TYPES) ---
 DOC_TYPE_RENEWAL = "renewal"
 
-# --- Slack channels (RSG) — override via env if they change ---
-SLACK_GRETCHEN_TASKS = os.environ.get("SLACK_GRETCHEN_TASKS", "C0AUP125PRU")  # #gretchen-tasks
-SLACK_THE_BOSS = os.environ.get("SLACK_THE_BOSS", "C0ANQUENX4P")              # #the-boss
-SLACK_RSG_WINS = os.environ.get("SLACK_RSG_WINS", "C0ANFKMDRUH")              # #rsg-wins
-SLACK_SYSTEMS_CHECK = os.environ.get("HERMES_SYSTEMS_CHECK_CHANNEL", "C0ANSEP6SSD")
+# --- Report destinations — Nextcloud Talk categories (see integrations/team_notify) ---
+# The room token for each comes from HERMES_TALK_ROOM_{BOSS,RENEWALS,SYSTEMS}.
+# The three unused Slack channel-id constants (gretchen-tasks, the-boss, rsg-wins)
+# were dropped; only the systems destination had a consumer.
+ROOM_SYSTEMS = "systems"
 
 # --- Task assignee (Gretchen) ---
 GRETCHEN_USERNAME = os.environ.get("HERMES_RENEWALS_GRETCHEN_USERNAME", "gretchcoates")

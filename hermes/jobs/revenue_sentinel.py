@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.team_notify import TeamNotifier, TeamNotifyError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 # Data source: the custom CRM (Command Center) — read directly from its Supabase
@@ -52,7 +52,7 @@ class SentinelHealthStatus:
 def run(
     *,
     supa: SupabaseClient | None = None,
-    notifier: SlackNotifier | None = None,
+    notifier: TeamNotifier | None = None,
     now: datetime | None = None,
     dry_run: bool = False,
     force: bool = False,
@@ -89,12 +89,12 @@ def run(
             sections=sections,
             warnings=warnings,
         )
-    active_notifier = notifier or SlackNotifier(
+    active_notifier = notifier or TeamNotifier(
         channel=os.environ.get("HERMES_SENTINEL_REPORT_CHANNEL", SENTINEL_REPORT_CHANNEL)
     )
     try:
         active_notifier.post_message(text=text, blocks=blocks)
-    except SlackNotifierError as e:
+    except TeamNotifyError as e:
         return SentinelRunResult(
             ok=False,
             posted=False,
@@ -554,7 +554,8 @@ def _expected_latest_business_day(today_local: date) -> date:
 
 
 def _missing_required_env() -> list[str]:
-    required = ["SLACK_BOT_TOKEN"]
+    # Posting goes to Nextcloud Talk; the room token is what must be set.
+    required = ["HERMES_TALK_ROOM_BOSS"]
     missing: list[str] = []
     for key in required:
         if not os.environ.get(key, "").strip():

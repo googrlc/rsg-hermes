@@ -10,8 +10,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture(autouse=True)
 def _env(monkeypatch):
     monkeypatch.setenv("HERMES_API_TOKEN", "")
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setenv("HERMES_SENTINEL_SLACK_CHANNEL", "C-TEST")
+    monkeypatch.setenv("HERMES_TALK_ROOM_BOSS", "room-test")
 
 
 def test_tts_empty_text_rejected():
@@ -23,10 +22,9 @@ def test_tts_empty_text_rejected():
     assert resp.status_code in (400, 422)
 
 
-def test_tts_no_slack_token_rejected(monkeypatch):
-    """Without SLACK_BOT_TOKEN the endpoint should fail before audio gen."""
-    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("HERMES_SENTINEL_SLACK_CHANNEL", raising=False)
+def test_tts_no_talk_room_rejected(monkeypatch):
+    """Without a Talk room the endpoint should fail before audio gen."""
+    monkeypatch.delenv("HERMES_TALK_ROOM_BOSS", raising=False)
     from hermes.api import app
 
     client = TestClient(app)
@@ -34,8 +32,8 @@ def test_tts_no_slack_token_rejected(monkeypatch):
     assert resp.status_code in (400, 503)
 
 
-def test_tts_success_with_mock(monkeypatch):
-    """Full happy path with mocked audio generation and Slack upload."""
+def test_tts_success_files_clip_and_posts_talk_link(monkeypatch):
+    """Happy path: audio is filed to Nextcloud and linked in a Talk message."""
     from hermes.api import app
 
     mock_audio = b"FAKE_MP3_DATA"
@@ -43,15 +41,24 @@ def test_tts_success_with_mock(monkeypatch):
     async def _fake_generate(*args, **kwargs):
         return mock_audio
 
+    nc = mock.MagicMock()
+    nc.is_configured.return_value = True
+    nc.file_document.return_value = {"path": "Internal/Voice/hermes_voice.mp3", "url": "https://nc/x"}
+
     with mock.patch("hermes.api._generate_tts_audio", side_effect=_fake_generate):
-        with mock.patch("hermes.api._get_slack_web_client") as mock_slack:
-            mock_client = mock.MagicMock()
-            mock_slack.return_value = mock_client
+        with mock.patch("hermes.integrations.nextcloud_client.NextcloudClient", return_value=nc):
             client = TestClient(app)
             resp = client.post("/api/hermes/tts", json={"text": "test message"})
-            assert resp.status_code == 200
-            assert resp.json()["ok"] is True
-            mock_client.files_upload_v2.assert_called_once()
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["ok"] is True and body["room"] == "room-test"
+
+    # The clip was filed as audio, and the Talk message carries the link.
+    assert nc.file_document.call_args.kwargs["content"] == mock_audio
+    assert nc.file_document.call_args.kwargs["content_type"] == "audio/mpeg"
+    room, message = nc.post_talk_message.call_args.args
+    assert room == "room-test"
+    assert "https://nc/x" in message and "test message" in message
 
 
 def test_tts_generation_failure_returns_502(monkeypatch):

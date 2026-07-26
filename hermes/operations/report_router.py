@@ -1,29 +1,34 @@
-"""Slack routing layer that enforces the ``slack_registry`` guardrail."""
+"""Report routing layer that enforces the ``slack_registry`` guardrail.
+
+Delivery is Nextcloud Talk (see ``team_notify``). The registry table keeps its
+``slack_registry`` name and channel-id keys — renaming it needs a migration and
+a data backfill, so that is deliberately not done here.
+"""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.team_notify import TeamNotifier, TeamNotifyError
 from hermes.integrations.supabase_client import SupabaseClient
 from hermes.operations.guardrails import GuardrailViolation, validate_slack_channel
 
 log = logging.getLogger(__name__)
 
 
-class RegistryAwareSlackRouter:
-    """Posts to Slack only via channels validated against ``slack_registry``."""
+class RegistryAwareReportRouter:
+    """Posts only via destinations validated against ``slack_registry``."""
 
     def __init__(
         self,
         supa: SupabaseClient,
-        notifier: SlackNotifier | None = None,
+        notifier: TeamNotifier | None = None,
     ) -> None:
         self.supa = supa
         self._notifier = notifier
 
-    def _get_notifier(self, channel_id: str) -> SlackNotifier:
+    def _get_notifier(self, channel_id: str) -> TeamNotifier:
         if self._notifier:
             if self._notifier.channel != channel_id:
                 raise ValueError(
@@ -31,7 +36,7 @@ class RegistryAwareSlackRouter:
                     f"but registry validated {channel_id}"
                 )
             return self._notifier
-        return SlackNotifier(channel=channel_id)
+        return TeamNotifier(channel=channel_id)
 
     def post(
         self,

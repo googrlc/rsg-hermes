@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.team_notify import TeamNotifier, TeamNotifyError
 
 
 @dataclass
@@ -31,7 +31,7 @@ def run_reconciliation(
     supa: SupabaseClient,
     *,
     statement_path: str,
-    notifier: SlackNotifier | None = None,
+    notifier: TeamNotifier | None = None,
     dry_run: bool = False,
 ) -> ReconciliationResult:
     path = Path(statement_path).expanduser()
@@ -58,10 +58,10 @@ def run_reconciliation(
             unmatched_policy_numbers,
             warnings,
         )
-    active_notifier = notifier or SlackNotifier(channel=os.environ.get("HERMES_COMMISSION_RECON_CHANNEL", "").strip() or None)
+    active_notifier = notifier or TeamNotifier(channel=os.environ.get("HERMES_COMMISSION_RECON_CHANNEL", "").strip() or None)
     try:
         active_notifier.post_message(text=text, blocks=blocks)
-    except SlackNotifierError as e:
+    except TeamNotifyError as e:
         return ReconciliationResult(
             False,
             False,

@@ -1,7 +1,7 @@
 """Team notifications over Nextcloud Talk — the transport Hermes reports post to.
 
 Replaces the old Slack posting path. Reports still call the same
-``SlackNotifier(channel=...).post_message(text=, blocks=)`` API (see
+``TeamNotifier(channel=...).post_message(text=, blocks=)`` API (see
 ``slack_notifier``); this module does the real work: resolve the Slack channel
 id to a Talk room token, render the Block Kit payload to markdown, and post via
 ``NextcloudClient.post_talk_message``.
@@ -18,7 +18,8 @@ import os
 import re
 from typing import Any
 
-# Slack channel id → logical category (kept small + explicit; unknown → boss).
+# Legacy Slack channel id → category. Retained for already-deployed callers;
+# new code should pass the category name directly.
 _CHANNEL_CATEGORY: dict[str, str] = {
     "C0ANQUENX4P": "boss",       # #the-boss
     "C09R2CG2KS6": "renewals",   # #renewal-updates
@@ -36,8 +37,13 @@ class TeamNotifyError(RuntimeError):
 
 
 def resolve_room(channel: str | None) -> str:
-    """Map a Slack channel id to a Talk room token. Unknown → the boss room."""
-    category = _CHANNEL_CATEGORY.get((channel or "").strip(), "boss")
+    """Map a category name or legacy Slack channel id to a Talk room token.
+
+    Unknown values fall back to the boss room rather than raising, so a report is
+    never lost to a routing typo.
+    """
+    key = (channel or "").strip()
+    category = key if key in _CATEGORY_ENV else _CHANNEL_CATEGORY.get(key, "boss")
     token = os.environ.get(_CATEGORY_ENV[category], "").strip()
     return token or os.environ.get("HERMES_TALK_ROOM_BOSS", "").strip()
 
@@ -85,7 +91,7 @@ class TeamNotifier:
 
     def __init__(self, *, channel: str | None = None, **_ignored: Any) -> None:
         # Extra kwargs (bot_token, retry_*, client) are accepted + ignored so the
-        # old SlackNotifier call sites keep working unchanged during the cutover.
+        # old TeamNotifier call sites keep working unchanged during the cutover.
         self.channel = channel
 
     def post_message(self, *, text: str, blocks: list[dict[str, Any]] | None = None) -> dict[str, Any]:

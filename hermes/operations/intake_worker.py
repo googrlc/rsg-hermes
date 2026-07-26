@@ -39,7 +39,7 @@ from hermes.integrations.intake_submissions import (
     claim_next_received,
     transition,
 )
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.team_notify import TeamNotifier, TeamNotifyError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 log = logging.getLogger(__name__)
@@ -48,28 +48,23 @@ log = logging.getLogger(__name__)
 DEFAULT_POLL_SECONDS = 5.0
 
 
-def _intake_alert_channel() -> str:
-    """Slack channel for failure alerts (#systems-check by default)."""
-    return os.environ.get(
-        "HERMES_INTAKE_ALERT_CHANNEL", os.environ.get("HERMES_SYSTEMS_CHECK_CHANNEL", "C0ANSEP6SSD")
-    ).strip()
+def _intake_alert_room() -> str:
+    """Talk destination for failure alerts. Category name; team_notify resolves it."""
+    return (os.environ.get("HERMES_INTAKE_ALERT_ROOM") or "systems").strip()
 
 
-def _intake_draft_channel() -> str:
-    """Slack channel for draft + completion posts."""
-    return os.environ.get(
-        "HERMES_INTAKE_DRAFT_CHANNEL",
-        os.environ.get("HERMES_SENTINEL_SLACK_CHANNEL", "D0B2PJYLGQG"),
-    ).strip()
+def _intake_draft_room() -> str:
+    """Talk destination for draft + completion posts."""
+    return (os.environ.get("HERMES_INTAKE_DRAFT_ROOM") or "boss").strip()
 
 
 def _post_alert(text: str, *, channel: str | None = None) -> None:
-    """Post to Slack, swallowing errors so the worker doesn't crash on Slack failures."""
+    """Post to Talk, swallowing errors so the worker doesn't crash on a post failure."""
     try:
-        notifier = SlackNotifier(channel=channel or _intake_alert_channel())
+        notifier = TeamNotifier(channel=channel or _intake_alert_room())
         notifier.post_message(text=text)
-    except SlackNotifierError:
-        log.exception("Slack post failed (channel=%s)", channel)
+    except TeamNotifyError:
+        log.exception("Talk post failed (room=%s)", channel)
     except Exception:
         log.exception("Unexpected Slack post failure (channel=%s)", channel)
 
@@ -164,10 +159,10 @@ def post_draft_to_slack(submission_id: str, draft_summary: dict[str, Any]) -> No
     prompt_text = _format_submission_approval_prompt(submission_id, draft_summary)
     blocks = build_approval_blocks(submission_id, prompt_text)
     try:
-        notifier = SlackNotifier(channel=_intake_draft_channel())
+        notifier = TeamNotifier(channel=_intake_draft_room())
         notifier.post_message(text=prompt_text, blocks=blocks)
         log.info("Posted intake draft to Slack for submission %s", submission_id)
-    except SlackNotifierError as exc:
+    except TeamNotifyError as exc:
         log.exception("Slack draft post failed for submission %s", submission_id)
         # Surface to the alert channel so it doesn't get lost.
         _post_alert(
@@ -383,7 +378,7 @@ def process_one_approved(supa: SupabaseClient) -> bool:
         f"- submission_id: {submission_id}\n"
         f"- opportunities: {result.get('opportunity_count', 0)}\n"
         f"- Retrieval rows: {retrieval_summary}",
-        channel=_intake_draft_channel(),
+        channel=_intake_draft_room(),
     )
     return True
 

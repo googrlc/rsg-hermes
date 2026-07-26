@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes.integrations.team_notify import TeamNotifier, TeamNotifyError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations import renewal_tracker
 from hermes.operations.guardrails import log_guardrail_event
@@ -166,7 +166,7 @@ def run_executor(
     supa: SupabaseClient | None = None,
     nowcerts: NowCertsClient | None = None,
     momentum: MomentumMCPClient | None = None,
-    notifier_cls: type[SlackNotifier] = SlackNotifier,
+    notifier_cls: type[TeamNotifier] = TeamNotifier,
     limit: int = 1,
     dry_run: bool = False,
     now: datetime | None = None,
@@ -284,7 +284,7 @@ def process_job(
     *,
     nowcerts: NowCertsClient,
     momentum: MomentumMCPClient | None = None,
-    notifier_cls: type[SlackNotifier] = SlackNotifier,
+    notifier_cls: type[TeamNotifier] = TeamNotifier,
     now: datetime | None = None,
 ) -> JobOutcome:
     """Validate → read → compare → execute → verify → receipt → finalize."""
@@ -604,7 +604,7 @@ def _block(
     *,
     reason: str,
     before_state: dict[str, Any] | None,
-    notifier_cls: type[SlackNotifier],
+    notifier_cls: type[TeamNotifier],
     started_at: datetime,
 ) -> JobOutcome:
     return _terminal(supa, ctx, receipt_status="blocked", trail="EXECUTION_BLOCKED",
@@ -620,7 +620,7 @@ def _fail(
     before_state: dict[str, Any] | None,
     after_state: dict[str, Any] | None,
     nowcerts_ids: dict[str, Any],
-    notifier_cls: type[SlackNotifier],
+    notifier_cls: type[TeamNotifier],
     started_at: datetime,
 ) -> JobOutcome:
     return _terminal(supa, ctx, receipt_status="failed", trail="EXECUTION_FAILED",
@@ -638,7 +638,7 @@ def _terminal(
     before_state: dict[str, Any] | None,
     after_state: dict[str, Any] | None,
     nowcerts_ids: dict[str, Any],
-    notifier_cls: type[SlackNotifier],
+    notifier_cls: type[TeamNotifier],
     started_at: datetime,
 ) -> JobOutcome:
     """Preserve evidence, mark the queue failed, and escalate high-impact stops."""
@@ -662,7 +662,7 @@ def _terminal_error(
     row: dict[str, Any],
     *,
     nowcerts: NowCertsClient | None,
-    notifier_cls: type[SlackNotifier],
+    notifier_cls: type[TeamNotifier],
     reason: str,
     now: datetime,
 ) -> JobOutcome:
@@ -782,7 +782,7 @@ def _log_guardrail(
 
 
 def _escalate(
-    notifier_cls: type[SlackNotifier], ctx: JobContext, *, receipt_status: str, reason: str
+    notifier_cls: type[TeamNotifier], ctx: JobContext, *, receipt_status: str, reason: str
 ) -> None:
     """Escalate high-impact renewal stops to #systems-check.
 
@@ -790,7 +790,11 @@ def _escalate(
     """
     import os
 
-    if not os.environ.get("SLACK_BOT_TOKEN", "").strip():
+    # Gate on the Talk room, not the retired Slack bot token — otherwise a box
+    # without the old token silently drops every escalation.
+    if not os.environ.get("HERMES_TALK_ROOM_SYSTEMS", "").strip() and not os.environ.get(
+        "HERMES_TALK_ROOM_BOSS", ""
+    ).strip():
         return
     text = (
         f":rotating_light: Renewal executor {receipt_status.upper()}\n"
@@ -801,8 +805,8 @@ def _escalate(
         f"- reason: {reason}"
     )
     try:
-        notifier_cls(channel=config.SLACK_SYSTEMS_CHECK).post_message(text=text)
-    except (SlackNotifierError, Exception):  # noqa: BLE001 — alerting must never crash the run
+        notifier_cls(channel=config.ROOM_SYSTEMS).post_message(text=text)
+    except (TeamNotifyError, Exception):  # noqa: BLE001 — alerting must never crash the run
         log.exception("Failed to post renewal escalation for queue_id=%s", ctx.queue_id)
 
 

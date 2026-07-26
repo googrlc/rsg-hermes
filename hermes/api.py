@@ -2142,32 +2142,17 @@ async def command(req: DispatchRequest):
     return await dispatch(req)
 
 
-# Slack Web client — retained only for the TTS audio-upload endpoint below; the
-# inbound Slack command webhook was removed. (Outbound Slack removal is a later step.)
-_slack_web_client = None
-
-
-def _get_slack_web_client():
-    global _slack_web_client
-    if _slack_web_client is None:
-        token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
-        from slack_sdk import WebClient
-
-        _slack_web_client = WebClient(token=token)
-    return _slack_web_client
-
-
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Voice output — TTS endpoint for Slack voice clips.
 # ---------------------------------------------------------------------------
 
 class TTSRequest(BaseModel):
-    """Text-to-speech request. Posts an audio clip to a Slack channel or DM."""
+    """Text-to-speech request. Files an audio clip and links it in Nextcloud Talk."""
     text: str = Field(..., min_length=1, max_length=4000)
     channel: str = Field(
         default="",
-        description="Slack channel ID or user ID. Defaults to HERMES_SENTINEL_SLACK_CHANNEL.",
+        description="Talk room token. Defaults to HERMES_TALK_ROOM_BOSS.",
     )
     voice: str = Field(
         default="",
@@ -2227,35 +2212,36 @@ async def hermes_tts(req: TTSRequest, request: Request):
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    channel = req.channel.strip() or os.environ.get("HERMES_SENTINEL_SLACK_CHANNEL", "")
-    if not channel:
-        raise HTTPException(status_code=400, detail="no Slack channel configured")
+    room = req.channel.strip() or os.environ.get("HERMES_TALK_ROOM_BOSS", "").strip()
+    if not room:
+        raise HTTPException(status_code=400, detail="no Talk room configured (HERMES_TALK_ROOM_BOSS)")
 
     audio = await _generate_tts_audio(text, req.voice)
     if not audio:
         raise HTTPException(status_code=502, detail="TTS generation failed (no provider available)")
 
-    # Post audio to Slack as a file upload.
+    # Talk has no audio-upload API, so file the clip to Nextcloud and post a link.
     try:
-        import io
-        client = _get_slack_web_client()
-        if client is None:
-            raise HTTPException(status_code=503, detail="Slack web client not configured (SLACK_BOT_TOKEN missing)")
+        from hermes.integrations.nextcloud_client import NextcloudClient
 
-        client.files_upload_v2(
-            channel=channel,
-            file=io.BytesIO(audio),
+        nc = NextcloudClient()
+        if not nc.is_configured():
+            raise HTTPException(status_code=503, detail="Nextcloud is not configured on this instance")
+        filed = nc.file_document(
+            content=audio,
             filename="hermes_voice.mp3",
-            title="Hermes",
-            initial_comment=text[:500],
+            content_type="audio/mpeg",
+            internal_folder="Voice",
         )
+        link = filed.get("url") or filed.get("path") or ""
+        nc.post_talk_message(room, f"🔊 {text[:500]}" + (f"\n\n[Listen]({link})" if link else ""))
     except HTTPException:
         raise
     except Exception as exc:
-        log.exception("Slack voice post failed")
-        raise HTTPException(status_code=502, detail=f"Slack post failed: {exc}")
+        log.exception("Talk voice post failed")
+        raise HTTPException(status_code=502, detail=f"Talk post failed: {exc}")
 
-    return {"ok": True, "channel": channel, "chars": len(text)}
+    return {"ok": True, "room": room, "path": filed.get("path"), "chars": len(text)}
 
 
 

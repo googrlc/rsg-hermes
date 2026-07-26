@@ -412,7 +412,7 @@ class TestWorkerWithRealSynthesizer:
 
 
 class TestPostDraftToSlack:
-    @patch("hermes.operations.intake_worker.SlackNotifier")
+    @patch("hermes.operations.intake_worker.TeamNotifier")
     def test_post_format_includes_summary_and_blocks(self, MockNotifier) -> None:
         from hermes.operations.intake_worker import post_draft_to_slack
 
@@ -458,7 +458,7 @@ class TestPostDraftToSlack:
             "agency_intake_cancel",
         ]
 
-    @patch("hermes.operations.intake_worker.SlackNotifier")
+    @patch("hermes.operations.intake_worker.TeamNotifier")
     def test_metadata_carries_submission_id_not_draft_id(self, MockNotifier) -> None:
         from hermes.operations.intake_worker import post_draft_to_slack
 
@@ -479,18 +479,18 @@ class TestPostDraftToSlack:
             assert element["value"] == "submission-uuid-zzz"
 
     @patch("hermes.operations.intake_worker._post_alert")
-    @patch("hermes.operations.intake_worker.SlackNotifier")
+    @patch("hermes.operations.intake_worker.TeamNotifier")
     def test_slack_failure_routes_to_alert_channel(
         self, MockNotifier, mock_alert,
     ) -> None:
         """If the draft post fails, the helper must NOT crash the worker —
         it should log and post a warning to the alert channel so the
         operator knows the row is stuck at awaiting_approval."""
-        from hermes.integrations.slack_notifier import SlackNotifierError
+        from hermes.integrations.team_notify import TeamNotifyError
         from hermes.operations.intake_worker import post_draft_to_slack
 
         notifier = MockNotifier.return_value
-        notifier.post_message.side_effect = SlackNotifierError("rate limited")
+        notifier.post_message.side_effect = TeamNotifyError("rate limited")
 
         # Should not raise.
         post_draft_to_slack("sub-1", {"account": {"account_name": "X"}})
@@ -502,16 +502,16 @@ class TestPostDraftToSlack:
         assert "sub-1" in alert_text
         assert "rate limited" in alert_text
 
-    @patch("hermes.operations.intake_worker.SlackNotifier")
+    @patch("hermes.operations.intake_worker.TeamNotifier")
     def test_uses_draft_channel_env(self, MockNotifier, monkeypatch) -> None:
         from hermes.operations.intake_worker import post_draft_to_slack
 
-        monkeypatch.setenv("HERMES_INTAKE_DRAFT_CHANNEL", "CCUSTOMDRAFT")
+        monkeypatch.setenv("HERMES_INTAKE_DRAFT_ROOM", "renewals")
         MockNotifier.return_value.post_message.return_value = {"ok": True}
 
         post_draft_to_slack("sub-1", {"account": {"account_name": "X"}})
 
-        MockNotifier.assert_called_with(channel="CCUSTOMDRAFT")
+        MockNotifier.assert_called_with(channel="renewals")
 
 
 class TestPostDraftWiredIntoWorker:
@@ -705,17 +705,15 @@ class TestTickAllArcs:
         assert all(v == 0 for v in result.values())
 
 
-class TestChannelResolution:
-    def test_alert_channel_default(self, monkeypatch) -> None:
-        monkeypatch.delenv("HERMES_INTAKE_ALERT_CHANNEL", raising=False)
-        monkeypatch.delenv("HERMES_SYSTEMS_CHECK_CHANNEL", raising=False)
-        assert intake_worker._intake_alert_channel() == "C0ANSEP6SSD"
+class TestRoomResolution:
+    def test_alert_room_default(self, monkeypatch) -> None:
+        monkeypatch.delenv("HERMES_INTAKE_ALERT_ROOM", raising=False)
+        assert intake_worker._intake_alert_room() == "systems"
 
-    def test_alert_channel_override(self, monkeypatch) -> None:
-        monkeypatch.setenv("HERMES_INTAKE_ALERT_CHANNEL", "C123ABCDEF")
-        assert intake_worker._intake_alert_channel() == "C123ABCDEF"
+    def test_alert_room_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("HERMES_INTAKE_ALERT_ROOM", "boss")
+        assert intake_worker._intake_alert_room() == "boss"
 
-    def test_draft_channel_falls_back_to_sentinel(self, monkeypatch) -> None:
-        monkeypatch.delenv("HERMES_INTAKE_DRAFT_CHANNEL", raising=False)
-        monkeypatch.setenv("HERMES_SENTINEL_SLACK_CHANNEL", "DSENTINEL")
-        assert intake_worker._intake_draft_channel() == "DSENTINEL"
+    def test_draft_room_default(self, monkeypatch) -> None:
+        monkeypatch.delenv("HERMES_INTAKE_DRAFT_ROOM", raising=False)
+        assert intake_worker._intake_draft_room() == "boss"
