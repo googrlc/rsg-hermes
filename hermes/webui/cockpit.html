@@ -119,6 +119,8 @@
   .task .t-status{font-size:12.5px;color:var(--muted);margin-left:auto}
 
   .empty,.loading{padding:44px;text-align:center;color:var(--muted);font-size:14px}
+  .corrected{border-bottom:1.5px dotted var(--warn);cursor:help}
+  .corrected::after{content:'*';color:var(--warn);font-weight:700;margin-left:2px}
 
   /* modal */
   .overlay{position:fixed;inset:0;background:rgba(20,46,55,.34);display:none;align-items:flex-start;justify-content:center;padding:60px 20px;z-index:40;overflow:auto}
@@ -239,7 +241,7 @@ const TABLES = {
   renewals:{title:'Renewals',eyebrow:'Live worklist',lede:'Renewal events with win/loss outcome. Click a row to open the insured in NowCerts.',endpoint:'/api/renewals',
     rowClick:(r)=>{ if(r.insured_id&&NOWCERTS_INSURED_URL) window.open(NOWCERTS_INSURED_URL.replace('{guid}',encodeURIComponent(r.insured_id)),'_blank','noopener'); },
     cols:[['client_name','Client'],['policy_number','Policy #'],['line_of_business','LOB'],['renewal_event_date','Renewal'],['risk_status','Urgency',chip],['outcome','Outcome',chip],['premium_current','Premium',money]]},
-  commissions:{title:'Commissions',eyebrow:'Reconciled · read-only',lede:'Reconciled commissions. Ingest and reconcile in the Commission Tracker.',endpoint:'/api/commissions',emptyState:commissionsEmpty,
+  commissions:{title:'Commissions',eyebrow:'Reconciled · click a row to correct it',lede:'Reconciled commissions. Click a row to correct a value in the portal — NowCerts is fixed by hand separately.',endpoint:'/api/commissions',emptyState:commissionsEmpty,rowClick:(r)=>openCommission(r),
     cols:[['policy_number','Policy #'],['client_name','Client'],['carrier_name','Carrier'],['gross_premium','Premium',money],['expected_commission','Expected',money],['actual_commission','Actual',money],['delta','Delta',money],['reconciliation_status','Status',chip]]},
   pipeline:{title:'Pipeline',eyebrow:'Quote-to-bind workflow',lede:'Opportunities — including cross-sells and inactive-client policies. Click one to send a quote to NowCerts.',endpoint:'/api/opportunities',action:'newOpp',rowClick:(o)=>openOpportunity(o),
     cols:[['insured_name','Client'],['line_of_business','LOB'],['stage','Stage',chip],['premium_estimate','Est. Premium',money],['carrier','Carrier'],['next_action','Next action']]},
@@ -317,6 +319,14 @@ async function renderTable(host,cfg){
       const fmt=c[2]; const raw=r[c[0]];
       const cell = fmt?fmt(raw):(raw==null||raw===''?'<span class="muted">—</span>':esc(raw));
       const num = fmt===money?' class="num"':'';
+      // A portal correction is marked in place: the value shown is a human's,
+      // not the AMS's, and hovering says what it replaced.
+      const ovr = r._overridden || {};
+      if(Object.prototype.hasOwnProperty.call(ovr,c[0])){
+        const was = ovr[c[0]];
+        const wasTxt = fmt?fmt(was):(was==null||was===''?'blank':String(was));
+        return `<td${num}><span class="corrected" title="Corrected in the portal — was ${esc(wasTxt)}. NowCerts still needs the same fix.">${cell}</span></td>`;
+      }
       return `<td${num}>${cell}</td>`;
     }).join('')+'</tr>').join('');
     wrap.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
@@ -389,6 +399,112 @@ async function openCommTerms(){
     ['crCarrier','crLob','crNb','crRen'].forEach(i=>$('#'+i).value='');
     loadRules();
   });
+}
+
+/* ---------- Commission row: correct it here, fix the AMS by hand ----------
+   An override outranks the synced value until NowCerts reports the same thing,
+   at which point the nightly reconcile retires it. Nothing here writes to the
+   AMS. Fields match the server's OVERRIDABLE_FIELDS allowlist — reconciliation
+   status is derived from statement transactions and is deliberately not here. */
+const COMM_EDITABLE = [
+  ['gross_premium','Gross premium','number'],
+  ['expected_commission','Expected commission','number'],
+  ['carrier_name','Carrier','text'],
+  ['lob','Line of business','text'],
+  ['client_name','Client','text'],
+  ['policy_effective_date','Effective date','date'],
+  ['policy_expiration_date','Expiration date','date'],
+  ['notes','Notes','text'],
+];
+
+async function openCommission(row){
+  await loadUsers();
+  const ovr = row._overridden || {};
+  const wasOverridden = (f)=> Object.prototype.hasOwnProperty.call(ovr,f);
+  const fmt = (f,v)=> (f.includes('premium')||f.includes('commission')) ? money(v) : (v==null||v===''?'—':esc(v));
+
+  const facts = [
+    ['Policy', row.policy_number],['Client', row.client_name],['Carrier', row.carrier_name],
+    ['Line of business', row.lob],['Gross premium', money(row.gross_premium)],
+    ['Expected', money(row.expected_commission)],['Actual', money(row.actual_commission)],
+    ['Delta', money(row.delta)],['Status', row.reconciliation_status],
+    ['Statement date', row.statement_date],
+  ].map(([l,v])=>`<div><div class="m-l">${l}</div><div class="m-v">${v==null||v===''?'—':esc(v)}</div></div>`).join('');
+
+  const overriddenNote = Object.keys(ovr).length
+    ? `<div class="t-meta" style="margin-top:12px;color:var(--warn)">Corrected in the portal:
+        ${Object.entries(ovr).map(([f,orig])=>`<strong>${esc(f)}</strong> was ${fmt(f,orig)}`).join(' · ')}.
+        NowCerts still needs the same fix by hand.</div>`
+    : '';
+
+  openModal(`<div class="modal-head"><h3>${esc(row.policy_number||'Commission row')}</h3>
+      <p>Correct a value here so the numbers are right today. This does <strong>not</strong> write to NowCerts —
+         fix the AMS separately and the correction retires itself once they agree.</p></div>
+    <div class="modal-body">
+      <div class="meta" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px">${facts}</div>
+      ${overriddenNote}
+      <div style="border-top:1px solid var(--border-soft);margin-top:16px;padding-top:14px">
+        <div class="eyebrow" style="margin-bottom:10px">Correct a field</div>
+        <div class="row2">
+          <div class="field"><label>Field</label><select id="ovField">
+            ${COMM_EDITABLE.map(([f,l])=>`<option value="${f}"${wasOverridden(f)?' data-ov="1"':''}>${l}${wasOverridden(f)?' (corrected)':''}</option>`).join('')}
+          </select></div>
+          <div class="field"><label>Correct value</label><input id="ovValue" placeholder="the right number"/></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>Approved by</label><select id="ovBy">${userOptions()}</select></div>
+          <div class="field"><label>Why</label><input id="ovReason" placeholder="e.g. premium missing from the AMS"/></div>
+        </div>
+        <div id="ovExisting"></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn primary" id="ovSave">Save correction</button></div>`);
+
+  const syncType=()=>{ const f=$('#ovField').value;
+    const spec=COMM_EDITABLE.find(c=>c[0]===f); $('#ovValue').type = spec?spec[2]:'text'; };
+  $('#ovField').onchange=syncType; syncType();
+
+  async function loadExisting(){
+    try{
+      const rows=(await api('/api/commissions/overrides?status=all')).overrides||[];
+      const mine=rows.filter(o=>o.entity_key===row.policy_number);
+      $('#ovExisting').innerHTML = mine.length
+        ? `<div class="eyebrow" style="margin:14px 0 8px">Corrections on this policy</div>` + mine.map(o=>`
+            <div class="t-meta" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0">
+              <span><strong>${esc(o.field_name)}</strong> → ${esc(String(o.override_value))}
+                <span class="chip ${o.status==='conflicted'?'crit':(o.status==='active'?'warn':'')}">${esc(o.status)}</span>
+                ${o.status==='conflicted'?`<br/><span style="color:var(--crit)">The AMS now says ${esc(String(o.conflict_value))} — neither the original nor your correction. Resolve it.</span>`:''}
+              </span>
+              ${o.status==='active'?`<button class="btn" data-withdraw="${o.id}" style="padding:4px 10px;font-size:12px">Withdraw</button>`:''}
+            </div>`).join('')
+        : '';
+      $('#ovExisting').querySelectorAll('[data-withdraw]').forEach(b=>b.onclick=(e)=>submitBtn(e.target,async()=>{
+        const by=$('#ovBy').value;
+        await api(`/api/commissions/overrides/${b.dataset.withdraw}?approved_by=${encodeURIComponent(by)}`,{method:'DELETE'});
+        toast('Correction withdrawn.'); loadExisting(); refreshCommissions();
+      }));
+    }catch(e){ $('#ovExisting').innerHTML=`<div class="t-meta">Couldn't load corrections — ${esc(e.message)}</div>`; }
+  }
+  loadExisting();
+
+  $('#ovSave').onclick=(e)=>submitBtn(e.target,async()=>{
+    const field=$('#ovField').value, raw=$('#ovValue').value.trim(), by=$('#ovBy').value;
+    if(!raw) throw new Error('Enter the correct value.');
+    if(!by) throw new Error('Pick who is approving this.');
+    const spec=COMM_EDITABLE.find(c=>c[0]===field);
+    let value=raw;
+    if(spec && spec[2]==='number'){ value=Number(raw); if(Number.isNaN(value)) throw new Error('That is not a number.'); }
+    await api(`/api/commissions/${row.id}/override`,{method:'POST',body:JSON.stringify({
+      field_name:field, value, approved_by:by, reason:$('#ovReason').value.trim()||null})});
+    toast('Corrected here. NowCerts still needs the same fix.');
+    $('#ovValue').value=''; $('#ovReason').value='';
+    loadExisting(); refreshCommissions();
+  });
+}
+
+function refreshCommissions(){
+  if(document.querySelector('.nav a.active')?.dataset.view==='commissions') show('commissions');
 }
 
 /* ---------- Pipeline Kanban ---------- */
