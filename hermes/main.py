@@ -228,6 +228,29 @@ def main() -> int:
         help="Preview case/task NowCerts task payloads without claiming or writing",
     )
     parser.add_argument(
+        "--proactive-cases",
+        action="store_true",
+        help="Find slipped work (renewals with no case, stalled cases, overdue tasks). "
+             "Reports only unless --proactive-cases-commit is also given.",
+    )
+    parser.add_argument(
+        "--proactive-cases-commit",
+        action="store_true",
+        help="Actually open the renewal cases the scan found (default is report-only)",
+    )
+    parser.add_argument(
+        "--proactive-cases-horizon",
+        type=int,
+        default=30,
+        help="Days ahead to look for uncovered renewals (default 30)",
+    )
+    parser.add_argument(
+        "--proactive-cases-limit",
+        type=int,
+        default=10,
+        help="Max cases to open in one run (default 10). Anything past the cap is reported.",
+    )
+    parser.add_argument(
         "--run-scheduler",
         action="store_true",
         help="Run the executor scheduler loop (intake+renewal every N s, locked). Requires SCHEDULER_ENABLED.",
@@ -833,6 +856,19 @@ def main() -> int:
             print(f"  PREVIEW {pv.get('object_type')} {pv.get('target')} title={t.get('title')!r} "
                   f"insured={t.get('insured_database_id')} category={t.get('category_name')}")
         return 0 if summary["failed"] == 0 else 1
+
+    if args.proactive_cases or args.proactive_cases_commit:
+        from hermes.casework import sentinel
+        from hermes.sync.supabase_client import SupabaseClient
+
+        result = sentinel.scan(
+            SupabaseClient(),
+            horizon_days=args.proactive_cases_horizon,
+            limit=args.proactive_cases_limit,
+            commit=args.proactive_cases_commit,
+        )
+        print(sentinel.format_report(result))
+        return 0 if not result["failed"] else 1
 
     if args.scheduler_health:
         from hermes.integrations.supabase_client import SupabaseClient
