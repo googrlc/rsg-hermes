@@ -282,6 +282,12 @@ def create_tasks(
                 "due_at": t.get("due_at") or t.get("due_date"),
                 "assigned_to_email": t.get("assigned_to_email") or default_assignee_email,
                 "created_by_email": created_by_email or _service_email(),
+                # Checklist metadata (migration 20260727000000). Only meaningful
+                # for template-spawned tasks; _compact drops them when absent so
+                # ad-hoc callers are unaffected.
+                "is_required": t.get("is_required"),
+                "sort_order": t.get("sort_order"),
+                "template_key": t.get("template_key"),
             }),
         )
         created.append(row)
