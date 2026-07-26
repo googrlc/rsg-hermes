@@ -48,17 +48,24 @@ class OpsCheckResult:
 class OpsDoctorReport:
     checks: list[OpsCheckResult] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Reachability alone said HEALTHY while the 6am KPI job 404'd for months and
+    # the writeback had never once succeeded. Movement is the other half.
+    staleness: Any = None
 
     @property
     def ok(self) -> bool:
-        return all(c.ok for c in self.checks) and not self.errors
+        base = all(c.ok for c in self.checks) and not self.errors
+        return base and (self.staleness.ok if self.staleness is not None else True)
 
     def format_lines(self) -> list[str]:
         lines = ["Hermes Operations Center — Health Check", "=" * 48]
+        lines.append("Tables reachable:")
         for c in self.checks:
             status = "OK" if c.ok else "FAIL"
             detail = f" ({c.error})" if c.error else ""
             lines.append(f"  [{status}] {c.table}: {c.row_count} rows{detail}")
+        if self.staleness is not None:
+            lines.extend(self.staleness.format_lines())
         if self.errors:
             lines.append("")
             lines.append("Errors:")
@@ -69,8 +76,13 @@ class OpsDoctorReport:
         return lines
 
 
-def run_ops_doctor(supa: SupabaseClient) -> OpsDoctorReport:
-    """Verify Supabase connectivity and row counts for all Hermes tables."""
+def run_ops_doctor(supa: SupabaseClient, *, check_movement: bool = True) -> OpsDoctorReport:
+    """Verify Supabase connectivity, row counts, AND that pipelines still move.
+
+    ``check_movement=False`` gives the old reachability-only behaviour, which is
+    only useful when you already know a pipeline is down and want to confirm the
+    database itself is fine.
+    """
     report = OpsDoctorReport()
 
     for table in HERMES_TABLES:
@@ -88,6 +100,16 @@ def run_ops_doctor(supa: SupabaseClient) -> OpsDoctorReport:
     roles = _check_roles(supa)
     if roles:
         report.errors.extend(roles)
+
+    if check_movement:
+        from hermes.operations.staleness import check_staleness, validate_rules
+
+        # A monitor that cannot monitor itself is decoration: a rule naming a
+        # column that does not exist reports UNKNOWN forever and looks like a
+        # gap in the data rather than a bug in the check.
+        for problem in validate_rules(supa):
+            report.errors.append(f"staleness rule misconfigured — {problem}")
+        report.staleness = check_staleness(supa)
 
     return report
 
