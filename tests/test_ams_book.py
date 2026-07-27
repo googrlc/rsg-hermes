@@ -448,3 +448,86 @@ def test_a_full_pull_is_forced_periodically_to_catch_deletions(live, monkeypatch
     book.fetch_book(_supa(), nowcerts=nc, force=True)
     book.fetch_book(_supa(), nowcerts=nc, force=True)
     assert nc.fetch_policies.call_args.kwargs.get("since") is None
+
+
+# ------------------------------------------------------------- clients
+# Policies went live and clients did not — nobody noticed, because a stale client
+# still renders. It surfaced when duplicates deleted in NowCerts kept appearing
+# in the CRM: /api/clients was reading a mirror whose sync has been off since
+# 2026-07-24, carrying 54 clients that no longer exist in the AMS.
+
+@pytest.fixture(autouse=True)
+def _clear_client_cache():
+    book.await_client_refresh(timeout=5)
+    book.invalidate_client_cache()
+    yield
+    book.await_client_refresh(timeout=5)
+    book.invalidate_client_cache()
+
+
+def _nci(records=None):
+    c = MagicMock()
+    c.fetch_insureds.return_value = records if records is not None else [
+        {"databaseId": "i1", "commercialName": "Acme Holdings LLC", "city": "Atlanta",
+         "state": "Georgia", "eMail": "ops@acme.example", "active": True},
+        {"databaseId": "i2", "firstName": "Jane", "lastName": "Doe", "city": "Marietta",
+         "state": "Georgia", "active": True},
+    ]
+    return c
+
+
+def test_clients_come_from_the_ams_when_live_reads_are_on(live):
+    nc = _nci()
+    book.fetch_clients(_supa(), nowcerts=nc, force=True)
+    rows = book.select_clients(_supa(), nowcerts=nc)
+    assert {r["insured_name"] for r in rows} == {"Acme Holdings LLC", "Jane Doe"}
+
+
+def test_a_commercial_name_makes_it_commercial_and_a_person_personal(live):
+    nc = _nci()
+    book.fetch_clients(_supa(), nowcerts=nc, force=True)
+    by = {r["insured_name"]: r for r in book.select_clients(_supa(), nowcerts=nc)}
+    assert by["Acme Holdings LLC"]["client_type"] == "Commercial"
+    assert by["Jane Doe"]["client_type"] == "Personal"
+
+
+def test_an_insured_without_a_guid_is_dropped(live):
+    """No stable key means it cannot be addressed, linked, or corrected."""
+    nc = _nci([{"commercialName": "No Id Co"}])
+    assert book.fetch_clients(_supa(), nowcerts=nc, force=True) == []
+
+
+def test_clients_fall_back_to_the_mirror_when_the_ams_fails(live):
+    nc = _nci()
+    nc.fetch_insureds.side_effect = RuntimeError("read timed out")
+    supa = _supa()
+    supa.select.return_value = [{"insured_name": "from mirror"}]
+    rows = book.select_clients(supa, columns="insured_name", nowcerts=nc)
+    assert rows == [{"insured_name": "from mirror"}]
+
+
+def test_the_mirror_is_used_when_live_reads_are_off(monkeypatch):
+    monkeypatch.delenv("HERMES_AMS_LIVE_READS", raising=False)
+    supa = _supa()
+    supa.select.return_value = [{"insured_name": "mirror"}]
+    assert book.select_clients(supa, columns="insured_name") == [{"insured_name": "mirror"}]
+    supa.select.assert_called_once_with(
+        "canonical_clients", columns="insured_name", params={}, limit=None
+    )
+
+
+def test_a_cold_client_cache_never_blocks_the_caller(live):
+    nc = _nci()
+    started, release = threading.Event(), threading.Event()
+
+    def _never(*a, **k):
+        started.set(); release.wait(10); return []
+
+    nc.fetch_insureds.side_effect = _never
+    t0 = time.time()
+    with pytest.raises(book.AmsBookUnavailable):
+        book.fetch_clients(_supa(), nowcerts=nc)
+    assert time.time() - t0 < 2
+    assert started.wait(5)
+    release.set()
+    book.await_client_refresh(timeout=10)

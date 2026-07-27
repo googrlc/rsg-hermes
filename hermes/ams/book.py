@@ -30,6 +30,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from hermes.sync.canonical_book_sync import (
+    CLIENTS_TABLE,
     POLICIES_TABLE,
     POLICY_KEY,
     _map_policy_volatile,
@@ -393,6 +394,162 @@ def select_policies(
     if limit is not None:
         rows = rows[:limit]
 
+    if columns and columns != "*":
+        wanted = [c.strip() for c in columns.split(",") if c.strip()]
+        rows = [{c: r.get(c) for c in wanted} for r in rows]
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Clients.
+#
+# Policies went live; clients did not, and nobody noticed because a stale client
+# still renders. It took Lamar deleting duplicates in NowCerts and still seeing
+# them in the CRM to surface it: /api/clients was reading canonical_clients, a
+# mirror last written by a sync that has been disabled since 2026-07-24. 415
+# rows against 361 live — 54 clients that no longer exist in the AMS, including
+# every duplicate that had already been cleaned up at source.
+#
+# Same shape as the policy book: cached, refreshed off the request path, mirror
+# as the fallback.
+# ---------------------------------------------------------------------------
+_client_cache: dict[str, Any] = {
+    "rows": None, "at": 0.0, "failed_at": 0.0, "refreshing": False, "thread": None, "full_at": 0.0,
+}
+
+
+def invalidate_client_cache() -> None:
+    with _lock:
+        _client_cache["rows"], _client_cache["at"] = None, 0.0
+        _client_cache["failed_at"] = 0.0
+        _client_cache["refreshing"] = False
+        _client_cache["thread"] = None
+
+
+def await_client_refresh(timeout: float = 120.0) -> None:
+    t = _client_cache.get("thread")
+    if t is not None:
+        t.join(timeout)
+
+
+def _map_client(r: dict[str, Any]) -> dict[str, Any]:
+    """A NowCerts insured, shaped like a ``canonical_clients`` row."""
+    commercial = r.get("commercialName") or r.get("insuredCommercialName")
+    first = (r.get("firstName") or "").strip()
+    last = (r.get("lastName") or "").strip()
+    name = (commercial or " ".join(x for x in (first, last) if x)).strip()
+    return {
+        "nowcerts_insured_guid": str(r.get("databaseId") or r.get("id") or "").strip() or None,
+        "insured_name": name or None,
+        "client_type": "Commercial" if commercial else "Personal",
+        "email": r.get("eMail") or r.get("email") or None,
+        "phone": r.get("phone") or r.get("cellPhone") or None,
+        "address": r.get("addressLine1") or None,
+        "city": r.get("city") or None,
+        "state": r.get("state") or None,
+        "zip": r.get("zipCode") or r.get("zip") or None,
+        "active": bool(r.get("active", True)),
+    }
+
+
+def _pull_clients(
+    supa: "SupabaseClient", nowcerts: "NowCertsClient | None" = None
+) -> list[dict[str, Any]]:
+    if nowcerts is None:
+        from hermes.sync.nowcerts_client import get_client
+
+        nowcerts = get_client()
+    try:
+        records = nowcerts.fetch_insureds(page_size=_PAGE_SIZE, max_pages=_MAX_PAGES)
+    except Exception:
+        with _lock:
+            _client_cache["failed_at"] = time.time()
+        raise
+
+    rows = [c for c in (_map_client(r) for r in records) if c["nowcerts_insured_guid"]]
+    log.info("ams.book: %s clients live", len(rows))
+    now = time.time()
+    with _lock:
+        _client_cache["rows"], _client_cache["at"] = rows, now
+        _client_cache["failed_at"] = 0.0
+        _client_cache["full_at"] = now
+    return rows
+
+
+def fetch_clients(
+    supa: "SupabaseClient",
+    *,
+    nowcerts: "NowCertsClient | None" = None,
+    force: bool = False,
+) -> list[dict[str, Any]]:
+    """The live insured list. Never blocks a request — see fetch_book."""
+    ttl = _ttl()
+    with _lock:
+        rows = _client_cache["rows"]
+        fresh = rows is not None and (time.time() - _client_cache["at"]) < ttl
+        if fresh and not force:
+            return rows
+        failed_at = _client_cache.get("failed_at") or 0.0
+        backing_off = (time.time() - failed_at) < _FAIL_BACKOFF_SECONDS
+        spawn = not force and not backing_off and not _client_cache["refreshing"]
+        if spawn:
+            _client_cache["refreshing"] = True
+
+    if spawn:
+        def _run() -> None:
+            try:
+                _pull_clients(supa, nowcerts)
+            except Exception:  # noqa: BLE001
+                log.warning("ams.book: client refresh failed; serving stale", exc_info=True)
+            finally:
+                with _lock:
+                    _client_cache["refreshing"] = False
+
+        t = threading.Thread(target=_run, name="ams-clients-refresh", daemon=True)
+        _client_cache["thread"] = t
+        t.start()
+
+    if not force:
+        if rows is not None:
+            return rows
+        with _lock:
+            rows = _client_cache["rows"]
+        if rows is not None:
+            return rows
+        raise AmsBookUnavailable(
+            "ams.book: no cached client list yet — serving the mirror while the "
+            "AMS pull runs in the background"
+        )
+
+    return _pull_clients(supa, nowcerts)
+
+
+def select_clients(
+    supa: "SupabaseClient",
+    *,
+    columns: str | None = None,
+    params: dict[str, Any] | None = None,
+    limit: int | None = None,
+    nowcerts: "NowCertsClient | None" = None,
+) -> list[dict[str, Any]]:
+    """Drop-in for ``supa.select("canonical_clients", ...)``."""
+    params = dict(params or {})
+    if not live_reads_enabled():
+        return supa.select(CLIENTS_TABLE, columns=columns, params=params, limit=limit)
+
+    try:
+        rows = fetch_clients(supa, nowcerts=nowcerts)
+    except Exception:  # noqa: BLE001
+        log.exception("ams.book: live client read failed; falling back to the mirror")
+        return supa.select(CLIENTS_TABLE, columns=columns, params=params, limit=limit)
+
+    order = params.pop("order", None)
+    for field, expr in params.items():
+        rows = [r for r in rows if _matches(r, field, expr)]
+    if order:
+        rows = _sort(rows, str(order))
+    if limit is not None:
+        rows = rows[:limit]
     if columns and columns != "*":
         wanted = [c.strip() for c in columns.split(",") if c.strip()]
         rows = [{c: r.get(c) for c in wanted} for r in rows]
