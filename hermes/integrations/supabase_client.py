@@ -175,6 +175,26 @@ class SupabaseClient:
         rows = resp.json()
         return rows if isinstance(rows, list) else [rows] if rows else []
 
+    def delete_where(self, table: str, *, filters: dict[str, str]) -> None:
+        """DELETE rows matching arbitrary PostgREST filter params.
+
+        The by-primary-key ``delete`` cannot clear a case's children, and relying
+        on ON DELETE CASCADE would mean trusting a constraint this repo does not
+        own — agency_crm_case_events and agency_crm_document_links are created by
+        the shared schema.
+        """
+        if not filters:
+            raise ValueError("delete_where needs a filter; refusing to delete a whole table")
+        resp = self.session.delete(
+            f"{self.url}/rest/v1/{table}",
+            headers=self._headers(prefer=""),
+            params=filters,
+            timeout=self.timeout,
+        )
+        if not resp.ok:
+            log.error("Supabase delete_where %s failed: %s %s", table, resp.status_code, resp.text[:500])
+            raise SupabaseClientError(f"{resp.status_code} DELETE {table}: {resp.text[:500]}")
+
     def delete(self, table: str, record_id: str) -> None:
         """DELETE a single row by primary key."""
         resp = self.session.delete(

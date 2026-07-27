@@ -325,6 +325,59 @@ def update_task(
     return supa.update(TASKS_TABLE, task_id, payload)
 
 
+def update_case(
+    supa: "SupabaseClient",
+    case_id: str,
+    fields: dict[str, Any],
+) -> dict[str, Any]:
+    """Update an editable case field set.
+
+    ``status`` is not editable here on purpose. Closing runs checks, writes a
+    resolution and pushes a summary to the AMS — a bare status write would skip
+    all three and leave a case that reads closed with nothing to show for it.
+    Use the close endpoint.
+    """
+    if "status" in fields:
+        raise ValueError("status is not editable here; close the case instead")
+    priority = fields.get("priority")
+    if priority is not None and priority not in TASK_PRIORITIES:
+        raise ValueError(f"unknown priority '{priority}'; must be one of {list(TASK_PRIORITIES)}")
+
+    payload = dict(fields)
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return supa.update(CASES_TABLE, case_id, payload)
+
+
+def delete_task(supa: "SupabaseClient", task_id: str) -> None:
+    """Hard-delete one task. Callers log it — see the API layer."""
+    supa.delete(TASKS_TABLE, task_id)
+
+
+# A case's children, in the order they must go: anything pointing at the case
+# before the case itself. Not left to ON DELETE CASCADE — two of these tables
+# belong to the shared agency_crm schema, so the constraint is not ours to
+# assume, and a half-deleted case is worse than a refused one.
+CASE_CHILD_TABLES = (DOCLINKS_TABLE, EVENTS_TABLE, DETAILS_TABLE, TASKS_TABLE)
+
+
+def delete_case(supa: "SupabaseClient", case_id: str) -> dict[str, int]:
+    """Delete a case and everything filed against it. Returns rows seen per child.
+
+    Document links go, the documents themselves do not: they live in Nextcloud
+    and deleting a case is not a reason to destroy the client's paperwork.
+    """
+    counts: dict[str, int] = {}
+    for table in CASE_CHILD_TABLES:
+        try:
+            counts[table] = len(supa.select(
+                table, columns="id", params={"case_id": f"eq.{case_id}"}, limit=1000))
+        except Exception:  # noqa: BLE001 — a count is for the receipt, not the delete
+            counts[table] = -1
+        supa.delete_where(table, filters={"case_id": f"eq.{case_id}"})
+    supa.delete(CASES_TABLE, case_id)
+    return counts
+
+
 def get_task(supa: "SupabaseClient", task_id: str) -> dict[str, Any] | None:
     try:
         rows = supa.select(TASKS_TABLE, columns="*", params={"id": f"eq.{task_id}"}, limit=1)
