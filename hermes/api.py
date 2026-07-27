@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 import uvicorn
@@ -1493,18 +1493,23 @@ async def close_case_endpoint(case_id: str, req: CaseCloseRequest):
 
     closed_at = datetime.utcnow().isoformat()
     try:
-        updated = supa.update("agency_crm_cases", {
+        # supa.update is (table, record_id, payload) — this used to pass the
+        # payload as the id with a params= kwarg, so every close raised TypeError
+        # and came back as a 502. Closing a case has never worked from the portal.
+        updated = supa.update("agency_crm_cases", case_id, {
             "status": "closed",
             "closed_at": closed_at,
             "resolution": req.resolution,
             "resolved_by_email": actor,
-        }, params={"id": f"eq.{case_id}"})
+        })
     except Exception as exc:
         log.exception("close case %s failed", case_id)
         raise HTTPException(status_code=502, detail=str(exc))
 
-    case = (updated[0] if isinstance(updated, list) and updated else {**case,
-            "status": "closed", "closed_at": closed_at, "resolution": req.resolution})
+    if isinstance(updated, list):
+        updated = updated[0] if updated else None
+    case = updated or {**case, "status": "closed", "closed_at": closed_at,
+                       "resolution": req.resolution}
     summary = T.build_summary(case, tasks)
 
     ams = {"pushed": False, "reason": "not requested"}
@@ -1514,8 +1519,8 @@ async def close_case_endpoint(case_id: str, req: CaseCloseRequest):
 
             ams = push_case_summary_to_ams(supa, case=case, summary=summary)
             if ams.get("pushed"):
-                supa.update("agency_crm_cases", {"ams_summary_sent_at": datetime.utcnow().isoformat()},
-                            params={"id": f"eq.{case_id}"})
+                supa.update("agency_crm_cases", case_id,
+                            {"ams_summary_sent_at": datetime.utcnow().isoformat()})
         except Exception as exc:  # noqa: BLE001
             # A closed case is closed. An AMS hiccup is a sync problem, not a
             # reason to refuse the close and make somebody redo the work.
@@ -1784,6 +1789,126 @@ async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
         log.exception("update task failed: %s", task_id)
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "task": row}
+
+
+# ---------------------------------------------------------------------------
+# Deleting case work.
+#
+# A task or case created by mistake had no way out: cancelling leaves it in the
+# list forever, and the portal is the only surface most of this work has. So a
+# real delete — with a named actor and a row in portal_write_log carrying the
+# record as it was, because "it disappeared and nobody knows who" is how a
+# shared queue stops being trusted.
+# ---------------------------------------------------------------------------
+class DeleteRequest(BaseModel):
+    deleted_by: str
+    reason: str | None = None
+
+
+def _log_deletion(supa, *, entity_type: str, entity_key: str, actor: str,
+                  before: dict, reason: str | None) -> None:
+    from hermes.overrides.store import write_log
+
+    write_log(supa, entity_type=entity_type, entity_key=entity_key,
+              action="deleted", actor=actor, before=before, note=reason)
+
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task_endpoint(task_id: str, req: DeleteRequest):
+    """Delete a task outright. Cancelling keeps it in the record; this removes it."""
+    from hermes.renewals import cases as C
+
+    supa = _get_supa()
+    _require_users(supa, [("deleted_by", req.deleted_by)])
+    task = C.get_task(supa, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="task not found")
+    try:
+        C.delete_task(supa, task_id)
+    except Exception as exc:
+        log.exception("delete task failed: %s", task_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    _log_deletion(supa, entity_type="agency_crm_tasks", entity_key=task_id,
+                  actor=req.deleted_by, before=task, reason=req.reason)
+    # A case-linked task leaves its trace on the case timeline too — the case is
+    # where anyone will go looking for why the checklist got shorter.
+    if task.get("case_id"):
+        try:
+            C.log_case_event(
+                supa, case_id=str(task["case_id"]), event_type="task_deleted",
+                summary=f"Task deleted: {task.get('title')}", actor_email=req.deleted_by,
+            )
+        except Exception:  # noqa: BLE001 — the task is already gone
+            log.exception("case event for deleted task %s failed", task_id)
+    return {"ok": True, "deleted": task_id, "task": task}
+
+
+class CaseUpdateRequest(BaseModel):
+    """Editable case fields. All optional — only what's provided is written.
+
+    ``status`` is absent on purpose: closing a case runs the required-task
+    checks, records a resolution and pushes a summary to the AMS. Use /close.
+    Extras are rejected rather than dropped, so a caller who sends ``status``
+    is told it is not editable instead of getting a silent no-op.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    description: str | None = None
+    priority: str | None = None
+    owner_email: str | None = None
+    due_at: str | None = None
+    case_type: str | None = None
+    insured_name: str | None = None
+    policy_number: str | None = None
+
+
+@app.patch("/api/cases/{case_id}")
+async def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
+    """Edit a case. Cases were create-and-close-only; a typo'd title or the wrong
+    owner meant the case stayed wrong."""
+    from hermes.renewals import cases as C
+
+    supa = _get_supa()
+    fields = req.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="no fields provided")
+    rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail="case not found")
+    if fields.get("owner_email"):
+        _require_users(supa, [("owner_email", fields["owner_email"])])
+    try:
+        row = C.update_case(supa, case_id, fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("update case failed: %s", case_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "case": row}
+
+
+@app.delete("/api/cases/{case_id}")
+async def delete_case_endpoint(case_id: str, req: DeleteRequest):
+    """Delete a case and everything filed against it — tasks, timeline, document
+    links, renewal detail. The Nextcloud documents themselves are left alone."""
+    from hermes.renewals import cases as C
+
+    supa = _get_supa()
+    _require_users(supa, [("deleted_by", req.deleted_by)])
+    rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail="case not found")
+    case = rows[0]
+    try:
+        removed = C.delete_case(supa, case_id)
+    except Exception as exc:
+        log.exception("delete case failed: %s", case_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    _log_deletion(supa, entity_type="agency_crm_cases", entity_key=case_id,
+                  actor=req.deleted_by, before=case, reason=req.reason)
+    return {"ok": True, "deleted": case_id, "case": case, "removed": removed}
 
 
 class PushToAmsRequest(BaseModel):
@@ -2760,6 +2885,57 @@ async def list_renewals_endpoint(limit: int = 1000):
         r["outcome"] = _renewal_outcome(r)
         out.append(r)
     return {"renewals": out, "count": len(out)}
+
+
+class RenewalUpdateRequest(BaseModel):
+    """Editable renewal-desk fields on project_85_renewals.
+
+    Both premiums are here because both get worked: the expiring number is often
+    wrong in the mirror, and the renewal number only exists once a carrier quotes
+    it. ``increase_percentage`` is deliberately absent — it is a generated column
+    computed from the two, so writing it is both refused by Postgres and the
+    wrong idea. Fix the premiums and the change follows.
+    """
+    premium_current: float | None = None
+    premium_renewal: float | None = None
+    risk_status: str | None = None
+    ai_strategy_notes: str | None = None
+    last_contact_date: str | None = None
+
+
+@app.patch("/api/renewals/{renewal_id}")
+async def update_renewal_endpoint(renewal_id: str, req: RenewalUpdateRequest):
+    """Update a renewal's working detail. The cockpit was read-only, so a premium
+    that came over wrong stayed wrong and every downstream number inherited it."""
+    from hermes.operations.renewal_tracker import VALID_RISK_STATUSES
+
+    supa = _get_supa()
+    fields = req.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="no fields provided")
+
+    risk = fields.get("risk_status")
+    if risk is not None:
+        risk = str(risk).strip().upper()
+        if risk not in VALID_RISK_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown risk_status '{risk}'; must be one of {list(VALID_RISK_STATUSES)}",
+            )
+        fields["risk_status"] = risk
+
+    rows = supa.select("project_85_renewals", columns="*",
+                       params={"id": f"eq.{renewal_id}"}, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail="renewal not found")
+
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        row = supa.update("project_85_renewals", renewal_id, fields)
+    except Exception as exc:
+        log.exception("update renewal failed: %s", renewal_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "renewal": row}
 
 
 @app.get("/api/workspace-stats")
