@@ -176,6 +176,25 @@ class NextcloudClient:
     # The CRM Desk assistant reads client documents here. Read-only: PROPFIND to
     # list a folder, GET to fetch a file's bytes. Neither creates or mutates.
 
+    def path_exists(self, rel_path: str) -> bool:
+        """Return whether a file or folder exists via a Depth-0 PROPFIND."""
+        self._require_configured()
+        resp = self.session.request(
+            "PROPFIND",
+            self._dav_url(rel_path),
+            headers={"Depth": "0", "Content-Type": "application/xml"},
+            data=_PROPFIND_BODY,
+            verify=self.verify_tls,
+            timeout=30,
+        )
+        if resp.status_code == 404:
+            return False
+        if resp.status_code not in (207, 200):
+            raise NextcloudError(
+                f"PROPFIND {rel_path} failed: {resp.status_code} {resp.text[:200]}"
+            )
+        return True
+
     def list_dir(self, rel_path: str) -> list[dict[str, Any]]:
         """List the immediate children of a folder via WebDAV PROPFIND (Depth 1).
 
@@ -258,18 +277,23 @@ class NextcloudClient:
         client: str | None = None,
         category: str = DEFAULT_CATEGORY,
         internal_folder: str | None = None,
+        client_root: str = "Clients",
+        overwrite: bool = True,
     ) -> dict[str, Any]:
         """File any document. Returns ``{"path": ..., "url": ...}``.
 
-        ``client`` -> Clients/{client}/{category}/; else ``internal_folder`` ->
-        Internal/{folder}/; else Internal/General/.
+        ``client`` -> {client_root}/{client}/{category}/; else
+        ``internal_folder`` -> Internal/{folder}/; else Internal/General/.
         """
         fname = _sanitize_segment(filename)
         if client:
-            rel = f"Clients/{_sanitize_segment(client)}/{_sanitize_segment(category)}/{fname}"
+            root = client_root.strip("/") or "Clients"
+            rel = f"{root}/{_sanitize_segment(client)}/{_sanitize_segment(category)}/{fname}"
         elif internal_folder:
             rel = f"Internal/{_sanitize_segment(internal_folder)}/{fname}"
         else:
             rel = f"Internal/General/{fname}"
+        if not overwrite and self.path_exists(rel):
+            raise NextcloudError(f"Refusing to overwrite existing file: {rel}")
         stored = self.put_file(rel, content, content_type=content_type)
         return {"path": stored, "url": self._dav_url(rel)}

@@ -74,6 +74,18 @@ def test_list_dir_missing_folder_returns_empty():
     assert c.list_dir("Clients/Nobody") == []
 
 
+def test_path_exists_uses_depth_zero():
+    session = _FakeSession(propfind=_Resp(207, _MULTISTATUS))
+    c = _client(session)
+    assert c.path_exists("Commercial Lines") is True
+    assert session.requests[0][0] == "PROPFIND"
+
+
+def test_path_exists_missing_returns_false():
+    c = _client(_FakeSession(propfind=_Resp(404, b"")))
+    assert c.path_exists("Commercial Lines") is False
+
+
 def test_read_file_returns_bytes():
     c = _client(_FakeSession(get=_Resp(200, b"PDFDATA", ok=True)))
     assert c.read_file("Clients/Acme/COIs/x.pdf") == b"PDFDATA"
