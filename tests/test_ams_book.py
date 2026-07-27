@@ -191,3 +191,63 @@ def test_ams_failure_falls_back_to_the_mirror(live):
     with patch.object(book, "fetch_book", side_effect=RuntimeError("AMS down")):
         rows = book.select_policies(supa, columns="policy_guid")
     assert rows == [{"policy_guid": "mirror"}]
+
+
+# ------------------------------------------------- shared client & backoff
+# Regression cover for the stall diagnosed 2026-07-27: NowCerts' password grant
+# takes ~26s, and every book read used to build a fresh client (empty token
+# cache) and re-pay it, which froze the API and timed out the MCP tools.
+
+def test_uses_the_shared_client_when_none_is_passed(live):
+    """No `nowcerts=` must reach get_client(), not a fresh NowCertsClient()."""
+    nc = _nc()
+    with patch("hermes.sync.nowcerts_client.get_client", return_value=nc) as shared:
+        book.select_policies(_supa())
+    shared.assert_called_once()
+    nc.fetch_policies.assert_called_once()
+
+
+def test_a_failed_read_backs_off_instead_of_retrying_immediately(live):
+    """The AMS is hit once; the next call fails fast without a second timeout."""
+    nc = _nc()
+    nc.fetch_policies.side_effect = RuntimeError("read timed out")
+    with pytest.raises(RuntimeError):
+        book.fetch_book(_supa(), nowcerts=nc)
+    with pytest.raises(book.AmsBookUnavailable):
+        book.fetch_book(_supa(), nowcerts=nc)
+    nc.fetch_policies.assert_called_once()
+
+
+def test_backoff_degrades_to_the_mirror_rather_than_erroring(live):
+    """select_policies() swallows the backoff, so callers still get rows."""
+    nc = _nc()
+    nc.fetch_policies.side_effect = RuntimeError("read timed out")
+    supa = _supa()
+    supa.select.return_value = [{"policy_guid": "mirror"}]
+    with pytest.raises(RuntimeError):
+        book.fetch_book(supa, nowcerts=nc)
+    rows = book.select_policies(supa, columns="policy_guid", nowcerts=nc)
+    assert rows == [{"policy_guid": "mirror"}]
+
+
+def test_force_overrides_the_backoff(live):
+    nc = _nc()
+    nc.fetch_policies.side_effect = RuntimeError("read timed out")
+    with pytest.raises(RuntimeError):
+        book.fetch_book(_supa(), nowcerts=nc)
+    nc.fetch_policies.side_effect = None
+    book.fetch_book(_supa(), nowcerts=nc, force=True)
+    assert nc.fetch_policies.call_count == 2
+
+
+def test_a_good_read_retires_the_backoff(live, monkeypatch):
+    monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
+    nc = _nc()
+    nc.fetch_policies.side_effect = RuntimeError("read timed out")
+    with pytest.raises(RuntimeError):
+        book.fetch_book(_supa(), nowcerts=nc)
+    nc.fetch_policies.side_effect = None
+    book.fetch_book(_supa(), nowcerts=nc, force=True)
+    # backoff cleared by the success -> a plain call goes through again
+    book.fetch_book(_supa(), nowcerts=nc)
+    assert nc.fetch_policies.call_count == 3
