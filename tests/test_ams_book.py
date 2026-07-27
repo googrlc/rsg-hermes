@@ -7,6 +7,7 @@ joining, caching, and the fallbacks. NowCerts + Supabase mocked.
 from __future__ import annotations
 
 import threading
+import time
 
 from unittest.mock import MagicMock, patch
 
@@ -54,6 +55,18 @@ def _supa(lineage=None):
     return s
 
 
+def _prime(supa, nc):
+    """Fill the cache synchronously.
+
+    fetch_book() no longer blocks a caller on the AMS: a cold cache raises and
+    refreshes in the background, so select_policies() falls back to the mirror.
+    Tests that are exercising the mapper/filters (not the concurrency) want the
+    book actually present, which is what force=True is for.
+    """
+    book.fetch_book(supa, nowcerts=nc, force=True)
+    return supa
+
+
 # ------------------------------------------------------------------ flag gate
 
 def test_delegates_to_supabase_when_flag_unset(monkeypatch):
@@ -69,6 +82,7 @@ def test_delegates_to_supabase_when_flag_unset(monkeypatch):
 
 def test_reads_the_ams_when_flag_set(live):
     nc = _nc()
+    _prime(_supa(), nc)
     rows = book.select_policies(_supa(), nowcerts=nc, limit=10)
     nc.fetch_policies.assert_called_once()
     assert {r["policy_guid"] for r in rows} == {"g1", "g2"}
@@ -77,6 +91,7 @@ def test_reads_the_ams_when_flag_set(live):
 # ------------------------------------------------------------------ mapping
 
 def test_maps_lob_premium_and_active_from_raw_nowcerts(live):
+    _prime(_supa(), _nc())
     rows = book.select_policies(_supa(), nowcerts=_nc(), limit=10)
     g1 = next(r for r in rows if r["policy_guid"] == "g1")
     # lineOfBusinesses is a LIST of objects; premium lives in totalPremium.
@@ -91,18 +106,21 @@ def test_zero_agency_commission_stays_zero(live):
     """0.0 is a real commission. Picking by truthiness would collapse it to None
     and send commission_sync to its rule-based fallback instead."""
     nc = _nc([{"databaseId": "g1", "number": "P-1", "totalAgencyCommission": 0.0}])
+    _prime(_supa(), nc)
     rows = book.select_policies(_supa(), nowcerts=nc)
     assert rows[0]["agency_commission_amount"] == 0.0
 
 
 def test_agency_commission_absent_is_none(live):
     nc = _nc([{"databaseId": "g1", "number": "P-1"}])
+    _prime(_supa(), nc)
     rows = book.select_policies(_supa(), nowcerts=nc)
     assert rows[0]["agency_commission_amount"] is None
 
 
 def test_records_without_a_guid_are_dropped(live):
     nc = _nc([{"number": "no-guid", "status": "Active"}])
+    _prime(_supa(), nc)
     assert book.select_policies(_supa(), nowcerts=nc) == []
 
 
@@ -110,6 +128,7 @@ def test_records_without_a_guid_are_dropped(live):
 
 def test_lineage_is_joined_from_supabase(live):
     supa = _supa([{"policy_guid": "g1", "renewed_policy": "OLD-1"}])
+    _prime(supa, _nc())
     rows = book.select_policies(supa, nowcerts=_nc(), limit=10)
     by_guid = {r["policy_guid"]: r for r in rows}
     # renewed_policy is NOT in the AMS — it must come from policy_lineage.
@@ -120,6 +139,7 @@ def test_lineage_is_joined_from_supabase(live):
 def test_lineage_failure_does_not_break_the_book(live):
     supa = MagicMock()
     supa.select.side_effect = RuntimeError("lineage table gone")
+    _prime(supa, _nc())
     rows = book.select_policies(supa, nowcerts=_nc(), limit=10)
     assert len(rows) == 2 and all(r["renewed_policy"] is None for r in rows)
 
@@ -127,6 +147,7 @@ def test_lineage_failure_does_not_break_the_book(live):
 # ------------------------------------------------------------------ filtering
 
 def test_eq_filter(live):
+    _prime(_supa(), _nc())
     rows = book.select_policies(
         _supa(), nowcerts=_nc(), params={"nowcerts_insured_guid": "eq.i2"}
     )
@@ -134,6 +155,7 @@ def test_eq_filter(live):
 
 
 def test_in_filter(live):
+    _prime(_supa(), _nc())
     rows = book.select_policies(
         _supa(), nowcerts=_nc(), params={"nowcerts_insured_guid": "in.(i1,i2)"}
     )
@@ -141,6 +163,7 @@ def test_in_filter(live):
 
 
 def test_order_desc_and_limit(live):
+    _prime(_supa(), _nc())
     rows = book.select_policies(
         _supa(), nowcerts=_nc(), params={"order": "expiration_date.desc"}, limit=1
     )
@@ -150,11 +173,13 @@ def test_order_desc_and_limit(live):
 def test_unsupported_filter_raises_rather_than_widening(live):
     # Silently ignoring a filter would return the whole book to a caller that
     # asked for one client's policies.
+    _prime(_supa(), _nc())
     with pytest.raises(ValueError, match="unsupported filter"):
         book.select_policies(_supa(), nowcerts=_nc(), params={"premium_amount": "gt.100"})
 
 
 def test_column_projection(live):
+    _prime(_supa(), _nc())
     rows = book.select_policies(_supa(), nowcerts=_nc(), columns="policy_number,carrier")
     assert set(rows[0]) == {"policy_number", "carrier"}
 
@@ -250,12 +275,12 @@ def test_a_good_read_retires_the_backoff(live, monkeypatch):
     nc = _nc()
     nc.fetch_policies.side_effect = RuntimeError("read timed out")
     with pytest.raises(RuntimeError):
-        book.fetch_book(_supa(), nowcerts=nc)
+        book.fetch_book(_supa(), nowcerts=nc, force=True)
+    assert book._cache["failed_at"] > 0
     nc.fetch_policies.side_effect = None
     book.fetch_book(_supa(), nowcerts=nc, force=True)
-    # backoff cleared by the success -> a plain call goes through again
-    book.fetch_book(_supa(), nowcerts=nc)
-    assert nc.fetch_policies.call_count == 3
+    assert book._cache["failed_at"] == 0, "a good read must retire the backoff"
+    assert nc.fetch_policies.call_count == 2
 
 
 # ---------------------------------------------- stale-while-revalidate
@@ -316,3 +341,41 @@ def test_a_failed_background_refresh_keeps_serving_the_stale_book(live, monkeypa
     assert rows, "a failed refresh must not take the cached book away"
     # and the failure is recorded, so the next stale read backs off instead of retrying
     assert book._cache["failed_at"] > 0
+
+
+def test_a_cold_cache_never_blocks_the_caller(live):
+    """The regression that mattered: with the AMS failing rather than merely slow,
+    the pull never succeeds, so the cache never fills, so 'block just this once'
+    was every request. Measured 77s on /api/clients before this."""
+    nc = _nc()
+    started, release = threading.Event(), threading.Event()
+
+    def _never_returns(*a, **k):
+        started.set()
+        release.wait(10)
+        return []
+
+    nc.fetch_policies.side_effect = _never_returns
+    t0 = time.time()
+    with pytest.raises(book.AmsBookUnavailable):
+        book.fetch_book(_supa(), nowcerts=nc)
+    assert time.time() - t0 < 2, "a cold read must not wait on the AMS"
+    assert started.wait(5), "it should still have started the pull in the background"
+    release.set()
+    book.await_refresh(timeout=10)
+
+
+def test_a_cold_cache_degrades_to_the_mirror_rather_than_hanging(live):
+    """select_policies() swallows AmsBookUnavailable, so the CRM stays up on
+    mirror data while the AMS pull runs behind it."""
+    nc = _nc()
+    release = threading.Event()
+    nc.fetch_policies.side_effect = lambda *a, **k: (release.wait(10), [])[1]
+    supa = _supa()
+    supa.select.return_value = [{"policy_guid": "mirror"}]
+    t0 = time.time()
+    rows = book.select_policies(supa, columns="policy_guid", nowcerts=nc)
+    assert rows == [{"policy_guid": "mirror"}]
+    assert time.time() - t0 < 2
+    release.set()
+    book.await_refresh(timeout=10)

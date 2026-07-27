@@ -153,12 +153,21 @@ def fetch_book(
 ) -> list[dict[str, Any]]:
     """The whole live book, shaped like ``canonical_policies`` rows.
 
-    Cached for ``HERMES_AMS_BOOK_TTL`` seconds, and **stale-while-revalidate**:
-    once there is any cached book, an expired TTL is served from cache while the
-    refresh runs on a background thread. A full pull is 5 pages against an API
-    whose per-page latency swings between 5s and 30s, so making a request wait
-    for one is what froze the API and 8s-timed-out the portal behind it. Only a
-    genuinely cold cache blocks; `force=True` always blocks and always refetches.
+    Cached for ``HERMES_AMS_BOOK_TTL`` seconds. **A request never waits on the
+    AMS** — not on a stale cache, and not on a cold one.
+
+    The earlier version only avoided blocking once something was cached, and let
+    a cold cache block "just this once". Against an AMS that is failing rather
+    than merely slow, "just this once" is every single request: the pull never
+    succeeds, so the cache never fills, so every caller pays the full timeout.
+    Raising the per-read timeout to 60s then made each stall *longer* — measured
+    77s on /api/clients — which is the opposite of the intent.
+
+    So: cold cache raises immediately and starts a background pull. Callers go
+    through ``select_policies``, which falls back to the Supabase mirror on any
+    exception, so the CRM stays responsive on mirror data and silently upgrades
+    to live the moment a background pull lands. ``force=True`` still blocks — it
+    is only used by jobs that genuinely need the freshest book.
     """
     ttl = _ttl()
     with _lock:
@@ -169,20 +178,17 @@ def fetch_book(
         failed_at = _cache.get("failed_at") or 0.0
         backing_off = (time.time() - failed_at) < _FAIL_BACKOFF_SECONDS
 
-        if rows is not None and not force:
-            # Warm but stale: hand back what we have. Kick off a refresh unless
-            # one is already running or the upstream just failed.
+        if not force:
+            # Refresh behind the request, never in front of it.
             if not backing_off and not _cache["refreshing"]:
                 _cache["refreshing"] = True
                 _spawn_refresh(supa, nowcerts)
-            return rows
-
-        # Cold cache: nothing to serve, so this caller has to wait for the AMS.
-        # Fail fast rather than queue behind another timeout if it just failed.
-        if not force and backing_off:
+            if rows is not None:
+                return rows          # stale beats slow
             raise AmsBookUnavailable(
-                "ams.book: AMS read failed recently; backing off "
-                f"{_FAIL_BACKOFF_SECONDS}s before retrying"
+                "ams.book: no cached book yet"
+                + (f"; last read failed, backing off {_FAIL_BACKOFF_SECONDS}s" if backing_off else "")
+                + " — serving the mirror while the AMS pull runs in the background"
             )
 
     return _pull_book(supa, nowcerts)
