@@ -59,7 +59,11 @@ CASE_TEMPLATES: dict[str, dict[str, Any]] = {
             {"title": "Build the NextCloud folder structure",
              "due_days": 2, "priority": "medium", "required": False},
             {"title": "Send the welcome email (sent, not drafted)",
-             "due_days": 2, "priority": "high", "required": True},
+             "due_days": 2, "priority": "high", "required": True,
+             "description": (
+                 "Template email lives in Codex: "
+                 "https://chatgpt.com/plugins/Plugin_58e8181057248191b9c6e46ba7183bcf?open_in_codex"
+             )},
             {"title": "Welcome call to the client",
              "due_days": 3, "priority": "high", "required": False},
             {"title": "Confirm policy bind and verify documents received",
