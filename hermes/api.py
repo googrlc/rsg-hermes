@@ -1165,6 +1165,77 @@ def _require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
             )
 
 
+# ---------------------------------------------------------------------------
+# Nextcloud Deck — shared boards.
+#
+# Read + one write, deliberately narrow. Deck is where cross-team work is
+# tracked; the point of exposing it here is that a scheduled Hermes run can put
+# a card on a board without a human driving a browser. The MCP bridge fronts
+# these rather than talking to Nextcloud itself, so the app password stays in
+# this process and is not copied into a second container.
+# ---------------------------------------------------------------------------
+def _deck():
+    from hermes.integrations.nextcloud_deck import DeckClient
+
+    return DeckClient()
+
+
+@app.get("/api/deck/boards")
+async def deck_boards_endpoint():
+    """Boards, and the stacks (lists) on each — what a caller needs to address a card."""
+    from hermes.integrations.nextcloud_deck import DeckError
+
+    try:
+        client = _deck()
+        boards = client.list_boards()
+        for b in boards:
+            b["stacks"] = [
+                {"id": st["id"], "title": st["title"], "cards": len(st["cards"])}
+                for st in client.list_stacks(b["id"])
+            ]
+        return {"boards": boards, "count": len(boards)}
+    except DeckError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        log.exception("deck boards failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+class DeckCardRequest(BaseModel):
+    """Board and list are given by *name* — callers hold names, not Deck ids."""
+
+    board: str
+    stack: str = "To Do"
+    title: str
+    description: str | None = None
+    duedate: str | None = None       # ISO-8601, e.g. 2026-07-28T17:00:00+00:00
+    skip_if_exists: bool = True
+
+
+@app.post("/api/deck/cards")
+async def deck_create_card_endpoint(req: DeckCardRequest):
+    """Add a card. Idempotent by title within the list, so a job that runs twice
+    doesn't leave two identical cards."""
+    from hermes.integrations.nextcloud_deck import DeckError
+
+    try:
+        return _deck().create_card(
+            board=req.board,
+            stack=req.stack,
+            title=req.title,
+            description=req.description,
+            duedate=req.duedate,
+            skip_if_exists=req.skip_if_exists,
+        )
+    except DeckError as exc:
+        # A bad board/list name is the caller's mistake, and the message lists
+        # the real ones — that is a 400, not a gateway failure.
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        log.exception("deck card create failed")
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @app.get("/api/agency-users")
 async def list_agency_users_endpoint(assignable: bool = False):
     """Active CRM users — powers owner/assignee pickers (valid FK targets).
