@@ -212,6 +212,13 @@ def main() -> int:
         help="Preview opportunity-writeback jobs without claiming or writing to NowCerts",
     )
     parser.add_argument(
+        "--opportunity-writeback-opportunity-id",
+        default=None,
+        help="Read-only diagnostic: resolve one NowCerts opportunity by id and print "
+             "the exact writeback payload (assignedTo shape, insuredDatabaseId presence) "
+             "regardless of queue state. Forces dry-run — never writes.",
+    )
+    parser.add_argument(
         "--casework-executor",
         action="store_true",
         help="Process approved case/task jobs (agency_crm case/task → NowCerts task) from outbound_sync_queue",
@@ -823,20 +830,33 @@ def main() -> int:
                   f"carrier={pol.get('CarrierName')} premium={pol.get('Premium')} IsQuote={pol.get('IsQuote')}")
         return 0 if summary["failed"] == 0 else 1
 
-    if args.opportunity_writeback_executor or args.opportunity_writeback_dry_run:
+    if (
+        args.opportunity_writeback_executor
+        or args.opportunity_writeback_dry_run
+        or args.opportunity_writeback_opportunity_id
+    ):
         from hermes.sync.opportunity_writeback import run_opportunity_writeback_executor
 
         summary = run_opportunity_writeback_executor(
             limit=args.opportunity_writeback_limit,
             dry_run=args.opportunity_writeback_dry_run,
+            opportunity_id=args.opportunity_writeback_opportunity_id,
         )
-        mode = "dry-run" if args.opportunity_writeback_dry_run else "live"
+        mode = "dry-run" if (args.opportunity_writeback_dry_run or args.opportunity_writeback_opportunity_id) else "live"
         print(
             f"Opportunity writeback ({mode}): claimed={summary['claimed']} "
             f"completed={summary['completed']} failed={summary['failed']}"
         )
         for pv in summary.get("previews", []):
-            print(f"  PREVIEW opp={pv.get('opportunity')} → {pv.get('target_stage')}")
+            if pv.get("found") is False:
+                print(f"  PREVIEW opp={pv.get('opportunity')} → {pv.get('target_stage')} NOT FOUND in AMS")
+                continue
+            print(
+                f"  PREVIEW opp={pv.get('opportunity')} → {pv.get('target_stage')} "
+                f"assignedTo={pv.get('assigned_to_raw')!r} (type={pv.get('assigned_to_type')}) "
+                f"insuredDatabaseId_present={pv.get('insured_database_id_present')}"
+            )
+            print(f"    resolved payload: {pv.get('resolved_payload')}")
         return 0 if summary["failed"] == 0 else 1
 
     if args.casework_executor or args.casework_executor_dry_run:
