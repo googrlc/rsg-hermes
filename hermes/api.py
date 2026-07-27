@@ -1452,15 +1452,122 @@ async def close_case_endpoint(case_id: str, req: CaseCloseRequest):
 
 
 @app.get("/api/cases")
-async def list_cases_endpoint(status: str | None = None, case_type: str | None = None, limit: int = 100):
-    """List cases, newest first."""
+async def list_cases_endpoint(
+    status: str | None = None,
+    case_type: str | None = None,
+    limit: int = 100,
+    include_progress: bool = False,
+):
+    """List cases, newest first.
+
+    ``include_progress`` merges each case's checklist state from v_case_progress —
+    how far through it is, whether every required task is satisfied
+    (``can_close``), and how many are still blocking. That is the question anyone
+    actually asks about a case, and answering it here avoids a per-case round trip
+    from callers that can only make one request (the MCP bridge, a morning brief).
+
+    One extra query for the whole page, not one per case.
+    """
     params: dict[str, str] = {"order": "created_at.desc"}
     if status:
         params["status"] = f"eq.{status}"
     if case_type:
         params["case_type"] = f"eq.{case_type}"
-    rows = _get_supa().select("agency_crm_cases", columns="*", params=params, limit=limit)
+    supa = _get_supa()
+    rows = supa.select("agency_crm_cases", columns="*", params=params, limit=limit)
+
+    if include_progress and rows:
+        prog_params: dict[str, str] = {}
+        if status:
+            prog_params["status"] = f"eq.{status}"
+        prog = supa.select("v_case_progress", columns="*", params=prog_params, limit=max(limit, len(rows)))
+        by_id = {str(p.get("case_id")): p for p in prog}
+        for r in rows:
+            p = by_id.get(str(r.get("id")))
+            if not p:
+                continue
+            r["progress"] = {
+                "tasks_total": p.get("tasks_total"),
+                "tasks_done": p.get("tasks_done"),
+                "required_total": p.get("required_total"),
+                "required_done": p.get("required_done"),
+                "required_blocking": p.get("required_blocking"),
+                "can_close": p.get("can_close"),
+            }
     return {"cases": rows, "count": len(rows)}
+
+
+@app.get("/api/cases/blocked")
+async def list_blocked_cases_endpoint(limit: int = 100):
+    """Open cases that cannot close yet, and the specific tasks blocking each.
+
+    The morning-brief question: "what is stopping these from being finished?"
+    Returns the blocking task titles, not just a count — a number tells you there
+    is a problem, a title tells you what to do about it.
+    """
+    supa = _get_supa()
+    prog = supa.select(
+        "v_case_progress", columns="*",
+        params={"status": "eq.open", "can_close": "is.false", "order": "opened_at.asc"},
+        limit=limit,
+    )
+    out: list[dict[str, Any]] = []
+    for p in prog:
+        tasks = supa.select(
+            "agency_crm_tasks", columns="id,title,status,due_at,assigned_to_email,is_required",
+            params={"case_id": f"eq.{p.get('case_id')}", "is_required": "is.true",
+                    "order": "sort_order.asc"},
+            limit=100,
+        )
+        blocking = [t for t in tasks if t.get("status") not in ("completed", "cancelled")]
+        out.append({
+            "case_id": p.get("case_id"),
+            "case_number": p.get("case_number"),
+            "case_type": p.get("case_type"),
+            "insured_name": p.get("insured_name"),
+            "title": p.get("title"),
+            "tasks_done": p.get("tasks_done"),
+            "tasks_total": p.get("tasks_total"),
+            "blocking": [{"title": t.get("title"), "assigned_to_email": t.get("assigned_to_email"),
+                          "due_at": t.get("due_at")} for t in blocking],
+        })
+    return {"blocked_cases": out, "count": len(out)}
+
+
+@app.get("/api/intake/queue")
+async def intake_queue_endpoint(limit: int = 50):
+    """Intake submissions waiting on a human, oldest first.
+
+    Oldest first on purpose: the useful signal is what has been sitting, not what
+    just arrived. ``oldest_age_days`` is surfaced because a queue that stopped
+    moving looks identical to a busy one if you only report the count.
+    """
+    supa = _get_supa()
+    rows = supa.select(
+        "intake_submissions",
+        columns="id,source,agent,intake_kind,client_identifier,lob_code,status,"
+                "approval_token,retry_count,created_at,updated_at",
+        params={"status": "eq.awaiting_approval", "order": "created_at.asc"},
+        limit=limit,
+    )
+    failed = supa.select(
+        "intake_submissions", columns="id,client_identifier,status,error_log,updated_at",
+        params={"status": "eq.failed", "order": "updated_at.desc"}, limit=20,
+    )
+    oldest_age = None
+    if rows:
+        try:
+            oldest = datetime.fromisoformat(str(rows[0].get("created_at")).replace("Z", "+00:00"))
+            oldest_age = (datetime.now(oldest.tzinfo) - oldest).days
+        except (ValueError, TypeError):
+            oldest_age = None
+    return {
+        "awaiting_approval": rows,
+        "awaiting_count": len(rows),
+        "oldest_age_days": oldest_age,
+        "failed_recent": failed,
+        "failed_count": len(failed),
+    }
 
 
 class TaskCreateRequest(BaseModel):
