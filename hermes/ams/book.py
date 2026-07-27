@@ -166,6 +166,24 @@ def _lineage_index(supa: "SupabaseClient") -> dict[str, str]:
     }
 
 
+def _is_quote(p: dict[str, Any]) -> bool:
+    """True when a NowCerts Policy row is actually a quote.
+
+    In NowCerts a quote is a Policy row with ``isQuote=true``. The book pulled
+    PolicyDetailList wholesale and never looked at the flag, so quotes were
+    counted as bound policies — while quote_sync.py was independently syncing
+    those same rows into `opportunities`. The same record showed up twice, once
+    as a policy and once as a deal, and inflated the policy count and premium.
+    """
+    for key in ("isQuote", "IsQuote", "is_quote"):
+        if key in p:
+            v = p[key]
+            if isinstance(v, bool):
+                return v
+            return str(v).strip().lower() in ("true", "1", "yes")
+    return False
+
+
 def fetch_book(
     supa: "SupabaseClient",
     *,
@@ -300,7 +318,11 @@ def _pull_book(
     lineage = _lineage_index(supa)
 
     rows: list[dict[str, Any]] = []
+    quotes = 0
     for p in records:
+        if _is_quote(p):
+            quotes += 1
+            continue  # a quote is an opportunity, not a policy (see quote_sync)
         guid = _policy_guid(p)
         if not guid:
             continue  # no stable key -> cannot be addressed or reconciled
@@ -328,7 +350,10 @@ def _pull_book(
             )
         else:
             _cache["full_at"] = now
-            log.info("ams.book: %s policies live (%s with lineage)", len(rows), len(lineage))
+            log.info(
+                "ams.book: %s policies live (%s with lineage); %s quotes excluded",
+                len(rows), len(lineage), quotes,
+            )
         _cache["rows"], _cache["at"] = rows, now
         _cache["failed_at"] = 0.0  # a good read retires any outstanding backoff
     return rows
