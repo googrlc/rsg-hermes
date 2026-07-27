@@ -2032,15 +2032,105 @@ async def case_documents_endpoint(case_id: str):
 
 
 # ── Book reads + Workspace KPIs (power the CRM cockpit views) ──
+# ---------------------------------------------------------------------------
+# Client corrections.
+#
+# The CRM is a read-only mirror of NowCerts, which leaves nobody able to fix a
+# wrong phone number without opening the AMS. An override is a human correction
+# that outranks the synced value until the source catches up — the same
+# mechanism the commission surface already uses, so corrections are visible,
+# attributed, reversible, and reconciled rather than silently overwriting a
+# mirror that the next sync would clobber anyway.
+#
+# This does NOT write to NowCerts. Write-back is a separate decision.
+# ---------------------------------------------------------------------------
+CLIENT_ENTITY_TYPE = "canonical_clients"
+CLIENT_OVERRIDABLE_FIELDS = frozenset({
+    "insured_name", "client_type", "email", "phone",
+    "address", "city", "state", "zip", "notes",
+})
+
+
+class ClientOverrideRequest(BaseModel):
+    field_name: str
+    value: Any = None
+    approved_by: str
+    reason: str | None = None
+
+
+@app.post("/api/clients/{insured_guid}/override")
+async def override_client_field(insured_guid: str, req: ClientOverrideRequest):
+    """Correct a client field in the portal.
+
+    Keyed on the NowCerts insured GUID so the correction survives a re-seed of
+    the mirror. Retires itself once NowCerts reports the same value.
+    """
+    from hermes.overrides.store import set_override
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+
+    field_name = (req.field_name or "").strip()
+    if field_name not in CLIENT_OVERRIDABLE_FIELDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name!r} is not overridable; allowed: {sorted(CLIENT_OVERRIDABLE_FIELDS)}",
+        )
+
+    try:
+        rows = supa.select("canonical_clients", columns="*",
+                           params={"nowcerts_insured_guid": f"eq.{insured_guid}"}, limit=1)
+    except Exception:
+        rows = []
+    if not rows:
+        raise HTTPException(status_code=404, detail="client not found")
+
+    try:
+        row = set_override(
+            supa,
+            entity_type=CLIENT_ENTITY_TYPE,
+            entity_key=insured_guid,
+            field_name=field_name,
+            override_value=req.value,
+            # The value the SOURCE currently reports — reconciliation compares
+            # against this to decide whether the AMS has caught up.
+            original_value=rows[0].get(field_name),
+            approved_by=req.approved_by,
+            reason=req.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "override": row}
+
+
+def _apply_client_overrides(supa, records: list[dict]) -> list[dict]:
+    """Overlay active corrections onto client rows. Best-effort: a correction is
+    an enrichment, and losing it must not take the client list down."""
+    from hermes.overrides.core import apply_overrides
+    from hermes.overrides.store import active_overrides
+
+    try:
+        ovr = active_overrides(supa, CLIENT_ENTITY_TYPE)
+    except Exception:  # noqa: BLE001
+        log.exception("client overrides lookup failed; serving uncorrected")
+        return records
+    if not ovr:
+        return records
+    return apply_overrides(
+        records, ovr, entity_type=CLIENT_ENTITY_TYPE, key_field="nowcerts_insured_guid"
+    )
+
+
 @app.get("/api/clients")
 async def list_clients_endpoint(limit: int = 500):
-    """Full canonical client book (read-only mirror)."""
-    rows = _get_supa().select(
+    """Full canonical client book, with any portal corrections applied."""
+    supa = _get_supa()
+    rows = supa.select(
         "canonical_clients",
         columns="nowcerts_insured_guid,insured_name,client_type,city,state,email,phone",
         params={"order": "insured_name.asc"}, limit=limit,
     )
-    return {"clients": rows, "count": len(rows)}
+    return {"clients": _apply_client_overrides(supa, rows), "count": len(rows)}
 
 
 @app.get("/api/clients/{insured_guid}")
@@ -2055,7 +2145,9 @@ async def client_360_endpoint(insured_guid: str):
         except Exception:
             return []
 
-    client = sel("canonical_clients", "*", {"nowcerts_insured_guid": f"eq.{insured_guid}"})
+    client = _apply_client_overrides(
+        supa, sel("canonical_clients", "*", {"nowcerts_insured_guid": f"eq.{insured_guid}"})
+    )
     try:
         policies = ams_book.select_policies(
             supa,
@@ -2078,10 +2170,18 @@ async def client_360_endpoint(insured_guid: str):
         "agency_crm_cases", "id,case_number,title,case_type,status,priority,created_at",
         {"insured_database_id": f"eq.{insured_guid}", "order": "created_at.desc"},
     )
+    tasks = sel(
+        "agency_crm_tasks", "id,title,status,priority,due_at,assigned_to_email,case_id",
+        {"insured_database_id": f"eq.{insured_guid}", "order": "due_at.asc"},
+    )
     return {
         "client": client[0] if client else None,
-        "policies": policies, "opportunities": opportunities, "cases": cases,
-        "counts": {"policies": len(policies), "opportunities": len(opportunities), "cases": len(cases)},
+        "policies": policies, "opportunities": opportunities, "cases": cases, "tasks": tasks,
+        "editable_fields": sorted(CLIENT_OVERRIDABLE_FIELDS),
+        "counts": {
+            "policies": len(policies), "opportunities": len(opportunities),
+            "cases": len(cases), "tasks": len(tasks),
+        },
     }
 
 
