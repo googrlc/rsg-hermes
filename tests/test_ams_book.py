@@ -531,3 +531,36 @@ def test_a_cold_client_cache_never_blocks_the_caller(live):
     assert started.wait(5)
     release.set()
     book.await_client_refresh(timeout=10)
+# ------------------------------------------------------------- quotes
+# In NowCerts a quote is a Policy row with isQuote=true. The book pulled
+# PolicyDetailList wholesale and never checked the flag, so quotes were counted
+# as bound policies — while quote_sync.py was independently syncing those same
+# rows into `opportunities`. One record, counted twice.
+
+def test_quotes_are_not_policies(live):
+    nc = _nc([
+        {"databaseId": "g1", "number": "P-1", "status": "Active", "isQuote": False},
+        {"databaseId": "q1", "number": "Q-1", "status": "Quoted", "isQuote": True},
+    ])
+    _prime(_supa(), nc)
+    rows = book.select_policies(_supa(), nowcerts=nc)
+    assert [r["policy_guid"] for r in rows] == ["g1"]
+
+
+@pytest.mark.parametrize("flag,truthy", [
+    (True, True), ("true", True), ("True", True), ("1", True),
+    (False, False), ("false", False), ("0", False), (None, False),
+])
+def test_the_quote_flag_is_read_however_nowcerts_spells_it(flag, truthy):
+    """The AMS is inconsistent about casing and about bool-vs-string."""
+    assert book._is_quote({"isQuote": flag}) is truthy
+
+
+def test_a_row_with_no_quote_flag_counts_as_a_policy():
+    """Absence must not silently drop a real policy out of the book."""
+    assert book._is_quote({"databaseId": "g1"}) is False
+
+
+def test_alternate_spellings_of_the_flag_are_honoured():
+    assert book._is_quote({"IsQuote": "true"}) is True
+    assert book._is_quote({"is_quote": True}) is True
