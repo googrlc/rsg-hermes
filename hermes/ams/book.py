@@ -86,7 +86,9 @@ DEFAULT_TTL_SECONDS = 300
 _PAGE_SIZE = 100
 _MAX_PAGES = 50  # 50 * 100 = 5000, ~11x the current book
 
-_cache: dict[str, Any] = {"rows": None, "at": 0.0, "failed_at": 0.0}
+_cache: dict[str, Any] = {
+    "rows": None, "at": 0.0, "failed_at": 0.0, "refreshing": False, "thread": None,
+}
 _lock = threading.Lock()
 
 # How long a failed AMS pull suppresses the next attempt. Long enough that a sick
@@ -122,6 +124,8 @@ def invalidate_cache() -> None:
         # Clear the backoff too — an explicit invalidation is a request to go and
         # look again, which a lingering failure stamp would otherwise refuse.
         _cache["failed_at"] = 0.0
+        _cache["refreshing"] = False
+        _cache["thread"] = None
 
 
 def _lineage_index(supa: "SupabaseClient") -> dict[str, str]:
@@ -149,23 +153,74 @@ def fetch_book(
 ) -> list[dict[str, Any]]:
     """The whole live book, shaped like ``canonical_policies`` rows.
 
-    Cached for ``HERMES_AMS_BOOK_TTL`` seconds so a dashboard render doesn't
-    re-pull the AMS per widget.
+    Cached for ``HERMES_AMS_BOOK_TTL`` seconds, and **stale-while-revalidate**:
+    once there is any cached book, an expired TTL is served from cache while the
+    refresh runs on a background thread. A full pull is 5 pages against an API
+    whose per-page latency swings between 5s and 30s, so making a request wait
+    for one is what froze the API and 8s-timed-out the portal behind it. Only a
+    genuinely cold cache blocks; `force=True` always blocks and always refetches.
     """
     ttl = _ttl()
     with _lock:
-        fresh = _cache["rows"] is not None and (time.time() - _cache["at"]) < ttl
+        rows = _cache["rows"]
+        fresh = rows is not None and (time.time() - _cache["at"]) < ttl
         if fresh and not force:
-            return _cache["rows"]
-        # Recent failure: fail fast instead of queueing behind another timeout.
-        # `force` still gets through, so a deliberate refresh can always retry.
+            return rows
         failed_at = _cache.get("failed_at") or 0.0
-        if not force and (time.time() - failed_at) < _FAIL_BACKOFF_SECONDS:
+        backing_off = (time.time() - failed_at) < _FAIL_BACKOFF_SECONDS
+
+        if rows is not None and not force:
+            # Warm but stale: hand back what we have. Kick off a refresh unless
+            # one is already running or the upstream just failed.
+            if not backing_off and not _cache["refreshing"]:
+                _cache["refreshing"] = True
+                _spawn_refresh(supa, nowcerts)
+            return rows
+
+        # Cold cache: nothing to serve, so this caller has to wait for the AMS.
+        # Fail fast rather than queue behind another timeout if it just failed.
+        if not force and backing_off:
             raise AmsBookUnavailable(
                 "ams.book: AMS read failed recently; backing off "
                 f"{_FAIL_BACKOFF_SECONDS}s before retrying"
             )
 
+    return _pull_book(supa, nowcerts)
+
+
+def _spawn_refresh(
+    supa: "SupabaseClient", nowcerts: "NowCertsClient | None"
+) -> None:
+    """Refresh the book off the request path. Caller holds _lock and has already
+    set ``refreshing``."""
+
+    def _run() -> None:
+        try:
+            _pull_book(supa, nowcerts)
+        except Exception:  # noqa: BLE001 — a background refresh must never escape
+            log.warning("ams.book: background refresh failed; serving stale", exc_info=True)
+        finally:
+            with _lock:
+                _cache["refreshing"] = False
+
+    t = threading.Thread(target=_run, name="ams-book-refresh", daemon=True)
+    _cache["thread"] = t
+    t.start()
+
+
+def await_refresh(timeout: float = 120.0) -> None:
+    """Block until any in-flight background refresh settles. For tests and for
+    callers (the nightly sync) that genuinely need the freshest book."""
+    t = _cache.get("thread")
+    if t is not None:
+        t.join(timeout)
+
+
+def _pull_book(
+    supa: "SupabaseClient",
+    nowcerts: "NowCertsClient | None" = None,
+) -> list[dict[str, Any]]:
+    """The actual AMS pull + cache write. Raises on failure."""
     if nowcerts is None:
         # The SHARED client, not a fresh one. Most callers of select_policies()
         # don't thread a client through (15 call sites, nearly none of them do),

@@ -14,13 +14,31 @@ log = logging.getLogger(__name__)
 
 _TZ_OFFSET_RE = re.compile(r"[+\-]\d{2}:\d{2}$")
 
-# NowCerts' password grant is genuinely slow — measured at ~26s against the live
-# API, with the network path itself instant (DNS 0.06s / TCP 0.03s / TLS 0.07s).
-# A 30s ceiling therefore sat right on top of it and turned every fresh auth into
-# a coin flip. Give the token exchange its own, roomier budget; ordinary data
-# reads keep the tighter one.
-DEFAULT_TIMEOUT = 30.0
+# NowCerts is slow and, more importantly, *erratic*. Measured against the live
+# API, with the network path itself instant (DNS 0.06s / TCP 0.03s / TLS 0.07s):
+#
+#   password grant                        10-26s
+#   /api/PolicyDetailList  top=100 skip=0    7.7s
+#   /api/PolicyDetailList  top=50  skip=0   29.9s
+#   /api/PolicyDetailList  top=25  skip=0    4.7s
+#
+# Latency does not track payload size — a 50-row page outran a 100-row page by
+# 4x in the other direction. It is variance on their side, so the only defences
+# are headroom and a retry; shrinking the page size just buys more coin flips.
+# 30s sat inside the observed range, which is why reads failed at random.
+DEFAULT_TIMEOUT = 60.0
 DEFAULT_AUTH_TIMEOUT = 90.0
+# One retry on a timeout/connection blip. Two consecutive stalls is a genuinely
+# sick upstream, and the book cache's failure backoff should take over instead.
+DEFAULT_RETRIES = 1
+
+
+def _env_float(name: str, fallback: float) -> float:
+    """Tunable without a redeploy — these numbers depend on NowCerts' mood."""
+    try:
+        return float(os.environ[name])
+    except (KeyError, TypeError, ValueError):
+        return fallback
 
 _shared: "NowCertsClient | None" = None
 _shared_lock = threading.Lock()
@@ -61,21 +79,30 @@ class NowCertsClient:
         base_url: str | None = None,
         username: str | None = None,
         password: str | None = None,
-        timeout: float = DEFAULT_TIMEOUT,
+        timeout: float | None = None,
         auth_timeout: float | None = None,
+        retries: int | None = None,
     ) -> None:
         self.base_url = (
             base_url or os.environ.get("NOWCERTS_API_URL", "https://api.nowcerts.com")
         ).rstrip("/")
         self._username = username or os.environ.get("NOWCERTS_USERNAME", "")
         self._password = password or os.environ.get("NOWCERTS_PASSWORD", "")
-        self.timeout = timeout
+        self.timeout = (
+            timeout if timeout is not None
+            else _env_float("NOWCERTS_TIMEOUT", DEFAULT_TIMEOUT)
+        )
+        self.retries = (
+            retries if retries is not None
+            else int(_env_float("NOWCERTS_RETRIES", DEFAULT_RETRIES))
+        )
         # The token exchange needs more headroom than a data read; see
         # DEFAULT_AUTH_TIMEOUT. Never below `timeout`, so an explicitly widened
         # timeout is still respected.
         self.auth_timeout = max(
-            auth_timeout if auth_timeout is not None else DEFAULT_AUTH_TIMEOUT,
-            timeout,
+            auth_timeout if auth_timeout is not None
+            else _env_float("NOWCERTS_AUTH_TIMEOUT", DEFAULT_AUTH_TIMEOUT),
+            self.timeout,
         )
         self._token: str | None = None
         # Without this, N threads arriving on a cold client each fire their own

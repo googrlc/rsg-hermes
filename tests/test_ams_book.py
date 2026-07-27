@@ -6,6 +6,8 @@ joining, caching, and the fallbacks. NowCerts + Supabase mocked.
 
 from __future__ import annotations
 
+import threading
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -180,6 +182,9 @@ def test_expired_ttl_refetches(live, monkeypatch):
     nc = _nc()
     book.select_policies(_supa(), nowcerts=nc)
     book.select_policies(_supa(), nowcerts=nc)
+    # The second read is served from cache and refreshed behind the request, so
+    # the refetch lands on the background thread rather than inline.
+    book.await_refresh(timeout=5)
     assert nc.fetch_policies.call_count == 2
 
 
@@ -251,3 +256,63 @@ def test_a_good_read_retires_the_backoff(live, monkeypatch):
     # backoff cleared by the success -> a plain call goes through again
     book.fetch_book(_supa(), nowcerts=nc)
     assert nc.fetch_policies.call_count == 3
+
+
+# ---------------------------------------------- stale-while-revalidate
+# A full book pull is 5 pages against an API whose per-page latency swings
+# between ~5s and ~30s. Making a request wait for one is what froze the API and
+# 8s-timed-out the portal behind it, so only a cold cache may ever block.
+
+def test_a_stale_cache_is_served_without_waiting_for_the_ams(live, monkeypatch):
+    monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
+    nc = _nc()
+    book.select_policies(_supa(), nowcerts=nc)      # cold: blocks, fills cache
+    started = threading.Event()
+    release = threading.Event()
+
+    def _slow(*a, **k):
+        started.set()
+        release.wait(5)                              # a pull that never returns in time
+        return []
+
+    nc.fetch_policies.side_effect = _slow
+    rows = book.select_policies(_supa(), nowcerts=nc)   # must NOT wait on _slow
+    assert rows, "a stale book must still be served"
+    assert started.wait(5), "the refresh should have been kicked off in the background"
+    release.set()
+    book.await_refresh(timeout=5)
+
+
+def test_only_one_background_refresh_runs_at_a_time(live, monkeypatch):
+    monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
+    nc = _nc()
+    book.select_policies(_supa(), nowcerts=nc)
+    release = threading.Event()
+    nc.fetch_policies.side_effect = lambda *a, **k: (release.wait(5), [])[1]
+    for _ in range(5):
+        book.select_policies(_supa(), nowcerts=nc)
+    release.set()
+    book.await_refresh(timeout=5)
+    # 1 cold pull + exactly 1 background refresh, not one per request
+    assert nc.fetch_policies.call_count == 2
+
+
+def test_a_cold_cache_still_blocks_and_raises(live):
+    """With nothing cached there is nothing to serve, so the failure must surface
+    and let select_policies() fall back to the mirror."""
+    nc = _nc()
+    nc.fetch_policies.side_effect = RuntimeError("read timed out")
+    with pytest.raises(RuntimeError):
+        book.fetch_book(_supa(), nowcerts=nc)
+
+
+def test_a_failed_background_refresh_keeps_serving_the_stale_book(live, monkeypatch):
+    monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
+    nc = _nc()
+    book.select_policies(_supa(), nowcerts=nc)
+    nc.fetch_policies.side_effect = RuntimeError("read timed out")
+    rows = book.select_policies(_supa(), nowcerts=nc)
+    book.await_refresh(timeout=5)
+    assert rows, "a failed refresh must not take the cached book away"
+    # and the failure is recorded, so the next stale read backs off instead of retrying
+    assert book._cache["failed_at"] > 0
