@@ -2121,6 +2121,89 @@ def _apply_client_overrides(supa, records: list[dict]) -> list[dict]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Policy corrections.
+#
+# Same mechanism as client corrections, one rule tighter: the identifiers a
+# policy carries out of NowCerts — policy_guid, nowcerts_insured_guid,
+# renewed_policy, policy_number — are not overridable. They are how a row is
+# matched back to the AMS and how a renewal is tied to the term it replaced.
+# "Correcting" one does not fix the record, it detaches it from the source and
+# from its own lineage. They are shown, and shown read-only.
+# ---------------------------------------------------------------------------
+POLICY_ENTITY_TYPE = "canonical_policies"
+POLICY_OVERRIDABLE_FIELDS = frozenset({
+    "carrier", "lines_of_business", "status",
+    "effective_date", "expiration_date",
+    "premium_amount", "annualized_premium",
+})
+
+
+class PolicyOverrideRequest(BaseModel):
+    field_name: str
+    value: Any = None
+    approved_by: str
+    reason: str | None = None
+
+
+@app.post("/api/policies/{policy_guid}/override")
+async def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
+    """Correct a policy field in the portal. Keyed on the NowCerts policy GUID,
+    so the correction survives a re-seed of the mirror. Not an AMS write."""
+    from hermes.overrides.store import set_override
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+
+    field_name = (req.field_name or "").strip()
+    if field_name not in POLICY_OVERRIDABLE_FIELDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name!r} is not overridable; allowed: {sorted(POLICY_OVERRIDABLE_FIELDS)}",
+        )
+
+    try:
+        rows = ams_book.select_policies(
+            supa, columns="*", params={"policy_guid": f"eq.{policy_guid}"}, limit=1,
+        )
+    except Exception:  # noqa: BLE001
+        rows = []
+    if not rows:
+        raise HTTPException(status_code=404, detail="policy not found")
+
+    try:
+        row = set_override(
+            supa,
+            entity_type=POLICY_ENTITY_TYPE,
+            entity_key=policy_guid,
+            field_name=field_name,
+            override_value=req.value,
+            original_value=rows[0].get(field_name),
+            approved_by=req.approved_by,
+            reason=req.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "override": row}
+
+
+def _apply_policy_overrides(supa, records: list[dict]) -> list[dict]:
+    """Overlay active corrections onto policy rows. Best-effort, like clients."""
+    from hermes.overrides.core import apply_overrides
+    from hermes.overrides.store import active_overrides
+
+    try:
+        ovr = active_overrides(supa, POLICY_ENTITY_TYPE)
+    except Exception:  # noqa: BLE001
+        log.exception("policy overrides lookup failed; serving uncorrected")
+        return records
+    if not ovr:
+        return records
+    return apply_overrides(
+        records, ovr, entity_type=POLICY_ENTITY_TYPE, key_field="policy_guid"
+    )
+
+
 @app.get("/api/clients")
 async def list_clients_endpoint(limit: int = 500):
     """Full canonical client book, with any portal corrections applied."""
@@ -2161,7 +2244,11 @@ async def client_360_endpoint(insured_guid: str):
         )
     except Exception:  # noqa: BLE001 — a 360 view degrades rather than 500s
         policies = []
-    policies, _policy_prior_terms = _collapse_to_current_terms(policies)
+    # Correct first, then collapse: a corrected expiration date is what decides
+    # which term is the current one.
+    policies, _policy_prior_terms = _collapse_to_current_terms(
+        _apply_policy_overrides(supa, policies)
+    )
     opportunities = sel(
         "opportunities", "id,line_of_business,stage,status,premium_estimate,carrier,quote_number,next_action",
         {"insured_id": f"eq.{insured_guid}", "order": "updated_at.desc"},
@@ -2178,6 +2265,7 @@ async def client_360_endpoint(insured_guid: str):
         "client": client[0] if client else None,
         "policies": policies, "opportunities": opportunities, "cases": cases, "tasks": tasks,
         "editable_fields": sorted(CLIENT_OVERRIDABLE_FIELDS),
+        "editable_policy_fields": sorted(POLICY_OVERRIDABLE_FIELDS),
         "counts": {
             "policies": len(policies), "opportunities": len(opportunities),
             "cases": len(cases), "tasks": len(tasks),
@@ -2245,6 +2333,7 @@ async def list_policies_endpoint(limit: int = 1000, include_history: bool = Fals
                 "effective_date,expiration_date,premium_amount,annualized_premium,agency_commission_amount,state",
         params={"order": "expiration_date.asc"}, limit=limit,
     )
+    rows = _apply_policy_overrides(supa, rows)
     folded = 0
     if not include_history:
         rows, folded = _collapse_to_current_terms(rows)
