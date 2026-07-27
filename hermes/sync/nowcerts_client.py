@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from typing import Any
 
 import requests
@@ -12,6 +13,34 @@ import requests
 log = logging.getLogger(__name__)
 
 _TZ_OFFSET_RE = re.compile(r"[+\-]\d{2}:\d{2}$")
+
+# NowCerts' password grant is genuinely slow — measured at ~26s against the live
+# API, with the network path itself instant (DNS 0.06s / TCP 0.03s / TLS 0.07s).
+# A 30s ceiling therefore sat right on top of it and turned every fresh auth into
+# a coin flip. Give the token exchange its own, roomier budget; ordinary data
+# reads keep the tighter one.
+DEFAULT_TIMEOUT = 30.0
+DEFAULT_AUTH_TIMEOUT = 90.0
+
+_shared: "NowCertsClient | None" = None
+_shared_lock = threading.Lock()
+
+
+def get_client() -> "NowCertsClient":
+    """The process-wide NowCerts client — use this instead of ``NowCertsClient()``.
+
+    Auth costs ~26s, but a token is good for the life of the process, so the cost
+    is only bearable if everyone shares one client. Constructing a fresh client
+    per call (which is what most call sites used to do) threw the token away every
+    time and re-paid that 26s, which is what stalled the API and timed out the
+    MCP tools.
+    """
+    global _shared
+    if _shared is None:
+        with _shared_lock:
+            if _shared is None:
+                _shared = NowCertsClient()
+    return _shared
 
 
 class NowCertsClientError(Exception):
@@ -32,7 +61,8 @@ class NowCertsClient:
         base_url: str | None = None,
         username: str | None = None,
         password: str | None = None,
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_TIMEOUT,
+        auth_timeout: float | None = None,
     ) -> None:
         self.base_url = (
             base_url or os.environ.get("NOWCERTS_API_URL", "https://api.nowcerts.com")
@@ -40,7 +70,17 @@ class NowCertsClient:
         self._username = username or os.environ.get("NOWCERTS_USERNAME", "")
         self._password = password or os.environ.get("NOWCERTS_PASSWORD", "")
         self.timeout = timeout
+        # The token exchange needs more headroom than a data read; see
+        # DEFAULT_AUTH_TIMEOUT. Never below `timeout`, so an explicitly widened
+        # timeout is still respected.
+        self.auth_timeout = max(
+            auth_timeout if auth_timeout is not None else DEFAULT_AUTH_TIMEOUT,
+            timeout,
+        )
         self._token: str | None = None
+        # Without this, N threads arriving on a cold client each fire their own
+        # ~26s password grant instead of one of them doing it and the rest waiting.
+        self._auth_lock = threading.Lock()
         if not self._username or not self._password:
             raise NowCertsClientError(
                 "NOWCERTS_USERNAME and NOWCERTS_PASSWORD must be set (env or constructor)."
@@ -57,7 +97,7 @@ class NowCertsClient:
                 "password": self._password,
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=self.timeout,
+            timeout=self.auth_timeout,
         )
         if not resp.ok:
             raise NowCertsClientError(
@@ -73,7 +113,11 @@ class NowCertsClient:
 
     def _headers(self) -> dict[str, str]:
         if not self._token:
-            self._authenticate()
+            # Double-checked: whoever wins the lock authenticates, everyone else
+            # finds the token already there rather than re-paying the ~26s grant.
+            with self._auth_lock:
+                if not self._token:
+                    self._authenticate()
         return {
             "Authorization": f"Bearer {self._token}",
             "Accept": "application/json",

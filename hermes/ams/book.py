@@ -86,8 +86,21 @@ DEFAULT_TTL_SECONDS = 300
 _PAGE_SIZE = 100
 _MAX_PAGES = 50  # 50 * 100 = 5000, ~11x the current book
 
-_cache: dict[str, Any] = {"rows": None, "at": 0.0}
+_cache: dict[str, Any] = {"rows": None, "at": 0.0, "failed_at": 0.0}
 _lock = threading.Lock()
+
+# How long a failed AMS pull suppresses the next attempt. Long enough that a sick
+# upstream isn't re-probed once per dashboard widget, short enough that recovery
+# is picked up without a restart.
+_FAIL_BACKOFF_SECONDS = 60.0
+
+
+class AmsBookUnavailable(RuntimeError):
+    """The live book can't be read right now (recent failure, still backing off).
+
+    Its own type so callers can tell "AMS is briefly unavailable, use the mirror"
+    apart from a genuine bug. ``select_policies`` already falls back to Supabase
+    on any exception, so this degrades to the mirror rather than to an error."""
 
 
 def live_reads_enabled() -> bool:
@@ -106,6 +119,9 @@ def invalidate_cache() -> None:
     """Drop the cached book (call after a write that should be visible now)."""
     with _lock:
         _cache["rows"], _cache["at"] = None, 0.0
+        # Clear the backoff too — an explicit invalidation is a request to go and
+        # look again, which a lingering failure stamp would otherwise refuse.
+        _cache["failed_at"] = 0.0
 
 
 def _lineage_index(supa: "SupabaseClient") -> dict[str, str]:
@@ -141,13 +157,35 @@ def fetch_book(
         fresh = _cache["rows"] is not None and (time.time() - _cache["at"]) < ttl
         if fresh and not force:
             return _cache["rows"]
+        # Recent failure: fail fast instead of queueing behind another timeout.
+        # `force` still gets through, so a deliberate refresh can always retry.
+        failed_at = _cache.get("failed_at") or 0.0
+        if not force and (time.time() - failed_at) < _FAIL_BACKOFF_SECONDS:
+            raise AmsBookUnavailable(
+                "ams.book: AMS read failed recently; backing off "
+                f"{_FAIL_BACKOFF_SECONDS}s before retrying"
+            )
 
     if nowcerts is None:
-        from hermes.sync.nowcerts_client import NowCertsClient
+        # The SHARED client, not a fresh one. Most callers of select_policies()
+        # don't thread a client through (15 call sites, nearly none of them do),
+        # so building one here meant a brand-new empty token cache — and a fresh
+        # ~26s password grant — on every single book read.
+        from hermes.sync.nowcerts_client import get_client
 
-        nowcerts = NowCertsClient()
+        nowcerts = get_client()
 
-    records = nowcerts.fetch_policies(page_size=_PAGE_SIZE, max_pages=_MAX_PAGES)
+    # A failed AMS pull used to propagate straight out of here, before the cache
+    # write below — so nothing was ever recorded, the TTL never engaged, and every
+    # subsequent request re-paid the full timeout. Stamp the attempt first: a
+    # failure now backs off for _FAIL_BACKOFF_SECONDS instead of hammering a sick
+    # upstream once per widget.
+    try:
+        records = nowcerts.fetch_policies(page_size=_PAGE_SIZE, max_pages=_MAX_PAGES)
+    except Exception:
+        with _lock:
+            _cache["failed_at"] = time.time()
+        raise
     lineage = _lineage_index(supa)
 
     rows: list[dict[str, Any]] = []
@@ -171,6 +209,7 @@ def fetch_book(
     log.info("ams.book: %s policies live (%s with lineage)", len(rows), len(lineage))
     with _lock:
         _cache["rows"], _cache["at"] = rows, time.time()
+        _cache["failed_at"] = 0.0  # a good read retires any outstanding backoff
     return rows
 
 

@@ -132,12 +132,17 @@ def _get_supa():
 
 
 def _get_nowcerts():
-    """Lazy singleton for NowCertsClient. Reads NOWCERTS_USERNAME/PASSWORD from env."""
+    """The shared NowCertsClient. Reads NOWCERTS_USERNAME/PASSWORD from env.
+
+    Delegates to ``nowcerts_client.get_client()`` rather than keeping a second
+    singleton of its own: two singletons meant two tokens and two ~26s password
+    grants in one process, and the API and the book reads each paying their own.
+    """
     global _nowcerts
     if _nowcerts is None:
-        from hermes.sync.nowcerts_client import NowCertsClient
+        from hermes.sync.nowcerts_client import get_client
 
-        _nowcerts = NowCertsClient()
+        _nowcerts = get_client()
     return _nowcerts
 
 

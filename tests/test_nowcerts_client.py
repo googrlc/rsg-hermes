@@ -169,3 +169,47 @@ class NowCertsWriteMethodTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SharedClientAndTokenReuseTests(unittest.TestCase):
+    """Regression cover for the stall diagnosed 2026-07-27.
+
+    NowCerts' password grant measures ~26s against the live API. That is only
+    survivable if the token is fetched once and shared; every call site building
+    its own client re-paid it, which froze the API and timed out the MCP tools.
+    """
+
+    ENV = {"NOWCERTS_USERNAME": "u@risksolutionsgroup.net", "NOWCERTS_PASSWORD": "p"}
+
+    def setUp(self) -> None:
+        import hermes.sync.nowcerts_client as mod
+        self.mod = mod
+        mod._shared = None            # a shared singleton must not leak between tests
+        self.addCleanup(setattr, mod, "_shared", None)
+
+    def test_get_client_returns_one_shared_instance(self) -> None:
+        with patch.dict(os.environ, self.ENV, clear=True):
+            self.assertIs(self.mod.get_client(), self.mod.get_client())
+
+    def test_token_is_fetched_once_and_reused(self) -> None:
+        with patch.dict(os.environ, self.ENV, clear=True):
+            c = NowCertsClient()
+        with patch("requests.post", return_value=FakeResponse(200, {"access_token": "t"})) as post:
+            for _ in range(5):
+                headers = c._headers()
+        post.assert_called_once()
+        self.assertEqual(headers["Authorization"], "Bearer t")
+
+    def test_auth_gets_a_longer_timeout_than_a_data_read(self) -> None:
+        """A 30s ceiling sat on top of a ~26s grant and made auth a coin flip."""
+        with patch.dict(os.environ, self.ENV, clear=True):
+            c = NowCertsClient()
+        self.assertGreater(c.auth_timeout, c.timeout)
+        with patch("requests.post", return_value=FakeResponse(200, {"access_token": "t"})) as post:
+            c._authenticate()
+        self.assertEqual(post.call_args.kwargs["timeout"], c.auth_timeout)
+
+    def test_auth_timeout_never_drops_below_an_explicit_timeout(self) -> None:
+        with patch.dict(os.environ, self.ENV, clear=True):
+            c = NowCertsClient(timeout=120.0)
+        self.assertGreaterEqual(c.auth_timeout, 120.0)
