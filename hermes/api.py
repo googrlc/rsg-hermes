@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hmac
 import json
 import logging
@@ -2834,6 +2836,170 @@ async def document_detail(doc_id: str):
     if row is None:
         raise HTTPException(status_code=404, detail="document not found")
     return row
+
+
+class NextcloudEnsureFoldersRequest(BaseModel):
+    paths: list[str]
+    confirm: bool = False
+
+
+class NextcloudUploadRequest(BaseModel):
+    title: str
+    account_name: str
+    line_type: Literal["commercial", "personal"]
+    category: str
+    content_base64: str
+    content_type: str = "application/pdf"
+
+
+_NEXTCLOUD_LINE_ROOTS = {
+    "commercial": "Commercial Lines/Clients",
+    "personal": "Personal Lines/Clients",
+}
+_NEXTCLOUD_CATEGORIES = {
+    "commercial": {
+        "00 Intake Documents",
+        "Policies",
+        "Applications & Quotes",
+        "Endorsements",
+        "Certificates",
+        "Claims",
+        "Billing",
+        "Correspondence",
+    },
+    "personal": {
+        "00 Intake Documents",
+        "Auto",
+        "Home",
+        "Umbrella",
+        "Flood",
+        "Other Personal",
+        "Claims",
+        "Billing",
+        "Correspondence",
+    },
+}
+_NEXTCLOUD_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+def _validated_nextcloud_path(raw: str) -> str:
+    raw_path = (raw or "").strip()
+    if raw_path.startswith("/"):
+        raise HTTPException(status_code=400, detail=f"invalid Nextcloud path: {raw!r}")
+    path = raw_path.strip("/")
+    parts = path.split("/")
+    if (
+        not path
+        or "\\" in path
+        or "\x00" in path
+        or any(part in ("", ".", "..") for part in parts)
+    ):
+        raise HTTPException(status_code=400, detail=f"invalid Nextcloud path: {raw!r}")
+    return path
+
+
+@app.get("/api/nextcloud/folders")
+async def nextcloud_list_folder(path: str = ""):
+    """List one real Nextcloud WebDAV folder, not the document index."""
+    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+
+    nc = NextcloudClient()
+    if not nc.is_configured():
+        raise HTTPException(status_code=503, detail="Nextcloud is not configured")
+    clean = path.strip().strip("/")
+    if clean:
+        clean = _validated_nextcloud_path(clean)
+    try:
+        exists = nc.path_exists(clean)
+        entries = nc.list_dir(clean) if exists else []
+    except NextcloudError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"path": clean, "exists": exists, "entries": entries}
+
+
+@app.post("/api/nextcloud/folders/ensure")
+async def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
+    """Preview or idempotently create exact Nextcloud folder paths."""
+    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+
+    paths = list(dict.fromkeys(_validated_nextcloud_path(p) for p in req.paths))
+    if not paths:
+        raise HTTPException(status_code=400, detail="at least one path is required")
+    if len(paths) > 100:
+        raise HTTPException(status_code=400, detail="at most 100 paths per request")
+    if not req.confirm:
+        return {
+            "ok": True,
+            "requires_confirmation": True,
+            "operation": "ensure_nextcloud_folders",
+            "paths": paths,
+        }
+
+    nc = NextcloudClient()
+    if not nc.is_configured():
+        raise HTTPException(status_code=503, detail="Nextcloud is not configured")
+    results = []
+    try:
+        for path in paths:
+            existed = nc.path_exists(path)
+            nc.ensure_dirs(path)
+            verified = nc.path_exists(path)
+            results.append({
+                "path": path,
+                "status": "existing" if existed else "created",
+                "verified": verified,
+            })
+    except NextcloudError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    if not all(item["verified"] for item in results):
+        raise HTTPException(status_code=502, detail={"message": "folder read-back failed", "results": results})
+    return {"ok": True, "requires_confirmation": False, "results": results}
+
+
+@app.post("/api/nextcloud/upload")
+async def nextcloud_upload(req: NextcloudUploadRequest):
+    """Upload one approved PDF into the standardized RSG client tree."""
+    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+
+    if not req.title.strip() or not req.title.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="title must be a non-empty .pdf filename")
+    if not req.account_name.strip():
+        raise HTTPException(status_code=400, detail="account_name is required")
+    if req.category not in _NEXTCLOUD_CATEGORIES[req.line_type]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported {req.line_type} category: {req.category}",
+        )
+    if req.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="only application/pdf is supported")
+    try:
+        content = base64.b64decode(req.content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="content_base64 is invalid")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="content is not a PDF")
+    if len(content) > _NEXTCLOUD_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="PDF exceeds 25 MiB")
+
+    nc = NextcloudClient()
+    if not nc.is_configured():
+        raise HTTPException(status_code=503, detail="Nextcloud is not configured")
+    try:
+        result = nc.file_document(
+            content=content,
+            filename=req.title,
+            content_type=req.content_type,
+            client=req.account_name,
+            category=req.category,
+            client_root=_NEXTCLOUD_LINE_ROOTS[req.line_type],
+            overwrite=False,
+        )
+        verified = nc.path_exists(result["path"])
+    except NextcloudError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    if not verified:
+        raise HTTPException(status_code=502, detail="upload read-back failed")
+    return {**result, "verified": True}
 
 
 @app.post("/agency-intake", response_model=AgencyIntakeResponse)
