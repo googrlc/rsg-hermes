@@ -18,14 +18,36 @@ from hermes.ams import book
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
+    # Refreshes run on a background thread, so a thread still in flight from the
+    # previous test will happily write into _cache *after* invalidation and leak
+    # state into this one. Drain first, then clear.
+    book.await_refresh(timeout=5)
     book.invalidate_cache()
     yield
+    book.await_refresh(timeout=5)
     book.invalidate_cache()
 
 
 @pytest.fixture
 def live(monkeypatch):
     monkeypatch.setenv("HERMES_AMS_LIVE_READS", "1")
+
+
+
+@pytest.fixture
+def sync_refresh(monkeypatch):
+    """Run refreshes inline. The decision to refresh is the logic under test;
+    real threads here just make the suite flaky."""
+    def _inline(supa, nowcerts):
+        try:
+            book._pull_book(supa, nowcerts)
+        except Exception:
+            pass
+        finally:
+            with book._lock:
+                book._cache["refreshing"] = False
+    monkeypatch.setattr(book, "_spawn_refresh", _inline)
+    return _inline
 
 
 def _nc(records=None):
@@ -195,21 +217,20 @@ def test_book_is_cached_across_calls(live):
 
 
 def test_invalidate_cache_forces_a_refetch(live):
+    """Refreshes are backgrounded now, so drive them with force to stay
+    deterministic — the point is that invalidation re-pulls, not when."""
     nc = _nc()
-    book.select_policies(_supa(), nowcerts=nc)
+    _prime(_supa(), nc)
     book.invalidate_cache()
-    book.select_policies(_supa(), nowcerts=nc)
+    _prime(_supa(), nc)
     assert nc.fetch_policies.call_count == 2
 
 
-def test_expired_ttl_refetches(live, monkeypatch):
+def test_expired_ttl_refetches(live, monkeypatch, sync_refresh):
     monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
     nc = _nc()
-    book.select_policies(_supa(), nowcerts=nc)
-    book.select_policies(_supa(), nowcerts=nc)
-    # The second read is served from cache and refreshed behind the request, so
-    # the refetch lands on the background thread rather than inline.
-    book.await_refresh(timeout=5)
+    _prime(_supa(), nc)                            # warm the cache: 1 pull
+    book.select_policies(_supa(), nowcerts=nc)     # stale -> serves cache, refreshes behind
     assert nc.fetch_policies.call_count == 2
 
 
@@ -228,7 +249,7 @@ def test_ams_failure_falls_back_to_the_mirror(live):
 # takes ~26s, and every book read used to build a fresh client (empty token
 # cache) and re-pay it, which froze the API and timed out the MCP tools.
 
-def test_uses_the_shared_client_when_none_is_passed(live):
+def test_uses_the_shared_client_when_none_is_passed(live, sync_refresh):
     """No `nowcerts=` must reach get_client(), not a fresh NowCertsClient()."""
     nc = _nc()
     with patch("hermes.sync.nowcerts_client.get_client", return_value=nc) as shared:
@@ -309,17 +330,26 @@ def test_a_stale_cache_is_served_without_waiting_for_the_ams(live, monkeypatch):
 
 
 def test_only_one_background_refresh_runs_at_a_time(live, monkeypatch):
+    """Single-flight only means anything with real concurrency, so this one keeps
+    real threads while its siblings run the refresh inline."""
     monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
     nc = _nc()
-    book.select_policies(_supa(), nowcerts=nc)
-    release = threading.Event()
-    nc.fetch_policies.side_effect = lambda *a, **k: (release.wait(5), [])[1]
-    for _ in range(5):
+    _prime(_supa(), nc)                       # 1 pull, cache warm
+    entered, release = threading.Event(), threading.Event()
+
+    def _blocking(*a, **k):
+        entered.set()
+        release.wait(5)
+        return []
+
+    nc.fetch_policies.side_effect = _blocking
+    book.select_policies(_supa(), nowcerts=nc)        # spawns the refresh
+    assert entered.wait(5), "the refresh should have started"
+    for _ in range(4):                                # all land while it is in flight
         book.select_policies(_supa(), nowcerts=nc)
     release.set()
     book.await_refresh(timeout=5)
-    # 1 cold pull + exactly 1 background refresh, not one per request
-    assert nc.fetch_policies.call_count == 2
+    assert nc.fetch_policies.call_count == 2, "one refresh, not one per request"
 
 
 def test_a_cold_cache_still_blocks_and_raises(live):
@@ -331,13 +361,12 @@ def test_a_cold_cache_still_blocks_and_raises(live):
         book.fetch_book(_supa(), nowcerts=nc)
 
 
-def test_a_failed_background_refresh_keeps_serving_the_stale_book(live, monkeypatch):
+def test_a_failed_background_refresh_keeps_serving_the_stale_book(live, monkeypatch, sync_refresh):
     monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
     nc = _nc()
     book.select_policies(_supa(), nowcerts=nc)
     nc.fetch_policies.side_effect = RuntimeError("read timed out")
     rows = book.select_policies(_supa(), nowcerts=nc)
-    book.await_refresh(timeout=5)
     assert rows, "a failed refresh must not take the cached book away"
     # and the failure is recorded, so the next stale read backs off instead of retrying
     assert book._cache["failed_at"] > 0
@@ -379,3 +408,43 @@ def test_a_cold_cache_degrades_to_the_mirror_rather_than_hanging(live):
     assert time.time() - t0 < 2
     release.set()
     book.await_refresh(timeout=10)
+
+
+# ------------------------------------------------- incremental refresh
+# A full pull is 5 sequential pages against an API measured at ~40% success per
+# page. A changeDate delta is normally one page, so it lands far more often and
+# finishes in seconds — which matters when the AMS is this flaky.
+
+def test_first_pull_is_full_then_refreshes_are_incremental(live, monkeypatch):
+    monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
+    nc = _nc()
+    book.fetch_book(_supa(), nowcerts=nc, force=True)
+    assert nc.fetch_policies.call_args.kwargs.get("since") is None, "first pull must be full"
+    book.fetch_book(_supa(), nowcerts=nc, force=True)
+    assert nc.fetch_policies.call_args.kwargs.get("since"), "second pull must be a delta"
+
+
+def test_a_delta_merges_into_the_book_rather_than_replacing_it(live, monkeypatch):
+    monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
+    nc = _nc()
+    book.fetch_book(_supa(), nowcerts=nc, force=True)          # g1 + g2
+    # Delta reports only g1, changed. g2 must survive.
+    nc.fetch_policies.return_value = [
+        {"databaseId": "g1", "number": "P-1-UPDATED", "insuredDatabaseId": "i1",
+         "carrierName": "CNA", "status": "Active", "active": True},
+    ]
+    rows = book.fetch_book(_supa(), nowcerts=nc, force=True)
+    by = {r["policy_guid"]: r for r in rows}
+    assert set(by) == {"g1", "g2"}, "a delta must not drop untouched policies"
+    assert by["g1"]["policy_number"] == "P-1-UPDATED"
+
+
+def test_a_full_pull_is_forced_periodically_to_catch_deletions(live, monkeypatch):
+    """A changeDate delta never reports a removal, so a deleted policy would sit
+    in the cache forever without this."""
+    monkeypatch.setenv("HERMES_AMS_BOOK_TTL", "0")
+    monkeypatch.setenv("HERMES_AMS_FULL_REFRESH", "0")   # every refresh is due a full pull
+    nc = _nc()
+    book.fetch_book(_supa(), nowcerts=nc, force=True)
+    book.fetch_book(_supa(), nowcerts=nc, force=True)
+    assert nc.fetch_policies.call_args.kwargs.get("since") is None
