@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import threading
+import time
 from typing import Any
 
 import requests
@@ -28,9 +29,14 @@ _TZ_OFFSET_RE = re.compile(r"[+\-]\d{2}:\d{2}$")
 # 30s sat inside the observed range, which is why reads failed at random.
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_AUTH_TIMEOUT = 90.0
-# One retry on a timeout/connection blip. Two consecutive stalls is a genuinely
-# sick upstream, and the book cache's failure backoff should take over instead.
-DEFAULT_RETRIES = 1
+# Retries per request. Sized from the measured ~40% per-page success rate: a
+# book pull needs 5 consecutive pages, so without retries it lands ~1% of the
+# time. This runs on a background thread now, so spending a couple of minutes
+# getting the book is fine — no request is waiting on it.
+DEFAULT_RETRIES = 5
+# Between attempts, doubling each time: 2s, 4s, 8s… A stalled page is upstream
+# congestion, so backing off beats hammering it.
+_RETRY_BACKOFF_SECONDS = 2.0
 
 
 def _env_float(name: str, fallback: float) -> float:
@@ -151,25 +157,53 @@ class NowCertsClient:
         }
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
-        """GET with auto-retry on 401 (token expired)."""
+        """GET with auto-retry on 401 (token expired) and on a read timeout.
+
+        The timeout retry is not belt-and-braces, it is load-bearing. Measured
+        against the live API: the *same* request, ten times, succeeded 4/10 —
+        successes between 5.2s and 50.3s, the rest timing out at 60s. A book
+        pull needs 5 consecutive pages, so at a ~40% per-page success rate the
+        whole pull lands about 1% of the time, which is why 0 of 18 attempts
+        succeeded on the box. Retrying each page turns that arithmetic around:
+        at 5 attempts a page clears ~95% of the time and the pull ~79%.
+        """
         url = f"{self.base_url}{path}"
-        for attempt in range(2):
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                params=params,
-                timeout=self.timeout,
-            )
-            if resp.status_code == 401 and attempt == 0:
-                log.info("NowCerts: token expired, re-authenticating")
-                self._authenticate()
+        last: Exception | None = None
+        for attempt in range(max(1, self.retries + 1)):
+            try:
+                resp = requests.get(
+                    url,
+                    headers=self._headers(),
+                    params=params,
+                    timeout=self.timeout,
+                )
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last = exc
+                if attempt + 1 < max(1, self.retries + 1):
+                    delay = _RETRY_BACKOFF_SECONDS * (2 ** attempt)
+                    log.info(
+                        "NowCerts: %s on GET %s (attempt %d/%d); retrying in %.0fs",
+                        type(exc).__name__, path, attempt + 1, self.retries + 1, delay,
+                    )
+                    time.sleep(delay)
                 continue
+            if resp.status_code == 401:
+                # A stale token costs one re-auth, not a retry budget.
+                log.info("NowCerts: token expired, re-authenticating")
+                # _authenticate() overwrites the token itself; clearing it first
+                # just makes the next _headers() fire a second grant.
+                self._authenticate()
+                resp = requests.get(
+                    url, headers=self._headers(), params=params, timeout=self.timeout
+                )
             if not resp.ok:
                 raise NowCertsClientError(
                     f"NowCerts GET {path} failed {resp.status_code}: {resp.text[:500]}"
                 )
             return resp.json()
-        raise NowCertsClientError(f"NowCerts GET {path}: auth retry exhausted")
+        raise NowCertsClientError(
+            f"NowCerts GET {path}: {self.retries + 1} attempts all timed out"
+        ) from last
 
     def fetch_insureds(
         self,

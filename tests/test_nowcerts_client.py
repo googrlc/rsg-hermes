@@ -213,3 +213,58 @@ class SharedClientAndTokenReuseTests(unittest.TestCase):
         with patch.dict(os.environ, self.ENV, clear=True):
             c = NowCertsClient(timeout=120.0)
         self.assertGreaterEqual(c.auth_timeout, 120.0)
+
+
+class ReadTimeoutRetryTests(unittest.TestCase):
+    """#264 set `self.retries` and never used it — the commit claimed a retry the
+    code did not have. Measured live: the same request 10x succeeded 4/10, so a
+    5-page book pull landed ~1% of the time. These pin the retry."""
+
+    ENV = {"NOWCERTS_USERNAME": "u@risksolutionsgroup.net", "NOWCERTS_PASSWORD": "p"}
+
+    def _client(self, **kw):
+        with patch.dict(os.environ, self.ENV, clear=True):
+            c = NowCertsClient(**kw)
+        c._token = "t"          # skip auth
+        return c
+
+    def test_a_timeout_is_retried_and_can_succeed(self) -> None:
+        import requests as rq
+        c = self._client(retries=3)
+        seq = [rq.Timeout("stalled"), rq.Timeout("stalled"), FakeResponse(200, {"value": [1, 2]})]
+        with patch("requests.get", side_effect=seq) as g, patch("time.sleep"):
+            self.assertEqual(c._get("/api/PolicyDetailList"), {"value": [1, 2]})
+        self.assertEqual(g.call_count, 3)
+
+    def test_exhausting_the_retries_raises(self) -> None:
+        import requests as rq
+        c = self._client(retries=2)
+        with patch("requests.get", side_effect=rq.Timeout("stalled")) as g, patch("time.sleep"):
+            with self.assertRaisesRegex(NowCertsClientError, "3 attempts all timed out"):
+                c._get("/api/PolicyDetailList")
+        self.assertEqual(g.call_count, 3)
+
+    def test_backoff_grows_between_attempts(self) -> None:
+        import requests as rq
+        c = self._client(retries=3)
+        with patch("requests.get", side_effect=rq.Timeout("x")), patch("time.sleep") as sl:
+            with self.assertRaises(NowCertsClientError):
+                c._get("/api/PolicyDetailList")
+        waits = [a.args[0] for a in sl.call_args_list]
+        self.assertEqual(waits, sorted(waits))
+        self.assertGreater(waits[-1], waits[0])
+
+    def test_a_401_costs_a_reauth_not_the_retry_budget(self) -> None:
+        c = self._client(retries=1)
+        with patch("requests.get", side_effect=[FakeResponse(401), FakeResponse(200, {"ok": 1})]), \
+             patch.object(NowCertsClient, "_authenticate", return_value="t2") as auth:
+            self.assertEqual(c._get("/api/x"), {"ok": 1})
+        auth.assert_called_once()
+
+    def test_an_http_error_is_not_retried(self) -> None:
+        """A 500 is an answer, not a stall — retrying it just multiplies load."""
+        c = self._client(retries=3)
+        with patch("requests.get", return_value=FakeResponse(500, text="boom")) as g:
+            with self.assertRaises(NowCertsClientError):
+                c._get("/api/x")
+        self.assertEqual(g.call_count, 1)
