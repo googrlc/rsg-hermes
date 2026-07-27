@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from datetime import datetime, timezone
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -87,7 +88,7 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 50  # 50 * 100 = 5000, ~11x the current book
 
 _cache: dict[str, Any] = {
-    "rows": None, "at": 0.0, "failed_at": 0.0, "refreshing": False, "thread": None,
+    "rows": None, "at": 0.0, "failed_at": 0.0, "refreshing": False, "thread": None, "full_at": 0.0,
 }
 _lock = threading.Lock()
 
@@ -95,6 +96,24 @@ _lock = threading.Lock()
 # upstream isn't re-probed once per dashboard widget, short enough that recovery
 # is picked up without a restart.
 _FAIL_BACKOFF_SECONDS = 60.0
+
+# How often to re-pull the whole book rather than a delta. A ``changeDate ge``
+# query returns changed and new policies but says nothing about deleted ones, so
+# without this a removal would sit in the cache indefinitely.
+_FULL_REFRESH_DEFAULT = 6 * 3600.0
+
+
+def _full_refresh_secs() -> float:
+    """Read per call, not at import — otherwise it can't be configured or tested."""
+    try:
+        return max(0.0, float(os.environ.get("HERMES_AMS_FULL_REFRESH", _FULL_REFRESH_DEFAULT)))
+    except (TypeError, ValueError):
+        return _FULL_REFRESH_DEFAULT
+
+
+def _iso(ts: float) -> str:
+    """UTC ISO-8601 for an OData ``changeDate ge`` filter."""
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class AmsBookUnavailable(RuntimeError):
@@ -126,6 +145,7 @@ def invalidate_cache() -> None:
         _cache["failed_at"] = 0.0
         _cache["refreshing"] = False
         _cache["thread"] = None
+        _cache["full_at"] = 0.0
 
 
 def _lineage_index(supa: "SupabaseClient") -> dict[str, str]:
@@ -177,19 +197,27 @@ def fetch_book(
             return rows
         failed_at = _cache.get("failed_at") or 0.0
         backing_off = (time.time() - failed_at) < _FAIL_BACKOFF_SECONDS
+        # Decide under the lock; act outside it. Calling out while holding a
+        # non-reentrant lock is how a refresh that runs inline deadlocks.
+        spawn = not force and not backing_off and not _cache["refreshing"]
+        if spawn:
+            _cache["refreshing"] = True
 
-        if not force:
-            # Refresh behind the request, never in front of it.
-            if not backing_off and not _cache["refreshing"]:
-                _cache["refreshing"] = True
-                _spawn_refresh(supa, nowcerts)
-            if rows is not None:
-                return rows          # stale beats slow
-            raise AmsBookUnavailable(
-                "ams.book: no cached book yet"
-                + (f"; last read failed, backing off {_FAIL_BACKOFF_SECONDS}s" if backing_off else "")
-                + " — serving the mirror while the AMS pull runs in the background"
-            )
+    if spawn:
+        _spawn_refresh(supa, nowcerts)
+
+    if not force:
+        if rows is not None:
+            return rows              # stale beats slow
+        with _lock:                  # an inline refresh may have just filled it
+            rows = _cache["rows"]
+        if rows is not None:
+            return rows
+        raise AmsBookUnavailable(
+            "ams.book: no cached book yet"
+            + (f"; last read failed, backing off {_FAIL_BACKOFF_SECONDS}s" if backing_off else "")
+            + " — serving the mirror while the AMS pull runs in the background"
+        )
 
     return _pull_book(supa, nowcerts)
 
@@ -226,7 +254,17 @@ def _pull_book(
     supa: "SupabaseClient",
     nowcerts: "NowCertsClient | None" = None,
 ) -> list[dict[str, Any]]:
-    """The actual AMS pull + cache write. Raises on failure."""
+    """The actual AMS pull + cache write. Raises on failure.
+
+    Incremental once the book is warm. A full pull is 5 sequential pages against
+    an API measured at ~40% success per page, so it lands ~1% of the time raw and
+    ~79% even with retries. A ``changeDate ge`` delta is normally a single page —
+    ~95% with retries — and finishes in seconds instead of minutes.
+
+    A delta cannot report a *deletion*, so a full pull is forced every
+    ``_FULL_REFRESH_SECONDS`` to re-sync removals. Everything in between rides
+    the delta.
+    """
     if nowcerts is None:
         # The SHARED client, not a fresh one. Most callers of select_policies()
         # don't thread a client through (15 call sites, nearly none of them do),
@@ -241,8 +279,19 @@ def _pull_book(
     # subsequent request re-paid the full timeout. Stamp the attempt first: a
     # failure now backs off for _FAIL_BACKOFF_SECONDS instead of hammering a sick
     # upstream once per widget.
+    with _lock:
+        have = _cache["rows"]
+        full_age = time.time() - (_cache.get("full_at") or 0.0)
+    # Delta only when there is something to apply it to, and only until the
+    # periodic full pull is due — a delta never reports a deleted policy.
+    since = None
+    if have is not None and full_age < _full_refresh_secs():
+        since = _iso(_cache.get("at") or 0.0)
+
     try:
-        records = nowcerts.fetch_policies(page_size=_PAGE_SIZE, max_pages=_MAX_PAGES)
+        records = nowcerts.fetch_policies(
+            page_size=_PAGE_SIZE, max_pages=_MAX_PAGES, since=since
+        )
     except Exception:
         with _lock:
             _cache["failed_at"] = time.time()
@@ -267,9 +316,19 @@ def _pull_book(
         row[LINEAGE_FIELD] = lineage.get(guid)
         rows.append(row)
 
-    log.info("ams.book: %s policies live (%s with lineage)", len(rows), len(lineage))
+    now = time.time()
     with _lock:
-        _cache["rows"], _cache["at"] = rows, time.time()
+        if since is not None and _cache["rows"] is not None:
+            merged = {r[POLICY_KEY]: r for r in _cache["rows"]}
+            merged.update({r[POLICY_KEY]: r for r in rows})
+            rows = list(merged.values())
+            log.info(
+                "ams.book: %s changed since %s; book now %s policies", len(records), since, len(rows)
+            )
+        else:
+            _cache["full_at"] = now
+            log.info("ams.book: %s policies live (%s with lineage)", len(rows), len(lineage))
+        _cache["rows"], _cache["at"] = rows, now
         _cache["failed_at"] = 0.0  # a good read retires any outstanding backoff
     return rows
 
