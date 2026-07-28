@@ -2331,6 +2331,147 @@ def _apply_policy_overrides(supa, records: list[dict]) -> list[dict]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Pushing a correction on to NowCerts.
+#
+# A CRM override fixes what the portal shows. It does not fix the AMS, and for a
+# wrong phone number the AMS never catches up on its own. These endpoints are the
+# other half: they take the same fields, keyed on the record's NowCerts GUID, and
+# write them to the system of record with read-before / verify / receipt.
+#
+# The human gate is the portal's confirmation step — the approval is stamped on
+# the queue row from `approved_by`. That is a deliberate departure from the
+# renewal writeback's separate approve-later inbox: the renewal executor's cron
+# is not enabled, so a row parked for approval would wait forever.
+# ---------------------------------------------------------------------------
+class AmsPushRequest(BaseModel):
+    fields: dict[str, Any]
+    approved_by: str
+    reason: str | None = None
+
+
+def _ams_push(object_type: str, object_id: str, req: AmsPushRequest):
+    from hermes.ams import writeback
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+    if not req.fields:
+        raise HTTPException(status_code=400, detail="no fields to push")
+    try:
+        return writeback.push(
+            supa, _get_nowcerts(), object_type=object_type, object_id=object_id,
+            fields=req.fields, actor=req.approved_by, note=req.reason,
+        )
+    except ValueError as exc:      # unknown/unpushable field, missing id
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/pipeline/stages")
+async def pipeline_stages_endpoint():
+    """The stage vocabulary, in order, per pipeline.
+
+    A kanban has to know its columns and their order before it can draw them, and
+    hardcoding the list in the browser is how the board drifts from what the
+    backend will accept on a stage move. Same source both sides.
+    """
+    from hermes.intake.opportunities import (
+        LOST_STAGES,
+        NEW_BUSINESS_STAGES,
+        RENEWAL_STAGES,
+        WON_STAGES,
+    )
+
+    return {
+        "new_business": list(NEW_BUSINESS_STAGES),
+        "renewal": list(RENEWAL_STAGES),
+        "won": sorted(WON_STAGES),
+        "lost": sorted(LOST_STAGES),
+    }
+
+
+class PolicyCreateRequest(BaseModel):
+    """Create a policy in NowCerts. The AMS owns what a client has BOUND, so this
+    writes there rather than into a mirror that the next sync would overwrite."""
+
+    insured_id: str                      # the NowCerts insured GUID
+    policy_number: str
+    carrier: str | None = None
+    lines_of_business: str | None = None
+    effective_date: str | None = None
+    expiration_date: str | None = None
+    premium_amount: float | None = None
+    approved_by: str
+    reason: str | None = None
+
+
+@app.post("/api/policies")
+async def create_policy_endpoint(req: PolicyCreateRequest):
+    """Add a policy to a client, in NowCerts.
+
+    Deliberately NOT a write to canonical_policies: that table is a mirror under a
+    two-writer freeze, and a row invented there would be tombstoned by the next
+    import. The insured GUID is verified against the AMS before anything is
+    created, so a typo'd id cannot spawn an orphan policy.
+    """
+    from hermes.ams import writeback
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+    nowcerts = _get_nowcerts()
+
+    if writeback._read(nowcerts, writeback.OBJECT_TYPE_CLIENT, req.insured_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"could not confirm insured {req.insured_id} in NowCerts — "
+                   f"refusing to create a policy against an unknown client",
+        )
+
+    payload: dict[str, Any] = {
+        "InsuredDatabaseId": req.insured_id,
+        "Number": req.policy_number,
+        "IsQuote": False,
+    }
+    if req.carrier:
+        payload["CarrierName"] = req.carrier
+    if req.lines_of_business:
+        payload["LineOfBusinessName"] = req.lines_of_business
+    if req.effective_date:
+        payload["EffectiveDate"] = str(req.effective_date)
+    if req.expiration_date:
+        payload["ExpirationDate"] = str(req.expiration_date)
+    if req.premium_amount is not None:
+        payload["Premium"] = float(req.premium_amount)
+
+    try:
+        created = nowcerts.insert_policy(payload)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("create policy failed: %s", req.policy_number)
+        raise HTTPException(status_code=502, detail=f"NowCerts refused the policy: {exc}")
+
+    from hermes.overrides.store import write_log
+
+    write_log(supa, entity_type="nowcerts_policy", entity_key=req.policy_number,
+              action="ams_create", actor=req.approved_by, before=None, after=payload,
+              note=req.reason)
+    return {"ok": True, "policy": created, "sent": payload}
+
+
+@app.post("/api/clients/{insured_guid}/push-to-ams")
+async def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
+    """Write a client's corrected fields to NowCerts, keyed on the insured GUID."""
+    from hermes.ams.writeback import OBJECT_TYPE_CLIENT
+
+    return _ams_push(OBJECT_TYPE_CLIENT, insured_guid, req)
+
+
+@app.post("/api/policies/{policy_guid}/push-to-ams")
+async def push_policy_to_ams(policy_guid: str, req: AmsPushRequest):
+    """Write a policy's corrected fields to NowCerts, keyed on the policy GUID."""
+    from hermes.ams.writeback import OBJECT_TYPE_POLICY
+
+    return _ams_push(OBJECT_TYPE_POLICY, policy_guid, req)
+
+
 @app.get("/api/clients")
 async def list_clients_endpoint(limit: int = 500):
     """Full canonical client book, with any portal corrections applied."""
