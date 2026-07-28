@@ -102,6 +102,7 @@ from hermes.commands.agency_intake import (  # noqa: E402
     build_approval_blocks,
     render_hermes_blocks,
     synthesize_from_payload,
+    validate_payload,
 )
 
 
@@ -205,8 +206,21 @@ def process_one_received(supa: SupabaseClient) -> bool:
     payload = claimed.get("payload") or {}
 
     # Stage A: synthesize -> 'synthesized' (writes hermes_blocks + draft_summary)
+    #
+    # A caller may supply the synthesized payload itself. The RSG intake gate
+    # does: it runs the same `crm-intake-writer` contract, then enriches the
+    # result with extracted PDF text, reference-table NAICS/SIC/class codes and
+    # contact names split against the AMS field contracts. Re-extracting from
+    # its raw text here would throw all of that away and — because the second
+    # LLM pass is not the first one — commit something other than what the
+    # operator reviewed and approved. So a supplied payload is used verbatim.
+    supplied = payload.get("synthesized_payload")
     try:
-        draft_summary, warnings = synthesize_payload(payload)
+        if supplied:
+            draft_summary, warnings = supplied, validate_payload(supplied)
+            log.info("Submission %s carries a synthesized payload; skipping extraction", submission_id)
+        else:
+            draft_summary, warnings = synthesize_payload(payload)
         hermes_blocks = render_blocks(draft_summary)
     except Exception as exc:
         _safe_transition_to_failed(supa, submission_id, exc=exc, stage="synthesize")
@@ -236,12 +250,23 @@ def process_one_received(supa: SupabaseClient) -> bool:
         _safe_transition_to_failed(supa, submission_id, exc=exc, stage="drafting-transition")
         return True
 
-    # Stage C: post Slack draft and settle at awaiting_approval.
+    # Stage C: settle at awaiting_approval — or walk straight past it when the
+    # submitter already carried an approval.
+    #
+    # A pre-approved submission was reviewed by a person before it was ever sent
+    # (the intake gate's Approve button). Asking for a second approval here would
+    # be asking the same person the same question twice, and with no Slack in the
+    # loop nobody would ever be asked — the row would simply stop. It still passes
+    # THROUGH awaiting_approval rather than skipping the state, so status_history
+    # records who approved it and when, exactly like a Slack approval would.
+    approval = (payload.get("approval") or {}) if isinstance(payload, dict) else {}
+    approver = str(approval.get("approved_by") or "").strip()
     try:
-        post_draft(submission_id, draft_summary)
+        if not approver:
+            post_draft(submission_id, draft_summary)
         transition(
             supa, submission_id, "awaiting_approval",
-            note="draft posted to Slack",
+            note=f"approved on submission by {approver}" if approver else "draft posted to Slack",
         )
     except (IntakeError, SupabaseClientError) as exc:
         _safe_transition_to_failed(
@@ -255,7 +280,26 @@ def process_one_received(supa: SupabaseClient) -> bool:
         _safe_transition_to_failed(supa, submission_id, exc=exc, stage="slack-draft-post")
         return True
 
-    log.info("Submission %s now awaiting_approval", submission_id)
+    if not approver:
+        log.info("Submission %s now awaiting_approval", submission_id)
+        return True
+
+    token = str(approval.get("token") or "APPROVE ALL").strip().upper()
+    try:
+        transition(
+            supa, submission_id, "approved",
+            note=f"{token} by {approver} (approved before submission)",
+            extra_fields={
+                "approved_by": approver,
+                "approved_at": _utcnow_iso(),
+                "approval_token": token,
+            },
+        )
+    except (IntakeError, SupabaseClientError) as exc:
+        _safe_transition_to_failed(supa, submission_id, exc=exc, stage="pre-approved-transition")
+        return True
+
+    log.info("Submission %s approved on submission by %s (%s)", submission_id, approver, token)
     return True
 
 
@@ -277,7 +321,7 @@ def _claim_next_approved(supa: SupabaseClient) -> dict[str, Any] | None:
     """
     candidates = supa.select(
         TABLE,
-        columns="id,status_history,draft_summary,approved_by,approval_token",
+        columns="id,status_history,draft_summary,approved_by,approval_token,source",
         params={"status": "eq.approved", "order": "created_at.asc"},
         limit=1,
     )
@@ -306,6 +350,7 @@ def _claim_next_approved(supa: SupabaseClient) -> dict[str, Any] | None:
     row.setdefault("draft_summary", candidate.get("draft_summary"))
     row.setdefault("approved_by", candidate.get("approved_by"))
     row.setdefault("approval_token", candidate.get("approval_token"))
+    row.setdefault("source", candidate.get("source"))
     return row
 
 
@@ -361,7 +406,16 @@ def process_one_approved(supa: SupabaseClient) -> bool:
     }
     if decision.approve_crm:
         try:
-            result = commit_draft(supa, draft_summary, approved_by=approver)
+            # Carry the submitting system onto every opportunity it opens. Without
+            # it every intake row reads `source='agency_intake'` regardless of
+            # where it came from, and "which channel is actually producing deals"
+            # stops being an answerable question.
+            result = commit_draft(
+                supa,
+                draft_summary,
+                approved_by=approver,
+                source=claimed.get("source"),
+            )
         except Exception as exc:
             _safe_transition_to_failed(supa, submission_id, exc=exc, stage="commit-nowcerts-intake")
             return True
@@ -430,6 +484,135 @@ def process_one_approved(supa: SupabaseClient) -> bool:
     )
     return True
 
+
+
+# ---------------------------------------------------------------------------
+# Synchronous commit — the reviewed-at-the-source path
+# ---------------------------------------------------------------------------
+
+
+def commit_submission_now(supa: SupabaseClient, submission_id: str) -> dict[str, Any]:
+    """Walk ONE submission from ``received`` to ``complete`` in a single call.
+
+    The asynchronous worker exists to buy time for things this path does not do:
+    an LLM extraction, a Slack round trip, and a wait for a human to approve.
+    When a submission arrives already synthesized AND already approved, none of
+    those are pending — there is nothing left to wait for, so making the caller
+    wait means their intake sits in a queue looking like it worked.
+
+    That is not hypothetical here. Nothing in this deployment runs the worker
+    loop: the scheduler drives ``run_intake_executor`` (the outbound queue), not
+    ``tick``. A row left for the worker is a row that never moves.
+
+    Every state is still walked in order rather than jumped, so ``status_history``
+    reads the same as an asynchronous commit and the DB's status CHECK is never
+    violated. Returns a summary; raises nothing — a failure is reported in the
+    return value with the row transitioned to ``failed``, because the caller is a
+    person looking at a screen who needs to be told.
+    """
+    from hermes.integrations.intake_submissions import fetch_by_id, transition
+    from hermes.intake.commit import commit_draft
+    from hermes.operations.agency_intake_approval import _insert_retrieval_rows
+    from hermes.operations.write_gate import APPROVE_ALL, parse_approval_token
+
+    row = fetch_by_id(supa, submission_id)
+    if row is None:
+        return {"ok": False, "status": "failed", "error": f"submission {submission_id} not found"}
+
+    payload = row.get("payload") or {}
+    draft_summary = payload.get("synthesized_payload")
+    approval = payload.get("approval") or {}
+    approver = str(approval.get("approved_by") or "").strip()
+    token = str(approval.get("token") or APPROVE_ALL).strip().upper()
+
+    if not draft_summary or not approver:
+        return {
+            "ok": False,
+            "status": row.get("status"),
+            "error": "a synchronous commit needs both a synthesized payload and an approver",
+        }
+
+    decision = parse_approval_token(token) or parse_approval_token(APPROVE_ALL)
+
+    def _fail(exc: Exception, stage: str) -> dict[str, Any]:
+        _safe_transition_to_failed(supa, submission_id, exc=exc, stage=stage)
+        return {"ok": False, "status": "failed", "error": f"{stage}: {exc}"}
+
+    # Walk to 'approved'. No synthesis (supplied), no Slack post, no wait.
+    try:
+        warnings = validate_payload(draft_summary)
+        blocks = render_blocks(draft_summary)
+        transition(supa, submission_id, "synthesizing", note="synchronous commit")
+        transition(supa, submission_id, "synthesized",
+                   note="payload supplied by submitter; extraction skipped",
+                   extra_fields={"hermes_blocks": blocks, "draft_summary": draft_summary})
+        transition(supa, submission_id, "drafting", note="dedup probes deferred — pass-through")
+        transition(supa, submission_id, "awaiting_approval",
+                   note=f"approved on submission by {approver}")
+        transition(supa, submission_id, "approved",
+                   note=f"{token} by {approver} (approved before submission)",
+                   extra_fields={"approved_by": approver, "approved_at": _utcnow_iso(),
+                                 "approval_token": token})
+        transition(supa, submission_id, "writing", note="synchronous commit")
+    except Exception as exc:  # noqa: BLE001 — reported, not raised; see the docstring
+        return _fail(exc, "approve-transitions")
+
+    result: dict[str, Any] = {"opportunities": [], "opportunity_count": 0,
+                              "intake_job_id": None, "nextcloud_folder": None}
+    if decision.approve_crm:
+        try:
+            result = commit_draft(supa, draft_summary, approved_by=approver,
+                                  source=row.get("source"))
+        except Exception as exc:  # noqa: BLE001
+            return _fail(exc, "commit-opportunities")
+
+    records_created: dict[str, Any] = {
+        "target": "crm",
+        "approval_token": token,
+        "opportunities": [r.get("id") for r in result.get("opportunities", [])],
+        "intake_job_id": result.get("intake_job_id"),
+        "nextcloud_folder": result.get("nextcloud_folder"),
+    }
+    try:
+        supa.update(TABLE, submission_id, {"records_created": records_created})
+        transition(supa, submission_id, "written", note="opportunities created")
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, "written-transition")
+
+    retrieval_ids: dict[str, list[str]] = {}
+    if decision.approve_supabase:
+        try:
+            retrieval_ids = _insert_retrieval_rows(supa, draft_summary)
+            records_created["retrieval_row_ids"] = retrieval_ids
+        except Exception as exc:  # noqa: BLE001
+            return _fail(exc, "retrieval-inserts")
+
+    try:
+        transition(supa, submission_id, "complete",
+                   note=f"intake committed by {approver} ({token})",
+                   extra_fields={"records_created": records_created})
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, "complete-transition")
+
+    log.info("Submission %s committed synchronously by %s (%d opportunities)",
+             submission_id, approver, result.get("opportunity_count", 0))
+    return {
+        "ok": True,
+        "status": "complete",
+        "approved_by": approver,
+        "approval_token": token,
+        "client_identifier": result.get("client_identifier"),
+        "opportunity_count": result.get("opportunity_count", 0),
+        "opportunity_ids": records_created["opportunities"],
+        "entity_count": len(retrieval_ids.get("client_entities", [])),
+        "fact_count": len(retrieval_ids.get("client_facts", [])),
+        "note_count": len(retrieval_ids.get("client_notes", [])),
+        "nextcloud_folder": result.get("nextcloud_folder"),
+        # False on this path by design — an intake is a prospect. Reported so the
+        # caller never has to assume.
+        "ams_insured_staged": bool(result.get("ams_insured_staged")),
+        "warnings": warnings,
+    }
 
 
 # ---------------------------------------------------------------------------

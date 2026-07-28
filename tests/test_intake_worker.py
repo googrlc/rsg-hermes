@@ -93,6 +93,128 @@ class TestProcessOneReceived:
         # Slack post called once with submission_id + draft_summary.
         intake_worker.post_draft.assert_called_once_with("sub-1", {"account": {"account_name": "Acme"}})
 
+    def test_supplied_payload_is_used_verbatim_and_skips_extraction(self) -> None:
+        """A caller that already synthesized must not be re-extracted.
+
+        The intake gate enriches its payload with cited PDF text, reference-table
+        codes and split contact names. A second LLM pass would drop all of that and
+        commit something the operator never reviewed.
+        """
+        supplied = {
+            "account": {"account_name": "Acme Plumbing LLC", "naics": "238220"},
+            "opportunities": [{"line_of_business": "General Liability"}],
+            "facts": [{"entity": "Acme Plumbing LLC", "fact_label": "EIN", "fact_value": "12-3456789"}],
+        }
+        supa = MagicMock()
+        supa.select.side_effect = [
+            [{"id": "sub-1", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesizing", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesized", "status_history": []}],
+            [{"id": "sub-1", "status": "drafting", "status_history": []}],
+        ]
+        supa.update_where.return_value = [{
+            "id": "sub-1",
+            "status": "synthesizing",
+            "status_history": [],
+            "payload": {"transcript": "raw text nobody should re-read", "synthesized_payload": supplied},
+        }]
+        supa.update.return_value = {"id": "sub-1"}
+
+        def _must_not_run(payload):  # pragma: no cover - the assertion is that it isn't
+            raise AssertionError("the worker re-ran extraction on a supplied payload")
+
+        intake_worker.synthesize_payload = _must_not_run
+        intake_worker.render_blocks = lambda payload: "rendered text"
+        intake_worker.post_draft = MagicMock()
+
+        assert process_one_received(supa) is True
+
+        updates = [call.args[2] for call in supa.update.call_args_list]
+        assert [u["status"] for u in updates] == ["synthesized", "drafting", "awaiting_approval"]
+        # Committed verbatim — the NAICS and the cited fact survive intact.
+        assert updates[0]["draft_summary"] == supplied
+
+    def test_supplied_payload_is_still_validated(self) -> None:
+        """Skipping extraction must not skip validation — warnings still surface."""
+        supa = MagicMock()
+        supa.select.side_effect = [
+            [{"id": "sub-1", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesizing", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesized", "status_history": []}],
+            [{"id": "sub-1", "status": "drafting", "status_history": []}],
+        ]
+        supa.update_where.return_value = [{
+            "id": "sub-1", "status": "synthesizing", "status_history": [],
+            # No account_name and no opportunities — validate_payload has something to say.
+            "payload": {"synthesized_payload": {"account": {}, "opportunities": []}},
+        }]
+        supa.update.return_value = {"id": "sub-1"}
+        intake_worker.render_blocks = lambda payload: "rendered"
+        intake_worker.post_draft = MagicMock()
+
+        with patch.object(intake_worker, "validate_payload", return_value=["missing account_name"]) as v:
+            assert process_one_received(supa) is True
+        v.assert_called_once()
+
+    def test_a_pre_approved_submission_walks_straight_to_approved(self) -> None:
+        """The submitter already had a human approve it, so nobody is asked again.
+
+        RSG does not use Slack. A row parked at awaiting_approval waits for a
+        button that will never be pressed, so an approval carried on the
+        submission has to be honoured — and no draft is posted anywhere.
+        """
+        supa = MagicMock()
+        supa.select.side_effect = [
+            [{"id": "sub-1", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesizing", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesized", "status_history": []}],
+            [{"id": "sub-1", "status": "drafting", "status_history": []}],
+            [{"id": "sub-1", "status": "awaiting_approval", "status_history": []}],
+        ]
+        supa.update_where.return_value = [{
+            "id": "sub-1", "status": "synthesizing", "status_history": [],
+            "payload": {
+                "synthesized_payload": {"account": {"account_name": "Acme"}},
+                "approval": {"approved_by": "lamar", "token": "APPROVE ALL"},
+            },
+        }]
+        supa.update.return_value = {"id": "sub-1"}
+        intake_worker.render_blocks = lambda payload: "rendered"
+        intake_worker.post_draft = MagicMock()
+
+        assert process_one_received(supa) is True
+
+        updates = [call.args[2] for call in supa.update.call_args_list]
+        assert [u["status"] for u in updates] == [
+            "synthesized", "drafting", "awaiting_approval", "approved",
+        ]
+        # It passes THROUGH awaiting_approval rather than skipping the state, so
+        # the audit trail records the approval the same way Slack would have.
+        approved = updates[-1]
+        assert approved["approved_by"] == "lamar"
+        assert approved["approval_token"] == "APPROVE ALL"
+        assert approved["approved_at"]
+        intake_worker.post_draft.assert_not_called()
+
+    def test_an_unapproved_submission_still_waits_and_still_posts(self, supa_with_received_row) -> None:
+        """The Slack path is unchanged for anything that did not carry an approval."""
+        supa = supa_with_received_row
+        supa.select.side_effect = [
+            [{"id": "sub-1", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesizing", "status_history": []}],
+            [{"id": "sub-1", "status": "synthesized", "status_history": []}],
+            [{"id": "sub-1", "status": "drafting", "status_history": []}],
+        ]
+        supa.update.return_value = {"id": "sub-1"}
+        intake_worker.synthesize_payload = lambda payload: ({"account": {"account_name": "Acme"}}, [])
+        intake_worker.render_blocks = lambda payload: "rendered"
+        intake_worker.post_draft = MagicMock()
+
+        assert process_one_received(supa) is True
+        statuses = [call.args[2]["status"] for call in supa.update.call_args_list]
+        assert statuses == ["synthesized", "drafting", "awaiting_approval"]
+        intake_worker.post_draft.assert_called_once()
+
     def test_synthesizer_exception_transitions_to_failed(self, supa_with_received_row) -> None:
         supa = supa_with_received_row
         # Used: claim_next_received select, then transition() select for the failed transition.
