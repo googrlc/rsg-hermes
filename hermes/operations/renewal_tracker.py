@@ -134,6 +134,79 @@ def get_renewals_expiring_within(
 # Buckets are ordered most-urgent-first; ``upcoming`` covers the next 90 days.
 RENEWAL_BUCKETS = ("past_due", "le7", "le30", "le60", "le90", "gt90", "no_date")
 
+# What the book knows about a renewal's policy that project_85_renewals does not.
+# The renewal table holds the desk's own working fields plus an expiration date; the
+# policy itself lives in canonical_policies.
+_POLICY_DATE_COLUMNS = "policy_number,effective_date,expiration_date,carrier,lines_of_business"
+_POLICY_FIELDS = ("effective_date", "carrier", "lines_of_business")
+
+
+def _quoted_in_list(values: list[str]) -> str:
+    """A PostgREST ``in.(…)`` list, each value quoted.
+
+    Policy numbers are free text and routinely carry commas, spaces and parens —
+    unquoted they would split the filter into nonsense terms.
+    """
+    quoted = ['"' + v.replace('\\', '\\\\').replace('"', '\\"') + '"' for v in values]
+    return f"in.({','.join(quoted)})"
+
+
+def attach_policy_dates(
+    supa: SupabaseClient,
+    rows: list[dict[str, Any]],
+    *,
+    batch_size: int = 200,
+) -> list[dict[str, Any]]:
+    """Hang each renewal's policy dates on it, in place, from ``canonical_policies``.
+
+    A renewal row carries the expiration date and nothing else about the term, so
+    the desk can see when cover runs out but not when it started — and "renews in
+    30 days" reads very differently on a policy written last month than on one that
+    has been in force for a year. The carrier and line come along for the same
+    reason: the renewal table stores neither, so the list has been showing a policy
+    number under a column headed Line.
+
+    Degrades to the rows as they were if the book read fails; missing policy dates
+    are worth less than an empty renewals cockpit.
+    """
+    by_number: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        number = str(row.get("policy_number") or "").strip()
+        if number:
+            by_number.setdefault(number, []).append(row)
+    if not by_number:
+        return rows
+
+    numbers = list(by_number)
+    for start in range(0, len(numbers), batch_size):
+        batch = numbers[start:start + batch_size]
+        try:
+            policies = supa.select(
+                "canonical_policies",
+                columns=_POLICY_DATE_COLUMNS,
+                params={"policy_number": _quoted_in_list(batch), "order": "effective_date.asc"},
+                limit=batch_size * 5,
+            )
+        except Exception:  # noqa: BLE001 — see the docstring: degrade, never 500
+            log.exception("renewals: policy date lookup failed for %d policies", len(batch))
+            continue
+        for policy in policies:
+            for row in by_number.get(str(policy.get("policy_number") or "").strip(), []):
+                # A policy number can carry several terms. Ordered by effective date
+                # ascending, the LAST one whose expiration matches the renewal is the
+                # term being renewed; fall back to the latest term when none matches,
+                # which is what a renewal with a corrected expiration date looks like.
+                exact = str(policy.get("expiration_date") or "")[:10] == str(row.get("expiration_date") or "")[:10]
+                if row.get("_policy_exact") and not exact:
+                    continue
+                for field in _POLICY_FIELDS:
+                    if policy.get(field) is not None:
+                        row[field] = policy.get(field)
+                row["_policy_exact"] = exact
+    for row in rows:
+        row.pop("_policy_exact", None)
+    return rows
+
 
 def _parse_iso_date(value: Any) -> date | None:
     if not value:
@@ -142,6 +215,11 @@ def _parse_iso_date(value: Any) -> date | None:
         return date.fromisoformat(str(value)[:10])
     except ValueError:
         return None
+
+
+def _iso_or_none(value: Any) -> str | None:
+    parsed = _parse_iso_date(value)
+    return parsed.isoformat() if parsed else None
 
 
 def _as_float(value: Any) -> float | None:
@@ -205,6 +283,11 @@ def summarize_renewals(
                     "client_name": row.get("client_name"),
                     "policy_number": row.get("policy_number"),
                     "expiration_date": exp.isoformat() if exp else None,
+                    # Present when the row has been through attach_policy_dates;
+                    # None rather than absent so the cockpit renders one shape.
+                    "effective_date": _iso_or_none(row.get("effective_date")),
+                    "carrier": row.get("carrier"),
+                    "lines_of_business": row.get("lines_of_business"),
                     "days_until": days_until,
                     "premium_current": _as_float(row.get("premium_current")),
                     "premium_renewal": _as_float(row.get("premium_renewal")),
