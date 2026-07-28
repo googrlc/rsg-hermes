@@ -2386,7 +2386,9 @@ async def pipeline_stages_endpoint():
     from hermes.intake.opportunities import (
         LOST_STAGES,
         NEW_BUSINESS_STAGES,
+        OPPORTUNITY_TYPES,
         RENEWAL_STAGES,
+        RENEWAL_TYPES,
         WON_STAGES,
     )
 
@@ -2395,6 +2397,13 @@ async def pipeline_stages_endpoint():
         "renewal": list(RENEWAL_STAGES),
         "won": sorted(WON_STAGES),
         "lost": sorted(LOST_STAGES),
+        # Which types are worked on the renewal ladder, and the full vocabulary.
+        # Shipped rather than re-derived in the browser: "is this a renewal" has
+        # to mean the same thing on the board as it does when a stage move is
+        # validated, and a substring test on the type name would quietly sweep in
+        # "Remarket" — a different pipeline with a different ladder.
+        "renewal_types": sorted(RENEWAL_TYPES),
+        "types": list(OPPORTUNITY_TYPES),
     }
 
 

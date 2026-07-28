@@ -279,3 +279,14 @@ def test_the_banner_survives_a_broken_lookup(client, supa):
     supa.select.side_effect = RuntimeError("boom")
     body = client.get("/api/ams/failed-pushes").json()
     assert body == {"failed": [], "count": 0, "unavailable": True}
+
+
+def test_the_board_is_told_which_types_are_renewals(client):
+    """Not re-derived in the browser: a substring test on the type name would
+    sweep in 'Remarket', which is a different pipeline with a different ladder."""
+    body = client.get("/api/pipeline/stages").json()
+    assert body["renewal_types"] == ["Renewals"]
+    assert "Remarket" in body["types"] and "Remarket" not in body["renewal_types"]
+    # and the two ladders really are different work
+    assert "Renewal in 90 days" in body["renewal"]
+    assert "Renewal in 90 days" not in body["new_business"]
