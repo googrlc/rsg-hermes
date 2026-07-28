@@ -543,5 +543,8 @@ class TestRenewalsEndpoint:
         assert data["total"] == 6
         assert data["past_due_count"] == 1
         assert {"as_of", "buckets", "upcoming", "upcoming_count"} <= data.keys()
-        # read came from the right table
-        assert mock_supa.select.call_args[0][0] == "project_85_renewals"
+        # read came from the right table, then enriched from the book: the renewal
+        # table holds no effective date, carrier or line.
+        tables = [call[0][0] for call in mock_supa.select.call_args_list]
+        assert tables[0] == "project_85_renewals"
+        assert "canonical_policies" in tables

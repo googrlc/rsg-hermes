@@ -134,6 +134,57 @@ def status_for_stage(stage: str) -> str:
     return STATUS_OPEN
 
 
+# --- Dates -------------------------------------------------------------------
+# Where a projected close date comes from, best source first. A board without a
+# date on the card is a list of names — you cannot see what lands this month, and
+# a deal whose date went by yesterday looks exactly like one that closes in June.
+#
+# NowCerts has no estimated-close field, so the forecast (expected_close_date) is
+# CRM-owned and set by hand. Until someone sets it, fall back to the AMS dates
+# that bound it. Each is reported with the basis it came from — a date nobody
+# chose must not be presented as a commitment.
+#
+# The fallback differs by pipeline, because the two are closing different things.
+# New business closes when cover has to START: neededBy, else the quote's
+# effective date. A renewal closes when the expiring policy ENDS — its effective
+# date is when the term being renewed BEGAN, which is in the past and reads as a
+# deal that slipped months ago.
+_CLOSE_DATE_SOURCES = (
+    ("expected_close_date", "set"),
+    ("needed_by", "needed by"),
+    ("effective_date", "effective"),
+)
+_RENEWAL_CLOSE_DATE_SOURCES = (
+    ("expected_close_date", "set"),
+    ("expiration_date", "expires"),
+    ("needed_by", "needed by"),
+)
+
+
+def projected_close(row: dict[str, Any]) -> tuple[str | None, str | None]:
+    """(date, basis) for an opportunity's projected close — see the source tuples.
+
+    Returns (None, None) when the row carries no date at all, rather than
+    inventing one from the stage.
+    """
+    renewal = str(row.get("opportunity_type") or "").strip() in RENEWAL_TYPES
+    sources = _RENEWAL_CLOSE_DATE_SOURCES if renewal else _CLOSE_DATE_SOURCES
+    for field, basis in sources:
+        value = str(row.get(field) or "").strip()
+        if value:
+            return value[:10], basis
+    return None, None
+
+
+def with_projected_close(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Annotate rows in place with ``projected_close_date`` + ``projected_close_basis``."""
+    for row in rows:
+        date_value, basis = projected_close(row)
+        row["projected_close_date"] = date_value
+        row["projected_close_basis"] = basis
+    return rows
+
+
 def make_client_identifier(name: str | None, fein: str | None = None) -> str:
     """Stable idempotency key from a client name (+ FEIN when present)."""
     base = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
@@ -165,6 +216,7 @@ def create_opportunity(
     probability: int | None = None,
     likelihood: str | None = None,
     disposition: str | None = None,
+    expected_close_date: str | None = None,
     source: str | None = None,
     created_by: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
@@ -227,6 +279,7 @@ def create_opportunity(
             "probability": probability,
             "likelihood": likelihood,
             "disposition": disposition,
+            "expected_close_date": expected_close_date,
             "source": source,
             "created_by": created_by,
         },

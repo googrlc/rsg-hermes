@@ -381,7 +381,7 @@ async def command_center_renewals():
     Server-side, service-role read of ``project_85_renewals`` aggregated into
     urgency buckets + the next-90-day list. No anon key ever reaches the browser.
     """
-    from hermes.operations.renewal_tracker import summarize_renewals
+    from hermes.operations.renewal_tracker import attach_policy_dates, summarize_renewals
 
     supa = _get_supa()
     rows = supa.select(
@@ -393,7 +393,10 @@ async def command_center_renewals():
         params={"order": "expiration_date.asc"},
         limit=1000,
     )
-    return summarize_renewals(rows)
+    # The renewal table holds an expiration date and nothing else about the term.
+    # Effective date, carrier and line come off the book so the desk can see the
+    # whole policy period, not just the end of it.
+    return summarize_renewals(attach_policy_dates(supa, rows))
 
 
 @app.get("/api/command-center/lapse-check")
@@ -626,6 +629,7 @@ class OpportunityCreateRequest(BaseModel):
     probability: int | None = None           # win %; defaults from stage
     likelihood: str | None = None            # NowCerts likelihood; defaults from probability
     disposition: str | None = None           # NowCerts Disposition (outcome)
+    expected_close_date: str | None = None   # CRM-owned forecast (YYYY-MM-DD)
     source: str = "manual"
     created_by: str | None = None
 
@@ -671,6 +675,7 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
             probability=req.probability,
             likelihood=req.likelihood,
             disposition=req.disposition,
+            expected_close_date=req.expected_close_date,
             source=req.source,
             created_by=req.created_by,
         )
@@ -699,7 +704,12 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
 
 @app.get("/api/opportunities")
 async def list_opportunities_endpoint(stage: str | None = None, status: str | None = "open", limit: int = 100):
-    """List pipeline opportunities (default open), newest-updated first."""
+    """List pipeline opportunities (default open), newest-updated first.
+
+    Each row carries a derived ``projected_close_date`` (+ the ``projected_close_basis``
+    it came from) so a board can be read as a forecast rather than a pile — see
+    ``opportunities.projected_close``.
+    """
     from hermes.intake import opportunities as opp
 
     try:
@@ -707,7 +717,7 @@ async def list_opportunities_endpoint(stage: str | None = None, status: str | No
     except Exception as exc:
         log.exception("list opportunities failed")
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"opportunities": rows, "count": len(rows)}
+    return {"opportunities": opp.with_projected_close(rows), "count": len(rows)}
 
 
 class OpportunityUpdateRequest(BaseModel):
@@ -728,6 +738,7 @@ class OpportunityUpdateRequest(BaseModel):
     assigned_to: str | None = None
     prospect_type: str | None = None
     needed_by: str | None = None
+    expected_close_date: str | None = None
     effective_date: str | None = None
     expiration_date: str | None = None
     lost_reason: str | None = None
@@ -786,11 +797,15 @@ async def delete_opportunity_endpoint(opportunity_id: str):
 @app.get("/api/leads")
 async def list_leads_endpoint(limit: int = 200):
     """Leads = live NowCerts prospects (insureds with a prospectType). Read-only;
-    a lead is promoted by creating an opportunity from it (POST /api/opportunities)."""
+    a lead is promoted by creating an opportunity from it (POST /api/opportunities).
+
+    Each lead carries an ``x_date`` where we know one — the expiration of the
+    coverage being chased, read off the opportunity/quote mirror. NowCerts holds no
+    x-date on the insured itself."""
     from hermes.leads import list_prospects
 
     try:
-        return list_prospects(_get_nowcerts(), limit=limit)
+        return list_prospects(_get_nowcerts(), _get_supa(), limit=limit)
     except Exception as exc:
         log.exception("leads list failed")
         raise HTTPException(status_code=502, detail=str(exc))
@@ -2542,6 +2557,8 @@ async def list_clients_endpoint(limit: int = 500):
 async def client_360_endpoint(insured_guid: str):
     """Client 360 — the insured's record plus their whole book: policies,
     opportunities, and cases, keyed on the NowCerts insured GUID."""
+    from hermes.intake import opportunities as opp
+
     supa = _get_supa()
 
     def sel(table, cols, params):
@@ -2571,10 +2588,14 @@ async def client_360_endpoint(insured_guid: str):
     policies, _policy_prior_terms = _collapse_to_current_terms(
         _apply_policy_overrides(supa, policies)
     )
-    opportunities = sel(
-        "opportunities", "id,line_of_business,stage,status,premium_estimate,carrier,quote_number,next_action",
+    opportunities = opp.with_projected_close(sel(
+        "opportunities",
+        "id,line_of_business,opportunity_type,stage,status,premium_estimate,carrier,quote_number,"
+        # The date columns the projected close is derived from, plus the x-date —
+        # a deal on a client's page is worked from the same dates as one on the board.
+        "next_action,expected_close_date,needed_by,effective_date,expiration_date",
         {"insured_id": f"eq.{insured_guid}", "order": "updated_at.desc"},
-    )
+    ))
     cases = sel(
         "agency_crm_cases", "id,case_number,title,case_type,status,priority,created_at",
         {"insured_database_id": f"eq.{insured_guid}", "order": "created_at.desc"},
