@@ -185,6 +185,50 @@ def with_projected_close(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+# --- What kind of deal this is, from who it is with -------------------------
+TYPE_CROSS_SELL = "Cross-selling"
+TYPE_UPSELL = "Upselling"
+
+
+def derive_opportunity_type(supa: "SupabaseClient", insured_id: str | None, line_of_business: str) -> str:
+    """New business, cross-sell or upsell — decided by the AMS id, not by hand.
+
+    Whether a deal is new business is not a matter of opinion: it depends on
+    whether the other party is already a client, and a client is exactly someone
+    who has a NowCerts insured id. So:
+
+      * no id            → a prospect            → New Business
+      * id, no policy in this line → an existing client buying something new → Cross-selling
+      * id, already has this line  → more of what they have → Upselling
+
+    Chosen by hand, this drifts — everything gets typed New Business, and then the
+    board cannot tell you how much of the pipeline is growth of the existing book
+    versus genuinely new names. Falls back to Cross-selling (never New Business)
+    when the book cannot be read: the id already proves they are a client, which
+    is the part that matters.
+    """
+    if not str(insured_id or "").strip():
+        return TYPE_NEW_BUSINESS
+    want = _norm_lob(line_of_business)
+    try:
+        rows = supa.select(
+            "canonical_policies",
+            columns="lines_of_business,active",
+            params={"nowcerts_insured_guid": f"eq.{insured_id}"},
+            limit=500,
+        )
+    except Exception:  # noqa: BLE001 — see the docstring
+        return TYPE_CROSS_SELL
+    for row in rows:
+        if row.get("active") and _norm_lob(row.get("lines_of_business")) == want:
+            return TYPE_UPSELL
+    return TYPE_CROSS_SELL
+
+
+def _norm_lob(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
 def make_client_identifier(name: str | None, fein: str | None = None) -> str:
     """Stable idempotency key from a client name (+ FEIN when present)."""
     base = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")

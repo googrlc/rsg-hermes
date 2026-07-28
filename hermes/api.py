@@ -652,7 +652,13 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
     if req.assigned_to_email:
         _require_users(_get_supa(), [("assigned_to_email", req.assigned_to_email)])
     ci = req.client_identifier or opp.make_client_identifier(req.insured_name, req.fein)
-    otype = (req.opportunity_type or opp.TYPE_NEW_BUSINESS).strip()
+    # Whether this is new business is not a matter of opinion — it depends on
+    # whether they are already a client, which is exactly what having a NowCerts
+    # insured id means. Left to a default, everything gets typed New Business and
+    # the board can no longer tell growth of the book from genuinely new names.
+    otype = (req.opportunity_type or "").strip() or opp.derive_opportunity_type(
+        _get_supa(), req.insured_id, req.line_of_business
+    )
     stage = req.stage.strip() if req.stage else None   # None → type's first stage
     try:
         row, created = opp.create_opportunity(
@@ -739,6 +745,8 @@ class OpportunityUpdateRequest(BaseModel):
     prospect_type: str | None = None
     needed_by: str | None = None
     expected_close_date: str | None = None
+    # The bound policy number — required before a won deal can be filed in the AMS.
+    policy_number: str | None = None
     effective_date: str | None = None
     expiration_date: str | None = None
     lost_reason: str | None = None
@@ -1049,8 +1057,13 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
 
     # Terminal → queue the AMS writeback (Bound/Won or Lost). Best-effort: a queue
     # hiccup must not fail the stage move.
+    #
+    # This one only ever syncs the STAGE of an opportunity that already exists in
+    # NowCerts. It is right for both won and lost: that record is there either way
+    # and leaving it open forever is its own kind of lie.
+    status = str(row.get("status") or "")
     queued = None
-    if str(row.get("status") or "") in ("won", "lost") and row.get("nowcerts_opportunity_id"):
+    if status in ("won", "lost") and row.get("nowcerts_opportunity_id"):
         try:
             from hermes.sync.opportunity_writeback import stage_writeback
 
@@ -1058,7 +1071,33 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
             queued = bool(job)
         except Exception:
             log.exception("opportunity writeback staging failed: %s", opportunity_id)
-    return {"ok": True, "opportunity": row, "writeback_queued": queued}
+
+    # WON → the insured and the policy have to exist in the system of record. This
+    # is the path that was missing: a deal opened in the CRM (a cross-sell, or a
+    # converted lead) carries no nowcerts_opportunity_id, so nothing above fires
+    # and NowCerts never heard it was won.
+    #
+    # LOST stages nothing here, ever. A lost deal was never coverage; it stays in
+    # the CRM with its x-date, which is next year's remarket list.
+    won_queued = None
+    won_blocked = None
+    if status == "won":
+        from hermes.sync.opportunity_won import NotPushable, stage_won
+
+        try:
+            stage_won(supa, row, approved_by=req.approved_by or "cockpit-stage-move")
+            won_queued = True
+        except NotPushable as exc:
+            # Not an error — the deal moved, it just is not ready to be filed.
+            # Say what is missing so it can be fixed rather than silently dropped.
+            won_blocked = str(exc)
+        except Exception:
+            log.exception("won-deal staging failed: %s", opportunity_id)
+
+    return {
+        "ok": True, "opportunity": row, "writeback_queued": queued,
+        "ams_queued": won_queued, "ams_blocked": won_blocked,
+    }
 
 
 # ── Opportunity quotes — carrier quotes (with PDF) attached to an opportunity ──
