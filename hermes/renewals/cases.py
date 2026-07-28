@@ -94,16 +94,76 @@ def log_case_event(
     )
 
 
+# ── Case numbers — one rule ──────────────────────────────────────────────────
+# Every case gets a human-readable number, because a case is the thing people
+# talk about: it goes in emails, in Talk messages, in a NowCerts note. A uuid
+# cannot be read down the phone.
+#
+# Every case is `TYP-` then two parts, and WHICH two says what kind of case it is:
+#
+#   * `REN-9300232193-20261029` — a case with a natural identity. A renewal is
+#     one policy renewing on one date, so the number is DERIVED from exactly
+#     that, and the same identity always yields the same number. That is what
+#     makes the renewal desk safe to re-run: a retry lands on the existing case
+#     instead of opening a second one. Any case that can name what makes it
+#     itself should be numbered this way.
+#   * `SER-20260723-7D674A` — a case with none. An ad-hoc service case is just a
+#     thing someone opened; two identical requests genuinely ARE two cases, so
+#     it is dated and given a random tail.
+#
+# Read the middle: a policy number means the case is tied to something and is
+# idempotent; a date means somebody opened it by hand.
+#
+# One generator, because this was previously spelled out in three places — the
+# renewal helper plus two endpoints that each re-derived it from `utcnow()`,
+# which is how they drifted apart and how the generic ones ended up dated in UTC.
+CASE_NUMBER_PREFIX_LEN = 3
+_IDENTITY_MAX = 24
+
+
+def _slug(value: str | None) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "", str(value or "")).upper()
+
+
+def case_number(
+    case_type: str | None,
+    *,
+    identity: str | None = None,
+    on: str | None = None,
+    now: "datetime | None" = None,
+) -> str:
+    """Build a case number — see the rule above.
+
+    ``identity`` is the thing that makes this case THIS case (a policy number, a
+    lineage id); pass it and the number is deterministic. ``on`` dates the number
+    — a renewal is dated by its event, not by when someone got round to opening
+    it — and defaults to today, agency time (not UTC: a case opened at 8pm ET
+    used to be numbered with tomorrow's date).
+    """
+    import uuid
+
+    from hermes.core.due_dates import agency_today
+
+    prefix = _slug(case_type)[:CASE_NUMBER_PREFIX_LEN] or "CAS"
+    day = str(on or "")[:10].replace("-", "") or agency_today(now).strftime("%Y%m%d")
+    if identity:
+        return f"{prefix}-{_slug(identity)[:_IDENTITY_MAX] or 'UNKNOWN'}-{day}"
+    return f"{prefix}-{day}-{uuid.uuid4().hex[:6].upper()}"
+
+
 def renewal_case_number(
     policy_number: str | None, policy_lineage_id: str, renewal_event_date: str
 ) -> str:
-    """Deterministic case_number for a renewal event (agency_crm_cases.case_number is
-    required with no default). Same renewal-event identity always yields the same
-    number, so retries stay idempotent even before the case row exists.
+    """The renewal flavour: identity is the policy, dated by the renewal event.
+
+    Kept as its own name because the renewal desk's idempotency is keyed on it
+    and the argument order is part of that contract.
     """
-    base = re.sub(r"[^A-Za-z0-9]+", "", str(policy_number or policy_lineage_id or "UNKNOWN")).upper()[:24]
-    date_compact = str(renewal_event_date)[:10].replace("-", "")
-    return f"REN-{base or 'UNKNOWN'}-{date_compact}"
+    return case_number(
+        CASE_TYPE_RENEWAL,
+        identity=policy_number or policy_lineage_id or "UNKNOWN",
+        on=str(renewal_event_date),
+    )
 
 
 def default_tasks(assigned_to_email: str | None = None) -> list[dict[str, Any]]:

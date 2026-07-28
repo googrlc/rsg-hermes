@@ -652,7 +652,13 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
     if req.assigned_to_email:
         _require_users(_get_supa(), [("assigned_to_email", req.assigned_to_email)])
     ci = req.client_identifier or opp.make_client_identifier(req.insured_name, req.fein)
-    otype = (req.opportunity_type or opp.TYPE_NEW_BUSINESS).strip()
+    # Whether this is new business is not a matter of opinion — it depends on
+    # whether they are already a client, which is exactly what having a NowCerts
+    # insured id means. Left to a default, everything gets typed New Business and
+    # the board can no longer tell growth of the book from genuinely new names.
+    otype = (req.opportunity_type or "").strip() or opp.derive_opportunity_type(
+        _get_supa(), req.insured_id, req.line_of_business
+    )
     stage = req.stage.strip() if req.stage else None   # None → type's first stage
     try:
         row, created = opp.create_opportunity(
@@ -699,6 +705,14 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
                 log.exception("prime opportunity failed: %s", opp_row.get("id"))
 
         background_tasks.add_task(_prime, row)
+    if created:
+        opp.log_event(
+            _get_supa(), str(row.get("id")), event_type=opp.EVENT_CREATED,
+            actor_email=req.created_by,
+            summary=f"Opened — {otype} on {req.line_of_business}"
+                    + (f" (from {req.source})" if req.source and req.source != "manual" else ""),
+            details={"source": req.source, "opportunity_type": otype},
+        )
     return {"ok": True, "created": created, "opportunity": row}
 
 
@@ -739,6 +753,8 @@ class OpportunityUpdateRequest(BaseModel):
     prospect_type: str | None = None
     needed_by: str | None = None
     expected_close_date: str | None = None
+    # The bound policy number — required before a won deal can be filed in the AMS.
+    policy_number: str | None = None
     effective_date: str | None = None
     expiration_date: str | None = None
     lost_reason: str | None = None
@@ -781,6 +797,52 @@ async def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdat
     return {"ok": True, "opportunity": row}
 
 
+@app.get("/api/opportunities/{opportunity_id}/events")
+async def list_opportunity_events_endpoint(opportunity_id: str, limit: int = 200):
+    """A deal's timeline — notes, stage moves, creation, AMS filings, newest first.
+
+    The pipeline was the one working surface with no history: `description` was
+    overwritten by each edit and stage moves were applied in place, so "who moved
+    this to Lost, and when, and why" had no answer on the records where it matters
+    most."""
+    from hermes.intake import opportunities as opp
+
+    try:
+        return {"events": opp.list_events(_get_supa(), opportunity_id, limit=limit)}
+    except Exception as exc:
+        log.exception("opportunity events read failed: %s", opportunity_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+class OpportunityNoteRequest(BaseModel):
+    body: str
+    author_email: str | None = None
+
+
+@app.post("/api/opportunities/{opportunity_id}/notes")
+async def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteRequest):
+    """Write down what happened on a deal. Appended to the same timeline the stage
+    moves land on, so one list answers "what happened here"."""
+    from hermes.intake import opportunities as opp
+
+    text = str(req.body or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="a note needs a body")
+    supa = _get_supa()
+    rows = []
+    try:
+        rows = supa.select("opportunities", columns="id", params={"id": f"eq.{opportunity_id}"}, limit=1)
+    except Exception:
+        rows = []                      # malformed uuid → not found, not a 502
+    if not rows:
+        raise HTTPException(status_code=404, detail="opportunity not found")
+    note = opp.log_event(supa, opportunity_id, summary=text,
+                         event_type=opp.EVENT_NOTE, actor_email=req.author_email)
+    if note is None:
+        raise HTTPException(status_code=502, detail="the note could not be saved")
+    return {"ok": True, "note": note}
+
+
 @app.delete("/api/opportunities/{opportunity_id}")
 async def delete_opportunity_endpoint(opportunity_id: str):
     """Delete an opportunity from the CRM. Supabase-only — opportunities never write
@@ -795,20 +857,187 @@ async def delete_opportunity_endpoint(opportunity_id: str):
 
 
 @app.get("/api/leads")
-async def list_leads_endpoint(limit: int = 200):
-    """Leads = live NowCerts prospects (insureds with a prospectType). Read-only;
-    a lead is promoted by creating an opportunity from it (POST /api/opportunities).
+async def list_leads_endpoint(limit: int = 200, status: str | None = None, include_ams: bool = True):
+    """The lead station — the agency's own leads, plus live NowCerts prospects.
 
-    Each lead carries an ``x_date`` where we know one — the expiration of the
-    coverage being chased, read off the opportunity/quote mirror. NowCerts holds no
-    x-date on the insured itself."""
-    from hermes.leads import list_prospects
+    A lead lives in the CRM (``crm_leads``) and never goes to the AMS; it reaches
+    NowCerts only by being converted to an opportunity and that opportunity being
+    won. Prospects created directly in NowCerts appear here too, read-only, marked
+    ``source='nowcerts'`` — and a prospect already held as a CRM lead is shown once.
+
+    The AMS half is best-effort: it is the slowest read the backend does, and our
+    own leads must not disappear because it was slow. When it fails the response
+    carries ``ams_error`` rather than 502-ing the whole screen."""
+    from hermes import leads as L
 
     try:
-        return list_prospects(_get_nowcerts(), _get_supa(), limit=limit)
+        return L.combined_leads(
+            _get_supa(),
+            _get_nowcerts() if include_ams else None,
+            status=status,
+            limit=limit,
+        )
     except Exception as exc:
         log.exception("leads list failed")
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+class LeadWriteRequest(BaseModel):
+    """A lead. Only a name is required — a lead is often just a name and a number,
+    and demanding a full record is how leads stay on a napkin."""
+    name: str | None = None
+    company: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    city: str | None = None
+    state: str | None = None
+    lead_type: str | None = None            # Personal | Commercial
+    lines_of_business: str | None = None
+    premium_estimate: float | None = None
+    x_date: str | None = None               # when their current cover expires
+    status: str | None = None
+    lead_source: str | None = None
+    owner_email: str | None = None
+    next_action: str | None = None
+    next_action_date: str | None = None
+    nowcerts_insured_guid: str | None = None
+    lost_reason: str | None = None
+    created_by_email: str | None = None
+
+
+@app.post("/api/leads")
+async def create_lead_endpoint(req: LeadWriteRequest):
+    """Add a lead. Written to the CRM only — nothing reaches NowCerts here."""
+    from hermes import leads as L
+
+    supa = _get_supa()
+    fields = req.model_dump(exclude_unset=True)
+    creator = fields.pop("created_by_email", None)
+    if fields.get("owner_email"):
+        _require_users(supa, [("owner_email", fields["owner_email"])])
+    try:
+        lead = L.create_lead(supa, fields, created_by=creator)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("create lead failed: %s", fields.get("name"))
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "lead": lead}
+
+
+@app.get("/api/leads/{lead_id}")
+async def get_lead_endpoint(lead_id: str):
+    """One lead and everything said to them so far."""
+    from hermes import leads as L
+
+    supa = _get_supa()
+    try:
+        lead = L.get_lead(supa, lead_id)
+    except Exception:
+        lead = None                 # malformed uuid → not found, not a 502
+    if not lead:
+        raise HTTPException(status_code=404, detail="lead not found")
+    try:
+        notes = L.list_notes(supa, lead_id)
+    except Exception:  # noqa: BLE001 — a lead without its notes still opens
+        log.exception("lead notes read failed: %s", lead_id)
+        notes = []
+    return {"lead": lead, "notes": notes, "statuses": list(L.LEAD_STATUSES)}
+
+
+@app.patch("/api/leads/{lead_id}")
+async def update_lead_endpoint(lead_id: str, req: LeadWriteRequest):
+    """Work a lead: status, owner, next action, the x-date you just found out."""
+    from hermes import leads as L
+
+    supa = _get_supa()
+    fields = req.model_dump(exclude_unset=True)
+    fields.pop("created_by_email", None)
+    if fields.get("owner_email"):
+        _require_users(supa, [("owner_email", fields["owner_email"])])
+    try:
+        lead = L.update_lead(supa, lead_id, fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("update lead failed: %s", lead_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "lead": lead}
+
+
+@app.delete("/api/leads/{lead_id}")
+async def delete_lead_endpoint(lead_id: str):
+    """Delete a lead. Its notes go with it (FK cascade). Prefer status='lost',
+    which keeps the x-date — a lead that went elsewhere this year is a call to
+    make next year."""
+    from hermes import leads as L
+
+    try:
+        _get_supa().delete(L.TABLE, lead_id)
+    except Exception as exc:
+        log.exception("delete lead failed: %s", lead_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "deleted": lead_id}
+
+
+class LeadNoteRequest(BaseModel):
+    body: str
+    author_email: str | None = None
+
+
+@app.post("/api/leads/{lead_id}/notes")
+async def add_lead_note_endpoint(lead_id: str, req: LeadNoteRequest):
+    """Write down what was said. Append-only — the history is why the next call
+    is not the same call again."""
+    from hermes import leads as L
+
+    supa = _get_supa()
+    if not L.get_lead(supa, lead_id):
+        raise HTTPException(status_code=404, detail="lead not found")
+    try:
+        note = L.add_note(supa, lead_id, req.body, author_email=req.author_email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("add lead note failed: %s", lead_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "note": note}
+
+
+class LeadConvertRequest(BaseModel):
+    line_of_business: str
+    opportunity_type: str | None = None
+    premium_estimate: float | None = None
+    assigned_to_email: str | None = None
+    created_by: str | None = None
+
+
+@app.post("/api/leads/{lead_id}/convert")
+async def convert_lead_endpoint(lead_id: str, req: LeadConvertRequest):
+    """Turn a lead into a pipeline opportunity.
+
+    Still nothing written to NowCerts: the deal is worked in the CRM and reaches
+    the AMS when it is won. Idempotent — converting twice returns the same deal."""
+    from hermes import leads as L
+
+    supa = _get_supa()
+    if req.assigned_to_email:
+        _require_users(supa, [("assigned_to_email", req.assigned_to_email)])
+    try:
+        lead, opportunity = L.convert_to_opportunity(
+            supa, lead_id,
+            line_of_business=req.line_of_business,
+            opportunity_type=req.opportunity_type,
+            premium_estimate=req.premium_estimate,
+            assigned_to_email=req.assigned_to_email,
+            created_by=req.created_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("lead conversion failed: %s", lead_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "lead": lead, "opportunity": opportunity}
 
 
 @app.get("/api/cross-sell")
@@ -859,6 +1088,9 @@ class StageUpdateRequest(BaseModel):
     stage: str
     lost_reason: str | None = None
     approved_by: str | None = None
+    # Who dragged the card. The portal has always sent this and the model has
+    # always dropped it, so every move was attributed to 'cockpit-stage-move'.
+    moved_by: str | None = None
 
 
 @app.post("/api/opportunities/{opportunity_id}/stage")
@@ -873,7 +1105,11 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
     stage = (req.stage or "").strip()
     try:
         # advance_stage accepts any non-empty stage (NowCerts owns the vocabulary).
-        row = opp.advance_stage(supa, opportunity_id, stage, lost_reason=req.lost_reason)
+        row = opp.advance_stage(
+            supa, opportunity_id, stage,
+            lost_reason=req.lost_reason,
+            moved_by=req.moved_by or req.approved_by,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -882,8 +1118,13 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
 
     # Terminal → queue the AMS writeback (Bound/Won or Lost). Best-effort: a queue
     # hiccup must not fail the stage move.
+    #
+    # This one only ever syncs the STAGE of an opportunity that already exists in
+    # NowCerts. It is right for both won and lost: that record is there either way
+    # and leaving it open forever is its own kind of lie.
+    status = str(row.get("status") or "")
     queued = None
-    if str(row.get("status") or "") in ("won", "lost") and row.get("nowcerts_opportunity_id"):
+    if status in ("won", "lost") and row.get("nowcerts_opportunity_id"):
         try:
             from hermes.sync.opportunity_writeback import stage_writeback
 
@@ -891,7 +1132,38 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
             queued = bool(job)
         except Exception:
             log.exception("opportunity writeback staging failed: %s", opportunity_id)
-    return {"ok": True, "opportunity": row, "writeback_queued": queued}
+
+    # WON → the insured and the policy have to exist in the system of record. This
+    # is the path that was missing: a deal opened in the CRM (a cross-sell, or a
+    # converted lead) carries no nowcerts_opportunity_id, so nothing above fires
+    # and NowCerts never heard it was won.
+    #
+    # LOST stages nothing here, ever. A lost deal was never coverage; it stays in
+    # the CRM with its x-date, which is next year's remarket list.
+    won_queued = None
+    won_blocked = None
+    if status == "won":
+        from hermes.sync.opportunity_won import NotPushable, stage_won
+
+        actor = req.moved_by or req.approved_by
+        try:
+            stage_won(supa, row, approved_by=req.approved_by or "cockpit-stage-move")
+            won_queued = True
+            opp.log_event(supa, opportunity_id, event_type=opp.EVENT_AMS, actor_email=actor,
+                          summary="Queued for NowCerts — insured and policy to be filed")
+        except NotPushable as exc:
+            # Not an error — the deal moved, it just is not ready to be filed.
+            # Say what is missing so it can be fixed rather than silently dropped.
+            won_blocked = str(exc)
+            opp.log_event(supa, opportunity_id, event_type=opp.EVENT_AMS, actor_email=actor,
+                          summary=f"NOT filed in NowCerts — {exc}")
+        except Exception:
+            log.exception("won-deal staging failed: %s", opportunity_id)
+
+    return {
+        "ok": True, "opportunity": row, "writeback_queued": queued,
+        "ams_queued": won_queued, "ams_blocked": won_blocked,
+    }
 
 
 # ── Opportunity quotes — carrier quotes (with PDF) attached to an opportunity ──
@@ -1289,18 +1561,18 @@ class CaseCreateRequest(BaseModel):
 async def create_case_endpoint(req: CaseCreateRequest):
     """Create a general agency_crm_cases row (any case_type) for any cockpit.
     Owner/creator emails are validated against agency_crm_users (FK guard)."""
-    import uuid
-
+    from hermes.core.due_dates import normalize_due
     from hermes.renewals import cases as C
 
     supa = _get_supa()
     creator = req.created_by_email or C._service_email()
     _require_users(supa, [("owner_email", req.owner_email), ("created_by_email", creator)])
 
-    case_number = (
-        f"{(req.case_type or 'CASE')[:3].upper()}-"
-        f"{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-    )
+    case_number = C.case_number(req.case_type)
+    try:
+        due_at = normalize_due(req.due_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     try:
         case = supa.insert("agency_crm_cases", C._compact({
             "case_type": req.case_type,
@@ -1314,7 +1586,7 @@ async def create_case_endpoint(req: CaseCreateRequest):
             "insured_name": req.insured_name,
             "insured_database_id": req.insured_database_id,
             "policy_number": req.policy_number,
-            "due_at": req.due_at,
+            "due_at": due_at,
         }))
         C.log_case_event(
             supa, case_id=str(case.get("id")), event_type="case_created",
@@ -1362,9 +1634,8 @@ async def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
     cannot be written the case is rolled back, so a caller never ends up with a
     bare case it believes is a full checklist.
     """
-    import uuid
-
     from hermes.casework import templates as T
+    from hermes.core.due_dates import due_in_days, normalize_due
     from hermes.renewals import cases as C
 
     tpl = T.get_template(req.template_key)
@@ -1383,14 +1654,17 @@ async def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
         ("assigned_to_email", req.assigned_to_email),
     ])
 
-    now = datetime.utcnow()
     case_type = tpl["case_type"]
-    case_number = (
-        f"{case_type[:3].upper()}-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-    )
-    case_due = req.due_at or (
-        (now + timedelta(days=tpl["due_days"])).isoformat() if tpl.get("due_days") else None
-    )
+    case_number = C.case_number(case_type)
+    # A template's due_days is a number of DAYS: counted from today's date, agency
+    # time, and landing at close of business — not `utcnow() + n`, which carried
+    # the creation second and, after 8pm ET, the wrong date outright.
+    try:
+        case_due = normalize_due(req.due_at) or (
+            due_in_days(tpl["due_days"]) if tpl.get("due_days") else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     try:
         case = supa.insert("agency_crm_cases", C._compact({
@@ -1427,7 +1701,7 @@ async def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
                 "is_required": bool(t.get("required")),
                 "sort_order": i,
                 "template_key": req.template_key,
-                "due_at": (now + timedelta(days=t.get("due_days", 0))).isoformat(),
+                "due_at": due_in_days(t.get("due_days", 0)),
             } for i, t in enumerate(tpl["tasks"])],
         )
     except Exception as exc:
@@ -1692,6 +1966,7 @@ async def create_task_endpoint(req: TaskCreateRequest):
     bucket), counting only OPEN tasks so a recurring chore isn't blocked forever
     by last month's completed copy.
     """
+    from hermes.core.due_dates import normalize_due
     from hermes.renewals import cases as C
 
     supa = _get_supa()
@@ -1699,12 +1974,16 @@ async def create_task_endpoint(req: TaskCreateRequest):
     _require_users(supa, [("assigned_to_email", req.assigned_to_email), ("created_by_email", creator)])
 
     try:
+        due_at = normalize_due(req.due_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
         created = C.create_tasks(
             supa, case_id=req.case_id,
             insured_database_id=req.insured_database_id,
             tasks=[{"title": req.title, "description": req.description,
                     "assigned_to_email": req.assigned_to_email,
-                    "priority": req.priority, "due_at": req.due_at}],
+                    "priority": req.priority, "due_at": due_at}],
             created_by_email=creator,
         )
     except Exception as exc:
@@ -1786,12 +2065,18 @@ async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
     real FK, so an unknown address fails at the database with a message nobody
     can act on.
     """
+    from hermes.core.due_dates import normalize_due
     from hermes.renewals import cases as C
 
     supa = _get_supa()
     fields = req.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(status_code=400, detail="no fields provided")
+    if "due_at" in fields:
+        try:
+            fields["due_at"] = normalize_due(fields["due_at"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     if not C.get_task(supa, task_id):
         raise HTTPException(status_code=404, detail="task not found")
     if fields.get("assigned_to_email"):
@@ -1883,12 +2168,18 @@ class CaseUpdateRequest(BaseModel):
 async def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
     """Edit a case. Cases were create-and-close-only; a typo'd title or the wrong
     owner meant the case stayed wrong."""
+    from hermes.core.due_dates import normalize_due
     from hermes.renewals import cases as C
 
     supa = _get_supa()
     fields = req.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(status_code=400, detail="no fields provided")
+    if "due_at" in fields:
+        try:
+            fields["due_at"] = normalize_due(fields["due_at"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
     if not rows:
         raise HTTPException(status_code=404, detail="case not found")
