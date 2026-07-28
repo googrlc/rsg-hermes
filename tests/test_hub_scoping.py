@@ -82,6 +82,87 @@ def test_carrier_appetite_empty_is_honest(monkeypatch):
     assert res.ok and "No carriers" in res.message
 
 
+# --- class-code reference (gl_class_codes / wc_class_codes) ---
+GL_ROWS = [
+    {"id": "a", "gl_code": "91341", "description": "Carpentry--Interior",
+     "search_keywords": "carpentry interior finish trim cabinets countertops",
+     "typical_businesses": "Finish carpenter, cabinet installer",
+     "notes": "Finish carpentry: higher skill than rough framing. Rough framing belongs on 91340."},
+    {"id": "b", "gl_code": "91340",
+     "description": "Carpentry--Construction of Residential Property Not Exceeding Three Stories in Height",
+     "search_keywords": "carpentry residential rough framing remodel",
+     "typical_businesses": "Framing contractor", "notes": "Structural rough framing."},
+    {"id": "c", "gl_code": "91343", "description": "Carpentry--Shop Only",
+     "search_keywords": None, "typical_businesses": None, "notes": None},
+]
+
+
+class CodeTablesFake:
+    """Serves the two manual tables; anything else comes back empty."""
+
+    def __init__(self, gl=None, wc=None, other=None):
+        self.gl, self.wc, self.other = gl or [], wc or [], other or []
+
+    def select(self, table, *, columns="*", params=None, limit=100):
+        if table == "gl_class_codes":
+            return self.gl
+        if table == "wc_class_codes":
+            return self.wc
+        return self.other
+
+
+def test_lookup_class_code_by_code(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: CodeTablesFake(gl=GL_ROWS))
+    res = A._exec_lookup_class_code({"query": "ISO 91341"})
+    assert res.ok
+    assert "Carpentry--Interior" in res.message
+    assert "countertops" in res.message                 # the scope text, not just the number
+    assert res.data["codes"][0]["code"] == "91341"      # exact hit outranks its siblings
+
+
+def test_lookup_class_code_reverse_from_description(monkeypatch):
+    """The high-leverage direction: the producer knows what the business DOES."""
+    import hermes.integrations.supabase_client as sc
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: CodeTablesFake(gl=GL_ROWS))
+    res = A._exec_lookup_class_code({"query": "cabinets and countertops install"})
+    assert res.ok and res.data["codes"][0]["code"] == "91341"
+
+
+def test_lookup_class_code_flags_rows_with_no_detail(monkeypatch):
+    """A thin row must announce it's thin — ranking low is a gap in our data,
+    not evidence the code is wrong for the risk."""
+    import hermes.integrations.supabase_client as sc
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: CodeTablesFake(gl=[GL_ROWS[2]]))
+    res = A._exec_lookup_class_code({"query": "91343"})
+    assert res.ok and "no scope detail recorded" in res.message
+
+
+def test_lookup_class_code_no_match_is_honest(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: CodeTablesFake(gl=GL_ROWS))
+    res = A._exec_lookup_class_code({"query": "aviation hull"})
+    assert res.ok and "No manual class code matches" in res.message
+
+
+def test_appointments_by_line_groups_panel(monkeypatch):
+    import hermes.integrations.supabase_client as sc
+
+    class PanelFake:
+        def select(self, table, *, columns="*", params=None, limit=100):
+            if table == "carriers":
+                return [{"id": "lm", "name": "Liberty Mutual", "lines_of_business": ["General Liability"]},
+                        {"id": "isc", "name": "ISC", "general_agent": "Wholesale Co",
+                         "lines_of_business": ["General Liability"]}]
+            return [{"carrier_id": "lm", "lob": "General Liability", "appetite_level": "preferred"}]
+
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: PanelFake())
+    res = A._exec_appointments_by_line({"line_of_business": "General Liability"})
+    assert res.ok
+    assert "Liberty Mutual (direct) — preferred" in res.message
+    assert "ISC (via Wholesale Co)" in res.message
+
+
 # --- commissions hub ---
 def test_commissions_hub_scoped_and_registered():
     names = {t["function"]["name"] for t in A._scoped_tools(A._TOOLS, "commissions")}

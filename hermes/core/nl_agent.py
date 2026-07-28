@@ -174,8 +174,11 @@ _TOOLS: list[dict[str, Any]] = [
             "name": "list_carriers",
             "description": (
                 "List the carriers RSG has appointments/data on, optionally filtered "
-                "by name or line of business. Use for 'which carriers do we work with', "
-                "'who's our GA for X', a carrier's lines, or its underwriting contact."
+                "by name or line of business. Returns each carrier's lines, general agent, "
+                "underwriting contacts (name/role/email/phone), hotline, agency code, "
+                "website and agent portal login. Use for 'which carriers do we work with', "
+                "'who's our GA for X', 'who's our underwriter at X', 'what's the agent "
+                "portal URL for X', or 'what's our agency code with X'."
             ),
             "parameters": {
                 "type": "object",
@@ -201,7 +204,48 @@ _TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "line_of_business": {"type": "string", "description": "Line of business, e.g. 'General Liability'."},
                     "state": {"type": "string", "description": "2-letter or full state name."},
-                    "class_or_naics": {"type": "string", "description": "Class code, NAICS, or an operations keyword."},
+                    "class_or_naics": {"type": "string", "description": "Class code, NAICS, or an operations keyword. Accepts 'ISO 91341' or '91341'."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_class_code",
+            "description": (
+                "The class-code reference (gl_class_codes / wc_class_codes) — what a code "
+                "MEANS, not who writes it. Two directions: a code in ('ISO 91341', '5645') "
+                "returns its manual description, scope and category; a business description "
+                "in ('finish carpentry, cabinets and countertops') returns ranked candidate "
+                "codes. Use for 'what is the scope of X', 'what code applies to this "
+                "operation', '91341 or 91340?'. Pair with match_carrier_appetite, which "
+                "answers who will actually write it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "A class code, or a description of the operation."},
+                    "code_system": {"type": "string", "description": "Optional filter: 'gl' or 'wc'."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "appointments_by_line",
+            "description": (
+                "The panel grouped by line of business — which carriers RSG can place each "
+                "line with, and whether the appointment is direct or through a general agent. "
+                "Use for 'who can write this?', 'appointments by line', 'what markets do we "
+                "have for work comp', 'do we have anyone for X'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "line_of_business": {"type": "string", "description": "Optional LOB filter; omit for the whole panel."},
                 },
             },
         },
@@ -509,9 +553,17 @@ def _exec_list_carriers(args: dict[str, Any]) -> DispatchResult:
     if lob:
         params["lines_of_business"] = f"ilike.*{lob}*"
     try:
+        # Embed carrier_contacts: this tool is advertised as answering "who's our
+        # underwriter at X", but the old column list carried no contact data at all,
+        # so those questions could only be answered by guessing. Credentials (agency
+        # code, portal login) ride along for "what's the agent portal URL for X".
         rows = supa.select(
             "carriers",
-            columns="name,segment,lines_of_business,general_agent,appetite_notes,underwriting_hotline",
+            columns=(
+                "id,name,segment,lines_of_business,general_agent,appetite_notes,"
+                "underwriting_hotline,agency_code,website,agent_login,"
+                "carrier_contacts(name,role,email,phone,region)"
+            ),
             params=params, limit=60,
         )
     except Exception as exc:  # noqa: BLE001
@@ -521,12 +573,181 @@ def _exec_list_carriers(args: dict[str, Any]) -> DispatchResult:
     lines = []
     for r in rows:
         bits = [r.get("name") or "?"]
-        tail = " · ".join(x for x in (r.get("segment"), r.get("lines_of_business")) if x)
+        tail = " · ".join(x for x in (_join(r.get("segment")), _join(r.get("lines_of_business"))) if x)
         if tail:
             bits.append(tail)
+        if r.get("general_agent"):
+            bits.append(f"via {r['general_agent']}")
         lines.append(" — ".join(bits))
+        for c in r.get("carrier_contacts") or []:
+            detail = " · ".join(
+                x for x in (c.get("role"), c.get("email"), c.get("phone"), c.get("region")) if x
+            )
+            lines.append(f"    contact: {c.get('name') or '?'}" + (f" — {detail}" if detail else ""))
+        if r.get("underwriting_hotline"):
+            lines.append(f"    hotline: {r['underwriting_hotline']}")
+        if r.get("agent_login"):
+            lines.append(f"    agent portal / login: {r['agent_login']}")
+        if r.get("website"):
+            lines.append(f"    website: {r['website']}")
+        if r.get("agency_code"):
+            lines.append(f"    agency code: {r['agency_code']}")
     return DispatchResult(True, f"{len(rows)} carriers:\n" + "\n".join(f"• {ln}" for ln in lines),
                           {"carriers": rows})
+
+
+def _join(v: Any) -> str:
+    """Render a Postgres text[] (or a scalar) as a readable comma list."""
+    if isinstance(v, list):
+        return ", ".join(str(x) for x in v if x)
+    return str(v or "")
+
+
+def _norm_code(v: Any) -> str:
+    """Normalize a class code for comparison — "ISO 91341", "91341" and "91-341"
+    all reduce to "91341", so a lookup isn't defeated by how the code was typed."""
+    stripped = re.sub(r"\b(ISO|NCCI|SIC|NAICS|CLASS|CODE)\b", "", str(v or "").upper())
+    return re.sub(r"[^A-Z0-9]", "", stripped)
+
+
+def _exec_lookup_class_code(args: dict[str, Any]) -> DispatchResult:
+    """Carrier hub tool — the class-code reference over gl_class_codes (1,154) and
+    wc_class_codes (499): what a code MEANS, plus the reverse lookup from a business
+    description to candidate codes.
+
+    Deliberately separate from appetite: `match_carrier_appetite` answers who WRITES
+    a code, this answers what the code IS. A correctly classified risk on a carrier
+    with no appetite is still a dead submission, and vice versa.
+    """
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    query = (args.get("query") or "").strip()
+    system = (args.get("code_system") or "").strip().lower()
+    if not query:
+        return DispatchResult(False, "Give a class code or a description of the operation.")
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Class-code reference unavailable: {exc}")
+
+    rows: list[dict[str, Any]] = []
+    try:
+        if system in ("", "gl"):
+            for r in supa.select(
+                "gl_class_codes",
+                columns="id,gl_code,description,category,subcategory,search_keywords,typical_businesses,notes,max_stories",
+                params={"order": "gl_code.asc"}, limit=2000,
+            ):
+                rows.append({**r, "system": "gl", "code": r.get("gl_code"),
+                             "typical": r.get("typical_businesses")})
+        if system in ("", "wc"):
+            for r in supa.select(
+                "wc_class_codes",
+                columns="id,wc_code,description,category,subcategory,search_keywords,typical_duties,notes,state",
+                params={"order": "wc_code.asc"}, limit=2000,
+            ):
+                rows.append({**r, "system": "wc", "code": r.get("wc_code"),
+                             "typical": r.get("typical_duties")})
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Class-code lookup failed: {exc}")
+    if not rows:
+        return DispatchResult(True, "The class-code tables came back empty.")
+
+    wanted = _norm_code(query)
+    terms = [t for t in re.split(r"[^a-z0-9]+", query.lower()) if len(t) > 2]
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for r in rows:
+        score = 100 if wanted and _norm_code(r.get("code")) == wanted else 0
+        fields = (
+            (str(r.get("description") or "").lower(), 4),
+            (str(r.get("search_keywords") or "").lower(), 3),
+            (str(r.get("typical") or "").lower(), 3),
+            (str(r.get("notes") or "").lower(), 2),
+            (f"{r.get('category') or ''} {r.get('subcategory') or ''}".lower(), 1),
+        )
+        for t in terms:
+            for hay, weight in fields:
+                if hay and t in hay:
+                    score += weight
+                    break
+        if score:
+            scored.append((score, r))
+    if not scored:
+        return DispatchResult(True, f"No manual class code matches '{query}'. Most codes have no "
+                                    f"keywords recorded yet, so only the official description is "
+                                    f"searchable — try the code number, or fewer words.")
+    scored.sort(key=lambda p: -p[0])
+
+    out = []
+    for _, r in scored[:6]:
+        out.append(f"{str(r['system']).upper()} {r.get('code')} — {r.get('description')}")
+        if r.get("notes"):
+            out.append(f"    scope: {r['notes']}")
+        if r.get("typical"):
+            out.append(f"    typical: {r['typical']}")
+        # Keywords carry the operation vocabulary ("countertops", "trim") that the
+        # official manual description leaves out — it's often the only place the
+        # actual covered work is spelled out.
+        if r.get("search_keywords"):
+            out.append(f"    covers: {r['search_keywords']}")
+        if r.get("category") or r.get("subcategory"):
+            out.append(f"    category: {' / '.join(x for x in (r.get('category'), r.get('subcategory')) if x)}")
+        if r.get("max_stories"):
+            out.append(f"    max stories: {r['max_stories']}")
+        if not (r.get("notes") or r.get("search_keywords") or r.get("typical")):
+            out.append("    (manual description only — no scope detail recorded for this code yet)")
+    return DispatchResult(True, "\n".join(out), {"codes": [r for _, r in scored[:6]]})
+
+
+def _exec_appointments_by_line(args: dict[str, Any]) -> DispatchResult:
+    """Carrier hub tool — the panel inverted: for each line of business, which
+    carriers RSG can actually place it with. "Who can write this?" is usually a
+    question about the appointment list, not about one carrier."""
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Carrier book unavailable: {exc}")
+    want = (args.get("line_of_business") or "").strip().lower()
+    try:
+        carriers = supa.select("carriers", columns="id,name,general_agent,lines_of_business",
+                               params={"order": "name.asc", "is_active": "eq.true"}, limit=200)
+        appetite = supa.select("carrier_appetite", columns="carrier_id,lob,appetite_level",
+                               params={"active": "eq.true"}, limit=400)
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Appointment lookup failed: {exc}")
+
+    levels = {(a.get("carrier_id"), str(a.get("lob") or "").lower()): a.get("appetite_level")
+              for a in appetite}
+    by_line: dict[str, list[str]] = {}
+    for c in carriers:
+        lobs = c.get("lines_of_business") or []
+        if not isinstance(lobs, list):
+            lobs = [lobs]
+        # An appetite row is itself evidence of an appointment on that line, even
+        # when lines_of_business on the carrier record was never filled in.
+        for a in appetite:
+            if a.get("carrier_id") == c.get("id") and a.get("lob") and a["lob"] not in lobs:
+                lobs.append(a["lob"])
+        for lob in lobs:
+            if not lob or (want and want not in str(lob).lower()):
+                continue
+            label = c.get("name") or "?"
+            label += f" (via {c['general_agent']})" if c.get("general_agent") else " (direct)"
+            level = levels.get((c.get("id"), str(lob).lower()))
+            if level:
+                label += f" — {level}"
+            by_line.setdefault(str(lob), []).append(label)
+
+    if not by_line:
+        return DispatchResult(True, "No appointments on file for that line. This reflects only the "
+                                    "carrier book — confirm directly before relying on it.")
+    out = []
+    for lob in sorted(by_line):
+        out.append(f"{lob} ({len(by_line[lob])}):")
+        out.extend(f"  • {name}" for name in sorted(by_line[lob]))
+    return DispatchResult(True, "Appointments by line:\n" + "\n".join(out), {"by_line": by_line})
 
 
 def _exec_carrier_appetite(args: dict[str, Any]) -> DispatchResult:
@@ -563,11 +784,50 @@ def _exec_carrier_appetite(args: dict[str, Any]) -> DispatchResult:
             return "ALL" in up or any(su == x or su in x or x in su for x in up)
 
         rows = [r for r in rows if _writes_state(r)]
+    bridge_note = ""
     if cls:
-        needle = cls.lower()
-        narrowed = [r for r in rows if needle in " ".join(
-            str(r.get(k) or "") for k in ("key_requirements", "notes", "exclusions", "lob")).lower()]
-        rows = narrowed or rows  # fall back to the LOB/state set if the class filter is too tight
+        # The bridge (carrier_appetite_class_codes) is the authoritative carrier↔code
+        # link and carries eligibility. Check it first — a code explicitly written in
+        # the carrier's own source beats any amount of keyword matching on notes.
+        code = _norm_code(cls)
+        try:
+            linked = supa.select(
+                "vw_carrier_appetite_class_resolved",
+                columns="carrier_name,lob,eligibility,match_method,state_scope,restrictions,code",
+                params={}, limit=200,
+            )
+        except Exception:  # noqa: BLE001
+            linked = []
+        hits = [b for b in linked if code and _norm_code(b.get("code")) == code]
+        if hits:
+            names = {(h.get("carrier_name"), h.get("lob")) for h in hits
+                     if h.get("eligibility") != "prohibited"}
+            banned = [h for h in hits if h.get("eligibility") == "prohibited"]
+            bridge_note = "\n".join(
+                f"• {h.get('carrier_name')} — {h.get('lob')}: {h.get('eligibility')}"
+                + (f" [{h['state_scope']} only]" if h.get("state_scope") else "")
+                + (f" — {h['restrictions']}" if h.get("restrictions") else "")
+                + f" ({h.get('match_method')})"
+                for h in hits)
+            matched = [r for r in rows
+                       if (r.get("carrier_name"), r.get("lob")) in names]
+            if matched:
+                rows = matched
+            if banned:
+                bridge_note += "\n(prohibited links above are knockouts — do not submit)"
+        else:
+            # Token-based, not whole-phrase: a producer asks about "interior carpentry"
+            # while the record says "Carpentry — interior", and a substring match misses.
+            tokens = [t for t in re.split(r"[^a-z0-9]+", cls.lower()) if len(t) > 2]
+
+            def _hay(r: dict[str, Any]) -> str:
+                return " ".join(str(r.get(k) or "") for k in
+                                ("key_requirements", "notes", "exclusions", "lob", "class_codes")).lower()
+
+            narrowed = [r for r in rows if tokens and all(t in _hay(r) for t in tokens)]
+            if not narrowed:
+                narrowed = [r for r in rows if tokens and any(t in _hay(r) for t in tokens)]
+            rows = narrowed or rows  # fall back to the LOB/state set if the filter is too tight
     if not rows:
         return DispatchResult(True, "No carriers with matching appetite on file. This reflects only the "
                                     "appetite table — confirm directly with the carrier before relying on it.")
@@ -577,8 +837,10 @@ def _exec_carrier_appetite(args: dict[str, Any]) -> DispatchResult:
         if r.get("min_premium") or r.get("max_premium"):
             prem = f" · ${r.get('min_premium') or 0}–${r.get('max_premium') or '?'}"
         out.append(f"{r.get('carrier_name')} — {r.get('lob')} ({r.get('appetite_level') or 'appetite'}){prem}")
-    return DispatchResult(True, f"{len(rows)} carrier appetite matches:\n" + "\n".join(f"• {x}" for x in out),
-                          {"matches": rows})
+    msg = f"{len(rows)} carrier appetite matches:\n" + "\n".join(f"• {x}" for x in out)
+    if bridge_note:
+        msg += f"\n\nExplicit class-code links for this code:\n{bridge_note}"
+    return DispatchResult(True, msg, {"matches": rows})
 
 
 def _num(v: Any) -> float:
@@ -1045,6 +1307,8 @@ _EXECUTORS: dict[str, Any] = {
     "intake_lead": _exec_intake,
     "list_carriers": _exec_list_carriers,
     "match_carrier_appetite": _exec_carrier_appetite,
+    "lookup_class_code": _exec_lookup_class_code,
+    "appointments_by_line": _exec_appointments_by_line,
     "commission_summary": _exec_commission_summary,
     "commission_shortfalls": _exec_commission_shortfalls,
     "find_client": _exec_find_client,
@@ -1063,7 +1327,8 @@ _WRITE_TOOLS = {"intake_lead"}
 # Add a hub by adding a tool set here (and, optionally, a persona file).
 # ---------------------------------------------------------------------------
 _HUB_TOOLS: dict[str, set[str]] = {
-    "carrier": {"list_carriers", "match_carrier_appetite", "web_research"},
+    "carrier": {"list_carriers", "match_carrier_appetite", "lookup_class_code",
+                "appointments_by_line", "web_research"},
     "commissions": {"commission_summary", "commission_shortfalls"},
     # CRM Desk sees the whole client: the canonical book, live AMS (NowCerts),
     # the custom agency CRM's cases/tasks, and the client's Nextcloud documents —
