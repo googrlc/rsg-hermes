@@ -705,6 +705,14 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
                 log.exception("prime opportunity failed: %s", opp_row.get("id"))
 
         background_tasks.add_task(_prime, row)
+    if created:
+        opp.log_event(
+            _get_supa(), str(row.get("id")), event_type=opp.EVENT_CREATED,
+            actor_email=req.created_by,
+            summary=f"Opened — {otype} on {req.line_of_business}"
+                    + (f" (from {req.source})" if req.source and req.source != "manual" else ""),
+            details={"source": req.source, "opportunity_type": otype},
+        )
     return {"ok": True, "created": created, "opportunity": row}
 
 
@@ -787,6 +795,52 @@ async def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdat
         log.exception("update opportunity failed: %s", opportunity_id)
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "opportunity": row}
+
+
+@app.get("/api/opportunities/{opportunity_id}/events")
+async def list_opportunity_events_endpoint(opportunity_id: str, limit: int = 200):
+    """A deal's timeline — notes, stage moves, creation, AMS filings, newest first.
+
+    The pipeline was the one working surface with no history: `description` was
+    overwritten by each edit and stage moves were applied in place, so "who moved
+    this to Lost, and when, and why" had no answer on the records where it matters
+    most."""
+    from hermes.intake import opportunities as opp
+
+    try:
+        return {"events": opp.list_events(_get_supa(), opportunity_id, limit=limit)}
+    except Exception as exc:
+        log.exception("opportunity events read failed: %s", opportunity_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+class OpportunityNoteRequest(BaseModel):
+    body: str
+    author_email: str | None = None
+
+
+@app.post("/api/opportunities/{opportunity_id}/notes")
+async def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteRequest):
+    """Write down what happened on a deal. Appended to the same timeline the stage
+    moves land on, so one list answers "what happened here"."""
+    from hermes.intake import opportunities as opp
+
+    text = str(req.body or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="a note needs a body")
+    supa = _get_supa()
+    rows = []
+    try:
+        rows = supa.select("opportunities", columns="id", params={"id": f"eq.{opportunity_id}"}, limit=1)
+    except Exception:
+        rows = []                      # malformed uuid → not found, not a 502
+    if not rows:
+        raise HTTPException(status_code=404, detail="opportunity not found")
+    note = opp.log_event(supa, opportunity_id, summary=text,
+                         event_type=opp.EVENT_NOTE, actor_email=req.author_email)
+    if note is None:
+        raise HTTPException(status_code=502, detail="the note could not be saved")
+    return {"ok": True, "note": note}
 
 
 @app.delete("/api/opportunities/{opportunity_id}")
@@ -1034,6 +1088,9 @@ class StageUpdateRequest(BaseModel):
     stage: str
     lost_reason: str | None = None
     approved_by: str | None = None
+    # Who dragged the card. The portal has always sent this and the model has
+    # always dropped it, so every move was attributed to 'cockpit-stage-move'.
+    moved_by: str | None = None
 
 
 @app.post("/api/opportunities/{opportunity_id}/stage")
@@ -1048,7 +1105,11 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
     stage = (req.stage or "").strip()
     try:
         # advance_stage accepts any non-empty stage (NowCerts owns the vocabulary).
-        row = opp.advance_stage(supa, opportunity_id, stage, lost_reason=req.lost_reason)
+        row = opp.advance_stage(
+            supa, opportunity_id, stage,
+            lost_reason=req.lost_reason,
+            moved_by=req.moved_by or req.approved_by,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -1084,13 +1145,18 @@ async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest)
     if status == "won":
         from hermes.sync.opportunity_won import NotPushable, stage_won
 
+        actor = req.moved_by or req.approved_by
         try:
             stage_won(supa, row, approved_by=req.approved_by or "cockpit-stage-move")
             won_queued = True
+            opp.log_event(supa, opportunity_id, event_type=opp.EVENT_AMS, actor_email=actor,
+                          summary="Queued for NowCerts — insured and policy to be filed")
         except NotPushable as exc:
             # Not an error — the deal moved, it just is not ready to be filed.
             # Say what is missing so it can be fixed rather than silently dropped.
             won_blocked = str(exc)
+            opp.log_event(supa, opportunity_id, event_type=opp.EVENT_AMS, actor_email=actor,
+                          summary=f"NOT filed in NowCerts — {exc}")
         except Exception:
             log.exception("won-deal staging failed: %s", opportunity_id)
 

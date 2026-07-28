@@ -331,20 +331,80 @@ def create_opportunity(
     return row, True
 
 
+# --- A deal's timeline -------------------------------------------------------
+EVENTS_TABLE = "opportunity_events"
+
+EVENT_NOTE = "note"
+EVENT_STAGE = "stage"
+EVENT_CREATED = "created"
+EVENT_AMS = "ams"
+
+
+def log_event(
+    supa: "SupabaseClient",
+    opportunity_id: str,
+    *,
+    summary: str,
+    event_type: str = EVENT_NOTE,
+    details: dict[str, Any] | None = None,
+    actor_email: str | None = None,
+) -> dict[str, Any] | None:
+    """Append to a deal's timeline. Best-effort: never fail the thing being logged.
+
+    A stage move that succeeded but could not be written to the timeline is still a
+    stage move — losing the audit line is bad, refusing the move because of it is
+    worse.
+    """
+    try:
+        return supa.insert(EVENTS_TABLE, {
+            "opportunity_id": opportunity_id,
+            "event_type": event_type,
+            "summary": summary,
+            "details": details or {},
+            "actor_email": actor_email,
+        })
+    except Exception:  # noqa: BLE001 — see the docstring
+        import logging
+
+        logging.getLogger(__name__).exception("opportunity event log failed: %s", opportunity_id)
+        return None
+
+
+def list_events(supa: "SupabaseClient", opportunity_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    """A deal's timeline, newest first."""
+    return supa.select(
+        EVENTS_TABLE, columns="*",
+        params={"opportunity_id": f"eq.{opportunity_id}", "order": "created_at.desc"},
+        limit=limit,
+    )
+
+
 def advance_stage(
     supa: "SupabaseClient",
     opportunity_id: str,
     stage: str,
     *,
     lost_reason: str | None = None,
+    moved_by: str | None = None,
 ) -> dict[str, Any]:
     """Move an opportunity to *stage*, syncing status + the stage-driven win
-    probability/likelihood (won = Bound/Complete·Auto-Renewal, lost = Lost/Not Renewed)."""
+    probability/likelihood (won = Bound/Complete·Auto-Renewal, lost = Lost/Not Renewed).
+
+    The move is written to the deal's timeline with who made it — a stage change
+    applied in place, with the previous value overwritten, is unauditable, and Lost
+    is exactly the stage someone will later want explained."""
     # Any non-empty stage is accepted — NowCerts is the source of truth for the
     # pipeline vocabulary, so we don't gate drag-to-stage on our known enum.
     stage = str(stage or "").strip()
     if not stage:
         raise ValueError("stage is required")
+    # Read the old stage BEFORE the update: "moved to Lost" is half a fact, and the
+    # row is about to stop being able to tell us where it came from.
+    try:
+        prior = supa.select(TABLE, columns="stage", params={"id": f"eq.{opportunity_id}"}, limit=1)
+        was = str((prior[0] if prior else {}).get("stage") or "") or None
+    except Exception:  # noqa: BLE001 — the move matters more than its provenance
+        was = None
     pct = probability_for_stage(stage)
     payload: dict[str, Any] = {
         "stage": stage,
@@ -358,7 +418,17 @@ def advance_stage(
     }
     if status_for_stage(stage) == STATUS_LOST and lost_reason:
         payload["lost_reason"] = lost_reason
-    return supa.update(TABLE, opportunity_id, payload)
+    row = supa.update(TABLE, opportunity_id, payload)
+
+    summary = f"Moved from {was} to {stage}" if was and was != stage else f"Moved to {stage}"
+    if lost_reason:
+        summary += f" — {lost_reason}"
+    log_event(
+        supa, opportunity_id,
+        event_type=EVENT_STAGE, summary=summary, actor_email=moved_by,
+        details={"from": was, "to": stage, "status": payload["status"], "lost_reason": lost_reason},
+    )
+    return row
 
 
 def link_nowcerts(
