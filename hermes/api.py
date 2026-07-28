@@ -184,7 +184,11 @@ class AsyncAcceptedResponse(BaseModel):
     status: str
 
 
-IntakeSource = Literal["cowork", "voice_tool", "manual_curl", "n8n"]
+# "intake_gate" is the RSG intake gate (rsg-cptintake) — the guarded gateway that
+# synthesizes an intake from PDFs, transcripts and operator facts and submits the
+# result here. Named rather than folded into "manual_curl" so the pipeline can tell
+# a reviewed, cited intake apart from a hand-rolled request.
+IntakeSource = Literal["cowork", "voice_tool", "manual_curl", "n8n", "intake_gate"]
 IntakeAgent = Literal["lamar", "gretchen"]
 IntakeKind = Literal["full_intake", "task", "note", "update", "other"]
 
@@ -226,12 +230,56 @@ class IntakeSubmissionRequest(BaseModel):
     coaching_snapshot: IntakeCoachingSnapshot | None = None
     notes: str | None = None
 
+    # An already-synthesized `crm-intake-writer` payload (account, contacts,
+    # opportunities, note, facts). Supply this when the CALLER has done the
+    # extraction and its result is better than a second pass would be — the RSG
+    # intake gate, for instance, synthesizes against the same contract and then
+    # adds cited PDF text, reference-table NAICS/SIC/class codes and split
+    # contact names. Re-extracting from raw text there would silently discard
+    # all of it and produce a different answer from the one the operator
+    # reviewed. When present the worker uses it verbatim and skips synthesis.
+    synthesized_payload: dict[str, Any] | None = None
+
+    # Who approved this intake BEFORE it was sent, when the caller owns the review.
+    #
+    # The intake gate does: an operator reads the synthesized bundle, resolves the
+    # flagged items and presses Approve, and only then is anything sent here. That
+    # review has already happened, so parking the row at `awaiting_approval` asks
+    # the same person the same question twice — and with no Slack in the loop the
+    # second question is never asked at all, leaving the intake stuck forever.
+    #
+    # Absent, nothing changes: the row waits for an approver exactly as before.
+    approved_by: str | None = None
+    approval_token: str | None = None   # defaults to APPROVE ALL when approved_by is set
+
+    @model_validator(mode="after")
+    def _validate_approval(self) -> "IntakeSubmissionRequest":
+        """A token without an approver is an unsigned approval — refuse it."""
+        if self.approval_token and not (self.approved_by or "").strip():
+            raise ValueError("approval_token requires approved_by — an approval must name who gave it")
+        if self.approved_by is not None and not self.approved_by.strip():
+            raise ValueError("approved_by cannot be blank")
+        from hermes.commands.agency_intake import ALLOWED_APPROVAL_TOKENS
+
+        token = (self.approval_token or "").strip().upper()
+        if token and token not in ALLOWED_APPROVAL_TOKENS:
+            raise ValueError(
+                f"approval_token {token!r} is not allowed; use one of {sorted(ALLOWED_APPROVAL_TOKENS)}"
+            )
+        return self
+
     @model_validator(mode="after")
     def _require_transcript_or_documents(self) -> "IntakeSubmissionRequest":
         has_transcript = bool(self.transcript and self.transcript.strip())
         has_documents = bool(self.documents)
+        # A synthesized payload IS the content; requiring raw text alongside it
+        # would force callers to send a transcript nothing will ever read.
+        if self.synthesized_payload:
+            return self
         if not (has_transcript or has_documents):
-            raise ValueError("at least one of `transcript` or `documents` is required")
+            raise ValueError(
+                "at least one of `transcript`, `documents` or `synthesized_payload` is required"
+            )
         return self
 
 
@@ -241,6 +289,11 @@ class IntakeSubmissionResponse(BaseModel):
     status_url: str
     created_at: str
     idempotent_replay: bool = False
+    # Set when the submission was committed inline (already synthesized, already
+    # approved). Carries what was actually created so the caller can say "it is in
+    # the CRM" instead of "it was accepted" — those are different claims, and only
+    # one of them is checkable.
+    commit: dict[str, Any] | None = None
 
 
 class AgencyIntakeRequest(BaseModel):
@@ -4036,6 +4089,17 @@ async def intake_submit(req: IntakeSubmissionRequest, request: Request):
         "coaching_snapshot": _model_dict(req.coaching_snapshot) if req.coaching_snapshot else None,
         "notes": req.notes,
     }
+    # Only carried when supplied — an absent key is what tells the worker to
+    # synthesize, and storing an explicit null would be indistinguishable from
+    # a caller who sent an empty one.
+    if req.synthesized_payload:
+        payload["synthesized_payload"] = req.synthesized_payload
+    # Likewise for the approval: absent means "wait for an approver".
+    if req.approved_by:
+        payload["approval"] = {
+            "approved_by": req.approved_by.strip(),
+            "token": (req.approval_token or "APPROVE ALL").strip().upper(),
+        }
 
     try:
         row, is_new = insert_submission(
@@ -4056,15 +4120,47 @@ async def intake_submit(req: IntakeSubmissionRequest, request: Request):
         raise HTTPException(status_code=502, detail=f"supabase write failed: {exc}")
 
     submission_id = str(row.get("id"))
+    status = str(row.get("status", "received"))
+
+    # Commit inline when there is genuinely nothing left to wait for: the payload
+    # is already synthesized and a human already approved it. The asynchronous
+    # worker buys time for an LLM extraction, a Slack round trip and an approval
+    # wait — none of which apply here. Queueing anyway would leave the operator
+    # looking at "accepted" while the intake had not moved, and in this deployment
+    # it would never move: nothing runs the worker loop.
+    #
+    # Only on a fresh insert. A replay must not re-commit — the first submission
+    # already did, and the row is past 'received'.
+    commit: dict[str, Any] | None = None
+    if is_new and req.approved_by and req.synthesized_payload:
+        from hermes.operations.intake_worker import commit_submission_now
+
+        try:
+            commit = commit_submission_now(_get_supa(), submission_id)
+        except Exception as exc:  # noqa: BLE001 — the row's own state is the record
+            log.exception("synchronous intake commit failed id=%s", submission_id)
+            commit = {"ok": False, "status": "failed", "error": str(exc)}
+        status = str(commit.get("status") or status)
+
     body = _model_dict(
         IntakeSubmissionResponse(
             submission_id=submission_id,
-            status=str(row.get("status", "received")),
+            status=status,
             status_url=_intake_status_url(request, submission_id),
             created_at=str(row.get("created_at", "")),
             idempotent_replay=not is_new,
+            commit=commit,
         )
     )
+    # 201 when it is actually in the CRM; 202 still means "accepted, not yet done".
+    if commit is not None:
+        if commit.get("ok"):
+            return JSONResponse(status_code=201, content=body)
+        # `detail` is where every other error on this API puts its reason, and it
+        # is what clients read. Without it a failed commit reads as a bare 502 and
+        # the actual cause — which the row already knows — is lost to the operator.
+        body["detail"] = str(commit.get("error") or "intake commit failed")
+        return JSONResponse(status_code=502, content=body)
     return JSONResponse(status_code=202 if is_new else 200, content=body)
 
 

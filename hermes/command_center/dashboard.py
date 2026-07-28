@@ -80,33 +80,76 @@ def activity_feed(supa, limit: int = 25) -> list[dict]:
 EMAIL_SOURCES = ("email-ms365", "email-gmail")
 
 
-def email_queue(supa, limit: int = 50) -> dict[str, Any]:
-    """Triaged inbound email — the intake_submissions rows the email lane
-    creates (Outlook/ms365 + Gmail). Surfaces the human-relevant header fields
-    from the payload so the Command Center can show what's waiting without
-    opening each row, plus a status rollup. ``awaiting_approval`` rows are the
-    ones a person needs to act on; ``failed`` rows flag a triage/synthesis gap.
+def _submission_title(row: dict) -> tuple[str, str]:
+    """What to call a waiting submission, and the line under it.
+
+    An email row is identified by its subject and sender. An intake row is
+    identified by the account it is about and the lines of business it opens —
+    reading it as "(no subject)" from nobody, which is what the email shape gives
+    you, makes a real intake look like junk mail.
     """
-    rows = supa.select("intake_submissions", params={
-        "source": f"in.({','.join(EMAIL_SOURCES)})",
-        "order": "created_at.desc",
-    }, limit=limit)
+    payload = row.get("payload") or {}
+    draft = row.get("draft_summary") or {}
+    account = (draft.get("account") or {}).get("account_name")
+    if account:
+        lobs = [
+            o.get("line_of_business")
+            for o in (draft.get("opportunities") or [])
+            if o.get("line_of_business")
+        ]
+        return account, ", ".join(lobs) or str(row.get("source") or "")
+    subject = payload.get("subject")
+    if subject:
+        return str(subject), str(payload.get("from") or payload.get("from_address") or "")
+    # Pre-synthesis, or a shape we don't recognize: say what it is rather than
+    # inventing a title.
+    return f"({row.get('source') or 'submission'})", str(row.get("status") or "")
+
+
+def intake_queue(supa, limit: int = 50, *, sources: tuple[str, ...] | None = None) -> dict[str, Any]:
+    """Everything waiting in ``intake_submissions``, whatever produced it.
+
+    This used to be filtered to the two email lanes, which meant a submission
+    from any other source — the intake gate, cowork, n8n — was committed to the
+    database and then invisible to the only person who could approve it. With
+    Slack out of the picture this list IS the approval surface, so it cannot be
+    the email list wearing a different name.
+
+    ``awaiting_approval`` rows are the ones a person needs to act on; ``failed``
+    rows flag a triage/synthesis gap. Pass ``sources`` to narrow it.
+    """
+    params: dict[str, str] = {"order": "created_at.desc"}
+    if sources:
+        params["source"] = f"in.({','.join(sources)})"
+    rows = supa.select("intake_submissions", params=params, limit=limit)
     items, counts = [], {}
     for r in rows:
         p = r.get("payload") or {}
         status = r.get("status")
         counts[status] = counts.get(status, 0) + 1
+        title, subtitle = _submission_title(r)
         items.append({
             "id": r.get("id"),
             "status": status,
             "source": r.get("source"),
-            "from": p.get("from") or p.get("from_address"),
-            "subject": p.get("subject"),
+            "title": title,
+            "subtitle": subtitle,
+            # Only an awaiting_approval row can be acted on. Sent so the UI can
+            # disable the button rather than offer an action that will 400.
+            "actionable": status == "awaiting_approval",
             "received_at": p.get("received_at") or r.get("created_at"),
             "lob_guess": p.get("lob_guess"),
             "classifier_reason": p.get("classifier_reason"),
+            # Kept so the existing email card renders unchanged.
+            "from": p.get("from") or p.get("from_address"),
+            "subject": p.get("subject"),
         })
     return {"items": items, "counts": counts, "total": len(items)}
+
+
+def email_queue(supa, limit: int = 50) -> dict[str, Any]:
+    """The email lanes only — the original card, unchanged in behaviour."""
+    return intake_queue(supa, limit=limit, sources=EMAIL_SOURCES)
 
 
 # ---- reports (Advanced-Pack-equivalent, on open core) --------------------

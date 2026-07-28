@@ -172,7 +172,20 @@ async def dashboard_feed(limit: int = 25):
 
 @dashboard_router.get("/email-queue")
 async def dashboard_email_queue(limit: int = 50):
+    """The two email lanes only — what the existing dashboard card renders."""
     return dashboard.email_queue(_get_supa(), limit=limit)
+
+
+@dashboard_router.get("/intake-queue")
+async def dashboard_intake_queue(limit: int = 50):
+    """Every intake_submissions row, whatever produced it.
+
+    With no Slack in the loop this is the window onto the intake pipeline: what
+    is waiting, what is mid-flight, and what failed. Filtering it to the email
+    lanes (as /email-queue does) hides every intake-gate submission from the only
+    person who could act on it.
+    """
+    return dashboard.intake_queue(_get_supa(), limit=limit)
 
 
 @dashboard_router.get("/retention-trend")

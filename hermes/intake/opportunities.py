@@ -261,6 +261,11 @@ def create_opportunity(
     likelihood: str | None = None,
     disposition: str | None = None,
     expected_close_date: str | None = None,
+    # When the coverage being chased starts and ends. ``expiration_date`` is the
+    # x-date — the reason a deal has a deadline at all, and what the lead station
+    # carries across on conversion so a converted lead does not arrive undated.
+    effective_date: str | None = None,
+    expiration_date: str | None = None,
     source: str | None = None,
     created_by: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
@@ -324,6 +329,8 @@ def create_opportunity(
             "likelihood": likelihood,
             "disposition": disposition,
             "expected_close_date": expected_close_date,
+            "effective_date": effective_date,
+            "expiration_date": expiration_date,
             "source": source,
             "created_by": created_by,
         },

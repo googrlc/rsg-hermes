@@ -1,20 +1,31 @@
-"""Commit an approved new-business intake — Supabase pipeline + gated NowCerts create.
+"""Commit an approved new-business intake — Supabase pipeline, CRM-only by default.
 
 On approval this:
   1. Creates the Supabase ``opportunities`` rows (the pipeline — immediate, no AMS write).
-  2. Stages an approval-gated NowCerts ``create_insured`` (prospect) job on
-     ``outbound_sync_queue`` (object_type='intake', destination='nowcerts').
-     The intake executor drains it out-of-band.
-  3. Creates the client's Nextcloud folder tree (if configured).
+  2. Creates the client's Nextcloud folder tree (if configured).
+  3. Only when ``HERMES_INTAKE_STAGES_AMS_INSURED=1``: stages a NowCerts
+     ``create_insured`` (prospect) job on ``outbound_sync_queue``.
 
-Nothing writes to NowCerts synchronously here — the insured create is queued and
-only performed when the (opt-in) intake executor runs, so a dry-run can verify
-the insert field casing before the first live write.
+Step 3 is OFF by default, and that default is the agency's rule rather than a
+matter of caution:
+
+    The CRM is the working copy; NowCerts is the record of what is REAL.
+
+An intake is a prospect. A prospect is not a record of insurance, and a book
+filled with prospects who never bought is a book that means nothing — the same
+reasoning that put the lead station in ``crm_leads`` instead of the AMS. The
+insured reaches NowCerts when a deal on it is WON, which is what the won-push
+executor does with ``opportunities.policy_number``.
+
+The staging path is kept, not deleted, because there are real cases for it (a
+migration, a backfill, an account that genuinely exists already). It just has to
+be asked for. Nothing here has ever written to NowCerts synchronously.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +42,22 @@ log = logging.getLogger(__name__)
 OBJECT_TYPE_INTAKE = "intake"
 INTAKE_ACTION_CREATE_INSURED = "create_insured"
 DEFAULT_ASSIGNEE = "gretchen"
+
+# Opt-in: stage the NowCerts prospect create on intake commit. See the module
+# docstring — the default is off because an intake is not yet a record of
+# insurance.
+ENV_STAGE_AMS_INSURED = "HERMES_INTAKE_STAGES_AMS_INSURED"
+
+
+def stages_ams_insured(env: "dict[str, str] | None" = None) -> bool:
+    """Whether an intake commit stages a NowCerts insured create.
+
+    Only an explicit "1"/"true"/"yes" turns it on. Anything else — unset, empty,
+    a typo — reads as off, because the failure mode of guessing wrong here is
+    prospects silently landing in the system of record.
+    """
+    raw = (env if env is not None else os.environ).get(ENV_STAGE_AMS_INSURED, "")
+    return str(raw).strip().lower() in ("1", "true", "yes")
 
 
 def _utcnow_iso() -> str:
@@ -97,6 +124,16 @@ def commit_intake(
         lob = spec.get("line_of_business")
         if not lob:
             continue
+        # Per-line owner and description win over the intake-wide default. An
+        # intake that says who works a line and what the deal actually is knows
+        # more than the fallback does; dropping that is how every intake
+        # opportunity lands on one person's desk with a blank card.
+        #
+        # `stage` is deliberately NOT carried across. The intake contract's stage
+        # vocabulary ("Discovery", "Quoting", ...) is not the pipeline's ("Not
+        # Assigned", "Preparing Application", ...), and create_opportunity raises
+        # on an unknown stage — so passing it through would fail the whole commit
+        # over a word. The type's first stage is correct for a new intake anyway.
         row, _created = opp.create_opportunity(
             supa,
             client_identifier=cid,
@@ -107,33 +144,46 @@ def commit_intake(
             premium_estimate=spec.get("premium_estimate"),
             carrier=spec.get("carrier"),
             lead_source=account.get("lead_source"),
-            assigned_to=assigned_to,
+            assigned_to=spec.get("assigned_to") or assigned_to,
+            description=spec.get("description"),
             source=source,
             created_by=created_by,
         )
         opp_rows.append(row)
 
-    # 2. Gated NowCerts insured-create job.
+    # 2. NowCerts insured-create job — opt-in only (see the module docstring).
     # ptype (Hot/Cold/Prospect) stays on the opportunities row; the NowCerts
     # insured write uses the connector's numeric type code (prospect=1).
+    #
+    # The payload is still BUILT when staging is off. It costs nothing, it goes
+    # back in the summary as `insured_preview`, and it is what lets an operator
+    # see exactly what would reach the AMS without anything being queued.
     insured_payload = nowcerts_map.map_to_insured(account, insured_type=itype, is_prospect=True)
-    job = _stage_insured_job(
-        supa,
-        insured_payload=insured_payload,
-        client_identifier=cid,
-        opportunity_ids=[r.get("id") for r in opp_rows],
-        approved_by=approved_by,
-    )
+    job: dict[str, Any] = {}
+    staged_ams = stages_ams_insured()
+    if staged_ams:
+        job = _stage_insured_job(
+            supa,
+            insured_payload=insured_payload,
+            client_identifier=cid,
+            opportunity_ids=[r.get("id") for r in opp_rows],
+            approved_by=approved_by,
+        )
 
     # 2b. Prompt AMS pull-back: link an existing insured now (and pull its segment
     # fields onto the row), or kick the just-staged create/link job immediately —
     # so the pipeline row is tied to NowCerts within seconds, not next scheduler
     # cycle. Best-effort: never fails the commit.
+    #
+    # The LOOKUP always runs: an intake for a client who already exists in the AMS
+    # should be linked to them, and that is a read plus a CRM-side update. Only the
+    # executor kick is conditional — with nothing staged there is no job to run, and
+    # kicking anyway would drain unrelated queued work as a side effect of an intake.
     prime: dict[str, Any] = {}
     try:
         from hermes.intake.opportunity_priming import prime_new_opportunities
 
-        prime = prime_new_opportunities(supa, opp_rows, kick_executor=True)
+        prime = prime_new_opportunities(supa, opp_rows, kick_executor=staged_ams)
     except Exception:
         log.exception("intake commit: opportunity priming failed for %s", cid)
 
@@ -154,7 +204,10 @@ def commit_intake(
         "client_identifier": cid,
         "opportunities": opp_rows,
         "opportunity_count": len(opp_rows),
+        # None when nothing was staged. `ams_insured_staged` says which of the two
+        # reasons that is, so "no job id" is never read as a silent failure.
         "intake_job_id": job.get("id"),
+        "ams_insured_staged": staged_ams,
         "insured_preview": insured_payload,
         "nextcloud_folder": folder,
         "prospect_type": ptype,
@@ -201,6 +254,13 @@ def commit_draft(
             "line_of_business": o.get("line_of_business"),
             "premium_estimate": o.get("premium") or o.get("target_premium"),
             "carrier": o.get("carrier"),
+            # A submitter that already decided the owner (the intake gate applies
+            # the agency's personal/commercial split per line) keeps it. Absent,
+            # commit_intake's default applies.
+            "assigned_to": o.get("assigned_to"),
+            # Where the deal came from and what still needs checking. Without it
+            # the pipeline card is a line of business and nothing else.
+            "description": o.get("description"),
         }
         for o in opps
         if o.get("line_of_business")

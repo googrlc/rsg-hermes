@@ -27,7 +27,13 @@ def _router_supa():
 
 # ---------------------------------------------------------------- commit
 
-def test_commit_creates_pipeline_job_and_folder():
+def test_commit_creates_pipeline_and_folder_without_touching_the_ams():
+    """The default: an intake opens the pipeline and stages NOTHING for NowCerts.
+
+    An intake is a prospect, and a prospect is not a record of insurance — the
+    insured reaches the AMS when a deal on it is won. The insured payload is still
+    previewed so an operator can see what *would* go, but no queue row exists.
+    """
     supa = _router_supa()
     nc = MagicMock()
     nc.is_configured.return_value = True
@@ -40,12 +46,47 @@ def test_commit_creates_pipeline_job_and_folder():
         nextcloud=nc,
     )
     assert out["opportunity_count"] == 2
-    assert out["intake_job_id"] == "out-1"
+    assert out["intake_job_id"] is None
+    assert out["ams_insured_staged"] is False
+    # The load-bearing assertion: nothing was queued for NowCerts.
+    assert [c.args[0] for c in supa.insert.call_args_list] == ["opportunities", "opportunities"]
     assert out["nextcloud_folder"] == "Clients/Acme Plumbing LLC"
     assert out["insured_preview"]["CommercialName"] == "Acme Plumbing LLC"
     assert out["insured_preview"]["type"] == 1            # prospect code
     assert out["insured_preview"]["insuredType"] == "0"  # commercial code
     assert out["insured_type"] == "Commercial"
+
+
+def test_commit_stages_the_ams_insured_when_explicitly_opted_in(monkeypatch):
+    """The opt-in path still works — migrations and backfills need it."""
+    monkeypatch.setenv(ic.ENV_STAGE_AMS_INSURED, "1")
+    supa = _router_supa()
+    nc = MagicMock()
+    nc.is_configured.return_value = False
+    out = ic.commit_intake(
+        supa,
+        account={"account_name": "Acme Plumbing LLC", "fein": "12-3456789", "insured_type": "Commercial"},
+        opportunities_spec=[{"line_of_business": "General Liability"}],
+        approved_by="lamar",
+        nextcloud=nc,
+    )
+    assert out["ams_insured_staged"] is True
+    assert out["intake_job_id"] == "out-1"
+    queued = [c.args[1] for c in supa.insert.call_args_list if c.args[0] == "outbound_sync_queue"]
+    assert len(queued) == 1
+    assert queued[0]["payload"]["action"] == "create_insured"
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "yes please", "TRUE-ish"])
+def test_only_an_explicit_yes_stages_the_ams_insured(monkeypatch, value):
+    """Anything ambiguous reads as off — guessing wrong puts prospects in the AMS."""
+    monkeypatch.setenv(ic.ENV_STAGE_AMS_INSURED, value)
+    assert ic.stages_ams_insured() is False
+
+
+def test_unset_flag_stages_nothing(monkeypatch):
+    monkeypatch.delenv(ic.ENV_STAGE_AMS_INSURED, raising=False)
+    assert ic.stages_ams_insured() is False
 
 
 def test_commit_without_nextcloud_configured():

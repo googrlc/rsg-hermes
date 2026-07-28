@@ -208,3 +208,30 @@ def test_converting_needs_a_line_of_business():
 def test_converting_an_unknown_lead_is_an_error():
     with pytest.raises(ValueError, match="not found"):
         L.convert_to_opportunity(FakeSupa(), "nope", line_of_business="BOP")
+
+
+def test_conversion_runs_against_the_REAL_create_opportunity():
+    """Convert a lead without mocking create_opportunity away.
+
+    Every other conversion test monkeypatches it with ``fake_create(_supa, **kw)``,
+    which accepts any keyword — so a kwarg the real function does not have passes
+    the suite and raises TypeError in production. It did: ``expiration_date`` was
+    passed here and never existed on the signature, and the lead station's only
+    forward path failed on every call. This test is the one that would have caught
+    it, so it deliberately uses the real thing.
+    """
+    supa = FakeSupa({
+        "crm_leads": [_lead(company="Prospect Co", x_date="2026-09-15", lead_type="Commercial")],
+        # No existing row → create_opportunity inserts rather than adopting.
+        "opportunities": [],
+    })
+    lead, opp = L.convert_to_opportunity(supa, "lead-1", line_of_business="General Liability")
+
+    table, payload = supa.inserted[0]
+    assert table == "opportunities"
+    assert payload["line_of_business"] == "General Liability"
+    assert payload["insured_name"] == "Prospect Co"
+    # The x-date is why the deal has a deadline. It has to land on the row itself,
+    # not merely be accepted as an argument.
+    assert payload["expiration_date"] == "2026-09-15"
+    assert lead["status"] == "converted"
