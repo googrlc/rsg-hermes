@@ -216,3 +216,66 @@ def test_the_kanban_gets_its_columns_from_the_backend(client):
     assert body["new_business"][0] == "Not Assigned"
     assert "Bound / Won" in body["new_business"] and "Lost" in body["new_business"]
     assert "Renewal in 90 days" in body["renewal"]
+
+
+# ── The active flag is derived, never set ────────────────────────────────────
+
+def test_active_cannot_be_pushed_to_the_ams():
+    """canonical_clients.active is recomputed by a trigger from the client's
+    policies, and a policy's active follows its status. Offering either as an
+    editable field would paint over a value the database owns."""
+    with pytest.raises(ValueError, match="active"):
+        writeback.map_fields("client", {"active": False})
+    with pytest.raises(ValueError, match="active"):
+        writeback.map_fields("policy", {"active": False})
+
+
+def test_active_is_not_an_overridable_client_field():
+    assert "active" not in api.CLIENT_OVERRIDABLE_FIELDS
+    assert "active" not in api.POLICY_OVERRIDABLE_FIELDS
+
+
+# ── Retrying a failed push ───────────────────────────────────────────────────
+
+FAILED_ROW = {
+    "id": "q-failed", "object_type": "client", "object_id": GUID, "status": "failed",
+    "payload": {"crm_fields": {"city": "Atlanta"}}, "last_error": "NowCerts 503",
+}
+
+
+def test_a_failed_push_is_replayed_from_its_own_row(supa):
+    """The row remembers the fields, so a retry does not need the person to."""
+    supa.select.return_value = [dict(FAILED_ROW)]
+    nc = _nowcerts([{"id": GUID, "city": "Atlanta"}])
+    out = writeback.retry(supa, nc, queue_id="q-failed", actor=LAMAR)
+    assert out["pushed"] and out["verified"]
+    assert nc.create_insured.call_args.args[0]["City"] == "Atlanta"
+
+
+def test_only_a_failed_push_can_be_retried(supa):
+    supa.select.return_value = [dict(FAILED_ROW, status="completed")]
+    with pytest.raises(ValueError, match="only failed pushes"):
+        writeback.retry(supa, MagicMock(), queue_id="q-failed", actor=LAMAR)
+
+
+def test_a_renewal_job_is_not_retried_by_this_path(supa):
+    """The renewal executor owns those, with its own approval contract."""
+    supa.select.return_value = [dict(FAILED_ROW, object_type="renewal")]
+    with pytest.raises(ValueError, match="only client and policy"):
+        writeback.retry(supa, MagicMock(), queue_id="q-failed", actor=LAMAR)
+
+
+def test_failed_pushes_are_listed_for_the_portal(supa):
+    supa.select.return_value = [dict(FAILED_ROW)]
+    rows = writeback.list_failed(supa)
+    assert rows and rows[0]["object_id"] == GUID
+    params = supa.select.call_args.kwargs["params"]
+    assert params["status"] == "eq.failed"
+    assert "client" in params["object_type"] and "policy" in params["object_type"]
+
+
+def test_the_banner_survives_a_broken_lookup(client, supa):
+    """A banner about failures must not itself take the portal down."""
+    supa.select.side_effect = RuntimeError("boom")
+    body = client.get("/api/ams/failed-pushes").json()
+    assert body == {"failed": [], "count": 0, "unavailable": True}

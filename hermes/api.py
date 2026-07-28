@@ -1133,7 +1133,7 @@ async def search_clients_endpoint(q: str, limit: int = 20):
     try:
         rows = _get_supa().select(
             "canonical_clients",
-            columns="nowcerts_insured_guid,insured_name,client_type,city,state,email,phone",
+            columns="nowcerts_insured_guid,insured_name,client_type,city,state,email,phone,active",
             params={"insured_name": f"ilike.*{query}*", "order": "insured_name.asc"},
             limit=limit,
         )
@@ -2176,6 +2176,15 @@ CLIENT_OVERRIDABLE_FIELDS = frozenset({
     "insured_name", "client_type", "email", "phone",
     "address", "city", "state", "zip", "notes",
 })
+# `active` is deliberately absent from both allowlists. canonical_clients.active
+# is recomputed by a database trigger from the client's own policies, in the same
+# transaction as any bind/cancel/insert/delete — so it is not a field anyone
+# sets. An override on it would not change the value, it would only paint over
+# it at read time: the screen would say active while the book said otherwise,
+# which is worse than not offering the control at all.
+#
+# The lever is the policy. Cancel a client's last active policy in NowCerts and
+# the flag follows on its own; there is nothing to set here.
 
 
 class ClientOverrideRequest(BaseModel):
@@ -2456,6 +2465,42 @@ async def create_policy_endpoint(req: PolicyCreateRequest):
     return {"ok": True, "policy": created, "sent": payload}
 
 
+@app.get("/api/ams/failed-pushes")
+async def list_failed_pushes(limit: int = 50):
+    """Corrections that never reached NowCerts.
+
+    Worth surfacing rather than leaving in a table: the CRM shows the corrected
+    value either way, so a push that failed is invisible on the one screen
+    somebody would go to to check it.
+    """
+    from hermes.ams import writeback
+
+    try:
+        rows = writeback.list_failed(_get_supa(), limit=limit)
+    except Exception:  # noqa: BLE001 — a banner must not take the portal down
+        log.exception("failed-push lookup failed")
+        return {"failed": [], "count": 0, "unavailable": True}
+    return {"failed": rows, "count": len(rows)}
+
+
+class AmsRetryRequest(BaseModel):
+    retried_by: str
+
+
+@app.post("/api/ams/failed-pushes/{queue_id}/retry")
+async def retry_failed_push(queue_id: str, req: AmsRetryRequest):
+    """Re-drive one failed push from its own queue row. Safe to repeat — both AMS
+    endpoints upsert on DatabaseId."""
+    from hermes.ams import writeback
+
+    supa = _get_supa()
+    _require_users(supa, [("retried_by", req.retried_by)])
+    try:
+        return writeback.retry(supa, _get_nowcerts(), queue_id=queue_id, actor=req.retried_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.post("/api/clients/{insured_guid}/push-to-ams")
 async def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
     """Write a client's corrected fields to NowCerts, keyed on the insured GUID."""
@@ -2478,7 +2523,7 @@ async def list_clients_endpoint(limit: int = 500):
     supa = _get_supa()
     rows = supa.select(
         "canonical_clients",
-        columns="nowcerts_insured_guid,insured_name,client_type,city,state,email,phone",
+        columns="nowcerts_insured_guid,insured_name,client_type,city,state,email,phone,active",
         params={"order": "insured_name.asc"}, limit=limit,
     )
     return {"clients": _apply_client_overrides(supa, rows), "count": len(rows)}
@@ -2505,7 +2550,7 @@ async def client_360_endpoint(insured_guid: str):
             # renewed_policy is required by _collapse_to_current_terms to group a
             # successor term with its predecessor.
             columns="policy_guid,policy_number,renewed_policy,nowcerts_insured_guid,carrier,"
-                    "lines_of_business,status,effective_date,expiration_date,"
+                    "lines_of_business,status,active,effective_date,expiration_date,"
                     "annualized_premium,premium_amount",
             params={"nowcerts_insured_guid": f"eq.{insured_guid}", "order": "expiration_date.asc"},
             limit=500,
@@ -2597,7 +2642,7 @@ async def list_policies_endpoint(limit: int = 1000, include_history: bool = Fals
     supa = _get_supa()
     rows = ams_book.select_policies(
         supa,
-        columns="policy_guid,policy_number,renewed_policy,nowcerts_insured_guid,carrier,lines_of_business,status,"
+        columns="policy_guid,policy_number,renewed_policy,nowcerts_insured_guid,carrier,lines_of_business,status,active,"
                 "effective_date,expiration_date,premium_amount,annualized_premium,agency_commission_amount,state",
         params={"order": "expiration_date.asc"}, limit=limit,
     )

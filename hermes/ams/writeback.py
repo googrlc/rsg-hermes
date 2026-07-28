@@ -51,6 +51,10 @@ OBJECT_TYPE_POLICY = "policy"
 # The NowCerts names are the connector's PascalCase common fields, matching
 # hermes/intake/nowcerts_map.py (insured) and hermes/quotes/executor.py (policy)
 # — the two payload builders already proven against the live API.
+# `active` is absent on purpose, on both sides. A client's active flag is
+# recomputed by a database trigger from that client's policies; a policy's is
+# derived from its status. Neither is a field you set — you bind or cancel a
+# policy in the AMS and both follow.
 CLIENT_FIELD_MAP = {
     "insured_name": "CommercialName",
     "email": "EMail",
@@ -285,6 +289,48 @@ _READ_ATTEMPTS = {
         ("/api/PolicyDetailList", "id"),
     ),
 }
+
+
+def list_failed(supa: "SupabaseClient", *, limit: int = 50) -> list[dict[str, Any]]:
+    """Pushes that did not land. The portal shows these, because a correction the
+    AMS never took is invisible otherwise: the CRM shows the corrected value, so
+    the record looks right on the screen where you would go to check it."""
+    rows = supa.select(
+        QUEUE_TABLE, columns="*",
+        params={
+            "object_type": f"in.({OBJECT_TYPE_CLIENT},{OBJECT_TYPE_POLICY})",
+            "destination_system": f"eq.{DESTINATION_NOWCERTS}",
+            "status": f"eq.{QUEUE_FAILED}",
+            "order": "updated_at.desc",
+        },
+        limit=limit,
+    )
+    return rows
+
+
+def retry(
+    supa: "SupabaseClient", nowcerts: "NowCertsClient", *, queue_id: str, actor: str
+) -> dict[str, Any]:
+    """Re-drive one failed push from its own queue row.
+
+    Repeating a push is safe by construction — both AMS endpoints upsert on
+    DatabaseId — so this replays the recorded fields rather than asking the
+    caller to remember what they were.
+    """
+    rows = supa.select(QUEUE_TABLE, columns="*", params={"id": f"eq.{queue_id}"}, limit=1)
+    if not rows:
+        raise ValueError(f"queue row {queue_id} not found")
+    job = rows[0]
+    if job.get("object_type") not in FIELD_MAPS:
+        raise ValueError("only client and policy AMS pushes are retried here")
+    if job.get("status") != QUEUE_FAILED:
+        raise ValueError(f"job status is {job.get('status')!r}; only failed pushes can be retried")
+    payload = job.get("payload") or {}
+    fields = payload.get("crm_fields") or {}
+    if not fields:
+        raise ValueError("queue row carries no fields to replay")
+    return push(supa, nowcerts, object_type=job["object_type"], object_id=job["object_id"],
+                fields=fields, actor=actor, note=f"retry of {queue_id}")
 
 
 def _read(nowcerts: "NowCertsClient", object_type: str, object_id: str) -> dict[str, Any] | None:
