@@ -167,3 +167,19 @@ def test_an_unreachable_ams_falls_back_to_the_snapshot_and_says_so():
     res = R.plan(FakeSupa([board()], [register()]), Dead())
     assert res.source == "canonical_quotes"
     assert res.fixes                      # still does the work, from the snapshot
+
+
+def test_a_board_row_whose_quote_is_no_longer_open_is_reported():
+    """Only active + Received quotes belong on the board. A row whose quote has
+    since been bound, declined or expired is reported so a human can retire it —
+    this tool corrects values, it does not remove somebody's work."""
+    supa = FakeSupa([board()], [register()])
+    res = R.plan(supa, FakeNC([live_quote(quoteStageName="Bound")]))
+    assert res.closed and "Huff" in res.closed[0]
+    assert supa.updates == []
+
+
+def test_an_open_quote_is_not_reported_as_closed():
+    supa = FakeSupa([board()], [register()])
+    res = R.plan(supa, FakeNC([live_quote(active=True, quoteStageName="Received")]))
+    assert res.closed == []

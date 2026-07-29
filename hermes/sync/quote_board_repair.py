@@ -42,8 +42,8 @@ QUOTES_TABLE = "canonical_quotes"
 # nicer; kept correct in two is what matters, so the personal-lines set is
 # imported rather than restated.
 from hermes.sync.quote_sync import (  # noqa: E402
-    _business_type, _carrier, _effective, _is_quote, _lob, _owner_for, _premium,
-    _quote_guid, _stage_for,
+    _business_type, _carrier, _effective, _is_open_quote, _is_quote, _lob, _owner_for,
+    _premium, _quote_guid, _stage_for,
 )
 
 
@@ -61,6 +61,8 @@ def register_from_ams(nc: Any) -> list[dict[str, Any]]:
     """
     quotes = [q for q in nc.fetch_policies() if _is_quote(q)]
     return [{
+        # Carried so the board can be told which of its rows are still open.
+        "_open": _is_open_quote(q),
         "nowcerts_quote_guid": _quote_guid(q),
         "business_type": q.get("businessType") or q.get("BusinessType"),
         "premium_estimate": _premium(q),
@@ -88,6 +90,9 @@ class RepairResult:
     applied: int = 0
     backup_path: str | None = None
     source: str = "canonical_quotes"
+    # Board rows whose quote is no longer open — expired, bound, declined, or
+    # gone from the register entirely. Reported, never deleted here.
+    closed: list[str] = field(default_factory=list)
     unmatched: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -98,7 +103,8 @@ class RepairResult:
             for k in f.changes:
                 by_field[k] = by_field.get(k, 0) + 1
         detail = ", ".join(f"{k}={n}" for k, n in sorted(by_field.items())) or "nothing to change"
-        return (f"[source: {self.source}] {len(self.fixes)} rows need work ({detail}); applied={self.applied}; "
+        return (f"[source: {self.source}] {len(self.fixes)} rows need work ({detail}); "
+                f"applied={self.applied}; not-open={len(self.closed)}; "
                 f"unmatched={len(self.unmatched)}; errors={len(self.errors)}")
 
 
@@ -160,6 +166,16 @@ def plan(supa: Any, nc: Any = None) -> RepairResult:
         guid = str(o.get("nowcerts_quote_guid") or "")
         q = by_guid.get(guid)
         changes: dict[str, tuple[Any, Any]] = {}
+
+        if q and q.get("_open") is False:
+            # The quote is in the register but is not open: bound, declined,
+            # expired or inactive. The board should not be carrying it, but
+            # deciding that a row goes is not this tool's job — it corrects
+            # values, it does not remove work somebody may be mid-way through.
+            result.closed.append(
+                f"{o.get('insured_name')} · {o.get('line_of_business')} "
+                f"(${o.get('premium_estimate')})"
+            )
 
         if q:
             want_type = _norm_type(q.get("business_type"))

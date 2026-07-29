@@ -52,6 +52,8 @@ class QuoteSyncResult:
     superseded_terms: int = 0
     # Quotes whose policy is already bound — AMS term artifacts, not deals.
     skipped_bound: int = 0
+    # Register rows that are not open quotes: expired, bound, declined, inactive.
+    skipped_closed: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -65,6 +67,7 @@ class QuoteSyncResult:
             f"created={self.created} linked={self.linked} enriched={self.enriched} "
             f"promoted={self.promoted} skipped_incomplete={self.skipped_incomplete} "
             f"superseded_terms={self.superseded_terms} skipped_bound={self.skipped_bound} "
+            f"skipped_closed={self.skipped_closed} "
             f"errors={len(self.errors)}"
         )
 
@@ -201,6 +204,27 @@ def _enrichment_payload(q: dict[str, Any], cols: set[str], *, now_iso: str) -> d
 # ---------------------------------------------------------------------------
 # Sync
 # ---------------------------------------------------------------------------
+# What belongs on the board: a quote that is still live and still out for a
+# decision. Lamar, 2026-07-29: "we only want active received quotes in the CRM.
+# those are actually renewal quotes."
+#
+# The register holds the agency's whole quote history — 104 rows, of which 89 are
+# Expired and only 12 still active. Stages: Received 48, Bound 12, Declined 2,
+# blank 42. Bound is won and Declined is lost; neither is an open opportunity,
+# and an expired quote is a record of something that already happened.
+#
+# active + Received leaves 7, worth ~$14.7k, six of them renewals. That is the
+# board. Everything else was the register being mistaken for a pipeline.
+QUOTE_STAGE_RECEIVED = "Received"
+
+
+def _is_open_quote(p: dict[str, Any]) -> bool:
+    """True if this quote is still live and still awaiting a decision."""
+    if p.get("active") is not True:
+        return False
+    return str(p.get("quoteStageName") or "").strip().lower() == QUOTE_STAGE_RECEIVED.lower()
+
+
 def _business_type(p: dict[str, Any]) -> str | None:
     """The AMS's own word for what this quote is: Renewal, New Business, Rewrite.
 
@@ -343,7 +367,9 @@ def run_quote_sync(
     """
     result = QuoteSyncResult()
 
-    quotes = [p for p in nc.fetch_policies(since=since, page_size=page_size) if _is_quote(p)]
+    all_quotes = [p for p in nc.fetch_policies(since=since, page_size=page_size) if _is_quote(p)]
+    quotes = [q for q in all_quotes if _is_open_quote(q)]
+    result.skipped_closed = len(all_quotes) - len(quotes)
     if limit:
         quotes = quotes[:limit]
     result.quotes_fetched = len(quotes)

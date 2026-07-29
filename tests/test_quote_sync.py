@@ -47,9 +47,11 @@ class FakeNowCerts:
 
 def nc_quote(number="Q1", *, insured="ins1", name="Acme LLC", lob="General Liability",
              premium=1200.0, carrier="Acme Mutual", is_quote=True, itype="Commercial",
-             fein=None, guid=None, business_type=None, effective=None):
+             fein=None, guid=None, business_type=None, effective=None,
+             active=True, stage="Received"):
     return {
-        "isQuote": is_quote, "databaseId": guid or f"qg-{number}", "number": number,
+        "isQuote": is_quote, "active": active, "quoteStageName": stage,
+        "databaseId": guid or f"qg-{number}", "number": number,
         "insuredDatabaseId": insured, "insuredCommercialName": name,
         "lineOfBusinesses": [{"lineOfBusinessName": lob}], "totalPremium": premium,
         "carrierName": carrier, "insuredType": itype, "insuredFEIN": fein,
@@ -309,3 +311,49 @@ def test_the_close_date_is_set_rather_than_left_for_the_ui_to_guess():
                                          effective="2026-08-01")])
     run(supa, nc)
     assert str(supa.tables[opp.TABLE][0]["expected_close_date"])[:10] == "2026-08-01"
+
+
+# --- only open quotes belong on the board ------------------------------------
+# "we only want active received quotes in the CRM. those are actually renewal
+# quotes." — Lamar, 2026-07-29. The register is the agency's whole quote history;
+# the board is what is still out for a decision.
+
+def test_an_inactive_quote_never_reaches_the_board():
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", active=False)]))
+    assert supa.tables.get(opp.TABLE, []) == []
+
+
+def test_a_bound_quote_is_won_not_open():
+    supa = FakeSupabase()
+    res = run(supa, FakeNowCerts(policies=[nc_quote("Q1", stage="Bound")]))
+    assert supa.tables.get(opp.TABLE, []) == [] and res.skipped_closed == 1
+
+
+def test_a_declined_quote_is_lost_not_open():
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", stage="Declined")]))
+    assert supa.tables.get(opp.TABLE, []) == []
+
+
+def test_a_quote_with_no_stage_is_not_assumed_open():
+    """42 of 104 register rows carry a blank stage. Blank is not Received."""
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", stage="")]))
+    assert supa.tables.get(opp.TABLE, []) == []
+
+
+def test_an_active_received_quote_is_exactly_what_we_keep():
+    supa = FakeSupabase()
+    res = run(supa, FakeNowCerts(policies=[nc_quote("Q1", active=True, stage="Received")]))
+    assert len(supa.tables[opp.TABLE]) == 1 and res.skipped_closed == 0
+
+
+def test_the_register_is_reported_not_silently_dropped():
+    """89 of 104 are Expired. Dropping them without a count would look like the
+    sync had simply stopped finding anything."""
+    supa = FakeSupabase()
+    res = run(supa, FakeNowCerts(policies=[
+        nc_quote("Q1"), nc_quote("Q2", stage="Bound"), nc_quote("Q3", active=False),
+    ]))
+    assert res.skipped_closed == 2 and res.quotes_fetched == 1

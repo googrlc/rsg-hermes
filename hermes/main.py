@@ -549,6 +549,10 @@ def main() -> int:
             print(f"  {fix.describe()}")
         if len(res.fixes) > 40:
             print(f"  …and {len(res.fixes) - 40} more")
+        for c in res.closed[:40]:
+            print(f"  NOT OPEN (bound/declined/expired — belongs off the board) {c}")
+        if len(res.closed) > 40:
+            print(f"  …and {len(res.closed) - 40} more not open")
         for u in res.unmatched:
             print(f"  UNMATCHED (no quote in the register) {u}")
         for e in res.errors:
