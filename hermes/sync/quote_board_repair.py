@@ -90,6 +90,9 @@ class RepairResult:
     applied: int = 0
     backup_path: str | None = None
     source: str = "canonical_quotes"
+    # Rows whose type cannot be corrected because the client already has a deal
+    # of that type on that line — the duplicate, not a repairable value.
+    collisions: list[str] = field(default_factory=list)
     # Board rows whose quote is no longer open — expired, bound, declined, or
     # gone from the register entirely. Reported, never deleted here.
     closed: list[str] = field(default_factory=list)
@@ -104,7 +107,8 @@ class RepairResult:
                 by_field[k] = by_field.get(k, 0) + 1
         detail = ", ".join(f"{k}={n}" for k, n in sorted(by_field.items())) or "nothing to change"
         return (f"[source: {self.source}] {len(self.fixes)} rows need work ({detail}); "
-                f"applied={self.applied}; not-open={len(self.closed)}; "
+                f"applied={self.applied}; collisions={len(self.collisions)}; "
+                f"not-open={len(self.closed)}; "
                 f"unmatched={len(self.unmatched)}; errors={len(self.errors)}")
 
 
@@ -148,6 +152,16 @@ def plan(supa: Any, nc: Any = None) -> RepairResult:
     """
     result = RepairResult()
     opps = supa.select(opp.TABLE, columns="*", limit=5000)
+    # (client, LOB, type) already on the board. Correcting a row's type into a
+    # slot another row occupies is refused by the unique index — and rightly:
+    # the two rows are the same deal, which is a job for opportunity_dedupe, not
+    # for a value fix. Checked up front so 37 rows do not lose their owner and
+    # close date to a write that was always going to be rejected.
+    taken = {
+        (str(o.get("client_identifier")), str(o.get("line_of_business")),
+         str(o.get("opportunity_type")))
+        for o in opps
+    }
     if nc is not None:
         try:
             quotes = register_from_ams(nc)
@@ -178,7 +192,15 @@ def plan(supa: Any, nc: Any = None) -> RepairResult:
             want_type = _norm_type(q.get("business_type"))
             # Only correct a type the sync guessed. A human who set this deliberately
             # is not overruled by a register row.
+            slot = (str(o.get("client_identifier")), str(o.get("line_of_business")), str(want_type))
             if (want_type and want_type != o.get("opportunity_type")
+                    and str(o.get("sync_source") or "") != "crm"
+                    and slot in taken):
+                result.collisions.append(
+                    f"{o.get('insured_name')} · {o.get('line_of_business')}: already has a "
+                    f"{want_type} deal — this row is the duplicate, not a wrong type"
+                )
+            elif (want_type and want_type != o.get("opportunity_type")
                     and str(o.get("sync_source") or "") != "crm"):
                 changes["opportunity_type"] = (o.get("opportunity_type"), want_type)
                 stage = _stage_for(want_type)
@@ -223,6 +245,19 @@ def run_repair(supa: Any, nc: Any = None, *, apply: bool = False,
             supa.update(opp.TABLE, fix.opportunity_id, payload)
             result.applied += 1
         except Exception as exc:  # noqa: BLE001 — one bad row shouldn't stop the sweep
+            # A collision the pre-check missed still must not cost this row its
+            # owner and close date, which have nothing to do with the type.
+            if "23505" in str(exc) or "duplicate key" in str(exc):
+                slim = {k: v for k, v in payload.items() if k not in ("opportunity_type", "stage")}
+                if len(slim) > 1:
+                    try:
+                        supa.update(opp.TABLE, fix.opportunity_id, slim)
+                        result.applied += 1
+                        result.collisions.append(
+                            f"{fix.insured_name}: type left alone (duplicate); other fields fixed")
+                        continue
+                    except Exception as exc2:  # noqa: BLE001
+                        exc = exc2
             result.errors.append(f"{fix.insured_name}: {exc}")
             log.warning("repair failed for %s: %s", fix.insured_name, exc)
     log.info("quote board repair: %s", result.message)
