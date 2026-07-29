@@ -203,13 +203,13 @@ const HUBS = {
   crm:        { name:"CRM",         mono:"CR", desk:"CRM Desk",         role:"Client book — accounts, policies, renewals, cases",
                 url:"/command-center/cockpit.html", frameable:true,
                 hint:"Ask about a client or their book.\nTry: “what does Integrity Construction have?” or “who’s renewing in 30 days?”" },
-  carrier:    { name:"Carrier",     mono:"CH", desk:"Carrier Desk",     role:"Appetite, appointments, submissions",
+  carrier:    { name:"Carrier",     mono:"CH", desk:"Carrier Desk",     role:"Appetite, class codes, contacts, submissions",
                 // Served over https via Tailscale Serve on hermes-gretch (roots the
                 // SPA so its absolute /assets paths resolve). The raw app is
                 // http://127.0.0.1:3200 on the same box; the serve mapping is:
                 //   tailscale serve --bg --https=8445 http://127.0.0.1:3200
                 url:"https://hermes-gretch.tail1cbc83.ts.net:8445/",
-                hint:"Ask where a risk should go.\nTry: “who writes commercial auto for a GA trucking risk?”" },
+                hint:"Ask where a risk should go, or what class code it is.\nTry: “who writes commercial auto for a GA trucking risk?” or “who writes WC 5183?”" },
   intake:     { name:"Intake",      mono:"IG", desk:"Intake Desk",      role:"Intake Gate — evidence, review & synthesis",
                 url:"https://hermes-gretch.tail1cbc83.ts.net/app",
                 hint:"Ask about the intake queue.\nTry: “what’s waiting for approval?” or “what intake failed?”" },

@@ -82,6 +82,230 @@ def test_carrier_appetite_empty_is_honest(monkeypatch):
     assert res.ok and "No carriers" in res.message
 
 
+class TableSupa:
+    """Fake Supabase that answers per table, and records every call."""
+
+    def __init__(self, tables):
+        self._tables = tables
+        self.calls = []
+
+    def select(self, table, *, columns="*", params=None, limit=100):
+        self.calls.append((table, params or {}))
+        rows = self._tables.get(table, [])
+        return list(rows)
+
+
+def _patch_supa(monkeypatch, fake):
+    import hermes.integrations.supabase_client as sc
+    monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
+
+
+# --- Carrier Desk: appetite rows carry their own caveats ---
+def test_appetite_flags_unverified_and_missing_territory(monkeypatch):
+    rows = [{"carrier_name": "Progressive", "lob": "Commercial Auto", "appetite_level": "standard",
+             "states_approved": ["GA", "AL"], "confidence": "unverified"}]
+    _patch_supa(monkeypatch, TableSupa({"carrier_appetite": rows}))
+    res = A._exec_carrier_appetite({"line_of_business": "Commercial Auto"})
+    assert "standard" in res.message and "GA/AL" in res.message
+    assert "unverified" in res.message  # never presented as signed-off
+
+
+def test_appetite_blank_territory_is_not_nationwide(monkeypatch):
+    # 14 live rows have no itemized states because their source doesn't itemize
+    # them. Blank must never satisfy a state filter — that invents a licence.
+    rows = [
+        {"carrier_name": "Itemized", "lob": "GL", "states_approved": ["GA"], "confidence": "verified"},
+        {"carrier_name": "NoTerritory", "lob": "GL", "states_approved": [], "confidence": "verified"},
+    ]
+    _patch_supa(monkeypatch, TableSupa({"carrier_appetite": rows}))
+    res = A._exec_carrier_appetite({"line_of_business": "GL", "state": "GA"})
+    assert "Itemized" in res.message
+    assert "NoTerritory" not in res.message
+    assert len(res.data["state_unconfirmed"]) == 1
+    assert "no itemized territory" in res.message  # excluded out loud, not silently
+
+
+def test_appetite_declined_is_a_knockout_not_a_match(monkeypatch):
+    rows = [
+        {"carrier_name": "Writes", "lob": "WC", "appetite_level": "preferred",
+         "states_approved": ["GA"], "confidence": "verified"},
+        {"carrier_name": "Declines", "lob": "WC", "appetite_level": "declined",
+         "states_approved": ["GA"], "confidence": "verified"},
+    ]
+    _patch_supa(monkeypatch, TableSupa({"carrier_appetite": rows}))
+    res = A._exec_carrier_appetite({"line_of_business": "WC"})
+    assert res.data["matches"][0]["carrier_name"] == "Writes"
+    assert [r["carrier_name"] for r in res.data["declined"]] == ["Declines"]
+    assert "Declined on file" in res.message
+
+
+def test_appetite_says_when_the_class_filter_found_nothing(monkeypatch):
+    rows = [{"carrier_name": "Nationwide", "lob": "GL", "appetite_level": "standard",
+             "states_approved": ["GA"], "confidence": "verified", "notes": "restaurants"}]
+    _patch_supa(monkeypatch, TableSupa({"carrier_appetite": rows}))
+    res = A._exec_carrier_appetite({"line_of_business": "GL", "class_or_naics": "asbestos"})
+    # Falls back to the LOB set rather than returning zero — but says so, so an
+    # LOB match is never passed off as a class match.
+    assert "Nationwide" in res.message
+    assert "LOB/state matches only" in res.message
+
+
+# --- Carrier Desk: contacts / appointment status ---
+def test_carrier_contacts_lists_people(monkeypatch):
+    fake = TableSupa({
+        "carriers": [{"id": "nationwide", "name": "Nationwide"}],
+        "carrier_contacts": [{"carrier_id": "nationwide", "name": "Dana Reed", "role": "New Business",
+                              "email": "dana@nw.com", "is_primary": True}],
+    })
+    _patch_supa(monkeypatch, fake)
+    res = A._exec_carrier_contacts({"carrier": "nation", "role": "new business"})
+    assert res.ok and "Dana Reed" in res.message and "Nationwide" in res.message
+    assert fake.calls[0][0] == "carriers"
+    assert fake.calls[1][0] == "carrier_contacts"
+    assert fake.calls[1][1]["carrier_id"] == 'in.("nationwide")'
+    assert fake.calls[1][1]["role"] == "ilike.*new business*"
+
+
+def test_carrier_contacts_not_in_roster_means_not_appointed(monkeypatch):
+    fake = TableSupa({"carriers": [], "carrier_contacts": []})
+    _patch_supa(monkeypatch, fake)
+    res = A._exec_carrier_contacts({"carrier": "Chubb"})
+    assert res.ok and "not appointed" in res.message
+    assert "appointment gap" in res.message
+    assert [c[0] for c in fake.calls] == ["carriers"]  # never looked for people
+
+
+def test_carrier_contacts_appointed_but_nobody_on_file(monkeypatch):
+    # Opposite answer to the one above — the distinction is the whole point.
+    _patch_supa(monkeypatch, TableSupa({
+        "carriers": [{"id": "rli", "name": "RLI", "underwriting_hotline": "800-555-0100"}],
+        "carrier_contacts": [],
+    }))
+    res = A._exec_carrier_contacts({"carrier": "RLI"})
+    assert res.ok and "Appointed at RLI" in res.message
+    assert "800-555-0100" in res.message  # the route that does exist
+
+
+# --- Carrier Desk: class codes ---
+def test_resolve_class_code_numeric_is_a_prefix_lookup(monkeypatch):
+    fake = TableSupa({"wc_class_codes": [{"wc_code": "5183", "description": "Plumbing NOC & Drivers",
+                                          "notes": "Master per Basic Manual - Georgia, 11/1/2021."}]})
+    _patch_supa(monkeypatch, fake)
+    res = A._exec_resolve_class_code({"query": "5183", "code_system": "wc"})
+    assert res.ok and "Plumbing NOC & Drivers" in res.message
+    assert "Georgia" in res.message  # the row's provenance note survives
+    assert fake.calls[0][1]["wc_code"] == "like.5183*"
+
+
+def test_resolve_class_code_surfaces_do_not_quote(monkeypatch):
+    _patch_supa(monkeypatch, TableSupa({"wc_class_codes": [
+        {"wc_code": "5037", "description": "Plumbing NOC",
+         "notes": "DISPUTED 2026-07-24 - DO NOT QUOTE. Believed to be Painting: Metal Structures."}]}))
+    res = A._exec_resolve_class_code({"query": "5037", "code_system": "wc"})
+    assert "DO NOT QUOTE" in res.message and "⛔" in res.message
+
+
+def test_resolve_class_code_asks_wc_or_gl_when_both_hit(monkeypatch):
+    _patch_supa(monkeypatch, TableSupa({
+        "wc_class_codes": [{"wc_code": "5183", "description": "Plumbing NOC & Drivers"}],
+        "gl_class_codes": [{"gl_code": "98483", "description": "Plumbing"}],
+        "naics_codes": [],
+    }))
+    res = A._exec_resolve_class_code({"query": "plumbing"})
+    assert "WC and GL both matched" in res.message  # ask, don't pick
+
+
+def test_resolve_class_code_nothing_found_invents_nothing(monkeypatch):
+    _patch_supa(monkeypatch, TableSupa({}))
+    res = A._exec_resolve_class_code({"query": "orbital debris removal"})
+    assert res.ok and "won't invent a code" in res.message
+
+
+def test_class_code_appetite_direct_link(monkeypatch):
+    fake = TableSupa({"vw_carrier_appetite_class_resolved": [
+        {"carrier_name": "LIBERTY MUTUAL", "lob": "General Liability", "appetite_level": "preferred",
+         "appetite_confidence": "verified", "states_approved": ["GA", "FL"], "code_system": "gl",
+         "code": "91340", "code_description": "Carpentry--Residential", "eligibility": "eligible",
+         "match_method": "explicit_source", "link_confidence": "verified"}]})
+    _patch_supa(monkeypatch, fake)
+    res = A._exec_class_code_appetite({"code": "91340", "code_system": "gl", "state": "GA"})
+    assert res.ok and "LIBERTY MUTUAL" in res.message and "direct code link" in res.message
+    assert fake.calls[0][1]["code"] == "eq.91340"
+    assert "unverified" not in res.message  # this one is signed off
+
+
+def test_class_code_appetite_bridges_through_naics(monkeypatch):
+    fake = TableSupa({
+        "vw_carrier_appetite_class_resolved": [],
+        "vw_who_writes_naics": [
+            {"naics_code": "238220", "naics_title": "HVAC Contractors", "carrier_name": "Travelers",
+             "lob": "General Liability", "appetite_level": "standard", "appetite_confidence": "unverified",
+             "states_approved": ["GA"], "code_system": "gl", "matched_code": "98482",
+             "matched_code_description": "HVAC", "eligibility": "eligible"}],
+    })
+    _patch_supa(monkeypatch, fake)
+    res = A._exec_class_code_appetite({"code": "238220"})
+    assert res.ok and "Travelers" in res.message
+    assert "bridged via NAICS" in res.message   # labelled as bridged, not passed off as direct
+    assert "unverified" in res.message
+    assert [c[0] for c in fake.calls] == ["vw_carrier_appetite_class_resolved", "vw_who_writes_naics"]
+
+
+def test_class_code_appetite_empty_is_a_gap_not_a_declination(monkeypatch):
+    # The failure mode this desk must never have: an empty join reported as
+    # "no carriers write this".
+    _patch_supa(monkeypatch, TableSupa({"vw_carrier_appetite_class_resolved": [], "vw_who_writes_naics": []}))
+    res = A._exec_class_code_appetite({"code": "5183"})
+    assert res.ok
+    assert "not a declination" in res.message
+    assert "match_carrier_appetite" in res.message  # names the fallback
+
+
+def test_class_code_appetite_flags_machine_derived_links(monkeypatch):
+    _patch_supa(monkeypatch, TableSupa({"vw_carrier_appetite_class_resolved": [
+        {"carrier_name": "Guessed", "lob": "GL", "appetite_level": "standard", "states_approved": ["GA"],
+         "code": "1234", "eligibility": "eligible", "match_method": "embedding",
+         "link_confidence": "unverified"}]}))
+    res = A._exec_class_code_appetite({"code": "1234"})
+    assert "machine-derived" in res.message
+
+
+def test_class_code_appetite_lists_a_carriers_codes(monkeypatch):
+    fake = TableSupa({"vw_carrier_appetite_class_resolved": [
+        {"carrier_name": "CNA", "lob": "Business Policy", "code_system": "carrier", "code": "87210",
+         "code_description": None, "eligibility": "eligible", "link_confidence": "verified",
+         "states_approved": []}]})
+    _patch_supa(monkeypatch, fake)
+    res = A._exec_class_code_appetite({"carrier": "CNA"})
+    assert res.ok and "87210" in res.message
+    assert fake.calls[0][1]["carrier_name"] == "ilike.*CNA*"
+
+
+def test_carrier_hub_carries_the_class_and_contact_lane():
+    carrier = A._HUB_TOOLS["carrier"]
+    assert {"resolve_class_code", "class_code_appetite", "carrier_contacts"} <= carrier
+    assert not (carrier & A._WRITE_TOOLS)          # enrichment is proposed, not written
+    assert not (carrier & A._HUB_TOOLS["crm"])     # stays out of the client lane
+
+
+def test_carrier_persona_only_promises_tools_the_desk_carries():
+    """The persona tells the desk what it can do; the hub decides what it can call.
+
+    When those drift, the desk promises a lookup it cannot run — which reads to the
+    user as a refusal or, worse, gets answered from the model's own market
+    knowledge. Every tool the persona names must be in the carrier hub's set.
+    """
+    from hermes.core import identity
+
+    persona = identity.load_named_persona("carrier")
+    every_tool = {t["function"]["name"] for t in A._TOOLS}
+    named = {n for n in every_tool if f"`{n}`" in persona}
+    assert named, "the carrier persona names no tools at all"
+    assert named <= A._HUB_TOOLS["carrier"]
+    # The desk is read-only today; the persona must not imply otherwise.
+    assert "You do not write" in persona
+
+
 # --- commissions hub ---
 def test_commissions_hub_scoped_and_registered():
     names = {t["function"]["name"] for t in A._scoped_tools(A._TOOLS, "commissions")}
