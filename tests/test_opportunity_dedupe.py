@@ -130,3 +130,74 @@ def test_the_survivor_keeps_the_type_that_makes_the_board_honest():
     assert len(supa.rows) == 1
     assert supa.rows[0]["opportunity_type"] == "Renewals"
     assert supa.rows[0]["opportunity_type"] != opp.TYPE_NEW_BUSINESS
+
+
+# --- retiring what is not a live quote ---------------------------------------
+
+class NC:
+    def __init__(self, quotes): self._q = quotes
+    def fetch_policies(self, **kw): return list(self._q)
+
+
+def q(guid="qg-live", status="Active", stage="Received"):
+    return {"isQuote": True, "databaseId": guid, "status": status,
+            "quoteStageName": stage, "lineOfBusinesses": [{"lineOfBusinessName": "Personal Auto"}]}
+
+
+def rows():
+    return [
+        {"id": "live", "insured_name": "White, Anthony", "nowcerts_quote_guid": "qg-live",
+         "premium_estimate": 1176},
+        {"id": "expired", "insured_name": "Trees of Georgia", "nowcerts_quote_guid": "qg-old",
+         "premium_estimate": 73000},
+        {"id": "handmade", "insured_name": "Meza, Brenda", "nowcerts_quote_guid": None,
+         "premium_estimate": 1332},
+    ]
+
+
+def test_only_quotes_the_ams_still_calls_open_are_kept():
+    res = dd.plan_retirement(FakeSupa(rows()), NC([q(), q("qg-old", status="Expired")]))
+    assert {r["id"] for r in res.keep} == {"live", "handmade"}
+    assert [r["id"] for r in res.retire] == ["expired"]
+
+
+def test_a_deal_that_never_came_from_a_quote_is_left_alone():
+    """A lead conversion or a hand-entered deal has no quote guid. It is not this
+    sweep's business, and deleting it would take work nobody asked to remove."""
+    res = dd.plan_retirement(FakeSupa(rows()), NC([]))
+    assert any(r["id"] == "handmade" for r in res.keep)
+
+
+def test_nothing_is_deleted_without_apply():
+    supa = FakeSupa(rows())
+    res = dd.run_retirement(supa, NC([q()]))
+    assert supa.deleted == [] and res.deleted == 0 and res.archived_path is None
+
+
+def test_apply_archives_the_rows_and_their_quotes_before_deleting(tmp_path):
+    """An opportunity is not a leaf — agency quote rows hang off it and go when
+    it goes. Archiving the parent alone loses them silently."""
+    class WithQuotes(FakeSupa):
+        def select(self, table, *, columns="*", params=None, limit=100):
+            if table == dd.QUOTES_CHILD_TABLE:
+                return [{"id": "quote-1", "opportunity_id": "expired", "carrier": "Geico"}]
+            return super().select(table, columns=columns, params=params, limit=limit)
+
+    supa = WithQuotes(rows())
+    res = dd.run_retirement(supa, NC([q()]), apply=True, backup_dir=str(tmp_path))
+    assert res.deleted == 1 and supa.deleted == ["expired"]
+    import json
+    saved = json.loads(open(res.archived_path).read())
+    assert saved[0]["insured_name"] == "Trees of Georgia"
+    assert saved[0]["_quotes"][0]["carrier"] == "Geico"
+
+
+def test_a_failed_delete_is_reported_and_the_sweep_continues(tmp_path):
+    class Boom(FakeSupa):
+        def delete(self, table, record_id):
+            raise RuntimeError("fk violation")
+
+    supa = Boom(rows())
+    res = dd.run_retirement(supa, NC([q()]), apply=True, backup_dir=str(tmp_path))
+    assert res.deleted == 0 and len(res.errors) == 1
+    assert res.archived_path       # archived even though the delete failed

@@ -379,6 +379,17 @@ def main() -> int:
         help="Cap the number of quotes processed (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--retire-closed-opportunities",
+        action="store_true",
+        help="Take every board row off the pipeline whose quote the AMS no longer "
+             "calls open. Previews by default; add --apply to archive and delete",
+    )
+    parser.add_argument(
+        "--retire-closed-opportunities-apply",
+        action="store_true",
+        help="Archive (with attached quotes) and delete the rows found by --retire-closed-opportunities",
+    )
+    parser.add_argument(
         "--repair-quote-board",
         action="store_true",
         help="Correct type/premium/owner/close-date on existing opportunities from "
@@ -525,6 +536,37 @@ def main() -> int:
         return 0 if book_result.ok else 1
 
     # --- NowCerts quotes → Supabase opportunities pipeline sync ---
+    if args.retire_closed_opportunities or args.retire_closed_opportunities_apply:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.nowcerts_client import NowCertsClient
+        from hermes.sync.opportunity_dedupe import run_retirement
+
+        try:
+            supa = SupabaseClient()
+            nc = NowCertsClient()
+        except (SupabaseClientError, Exception) as e:  # noqa: BLE001
+            print(f"Cannot reach the systems this needs: {e}", file=sys.stderr)
+            return 2
+        apply = bool(args.retire_closed_opportunities_apply)
+        res = run_retirement(supa, nc, apply=apply)
+        print("Retire closed opportunities — " + ("ARCHIVING + DELETING" if apply else "PREVIEW"))
+        print(f"  keeping {len(res.keep)}:")
+        for r in res.keep[:20]:
+            print(f"    {r.get('insured_name')} · {r.get('line_of_business')} "
+                  f"({r.get('opportunity_type')}, ${r.get('premium_estimate')})")
+        print(f"  retiring {len(res.retire)} (biggest first):")
+        for r in sorted(res.retire, key=lambda x: -(float(x.get("premium_estimate") or 0)))[:15]:
+            print(f"    {r.get('insured_name')} · {r.get('line_of_business')} "
+                  f"${r.get('premium_estimate')}")
+        if len(res.retire) > 15:
+            print(f"    …and {len(res.retire) - 15} more")
+        for e in res.errors:
+            print(f"  ERROR {e}")
+        if res.archived_path:
+            print(f"  archived: {res.archived_path}")
+        print(res.message)
+        return 0 if not res.errors else 1
+
     if args.repair_quote_board or args.repair_quote_board_apply:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.sync.nowcerts_client import NowCertsClient

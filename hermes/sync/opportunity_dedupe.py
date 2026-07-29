@@ -148,3 +148,91 @@ def run_dedupe(supa: Any, *, apply: bool = False, require_same_premium: bool = T
 
     log.info("opportunity dedupe: %s", result.message)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Retiring what is not a live quote.
+#
+# The board carried the agency's whole quote history: 108 rows against 4 quotes
+# NowCerts still calls open. The rest are bound, declined, expired, or duplicates
+# of each other. They are not wrong values — they are records of things that
+# already happened, and they belong off a pipeline.
+#
+# Everything removed is archived first, with its quotes, because an opportunity
+# is not a leaf: agency quote rows hang off it and go when it goes.
+# ---------------------------------------------------------------------------
+QUOTES_CHILD_TABLE = "quotes"
+
+
+@dataclass
+class RetireResult:
+    keep: list[dict[str, Any]] = field(default_factory=list)
+    retire: list[dict[str, Any]] = field(default_factory=list)
+    archived_path: str | None = None
+    deleted: int = 0
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def message(self) -> str:
+        prem = sum(_num(r.get("premium_estimate")) or 0 for r in self.retire)
+        return (f"{len(self.keep)} live quotes kept, {len(self.retire)} retired "
+                f"(${prem:,.0f} of closed/duplicate records); deleted={self.deleted}; "
+                f"errors={len(self.errors)}")
+
+
+def open_quote_guids(nc: Any) -> set[str]:
+    """Quote guids the AMS still reports as open — status Active, stage Received."""
+    from hermes.sync.quote_sync import _is_open_quote, _is_quote, _quote_guid
+
+    return {str(_quote_guid(q)) for q in nc.fetch_policies()
+            if _is_quote(q) and _is_open_quote(q) and _quote_guid(q)}
+
+
+def plan_retirement(supa: Any, nc: Any) -> RetireResult:
+    """Split the board into what the AMS still calls live, and everything else."""
+    result = RetireResult()
+    live = open_quote_guids(nc)
+    for row in supa.select(opp.TABLE, columns="*", limit=5000):
+        guid = str(row.get("nowcerts_quote_guid") or "")
+        # A row with no quote guid was not created from the register — a lead
+        # conversion, a hand-entered deal. Not this sweep's business.
+        if not guid:
+            result.keep.append(row)
+        elif guid in live:
+            result.keep.append(row)
+        else:
+            result.retire.append(row)
+    return result
+
+
+def run_retirement(supa: Any, nc: Any, *, apply: bool = False,
+                   backup_dir: str = "/var/lib/hermes") -> RetireResult:
+    from hermes.sync.quote_board_repair import backup
+
+    result = plan_retirement(supa, nc)
+    if not apply or not result.retire:
+        return result
+
+    # Archive the rows AND their quotes before anything goes.
+    payload: list[dict[str, Any]] = []
+    for row in result.retire:
+        record = dict(row)
+        try:
+            record["_quotes"] = supa.select(
+                QUOTES_CHILD_TABLE, columns="*",
+                params={"opportunity_id": f"eq.{row.get('id')}"}, limit=200,
+            )
+        except Exception:  # noqa: BLE001 — no quotes table, or none attached
+            record["_quotes"] = []
+        payload.append(record)
+    result.archived_path = backup(payload, backup_dir)
+
+    for row in result.retire:
+        try:
+            supa.delete(opp.TABLE, str(row.get("id")))
+            result.deleted += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{row.get('insured_name')}: {exc}")
+            log.warning("retire failed for %s: %s", row.get("insured_name"), exc)
+    log.info("opportunity retirement: %s", result.message)
+    return result
