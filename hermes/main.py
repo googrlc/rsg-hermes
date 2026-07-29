@@ -379,6 +379,17 @@ def main() -> int:
         help="Cap the number of quotes processed (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--repair-quote-board",
+        action="store_true",
+        help="Correct type/premium/owner/close-date on existing opportunities from "
+             "canonical_quotes. Previews by default; add --apply to write",
+    )
+    parser.add_argument(
+        "--repair-quote-board-apply",
+        action="store_true",
+        help="Actually write the corrections found by --repair-quote-board (backs up first)",
+    )
+    parser.add_argument(
         "--dedupe-opportunities",
         action="store_true",
         help="Merge duplicate deals (one client+LOB, a CRM row and a quote-sync twin) "
@@ -514,6 +525,43 @@ def main() -> int:
         return 0 if book_result.ok else 1
 
     # --- NowCerts quotes → Supabase opportunities pipeline sync ---
+    if args.repair_quote_board or args.repair_quote_board_apply:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.nowcerts_client import NowCertsClient
+        from hermes.sync.quote_board_repair import run_repair
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        # The live register outranks the canonical_quotes snapshot, which has not
+        # been refreshed since 2026-07-21. Unreachable AMS falls back and says so.
+        try:
+            nc = NowCertsClient()
+        except Exception as e:  # noqa: BLE001
+            print(f"NowCerts unavailable ({e}); repairing from the snapshot", file=sys.stderr)
+            nc = None
+        apply = bool(args.repair_quote_board_apply)
+        res = run_repair(supa, nc, apply=apply)
+        print("Quote board repair — " + ("APPLYING" if apply else "PREVIEW (nothing written)"))
+        for fix in res.fixes[:40]:
+            print(f"  {fix.describe()}")
+        if len(res.fixes) > 40:
+            print(f"  …and {len(res.fixes) - 40} more")
+        for c in res.closed[:40]:
+            print(f"  NOT OPEN (bound/declined/expired — belongs off the board) {c}")
+        if len(res.closed) > 40:
+            print(f"  …and {len(res.closed) - 40} more not open")
+        for u in res.unmatched:
+            print(f"  UNMATCHED (no quote in the register) {u}")
+        for e in res.errors:
+            print(f"  ERROR {e}")
+        if res.backup_path:
+            print(f"  backup: {res.backup_path}")
+        print(res.message)
+        return 0 if not res.errors else 1
+
     if args.dedupe_opportunities or args.dedupe_opportunities_apply:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.sync.opportunity_dedupe import run_dedupe

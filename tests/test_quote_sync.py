@@ -47,12 +47,16 @@ class FakeNowCerts:
 
 def nc_quote(number="Q1", *, insured="ins1", name="Acme LLC", lob="General Liability",
              premium=1200.0, carrier="Acme Mutual", is_quote=True, itype="Commercial",
-             fein=None, guid=None):
+             fein=None, guid=None, business_type=None, effective=None,
+             active=True, stage="Received", status="Active"):
     return {
-        "isQuote": is_quote, "databaseId": guid or f"qg-{number}", "number": number,
+        "isQuote": is_quote, "active": active, "quoteStageName": stage,
+        "status": status,
+        "databaseId": guid or f"qg-{number}", "number": number,
         "insuredDatabaseId": insured, "insuredCommercialName": name,
         "lineOfBusinesses": [{"lineOfBusinessName": lob}], "totalPremium": premium,
         "carrierName": carrier, "insuredType": itype, "insuredFEIN": fein,
+        "businessType": business_type, "effectiveDate": effective,
     }
 
 
@@ -146,7 +150,7 @@ def test_new_quote_stamps_live_terms():
     q = nc_quote("Q1", premium=2500.0, carrier="Travelers")
     q["effectiveDate"] = "2026-08-01T00:00:00"
     q["expirationDate"] = "2027-08-01T00:00:00"
-    q["status"] = "Quoted"
+    q["status"] = "Active"
     supa, nc = FakeSupabase(), FakeNowCerts(policies=[q])
     res = run(supa, nc)
     assert res.created == 1
@@ -154,7 +158,7 @@ def test_new_quote_stamps_live_terms():
     assert row["premium_actual"] == 2500.0
     assert row["effective_date"] == "2026-08-01"      # _strip_date drops the time
     assert row["expiration_date"] == "2027-08-01"
-    assert row["policy_status"] == "Quoted"
+    assert row["policy_status"] == "Active"
     assert row["sync_source"] == "nowcerts_quote_sync"
     assert row["synced_at"]                            # timestamp stamped
 
@@ -243,3 +247,176 @@ def test_the_live_path_agrees_with_what_the_dry_run_promised():
     preview = run(seed(), FakeNowCerts(policies=quote), dry_run=True)
     live = run(seed(), FakeNowCerts(policies=quote))
     assert (preview.created, preview.linked) == (live.created, live.linked)
+
+
+def test_the_newest_term_wins_so_premium_and_dates_agree():
+    """51 rows carried a premium from one six-month term beside dates from another.
+
+    Every term of a client's policy resolved to the same opportunity, and each
+    overwrote the last: premium stuck at the first term's value while the dates
+    followed the newest. Both cleanup runbooks read that as a join on the wrong
+    key — there is no join here. It is last-writer-wins across terms.
+    """
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[
+        nc_quote("Q-old", name="Huff, Phyllis", lob="Personal Auto",
+                 premium=2253, effective="2025-04-18"),
+        nc_quote("Q-new", name="Huff, Phyllis", lob="Personal Auto",
+                 premium=2377, effective="2026-04-18"),
+    ])
+    res = run(supa, nc)
+    rows = supa.tables[opp.TABLE]
+    assert len(rows) == 1
+    assert res.superseded_terms == 1
+    # premium and dates from the SAME record — the newest term
+    assert float(rows[0]["premium_estimate"]) == 2377
+    assert str(rows[0]["effective_date"])[:10] == "2026-04-18"
+
+
+def test_the_ams_says_what_kind_of_deal_it_is():
+    """37 rows were typed New Business on quotes NowCerts calls Renewal."""
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[
+        nc_quote("Q1", name="Judith Fuller", lob="Personal Auto", business_type="Renewal"),
+    ])
+    run(supa, nc)
+    assert supa.tables[opp.TABLE][0]["opportunity_type"] != opp.TYPE_NEW_BUSINESS
+
+
+def test_an_unreadable_business_type_falls_back_rather_than_inventing_one():
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[nc_quote("Q1", name="Acme", lob="General Liability",
+                                         business_type="Wibble")])
+    run(supa, nc)
+    assert supa.tables[opp.TABLE][0]["opportunity_type"] == opp.TYPE_NEW_BUSINESS
+
+
+def test_every_deal_lands_on_somebody():
+    """Nothing on the board had an owner. Personal lines to Gretchen, the rest to
+    Lamar — and to assigned_to_email, which is the column the CRM reads."""
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[
+        nc_quote("Q1", name="Banks, Sarah", lob="Personal Auto"),
+        nc_quote("Q2", name="Trees of Georgia", lob="Commercial Auto"),
+    ])
+    run(supa, nc)
+    owners = {r["insured_name"]: r.get("assigned_to_email") for r in supa.tables[opp.TABLE]}
+    assert owners["Banks, Sarah"] == qs.GRETCHEN
+    assert owners["Trees of Georgia"] == qs.LAMAR
+    assert all(r.get("assigned_to_email") for r in supa.tables[opp.TABLE])
+
+
+def test_the_close_date_is_set_rather_than_left_for_the_ui_to_guess():
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[nc_quote("Q1", name="Acme", lob="General Liability",
+                                         effective="2026-08-01")])
+    run(supa, nc)
+    assert str(supa.tables[opp.TABLE][0]["expected_close_date"])[:10] == "2026-08-01"
+
+
+# --- only open quotes belong on the board ------------------------------------
+# "we only want active received quotes in the CRM. those are actually renewal
+# quotes." — Lamar, 2026-07-29. The register is the agency's whole quote history;
+# the board is what is still out for a decision.
+
+def test_an_inactive_quote_never_reaches_the_board():
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", status="Expired", active=False)]))
+    assert supa.tables.get(opp.TABLE, []) == []
+
+
+def test_the_status_string_wins_over_the_active_flag():
+    """`Vines, Torreya` and `Moon, Melonie` carry active=true on quotes NowCerts
+    reports as Expired. Trusting the boolean puts two dead records on a board of
+    four — a 50% error on the number Lamar reads off his screen."""
+    supa = FakeSupabase()
+    res = run(supa, FakeNowCerts(policies=[
+        nc_quote("Q1", active=True, status="Expired", stage="Received"),
+    ]))
+    assert supa.tables.get(opp.TABLE, []) == []
+    assert res.skipped_closed == 1
+
+
+def test_a_renewed_quote_is_not_open():
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", status="Renewed", stage="Received")]))
+    assert supa.tables.get(opp.TABLE, []) == []
+
+
+def test_a_bound_quote_is_won_not_open():
+    supa = FakeSupabase()
+    res = run(supa, FakeNowCerts(policies=[nc_quote("Q1", stage="Bound")]))
+    assert supa.tables.get(opp.TABLE, []) == [] and res.skipped_closed == 1
+
+
+def test_a_declined_quote_is_lost_not_open():
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", stage="Declined")]))
+    assert supa.tables.get(opp.TABLE, []) == []
+
+
+def test_a_quote_with_no_stage_is_not_assumed_open():
+    """42 of 104 register rows carry a blank stage. Blank is not Received."""
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", stage="")]))
+    assert supa.tables.get(opp.TABLE, []) == []
+
+
+def test_an_active_received_quote_is_exactly_what_we_keep():
+    supa = FakeSupabase()
+    res = run(supa, FakeNowCerts(policies=[nc_quote("Q1", active=True, stage="Received")]))
+    assert len(supa.tables[opp.TABLE]) == 1 and res.skipped_closed == 0
+
+
+def test_the_register_is_reported_not_silently_dropped():
+    """89 of 104 are Expired. Dropping them without a count would look like the
+    sync had simply stopped finding anything."""
+    supa = FakeSupabase()
+    res = run(supa, FakeNowCerts(policies=[
+        nc_quote("Q1"), nc_quote("Q2", stage="Bound", status="Expired"),
+        nc_quote("Q3", status="Expired"),
+    ]))
+    assert res.skipped_closed == 2 and res.quotes_fetched == 1
+
+
+# --- the AMS type decides which board ----------------------------------------
+# "new business, rewrite go on the opportunities pipeline. Renewal go on the
+# renewal pipeline." The two boards run different stage ladders, so this is not
+# a label — it decides whether the row can even be saved.
+
+def test_a_renewal_quote_lands_on_the_renewal_pipeline():
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", business_type="Renewal")]))
+    row = supa.tables[opp.TABLE][0]
+    assert row["opportunity_type"] in opp.RENEWAL_TYPES
+    assert row["stage"] in opp.stages_for_type(row["opportunity_type"])
+
+
+def test_a_rewrite_lands_on_the_opportunities_pipeline():
+    """A rewrite is taking an existing policy back to market. It is not a renewal,
+    and typing it as one would put it on a ladder with no Quotes Received stage."""
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", business_type="Rewrite")]))
+    row = supa.tables[opp.TABLE][0]
+    assert row["opportunity_type"] == "Remarket"
+    assert row["opportunity_type"] not in opp.RENEWAL_TYPES
+    assert row["stage"] in opp.stages_for_type("Remarket")
+
+
+def test_new_business_lands_on_the_opportunities_pipeline():
+    supa = FakeSupabase()
+    run(supa, FakeNowCerts(policies=[nc_quote("Q1", business_type="New Business")]))
+    row = supa.tables[opp.TABLE][0]
+    assert row["opportunity_type"] == opp.TYPE_NEW_BUSINESS
+    assert row["opportunity_type"] not in opp.RENEWAL_TYPES
+
+
+def test_every_mapped_type_has_a_ladder_that_accepts_its_stage():
+    """The guard against the failure this whole change risks: a type whose stage
+    the pipeline rejects makes the row unsavable, and the sync reports an error
+    per quote instead of a board."""
+    from hermes.sync.quote_sync import _AMS_TYPE_MAP, _stage_for
+
+    for ams, crm in _AMS_TYPE_MAP.items():
+        assert crm in opp.OPPORTUNITY_TYPES, f"{ams} maps to {crm}, which is not a CRM type"
+        assert _stage_for(crm) in opp.stages_for_type(crm), f"{crm} has no usable stage"
