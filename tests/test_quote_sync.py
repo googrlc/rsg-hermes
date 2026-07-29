@@ -47,12 +47,13 @@ class FakeNowCerts:
 
 def nc_quote(number="Q1", *, insured="ins1", name="Acme LLC", lob="General Liability",
              premium=1200.0, carrier="Acme Mutual", is_quote=True, itype="Commercial",
-             fein=None, guid=None):
+             fein=None, guid=None, business_type=None, effective=None):
     return {
         "isQuote": is_quote, "databaseId": guid or f"qg-{number}", "number": number,
         "insuredDatabaseId": insured, "insuredCommercialName": name,
         "lineOfBusinesses": [{"lineOfBusinessName": lob}], "totalPremium": premium,
         "carrierName": carrier, "insuredType": itype, "insuredFEIN": fein,
+        "businessType": business_type, "effectiveDate": effective,
     }
 
 
@@ -243,3 +244,68 @@ def test_the_live_path_agrees_with_what_the_dry_run_promised():
     preview = run(seed(), FakeNowCerts(policies=quote), dry_run=True)
     live = run(seed(), FakeNowCerts(policies=quote))
     assert (preview.created, preview.linked) == (live.created, live.linked)
+
+
+def test_the_newest_term_wins_so_premium_and_dates_agree():
+    """51 rows carried a premium from one six-month term beside dates from another.
+
+    Every term of a client's policy resolved to the same opportunity, and each
+    overwrote the last: premium stuck at the first term's value while the dates
+    followed the newest. Both cleanup runbooks read that as a join on the wrong
+    key — there is no join here. It is last-writer-wins across terms.
+    """
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[
+        nc_quote("Q-old", name="Huff, Phyllis", lob="Personal Auto",
+                 premium=2253, effective="2025-04-18"),
+        nc_quote("Q-new", name="Huff, Phyllis", lob="Personal Auto",
+                 premium=2377, effective="2026-04-18"),
+    ])
+    res = run(supa, nc)
+    rows = supa.tables[opp.TABLE]
+    assert len(rows) == 1
+    assert res.superseded_terms == 1
+    # premium and dates from the SAME record — the newest term
+    assert float(rows[0]["premium_estimate"]) == 2377
+    assert str(rows[0]["effective_date"])[:10] == "2026-04-18"
+
+
+def test_the_ams_says_what_kind_of_deal_it_is():
+    """37 rows were typed New Business on quotes NowCerts calls Renewal."""
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[
+        nc_quote("Q1", name="Judith Fuller", lob="Personal Auto", business_type="Renewal"),
+    ])
+    run(supa, nc)
+    assert supa.tables[opp.TABLE][0]["opportunity_type"] != opp.TYPE_NEW_BUSINESS
+
+
+def test_an_unreadable_business_type_falls_back_rather_than_inventing_one():
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[nc_quote("Q1", name="Acme", lob="General Liability",
+                                         business_type="Wibble")])
+    run(supa, nc)
+    assert supa.tables[opp.TABLE][0]["opportunity_type"] == opp.TYPE_NEW_BUSINESS
+
+
+def test_every_deal_lands_on_somebody():
+    """Nothing on the board had an owner. Personal lines to Gretchen, the rest to
+    Lamar — and to assigned_to_email, which is the column the CRM reads."""
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[
+        nc_quote("Q1", name="Banks, Sarah", lob="Personal Auto"),
+        nc_quote("Q2", name="Trees of Georgia", lob="Commercial Auto"),
+    ])
+    run(supa, nc)
+    owners = {r["insured_name"]: r.get("assigned_to_email") for r in supa.tables[opp.TABLE]}
+    assert owners["Banks, Sarah"] == qs.GRETCHEN
+    assert owners["Trees of Georgia"] == qs.LAMAR
+    assert all(r.get("assigned_to_email") for r in supa.tables[opp.TABLE])
+
+
+def test_the_close_date_is_set_rather_than_left_for_the_ui_to_guess():
+    supa = FakeSupabase()
+    nc = FakeNowCerts(policies=[nc_quote("Q1", name="Acme", lob="General Liability",
+                                         effective="2026-08-01")])
+    run(supa, nc)
+    assert str(supa.tables[opp.TABLE][0]["expected_close_date"])[:10] == "2026-08-01"

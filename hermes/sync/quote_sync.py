@@ -48,6 +48,10 @@ class QuoteSyncResult:
     enriched: int = 0
     promoted: int = 0
     skipped_incomplete: int = 0
+    # Older six-month terms of a deal whose newest term we took instead.
+    superseded_terms: int = 0
+    # Quotes whose policy is already bound — AMS term artifacts, not deals.
+    skipped_bound: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -60,6 +64,7 @@ class QuoteSyncResult:
             f"quotes → opportunities: quotes={self.quotes_fetched} "
             f"created={self.created} linked={self.linked} enriched={self.enriched} "
             f"promoted={self.promoted} skipped_incomplete={self.skipped_incomplete} "
+            f"superseded_terms={self.superseded_terms} skipped_bound={self.skipped_bound} "
             f"errors={len(self.errors)}"
         )
 
@@ -196,6 +201,127 @@ def _enrichment_payload(q: dict[str, Any], cols: set[str], *, now_iso: str) -> d
 # ---------------------------------------------------------------------------
 # Sync
 # ---------------------------------------------------------------------------
+def _business_type(p: dict[str, Any]) -> str | None:
+    """The AMS's own word for what this quote is: Renewal, New Business, Rewrite.
+
+    NowCerts records it and the board ignored it, typing all 60 rows New Business —
+    37 of them on quotes the AMS explicitly calls Renewal. Mapped to the CRM's
+    vocabulary; anything unrecognised returns None so the caller falls back rather
+    than inventing a type.
+    """
+    raw = str(p.get("businessType") or p.get("BusinessType") or "").strip().lower()
+    if not raw:
+        return None
+    if raw.startswith("renew"):
+        return opp.TYPE_RENEWAL if hasattr(opp, "TYPE_RENEWAL") else "Renewals"
+    if raw.startswith("new"):
+        return opp.TYPE_NEW_BUSINESS
+    if raw.startswith("rewrit"):
+        return "Competitive Replacements (BOR)" if "Competitive Replacements (BOR)" in opp.OPPORTUNITY_TYPES else opp.TYPE_NEW_BUSINESS
+    return None
+
+
+def _effective(p: dict[str, Any]):
+    """Sortable effective date, or None. Used to pick the term that matters."""
+    raw = strip_date(p.get("effectiveDate") or p.get("EffectiveDate"))
+    return raw or None
+
+
+def _latest_term_per_deal(quotes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One quote per client + line: the one with the latest effective date.
+
+    Progressive personal auto runs six-month terms, so a single policy has up to
+    four quote rows in the register. Every one of them resolved to the same
+    opportunity (create_opportunity is idempotent per client + LOB + type), and each
+    overwrote the last: `premium_estimate` stuck at whatever the FIRST term set,
+    while the dates and quote guid followed the LAST. The result was 51 rows whose
+    premium belongs to a different term than the dates beside it — Huff, Phyllis
+    showing the 2026 premium against the 2025 term, and so on.
+
+    Both cleanup runbooks read that as a join on the wrong key. There is no join
+    here: the sync reads NowCerts directly. The defect is last-writer-wins across
+    terms, so the fix is to decide which term this deal is about — the newest one —
+    and take every field from that single record.
+    """
+    best: dict[tuple[str, str], dict[str, Any]] = {}
+    for q in quotes:
+        name, lob = _insured_name(q), _lob(q)
+        if not name or not lob:
+            best[(f"__incomplete__{id(q)}", "")] = q     # keep, so it still counts as skipped
+            continue
+        key = (opp.make_client_identifier(name, _fein(q)), lob)
+        current = best.get(key)
+        if current is None or (_effective(q) or "") > (_effective(current) or ""):
+            best[key] = q
+    return list(best.values())
+
+
+# Who works what, by line. Gretchen owns personal lines, Lamar owns commercial —
+# how RSG actually splits the work. Everything unrecognised goes to Lamar rather
+# than to nobody: an unowned deal is one nobody is accountable for, which is how
+# 84 rows sat on a board with no owner at all.
+#
+# Written to assigned_to_email, NOT assigned_to. Both columns exist and the CRM
+# reads the email one — filling the name column looks like it worked and shows
+# nothing on the board.
+_PERSONAL_LINES = {
+    "personal auto", "homeowners", "motorcycle", "dwelling fire",
+    "condo owners - personal", "personal umbrella", "mapd", "life",
+}
+GRETCHEN = "gretchen@risksolutionsgroup.net"
+LAMAR = "lamar@risksolutionsgroup.net"
+
+
+def _owner_for(lob: str | None) -> str:
+    return GRETCHEN if str(lob or "").strip().lower() in _PERSONAL_LINES else LAMAR
+
+
+def _stage_for(otype: str) -> str:
+    """The "we have a quote in hand" stage on that type's ladder.
+
+    Renewals run a different ladder entirely — no "Quotes Received" on it — so
+    passing the AMS business type through without translating the stage raises
+    `Unknown stage 'Quotes Received' for type 'Renewals'` on every renewal quote,
+    which is most of the register. On the renewal ladder the equivalent point is
+    Requote Renewal: we went to market and have a number back.
+    """
+    valid = opp.stages_for_type(otype)
+    for candidate in (opp.STAGE_QUOTES_RECEIVED, "Requote Renewal"):
+        if candidate in valid:
+            return candidate
+    return opp.default_stage_for_type(otype)
+
+
+def _bound_policy_index(supa: Any) -> set[tuple[str, str, str]]:
+    """(insured guid, LOB, effective date) for every bound policy in the book.
+
+    A quote whose bound counterpart already exists is not an opportunity — it is
+    the AMS's record of the term that was written. Those are the bulk of the
+    phantom board: the register was loaded whole, quotes and bound terms alike.
+
+    Best-effort: if the book cannot be read, the index is empty and nothing is
+    suppressed. Filtering the board is worth doing, but not at the cost of the
+    sync failing closed on a read it does not strictly need.
+    """
+    try:
+        from hermes.ams import book as ams_book
+
+        rows = ams_book.select_policies(
+            supa, columns="nowcerts_insured_guid,lines_of_business,effective_date", limit=100000,
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("bound-policy index unavailable; not suppressing term artifacts")
+        return set()
+    out = set()
+    for r in rows:
+        guid = str(r.get("nowcerts_insured_guid") or "").strip()
+        lob = str(r.get("lines_of_business") or "").strip()
+        eff = str(r.get("effective_date") or "")[:10]
+        if guid and lob and eff:
+            out.add((guid, lob, eff))
+    return out
+
+
 def run_quote_sync(
     nc: Any,
     supa: Any,
@@ -221,6 +347,11 @@ def run_quote_sync(
     if limit:
         quotes = quotes[:limit]
     result.quotes_fetched = len(quotes)
+    # Collapse a client's multiple six-month terms to the one the deal is about,
+    # so premium and dates come off the same record instead of two.
+    quotes = _latest_term_per_deal(quotes)
+    result.superseded_terms = max(0, result.quotes_fetched - len(quotes))
+    bound = _bound_policy_index(supa)
     log.info("quote sync: %d NowCerts quotes to process (dry_run=%s)", len(quotes), dry_run)
 
     cols = _discover_columns(supa) if not dry_run else set()
@@ -231,6 +362,11 @@ def run_quote_sync(
         if not name or not lob:
             result.skipped_incomplete += 1
             log.info("SKIP quote (missing insured name or LOB): %s", _quote_number(q) or _quote_guid(q))
+            continue
+
+        if bound and (str(_insured_guid(q) or ""), lob, str(_effective(q) or "")[:10]) in bound:
+            result.skipped_bound += 1
+            log.info("SKIP quote (policy already bound): %s %s", name, lob)
             continue
 
         client_identifier = opp.make_client_identifier(name, _fein(q))
@@ -273,18 +409,24 @@ def run_quote_sync(
                 # every not-created row; counting here too double-reports it.
                 row, created = prior[0], False
             else:
+                otype = _business_type(q) or opp.TYPE_NEW_BUSINESS
                 row, created = opp.create_opportunity(
                     supa,
                     client_identifier=client_identifier,
                     line_of_business=lob,
-                    opportunity_type=opp.TYPE_NEW_BUSINESS,
+                    opportunity_type=otype,
                     insured_name=name,
                     insured_id=_insured_guid(q),
                     insured_type=_insured_type(q),
-                    stage=opp.STAGE_QUOTES_RECEIVED,
+                    stage=_stage_for(otype),
                     premium_estimate=_premium(q),
                     carrier=_carrier(q),
                     source=SYNC_SOURCE,
+                    assigned_to_email=_owner_for(lob),
+                    # The board fell back to expiration_date when this was NULL,
+                    # which is why every date on screen looked arbitrary. For a
+                    # bind-by date the close date is the effective date.
+                    expected_close_date=_effective(q),
                 )
 
             # Stamp live terms + identifiers on both new and existing rows.

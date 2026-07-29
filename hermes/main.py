@@ -379,6 +379,17 @@ def main() -> int:
         help="Cap the number of quotes processed (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--repair-quote-board",
+        action="store_true",
+        help="Correct type/premium/owner/close-date on existing opportunities from "
+             "canonical_quotes. Previews by default; add --apply to write",
+    )
+    parser.add_argument(
+        "--repair-quote-board-apply",
+        action="store_true",
+        help="Actually write the corrections found by --repair-quote-board (backs up first)",
+    )
+    parser.add_argument(
         "--dedupe-opportunities",
         action="store_true",
         help="Merge duplicate deals (one client+LOB, a CRM row and a quote-sync twin) "
@@ -514,6 +525,31 @@ def main() -> int:
         return 0 if book_result.ok else 1
 
     # --- NowCerts quotes → Supabase opportunities pipeline sync ---
+    if args.repair_quote_board or args.repair_quote_board_apply:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.quote_board_repair import run_repair
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        apply = bool(args.repair_quote_board_apply)
+        res = run_repair(supa, apply=apply)
+        print("Quote board repair — " + ("APPLYING" if apply else "PREVIEW (nothing written)"))
+        for fix in res.fixes[:40]:
+            print(f"  {fix.describe()}")
+        if len(res.fixes) > 40:
+            print(f"  …and {len(res.fixes) - 40} more")
+        for u in res.unmatched:
+            print(f"  UNMATCHED (no quote in the register) {u}")
+        for e in res.errors:
+            print(f"  ERROR {e}")
+        if res.backup_path:
+            print(f"  backup: {res.backup_path}")
+        print(res.message)
+        return 0 if not res.errors else 1
+
     if args.dedupe_opportunities or args.dedupe_opportunities_apply:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.sync.opportunity_dedupe import run_dedupe
