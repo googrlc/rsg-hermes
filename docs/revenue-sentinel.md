@@ -38,6 +38,6 @@ remains in the tree. A click is silently dropped.
 - `Dismiss` — was: acknowledge without a CRM write.
 
 Until an inbound path exists (Events API endpoint or re-enabled Socket Mode),
-treat the briefing as read-only and act on it in the cockpit. Either wire a
+treat the briefing as read-only and act on it in the portal. Either wire a
 handler or stop rendering the buttons.
 

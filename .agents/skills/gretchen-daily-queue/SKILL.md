@@ -70,8 +70,9 @@ a participant. **If the token is unset, posting is silently skipped** — a
 "successful" run can deliver nothing. Verify the post landed before reporting
 that it did.
 
-**Secondary: the CRM Tasks view** at `/cockpit#tasks`. `task_notify` appends an
-"open in CRM ↗" link when `HERMES_PUBLIC_BASE_URL` is set.
+**Secondary: the Tasks view in the RSG Agency Portal.** `task_notify` appends an
+"open the CRM ↗" link when `HERMES_PORTAL_URL` is set. The portal has no URL
+routing, so the link opens it at the top rather than on Tasks.
 
 Slack is **not** the delivery path for Gretchen's queue any more.
 

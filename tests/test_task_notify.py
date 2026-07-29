@@ -45,22 +45,36 @@ def test_swallows_errors(monkeypatch):
 
 def test_includes_crm_link_and_priority(monkeypatch):
     monkeypatch.setenv("NEXTCLOUD_TALK_TOKEN", "tok1")
-    monkeypatch.setenv("HERMES_PUBLIC_BASE_URL", "https://ws.ts.net:8444")
+    monkeypatch.setenv("HERMES_PORTAL_URL", "https://ws.ts.net:8447")
     posts: list = []
     _fake_nc(monkeypatch, posts)
     T.notify_task_created({"title": "Bind policy", "priority": "high"})
     msg = posts[0][1]
-    assert "https://ws.ts.net:8444/cockpit#tasks" in msg  # link back to open
-    assert "🔴 high" in msg                                # priority badge
+    assert "https://ws.ts.net:8447/" in msg   # the portal — the CRM people use
+    assert "🔴 high" in msg                    # priority badge
 
 
-def test_no_link_without_base_url(monkeypatch):
+def test_the_link_never_points_at_the_retired_cockpit(monkeypatch):
+    """Every task notification carried a /cockpit link. That page no longer
+    exists, and this API's own origin no longer serves a UI at all."""
     monkeypatch.setenv("NEXTCLOUD_TALK_TOKEN", "tok1")
-    monkeypatch.delenv("HERMES_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.setenv("HERMES_PORTAL_URL", "https://ws.ts.net:8447")
+    monkeypatch.setenv("HERMES_PUBLIC_BASE_URL", "https://ws.ts.net:8444")
+    posts: list = []
+    _fake_nc(monkeypatch, posts)
+    T.notify_task_created({"title": "Bind policy"})
+    msg = posts[0][1]
+    assert "cockpit" not in msg
+    assert ":8444" not in msg
+
+
+def test_no_link_without_portal_url(monkeypatch):
+    monkeypatch.setenv("NEXTCLOUD_TALK_TOKEN", "tok1")
+    monkeypatch.delenv("HERMES_PORTAL_URL", raising=False)
     posts: list = []
     _fake_nc(monkeypatch, posts)
     T.notify_task_created({"title": "X"})
-    assert "cockpit#" not in posts[0][1]  # gracefully omits the link
+    assert "open the CRM" not in posts[0][1]  # gracefully omits the link
 
 
 def test_digest_excludes_done(monkeypatch):

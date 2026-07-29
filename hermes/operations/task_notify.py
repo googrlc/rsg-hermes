@@ -14,6 +14,8 @@ import logging
 import os
 from typing import Any
 
+from hermes.core import surfaces
+
 log = logging.getLogger(__name__)
 
 _DONE_STATUSES = {"completed", "done", "cancelled", "canceled", "closed"}
@@ -27,14 +29,20 @@ def talk_token() -> str:
 
 
 def _crm_link(view: str = "tasks") -> str:
-    """A markdown link back into the CRM (Tasks view), or "" if no base URL is set.
+    """A markdown link back into the CRM, or "" if no portal URL is set.
 
-    ``HERMES_PUBLIC_BASE_URL`` is the tailnet workspace origin
-    (e.g. https://hermes-gretch.tail1cbc83.ts.net:8444)."""
-    base = os.environ.get("HERMES_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    Points at the RSG Agency Portal (``HERMES_PORTAL_URL``), which is the CRM —
+    not at this API's own origin, which used to serve the cockpit and now serves
+    no screen at all.
+
+    The portal is a single-page app with no URL routing, so ``view`` cannot be
+    honoured: there is no address that opens it on Tasks. The link therefore
+    says "open the CRM" rather than naming a destination it does not reach —
+    the alternative is a link that lands somewhere else and looks broken."""
+    base = surfaces.portal_url()
     if not base:
         return ""
-    return f"[open in CRM ↗]({base}/cockpit#{view})"
+    return f"[open the CRM ↗]({base}/)"
 
 
 def _priority_badge(priority: Any) -> str:

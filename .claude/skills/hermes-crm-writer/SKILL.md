@@ -183,9 +183,9 @@ exposes `list_renewals`, `list_tasks`, `list_documents`, `retention_scan`,
 `hermes_dispatch` — and nothing for the pipeline. Use HTTP. If pipeline writes
 become routine, the fix is a bridge tool, not a workaround.
 
-**Human write path:** the Pipeline Kanban at `/cockpit#pipeline`
-(→ `/command-center/cockpit.html`). Drag-to-stage there hits the same
-`/stage` endpoint. When a human can do it in two clicks, hand it to them.
+**Human write path:** the Pipeline board in the RSG Agency Portal.
+Drag-to-stage there hits the same `/stage` endpoint. When a human can do it in
+two clicks, hand it to them.
 
 ### Create payload
 

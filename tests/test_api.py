@@ -28,10 +28,18 @@ def client():
 
 
 class TestHealth:
-    def test_root_redirects_to_command_center(self, client) -> None:
-        resp = client.get("/", follow_redirects=False)
-        assert resp.status_code in (301, 302, 307, 308)
-        assert resp.headers["location"] == "/command-center/"
+    def test_root_points_at_the_portal_now_that_no_ui_is_served(self, client, monkeypatch) -> None:
+        """The root used to redirect into the cockpit. The cockpit is gone, so it
+        answers with where the CRM actually is — an old bookmark should read as a
+        forwarding address, not a 404."""
+        monkeypatch.setenv("HERMES_PORTAL_URL", "https://ws.ts.net:8447")
+        body = client.get("/").json()
+        assert body["portal"] == "https://ws.ts.net:8447"
+        assert body["ui"].startswith("none")
+
+    def test_root_admits_when_no_portal_is_configured(self, client, monkeypatch) -> None:
+        monkeypatch.delenv("HERMES_PORTAL_URL", raising=False)
+        assert "unset" in client.get("/").json()["portal"]
 
     def test_health(self, client) -> None:
         resp = client.get("/health")
