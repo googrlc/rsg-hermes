@@ -72,13 +72,8 @@ def load_persona(path: str | None = None) -> str:
         return ""
 
 
-@functools.lru_cache(maxsize=8)
-def load_named_persona(key: str) -> str:
-    """Load a bundled persona by key from hermes/personas/{key}.md, or '' if absent.
-
-    Lets the conversational agent switch voice per request (e.g. Lamar's
-    owner/revenue persona vs the instance default) without a second instance.
-    """
+def _read_persona_file(key: str) -> str:
+    """Raw text of hermes/personas/{key}.md, or '' if the key is bad/unreadable."""
     import re
     from pathlib import Path
 
@@ -89,3 +84,37 @@ def load_named_persona(key: str) -> str:
         return path.read_text(encoding="utf-8").strip()
     except OSError:
         return ""
+
+
+@functools.lru_cache(maxsize=8)
+def load_named_persona(key: str) -> str:
+    """Load a bundled persona by key from hermes/personas/{key}.md, or '' if absent.
+
+    Lets the conversational agent switch voice per request (e.g. Lamar's
+    owner/revenue persona vs the instance default) without a second instance.
+
+    A persona may inherit another by opening with ``<!-- extends: <key> -->``.
+    The parent is emitted first and the child last, so the child's rules win on
+    anything the two disagree about. This exists so a specialist desk (Cases)
+    can layer on the shared client-context desk (CRM) instead of copy-pasting
+    it — one place to fix when the client-lookup rules change. A missing parent
+    degrades to just the child; a cycle stops at the repeat.
+    """
+    import re
+
+    extends_re = re.compile(r"^<!--\s*extends:\s*([a-z0-9_-]+)\s*-->", re.IGNORECASE)
+
+    layers: list[str] = []
+    seen: set[str] = set()
+    current = key
+    while current and current not in seen:
+        seen.add(current)
+        text = _read_persona_file(current)
+        if not text:
+            break
+        match = extends_re.match(text)
+        layers.append(extends_re.sub("", text, count=1).strip() if match else text)
+        current = match.group(1).lower() if match else ""
+
+    # Parent-most first, child last.
+    return "\n\n".join(reversed(layers)).strip()
