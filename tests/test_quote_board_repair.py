@@ -184,3 +184,53 @@ def test_an_open_quote_is_not_reported_as_closed():
     supa = FakeSupa([board()], [register()])
     res = R.plan(supa, FakeNC([live_quote(status="Active", quoteStageName="Received")]))
     assert res.closed == []
+
+
+def twin(**over):
+    """The Renewals row a New Business twin would collide with."""
+    row = board(id="o-twin", opportunity_type="Renewals", stage="Requote Renewal",
+                nowcerts_quote_guid="qg-twin", sync_source="crm")
+    row.update(over)
+    return row
+
+
+def test_a_type_that_would_collide_is_reported_not_attempted():
+    """Correcting the twin's type into the slot the real row holds is refused by
+    the unique index. The row is the duplicate — a job for the dedupe, not a
+    value fix — and 37 rows lost their owner and close date to finding that out
+    the hard way."""
+    supa = FakeSupa([board(client_identifier="moon-melonie"),
+                     twin(client_identifier="moon-melonie")], [register()])
+    res = R.plan(supa, FakeNC([live_quote()]))
+    fix = next(f for f in res.fixes if f.opportunity_id == "o1")
+    assert "opportunity_type" not in fix.changes
+    assert res.collisions and "already has a Renewals deal" in res.collisions[0]
+
+
+def test_the_rest_of_the_row_is_still_corrected_when_the_type_cannot_be():
+    supa = FakeSupa([board(client_identifier="moon-melonie"),
+                     twin(client_identifier="moon-melonie")], [register()])
+    res = R.plan(supa, FakeNC([live_quote()]))
+    fix = next(f for f in res.fixes if f.opportunity_id == "o1")
+    assert "assigned_to_email" in fix.changes and "expected_close_date" in fix.changes
+
+
+def test_a_collision_at_write_time_still_saves_the_safe_fields(tmp_path):
+    """Belt and braces: if the pre-check misses one, the owner and close date
+    must not go down with the type."""
+    class Collide(FakeSupa):
+        def __init__(self, *a):
+            super().__init__(*a)
+            self.attempts = []
+
+        def update(self, table, record_id, payload):
+            self.attempts.append(dict(payload))
+            if "opportunity_type" in payload:
+                raise RuntimeError('23505 duplicate key value violates unique constraint')
+            return super().update(table, record_id, payload)
+
+    supa = Collide([board()], [register()])
+    res = R.run_repair(supa, FakeNC([live_quote()]), apply=True, backup_dir=str(tmp_path))
+    assert res.applied == 1 and res.errors == []
+    assert "opportunity_type" not in supa.attempts[-1]
+    assert supa.attempts[-1]["assigned_to_email"]

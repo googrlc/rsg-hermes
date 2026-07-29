@@ -549,6 +549,10 @@ def main() -> int:
             print(f"  {fix.describe()}")
         if len(res.fixes) > 40:
             print(f"  …and {len(res.fixes) - 40} more")
+        for c in res.collisions[:40]:
+            print(f"  COLLISION (duplicate deal — dedupe it, do not retype it) {c}")
+        if len(res.collisions) > 40:
+            print(f"  …and {len(res.collisions) - 40} more collisions")
         for c in res.closed[:40]:
             print(f"  NOT OPEN (bound/declined/expired — belongs off the board) {c}")
         if len(res.closed) > 40:
