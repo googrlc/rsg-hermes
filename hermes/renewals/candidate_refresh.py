@@ -23,7 +23,7 @@ from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientEr
 from hermes.operations import renewal_classifier
 from hermes.sync.nowcerts_client import NowCertsClient
 
-from . import eligibility as elig
+from . import corrections, eligibility as elig
 from .eligibility import LineageContext
 
 from hermes.ams import book as ams_book
@@ -298,26 +298,29 @@ def _insured_index(nowcerts: NowCertsClient) -> dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 def _project_eligible(supa: SupabaseClient, eligible: list[dict[str, Any]]) -> dict[str, int]:
     eligible_pns: set[str] = set()
-    for c in eligible:
-        pn = c.get("policy_number")
-        if not pn:
-            continue
-        eligible_pns.add(str(pn))
+    payloads = [
+        {
+            "policy_number": str(c["policy_number"]),
+            "client_name": c.get("client_name") or "Unknown client",
+            "expiration_date": c.get("renewal_event_date"),
+            "premium_current": c.get("premium_current"),
+            "risk_status": c.get("risk_status") or "SAFE",
+            "ai_strategy_notes": renewal_classifier.build_strategy_note(
+                c.get("risk_status") or "SAFE", c.get("normalized_status"), None
+            ),
+        }
+        for c in eligible if c.get("policy_number")
+    ]
+    # A correction made on the renewal desk outranks the projection. Without this
+    # the rebuilt note, premium and risk call overwrite it every night — which is
+    # exactly what made correcting a renewal feel pointless.
+    for payload in corrections.apply(supa, payloads, surface=corrections.PROJECTION):
+        pn = payload["policy_number"]
+        if corrections.is_dismissed(corrections.PROJECTION, payload):
+            continue          # removed from the worklist; not ours to hand back
+        eligible_pns.add(pn)
         try:
-            supa.upsert(
-                P85_TABLE,
-                {
-                    "policy_number": pn,
-                    "client_name": c.get("client_name") or "Unknown client",
-                    "expiration_date": c.get("renewal_event_date"),
-                    "premium_current": c.get("premium_current"),
-                    "risk_status": c.get("risk_status") or "SAFE",
-                    "ai_strategy_notes": renewal_classifier.build_strategy_note(
-                        c.get("risk_status") or "SAFE", c.get("normalized_status"), None
-                    ),
-                },
-                on_conflict="policy_number",
-            )
+            supa.upsert(P85_TABLE, corrections.strip_keys(payload), on_conflict="policy_number")
         except SupabaseClientError:
             log.exception("p85 projection upsert failed for %s", pn)
 
@@ -404,6 +407,14 @@ def run_refresh(
     insured = _insured_index(nowcerts)
     rows = build_candidates(policies, insured, today=today, now_iso=now_iso)
 
+    # Human corrections outrank the rebuild. Applied BEFORE the eligible split so
+    # a dismissal ('excluded') keeps the row out of the p85 projection too —
+    # otherwise every night hands back the renewal somebody took off the list,
+    # and reverts the premium somebody fixed.
+    overlaid = corrections.apply(supa, rows, surface=corrections.CANDIDATES)
+    corrected = sum(1 for r in overlaid if r.get("_overridden"))
+    rows = [corrections.strip_keys(r) for r in overlaid]
+
     counts = {"eligible": 0, "needs_verification": 0, "excluded": 0}
     for r in rows:
         counts[r["eligibility_state"]] = counts.get(r["eligibility_state"], 0) + 1
@@ -413,7 +424,7 @@ def run_refresh(
     summary: dict[str, Any] = {
         "dry_run": dry_run, "as_of": today.isoformat(),
         "policies": len(policies), "candidates": len(rows),
-        "in_working_queue": working, **counts,
+        "in_working_queue": working, "corrected": corrected, **counts,
     }
     if dry_run:
         summary["sample_eligible"] = [
