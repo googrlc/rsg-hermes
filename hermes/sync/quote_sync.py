@@ -248,19 +248,44 @@ def run_quote_sync(
                     result.created += 1
                 continue
 
-            row, created = opp.create_opportunity(
-                supa,
-                client_identifier=client_identifier,
-                line_of_business=lob,
-                opportunity_type=opp.TYPE_NEW_BUSINESS,
-                insured_name=name,
-                insured_id=_insured_guid(q),
-                insured_type=_insured_type(q),
-                stage=opp.STAGE_QUOTES_RECEIVED,
-                premium_estimate=_premium(q),
-                carrier=_carrier(q),
-                source=SYNC_SOURCE,
+            # A deal for this client and LOB already counts, whatever type it is.
+            #
+            # create_opportunity is idempotent per (client, LOB, TYPE) and this
+            # sync always asks for New Business. So any client whose renewal was
+            # already on the board got a second, duplicate deal: the type differed,
+            # so the unique index let it through. That is how 43 of 108
+            # opportunities ended up a Renewals row beside a New Business twin with
+            # the same premium — the pipeline inflated by ~40%, renewals counted as
+            # new business, and the two rows unmergeable because retyping one hits
+            # the constraint.
+            #
+            # The dry-run branch above has always counted by (client, LOB) and
+            # called these `linked`. The preview was right; the live path was not.
+            prior = supa.select(
+                opp.TABLE,
+                columns="*",
+                params={"client_identifier": f"eq.{client_identifier}",
+                        "line_of_business": f"eq.{lob}"},
+                limit=1,
             )
+            if prior:
+                # `linked`/`enriched` are counted once at the end of the loop for
+                # every not-created row; counting here too double-reports it.
+                row, created = prior[0], False
+            else:
+                row, created = opp.create_opportunity(
+                    supa,
+                    client_identifier=client_identifier,
+                    line_of_business=lob,
+                    opportunity_type=opp.TYPE_NEW_BUSINESS,
+                    insured_name=name,
+                    insured_id=_insured_guid(q),
+                    insured_type=_insured_type(q),
+                    stage=opp.STAGE_QUOTES_RECEIVED,
+                    premium_estimate=_premium(q),
+                    carrier=_carrier(q),
+                    source=SYNC_SOURCE,
+                )
 
             # Stamp live terms + identifiers on both new and existing rows.
             payload = _enrichment_payload(q, cols, now_iso=now_iso)
