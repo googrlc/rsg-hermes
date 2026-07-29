@@ -41,7 +41,34 @@ QUOTES_TABLE = "canonical_quotes"
 # Same routing the sync now applies at creation. Kept in one place would be
 # nicer; kept correct in two is what matters, so the personal-lines set is
 # imported rather than restated.
-from hermes.sync.quote_sync import _owner_for, _stage_for  # noqa: E402
+from hermes.sync.quote_sync import (  # noqa: E402
+    _business_type, _carrier, _effective, _is_quote, _lob, _owner_for, _premium,
+    _quote_guid, _stage_for,
+)
+
+
+def register_from_ams(nc: Any) -> list[dict[str, Any]]:
+    """The quote register as NowCerts holds it *now*, shaped like canonical_quotes.
+
+    canonical_quotes is a snapshot: `nowcerts_quotes_commit` loaded 107 rows on
+    2026-07-21 and has not run since. Anything dispositioned in the AMS after
+    that — a junk quote purged, a dead one closed — is still sitting in that
+    table looking authoritative. Repairing the board from it would faithfully
+    restore values somebody deliberately retired.
+
+    So the truth comes from the AMS when it can be reached, and the snapshot is
+    only a fallback. The caller is told which was used.
+    """
+    quotes = [q for q in nc.fetch_policies() if _is_quote(q)]
+    return [{
+        "nowcerts_quote_guid": _quote_guid(q),
+        "business_type": q.get("businessType") or q.get("BusinessType"),
+        "premium_estimate": _premium(q),
+        "carrier": _carrier(q),
+        "line_of_business": _lob(q),
+        "effective_date": _effective(q),
+        "expiration_date": (q.get("expirationDate") or q.get("ExpirationDate") or "")[:10] or None,
+    } for q in quotes if _quote_guid(q)]
 
 
 @dataclass
@@ -60,6 +87,7 @@ class RepairResult:
     fixes: list[Fix] = field(default_factory=list)
     applied: int = 0
     backup_path: str | None = None
+    source: str = "canonical_quotes"
     unmatched: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -70,7 +98,7 @@ class RepairResult:
             for k in f.changes:
                 by_field[k] = by_field.get(k, 0) + 1
         detail = ", ".join(f"{k}={n}" for k, n in sorted(by_field.items())) or "nothing to change"
-        return (f"{len(self.fixes)} rows need work ({detail}); applied={self.applied}; "
+        return (f"[source: {self.source}] {len(self.fixes)} rows need work ({detail}); applied={self.applied}; "
                 f"unmatched={len(self.unmatched)}; errors={len(self.errors)}")
 
 
@@ -109,11 +137,23 @@ def backup(rows: list[dict[str, Any]], directory: str = "/var/lib/hermes") -> st
     return str(path)
 
 
-def plan(supa: Any) -> RepairResult:
-    """Work out every correction, touching nothing."""
+def plan(supa: Any, nc: Any = None) -> RepairResult:
+    """Work out every correction, touching nothing.
+
+    ``nc`` is a NowCertsClient. Given one, the live register is the truth and the
+    canonical_quotes snapshot is ignored — see ``register_from_ams``.
+    """
     result = RepairResult()
     opps = supa.select(opp.TABLE, columns="*", limit=5000)
-    quotes = supa.select(QUOTES_TABLE, columns="*", limit=5000)
+    if nc is not None:
+        try:
+            quotes = register_from_ams(nc)
+            result.source = "nowcerts (live)"
+        except Exception:  # noqa: BLE001
+            log.exception("live register unavailable; falling back to the snapshot")
+            quotes = supa.select(QUOTES_TABLE, columns="*", limit=5000)
+    else:
+        quotes = supa.select(QUOTES_TABLE, columns="*", limit=5000)
     by_guid = {str(q.get("nowcerts_quote_guid")): q for q in quotes if q.get("nowcerts_quote_guid")}
 
     for o in opps:
@@ -156,8 +196,9 @@ def plan(supa: Any) -> RepairResult:
     return result
 
 
-def run_repair(supa: Any, *, apply: bool = False, backup_dir: str = "/var/lib/hermes") -> RepairResult:
-    result = plan(supa)
+def run_repair(supa: Any, nc: Any = None, *, apply: bool = False,
+               backup_dir: str = "/var/lib/hermes") -> RepairResult:
+    result = plan(supa, nc)
     if not apply:
         return result
 

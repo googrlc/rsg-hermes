@@ -124,3 +124,46 @@ def test_a_clean_row_needs_no_work():
                   expiration_date="2025-10-18")
     res = R.plan(FakeSupa([clean], [register()]))
     assert res.fixes == []
+
+
+class FakeNC:
+    def __init__(self, quotes): self._q = quotes
+    def fetch_policies(self, **kw): return list(self._q)
+
+
+def live_quote(**over):
+    q = {"isQuote": True, "databaseId": "qg-1", "businessType": "Renewal",
+         "totalPremium": 2253, "carrierName": "Progressive",
+         "lineOfBusinesses": [{"lineOfBusinessName": "Personal Auto"}],
+         "effectiveDate": "2025-04-18", "expirationDate": "2025-10-18"}
+    q.update(over)
+    return q
+
+
+def test_the_live_register_outranks_the_snapshot():
+    """canonical_quotes was loaded once on 2026-07-21 and has not run since. A
+    quote dispositioned in the AMS after that is still sitting in the snapshot
+    looking authoritative, and repairing from it would restore what somebody
+    deliberately retired."""
+    stale = register(premium_estimate=9999, business_type="New Business")
+    supa = FakeSupa([board()], [stale])
+    res = R.plan(supa, FakeNC([live_quote()]))
+    assert res.source == "nowcerts (live)"
+    assert res.fixes[0].changes["premium_estimate"][1] == 2253.0     # live, not 9999
+
+
+def test_a_quote_the_ams_no_longer_has_is_reported_not_silently_kept():
+    """After a purge, the board row is the leftover. It surfaces as unmatched so
+    a human decides, rather than being repaired against nothing."""
+    supa = FakeSupa([board()], [register()])
+    res = R.plan(supa, FakeNC([]))
+    assert res.unmatched and "Huff" in res.unmatched[0]
+
+
+def test_an_unreachable_ams_falls_back_to_the_snapshot_and_says_so():
+    class Dead:
+        def fetch_policies(self, **kw): raise RuntimeError("NowCerts down")
+
+    res = R.plan(FakeSupa([board()], [register()]), Dead())
+    assert res.source == "canonical_quotes"
+    assert res.fixes                      # still does the work, from the snapshot

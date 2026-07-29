@@ -527,6 +527,7 @@ def main() -> int:
     # --- NowCerts quotes → Supabase opportunities pipeline sync ---
     if args.repair_quote_board or args.repair_quote_board_apply:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.nowcerts_client import NowCertsClient
         from hermes.sync.quote_board_repair import run_repair
 
         try:
@@ -534,8 +535,15 @@ def main() -> int:
         except SupabaseClientError as e:
             print(f"Supabase connection failed: {e}", file=sys.stderr)
             return 2
+        # The live register outranks the canonical_quotes snapshot, which has not
+        # been refreshed since 2026-07-21. Unreachable AMS falls back and says so.
+        try:
+            nc = NowCertsClient()
+        except Exception as e:  # noqa: BLE001
+            print(f"NowCerts unavailable ({e}); repairing from the snapshot", file=sys.stderr)
+            nc = None
         apply = bool(args.repair_quote_board_apply)
-        res = run_repair(supa, apply=apply)
+        res = run_repair(supa, nc, apply=apply)
         print("Quote board repair — " + ("APPLYING" if apply else "PREVIEW (nothing written)"))
         for fix in res.fixes[:40]:
             print(f"  {fix.describe()}")
