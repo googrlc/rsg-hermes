@@ -414,3 +414,70 @@ def test_client_documents_unconfigured_is_honest(monkeypatch):
     _patch_nextcloud(monkeypatch, FakeNextcloud(configured=False))
     res = A._exec_client_documents({"client": "Acme"})
     assert not res.ok and "isn't configured" in res.message
+
+
+# --- the portal's screen names are the hub names -----------------------------
+# The portal sends `hub: state.screen`. Every desk screen it has must resolve to
+# a real hub here, or that desk answers with the full toolset and no persona —
+# which is what its Finance screen was doing.
+PORTAL_DESK_SCREENS = ["crm", "renewals", "carrier", "intake", "cases", "finance"]
+
+
+def test_every_portal_desk_screen_resolves_to_a_hub():
+    for screen in PORTAL_DESK_SCREENS:
+        key = A._hub_key(screen)
+        assert key in A._HUB_TOOLS, f"portal screen {screen!r} has no hub"
+        assert key in A._HUB_PERSONA, f"portal screen {screen!r} has no persona"
+
+
+def test_the_finance_screen_is_the_commissions_desk():
+    """The one name that does not match, and the reason the alias map exists."""
+    assert A._hub_key("finance") == "commissions"
+    names = {t["function"]["name"] for t in A._scoped_tools(A._TOOLS, "finance")}
+    assert names == A._HUB_TOOLS["commissions"]
+    assert names != {t["function"]["name"] for t in A._TOOLS}   # scoped, not everything
+
+
+def test_hub_names_are_case_and_space_insensitive():
+    assert A._hub_key("  Finance ") == "commissions"
+    assert A._hub_key(None) == ""
+
+
+def test_the_renewals_desk_exists_and_carries_the_worklist():
+    assert "renewals_overview" in A._HUB_TOOLS["renewals"]
+
+
+def test_every_tool_named_by_every_hub_is_registered():
+    """The check that catches a hub pointing at a tool that was renamed or never
+    existed — the desk would resolve to an empty toolset and answer from memory."""
+    for hub, tools in A._HUB_TOOLS.items():
+        for name in tools:
+            assert any(t["function"]["name"] == name for t in A._TOOLS), \
+                f"{hub} names {name!r}, which is not in _TOOLS"
+            assert name in A._EXECUTORS, f"{hub} names {name!r}, which has no executor"
+
+
+def test_no_desk_can_reach_a_write_tool():
+    for hub, tools in A._HUB_TOOLS.items():
+        assert not (tools & A._WRITE_TOOLS), f"{hub} can write"
+
+
+def test_every_persona_named_by_a_hub_exists_on_disk():
+    from hermes.core.identity import load_named_persona
+
+    for hub, key in A._HUB_PERSONA.items():
+        assert load_named_persona(key).strip(), f"{hub} names persona {key!r} with no file"
+
+
+# --- model per desk ----------------------------------------------------------
+def test_judgment_desks_get_the_escalation_model():
+    """A class code or a commission shortfall is a judgment the agency acts on;
+    a CRM lookup is reading a row back. They should not run on the same model."""
+    from hermes.core.llm_client import resolve_model
+
+    for desk in ("carrier", "commissions", "renewals"):
+        assert A._HUB_MODEL[desk] == "hard_judgment_escalation"
+    assert "crm" not in A._HUB_MODEL      # lookups stay on the default group
+    assert "intake" not in A._HUB_MODEL
+    assert A._HUB_MODEL.get(A._hub_key("finance")) == A._HUB_MODEL["commissions"]
+    assert resolve_model(A._HUB_MODEL.get(A._hub_key("crm"))) == resolve_model(None)

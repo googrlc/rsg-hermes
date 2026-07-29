@@ -854,6 +854,40 @@ def _num(v: Any) -> float:
 _OWED_STATUSES = {"underpaid", "missing_statement", "pending"}
 
 
+def _origin(row: dict[str, Any]) -> str:
+    """Provenance of a ledger row: 'statement' (a carrier statement backs it) or
+    'seed' (backfilled from NowCerts, expectation computed, nothing matched)."""
+    return str(row.get("origin") or "unknown").strip().lower() or "unknown"
+
+
+def _origin_totals(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    """Expected/received/row-count split by provenance.
+
+    The Finance Desk may not quote a commission figure without saying whether a
+    carrier statement backs it — seed rows are a *statement gap*, not a proven
+    shortpay. That distinction is unanswerable unless the tool carries it, so the
+    split ships with every summary rather than being left to the model.
+    """
+    out: dict[str, dict[str, float]] = {}
+    for r in rows:
+        bucket = out.setdefault(_origin(r), {"expected": 0.0, "received": 0.0, "rows": 0.0})
+        bucket["expected"] += _num(r.get("expected_commission"))
+        bucket["received"] += _num(r.get("actual_commission"))
+        bucket["rows"] += 1
+    return out
+
+
+def _origin_line(rows: list[dict[str, Any]]) -> str:
+    """One-line rendering of _origin_totals, statement-backed first."""
+    totals = _origin_totals(rows)
+    order = sorted(totals, key=lambda k: (k != "statement", k))
+    return "; ".join(
+        f"{k}: expected ${t['expected']:,.0f}, received ${t['received']:,.0f} ({int(t['rows'])} rows)"
+        for k, t in ((k, totals[k]) for k in order)
+    )
+
+
+
 def _exec_commission_summary(args: dict[str, Any]) -> DispatchResult:
     """Commissions hub tool — expected vs received vs outstanding from commission_ledger."""
     from collections import Counter
@@ -871,7 +905,7 @@ def _exec_commission_summary(args: dict[str, Any]) -> DispatchResult:
     try:
         rows = supa.select(
             "commission_ledger",
-            columns="carrier_name,expected_commission,actual_commission,reconciliation_status,payment_received",
+            columns="carrier_name,expected_commission,actual_commission,reconciliation_status,payment_received,origin",
             params=params, limit=1000,
         )
     except Exception as exc:  # noqa: BLE001
@@ -884,9 +918,11 @@ def _exec_commission_summary(args: dict[str, Any]) -> DispatchResult:
     scope = f" for {carrier}" if carrier else ""
     status_line = ", ".join(f"{k}: {v}" for k, v in by_status.most_common())
     msg = (f"Commissions{scope}: expected ${exp:,.0f}, received ${act:,.0f}, "
-           f"outstanding ${exp - act:,.0f} across {len(rows)} ledger rows.\nBy status — {status_line}.")
+           f"outstanding ${exp - act:,.0f} across {len(rows)} ledger rows.\nBy status — {status_line}."
+           f"\nBy origin — {_origin_line(rows)}")
     return DispatchResult(True, msg,
-                          {"expected": exp, "received": act, "outstanding": exp - act, "rows": len(rows)})
+                          {"expected": exp, "received": act, "outstanding": exp - act, "rows": len(rows),
+                           "by_origin": _origin_totals(rows)})
 
 
 def _exec_commission_shortfalls(args: dict[str, Any]) -> DispatchResult:
@@ -904,7 +940,7 @@ def _exec_commission_shortfalls(args: dict[str, Any]) -> DispatchResult:
     try:
         rows = supa.select(
             "commission_ledger",
-            columns="client_name,carrier_name,policy_number,expected_commission,actual_commission,reconciliation_status",
+            columns="client_name,carrier_name,policy_number,expected_commission,actual_commission,reconciliation_status,origin",
             params=params, limit=1000,
         )
     except Exception as exc:  # noqa: BLE001
@@ -921,10 +957,14 @@ def _exec_commission_shortfalls(args: dict[str, Any]) -> DispatchResult:
     if not owed:
         return DispatchResult(True, "No outstanding commission shortfalls on file — everything reconciled or paid.")
     total = sum(s for s, _ in owed)
+    # origin travels with every row: a seed shortfall is money we cannot prove was
+    # paid, a statement one is money a carrier actually shorted us.
     lines = [f"{r.get('client_name') or r.get('policy_number') or '?'} · {r.get('carrier_name') or ''} — "
-             f"${s:,.0f} ({r.get('reconciliation_status')})" for s, r in owed]
+             f"${s:,.0f} ({r.get('reconciliation_status')}, origin={_origin(r)})" for s, r in owed]
+    seed_total = sum(s for s, r in owed if _origin(r) != "statement")
     return DispatchResult(True, f"{len(owed)} shortfalls, ${total:,.0f} outstanding:\n" + "\n".join(f"• {ln}" for ln in lines),
-                          {"total": total, "count": len(owed)})
+                          {"total": total, "count": len(owed), "seed_total": seed_total,
+                           "statement_total": total - seed_total})
 
 
 def _exec_find_client(args: dict[str, Any]) -> DispatchResult:
@@ -1337,19 +1377,76 @@ _HUB_TOOLS: dict[str, set[str]] = {
         "find_client", "client_policies", "renewals_overview",
         "ams_client_snapshot", "crm_client_activity", "client_documents",
     },
+    # Renewals Desk — the retention worklist. The portal has had a Renewals
+    # screen all along and this file had no hub for it, so every renewal question
+    # arrived as an unknown hub. Client context comes along because "should we
+    # remarket this?" is unanswerable without knowing what else they hold.
+    "renewals": {
+        "renewals_overview", "find_client", "client_policies",
+        "ams_client_snapshot", "crm_client_activity",
+    },
+    # Cases Desk — the service queue. Carries the CRM read tools because you
+    # cannot triage a case without knowing who the client is and what they hold;
+    # its persona extends the CRM one for the same reason. Read-only for now: the
+    # case write tools exist in the API but are not exposed to the agent yet.
+    "cases": {
+        "find_client", "client_policies", "renewals_overview",
+        "ams_client_snapshot", "crm_client_activity", "client_documents",
+    },
     "intake": {"list_intake_submissions"},
 }
 _HUB_PERSONA: dict[str, str] = {
     "carrier": "carrier",
     "commissions": "commissions",
     "crm": "crm",
+    "cases": "cases",
+    "renewals": "renewals",
     "intake": "intake",
+}
+
+# The hub name arrives from the portal as its screen name, and one of them does
+# not match: its Finance screen is this file's "commissions" desk. That single
+# mismatch meant the Finance desk resolved to no persona and — because an
+# unknown hub falls through to the FULL tool list — answered money questions
+# with every carrier and CRM tool loaded and no instruction about provenance.
+# Alias rather than rename: "commissions" is what the tables, the skill and the
+# persona file are all called.
+_HUB_ALIASES: dict[str, str] = {"finance": "commissions"}
+
+
+def _hub_key(hub: str | None) -> str:
+    """Normalise an incoming hub name to the key this module uses."""
+    key = (hub or "").strip().lower()
+    return _HUB_ALIASES.get(key, key)
+
+
+# Which model group each desk gets. Anything not listed runs on the default
+# group, which is where every desk ran until now.
+#
+# The split is by cost of being wrong, not prestige. A CRM lookup is "read a row
+# back to me" — a small model does that as well as a large one. A class code, an
+# appetite call and a commission shortfall are judgments the agency acts on:
+# quote the wrong WC code and the premium is wrong; call a seed row a shortpay
+# and someone chases a carrier for money they were never owed.
+#
+# The volume argument that would normally favour the cheap model does not apply:
+# these desks answer a handful of questions a day, so this saves fractions of a
+# cent on exactly the answers that matter.
+_HUB_MODEL: dict[str, str] = {
+    "carrier": "hard_judgment_escalation",
+    "commissions": "hard_judgment_escalation",
+    "renewals": "hard_judgment_escalation",
 }
 
 
 def _scoped_tools(tools: list[dict[str, Any]], hub: str | None) -> list[dict[str, Any]]:
-    """Filter a tool list to a hub's allowed set. Unknown/None hub → unchanged."""
-    allowed = _HUB_TOOLS.get(hub or "")
+    """Filter a tool list to a hub's allowed set. Unknown/None hub → unchanged.
+
+    Unchanged means every tool, which is right for the portal's Home screen
+    ("All desks") and wrong for a desk whose name simply failed to match — so the
+    names have to agree. ``_hub_key`` is what makes them.
+    """
+    allowed = _HUB_TOOLS.get(_hub_key(hub))
     if allowed is None:
         return tools
     return [t for t in tools if t["function"]["name"] in allowed]
@@ -1397,9 +1494,9 @@ def ask(
     except ImportError:
         return DispatchResult(False, "OpenAI SDK not installed.")
 
-    model = resolve_model(None)
+    model = resolve_model(_HUB_MODEL.get(_hub_key(hub)))
 
-    persona_key = persona or _HUB_PERSONA.get(hub or "")
+    persona_key = persona or _HUB_PERSONA.get(_hub_key(hub))
     messages: list[dict[str, Any]] = [{"role": "system", "content": _compose_system_prompt(persona_key)}]
     if conversation:
         messages.extend(conversation)
@@ -1411,17 +1508,34 @@ def ask(
     disabled = disabled_tools()
     active_tools = _scoped_tools([t for t in _TOOLS if t["function"]["name"] not in disabled], hub)
 
-    try:
-        response = oai.chat.completions.create(
-            model=model,
+    def _complete(with_model: str):
+        return oai.chat.completions.create(
+            model=with_model,
             messages=messages,
             tools=active_tools,
             tool_choice="auto",
             temperature=0,
         )
+
+    try:
+        response = _complete(model)
     except Exception as exc:
-        log.exception("OpenAI agent call failed")
-        return DispatchResult(False, f"AI agent error: {exc}")
+        fallback = resolve_model(None)
+        if model == fallback:
+            log.exception("OpenAI agent call failed")
+            return DispatchResult(False, f"AI agent error: {exc}")
+        # The desk asked for a stronger model group and the proxy would not serve
+        # it — a group that isn't configured, a budget cap, a model without
+        # tool-calling. A degraded answer beats no answer, so drop to the default
+        # and say so in the log; doing it silently is how a desk ends up running
+        # on the wrong model for a month.
+        log.warning("hub model %r failed (%s); falling back to %r", model, exc, fallback)
+        model = fallback
+        try:
+            response = _complete(model)
+        except Exception as exc2:
+            log.exception("OpenAI agent call failed on fallback model")
+            return DispatchResult(False, f"AI agent error: {exc2}")
 
     choice = response.choices[0] if response.choices else None
     if not choice:
