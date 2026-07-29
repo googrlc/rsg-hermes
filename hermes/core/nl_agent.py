@@ -1513,6 +1513,15 @@ _HUB_TOOLS: dict[str, set[str]] = {
         "find_client", "client_policies", "renewals_overview",
         "ams_client_snapshot", "crm_client_activity", "client_documents",
     },
+    # Renewals Desk — the retention worklist. The portal has had a Renewals
+    # screen all along and this code had no hub for it, so every renewal
+    # question arrived with the full toolset and no persona. Client context
+    # comes along because "should we remarket this?" is unanswerable without
+    # knowing what else they hold.
+    "renewals": {
+        "renewals_overview", "find_client", "client_policies",
+        "ams_client_snapshot", "crm_client_activity",
+    },
     # Cases Desk — the service queue. Carries the CRM read tools because you
     # cannot triage a case without knowing who the client is and what they hold;
     # its persona extends the CRM one for the same reason. Note this set is
@@ -1530,13 +1539,54 @@ _HUB_PERSONA: dict[str, str] = {
     "commissions": "commissions",
     "crm": "crm",
     "cases": "cases",
+    "renewals": "renewals",
     "intake": "intake",
+}
+
+# The hub name arrives from the portal as its screen name, and one of them does
+# not match: its Finance screen is this code's "commissions" desk. That single
+# mismatch meant the Finance desk resolved to no persona and — because an
+# unknown hub falls through to the FULL tool list — answered money questions
+# with every carrier and CRM tool loaded and no instruction about provenance.
+# Alias rather than rename: "commissions" is what the tables, the skill and the
+# persona file are all called.
+_HUB_ALIASES: dict[str, str] = {"finance": "commissions"}
+
+
+def _hub_key(hub: str | None) -> str:
+    """Normalise an incoming hub name to the key this module uses."""
+    key = (hub or "").strip().lower()
+    return _HUB_ALIASES.get(key, key)
+
+
+# Which model group each desk gets. Everything not listed runs on the default
+# group, which is where every desk ran until now.
+#
+# The split is by cost of being wrong, not by prestige. A CRM lookup is "read a
+# row back to me" — a small model does that as well as a large one, faster. But
+# a class code, an appetite call and a commission shortfall are judgments the
+# agency acts on: quote the wrong WC code and the premium is wrong, call a
+# seed row a shortpay and someone chases a carrier for money they were never
+# owed. Those get the escalation group.
+#
+# The volume argument that would normally favour the cheap model does not apply
+# here: these desks answer a handful of questions a day. Saving a fraction of a
+# cent on the answers the agency acts on is a false economy.
+_HUB_MODEL: dict[str, str] = {
+    "carrier": "hard_judgment_escalation",
+    "commissions": "hard_judgment_escalation",
+    "renewals": "hard_judgment_escalation",
 }
 
 
 def _scoped_tools(tools: list[dict[str, Any]], hub: str | None) -> list[dict[str, Any]]:
-    """Filter a tool list to a hub's allowed set. Unknown/None hub → unchanged."""
-    allowed = _HUB_TOOLS.get(hub or "")
+    """Filter a tool list to a hub's allowed set. Unknown/None hub → unchanged.
+
+    Unchanged means every tool, which is right for the portal's Home screen
+    ("All desks") and wrong for a desk whose name simply failed to match — so
+    the names have to agree. ``_hub_key`` is what makes them.
+    """
+    allowed = _HUB_TOOLS.get(_hub_key(hub))
     if allowed is None:
         return tools
     return [t for t in tools if t["function"]["name"] in allowed]
@@ -1584,9 +1634,9 @@ def ask(
     except ImportError:
         return DispatchResult(False, "OpenAI SDK not installed.")
 
-    model = resolve_model(None)
+    model = resolve_model(_HUB_MODEL.get(_hub_key(hub)))
 
-    persona_key = persona or _HUB_PERSONA.get(hub or "")
+    persona_key = persona or _HUB_PERSONA.get(_hub_key(hub))
     messages: list[dict[str, Any]] = [{"role": "system", "content": _compose_system_prompt(persona_key)}]
     if conversation:
         messages.extend(conversation)
@@ -1598,17 +1648,34 @@ def ask(
     disabled = disabled_tools()
     active_tools = _scoped_tools([t for t in _TOOLS if t["function"]["name"] not in disabled], hub)
 
-    try:
-        response = oai.chat.completions.create(
-            model=model,
+    def _complete(with_model: str):
+        return oai.chat.completions.create(
+            model=with_model,
             messages=messages,
             tools=active_tools,
             tool_choice="auto",
             temperature=0,
         )
+
+    try:
+        response = _complete(model)
     except Exception as exc:
-        log.exception("OpenAI agent call failed")
-        return DispatchResult(False, f"AI agent error: {exc}")
+        fallback = resolve_model(None)
+        if model == fallback:
+            log.exception("OpenAI agent call failed")
+            return DispatchResult(False, f"AI agent error: {exc}")
+        # The desk asked for a stronger model group and the proxy would not
+        # serve it — a group that isn't configured, a budget cap, a model
+        # without tool-calling. A degraded answer beats no answer, so drop to
+        # the default and say so in the log; silently doing it is how a desk
+        # ends up quietly running on the wrong model for a month.
+        log.warning("hub model %r failed (%s); falling back to %r", model, exc, fallback)
+        model = fallback
+        try:
+            response = _complete(model)
+        except Exception as exc2:
+            log.exception("OpenAI agent call failed on fallback model")
+            return DispatchResult(False, f"AI agent error: {exc2}")
 
     choice = response.choices[0] if response.choices else None
     if not choice:
