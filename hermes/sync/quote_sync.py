@@ -208,41 +208,61 @@ def _enrichment_payload(q: dict[str, Any], cols: set[str], *, now_iso: str) -> d
 # decision. Lamar, 2026-07-29: "we only want active received quotes in the CRM.
 # those are actually renewal quotes."
 #
-# The register holds the agency's whole quote history — 104 rows, of which 89 are
-# Expired and only 12 still active. Stages: Received 48, Bound 12, Declined 2,
-# blank 42. Bound is won and Declined is lost; neither is an open opportunity,
-# and an expired quote is a record of something that already happened.
+# Two fields say "active" and they disagree. The `active` boolean is true on
+# records NowCerts itself displays as Expired — `Vines, Torreya` and
+# `Moon, Melonie` are both, which is the contradiction the cleanup notes flagged
+# on those exact two records. The `status` string is what the AMS shows in its
+# Status column and what a person counts when they look at the register.
 #
-# active + Received leaves 7, worth ~$14.7k, six of them renewals. That is the
-# board. Everything else was the register being mistaken for a pipeline.
+# So the rule reads the string. Against the live register: 104 quotes, 48 at
+# stage Received, of which 40 are Expired, 2 Renewed, 2 Expired-but-flagged-
+# active, and 4 genuinely Active. Those 4 are the board, and all four are
+# Personal Auto renewals — which is what Lamar sees on his screen.
 QUOTE_STAGE_RECEIVED = "Received"
+QUOTE_STATUS_ACTIVE = "Active"
 
 
 def _is_open_quote(p: dict[str, Any]) -> bool:
-    """True if this quote is still live and still awaiting a decision."""
-    if p.get("active") is not True:
+    """True if this quote is still live and still awaiting a decision.
+
+    Deliberately not the `active` boolean: it is true on quotes the AMS reports
+    as Expired, and trusting it puts two dead records back on the board.
+    """
+    if str(p.get("status") or "").strip().lower() != QUOTE_STATUS_ACTIVE.lower():
         return False
     return str(p.get("quoteStageName") or "").strip().lower() == QUOTE_STAGE_RECEIVED.lower()
 
 
-def _business_type(p: dict[str, Any]) -> str | None:
-    """The AMS's own word for what this quote is: Renewal, New Business, Rewrite.
+# The AMS types every quote as Renewal, New Business or Rewrite, and that decides
+# which board it belongs on. Lamar, 2026-07-29: "new business, rewrite go on the
+# opportunities pipeline. Renewal go on the renewal pipeline."
+#
+# The split is not cosmetic — the two boards run different stage ladders, and
+# `Renewals` is the only type the CRM treats as a renewal, so a Rewrite typed as
+# `Renewals` would land on the wrong ladder entirely. Rewrite maps to Remarket:
+# it is the CRM's word for taking an existing policy back to market, it is not a
+# renewal type, and so it lands on the opportunities pipeline where it belongs.
+_AMS_TYPE_MAP = {
+    "renewal": "Renewals",                 # → renewal pipeline
+    "new business": opp.TYPE_NEW_BUSINESS,  # → opportunities pipeline
+    "rewrite": "Remarket",                 # → opportunities pipeline
+}
 
-    NowCerts records it and the board ignored it, typing all 60 rows New Business —
-    37 of them on quotes the AMS explicitly calls Renewal. Mapped to the CRM's
-    vocabulary; anything unrecognised returns None so the caller falls back rather
-    than inventing a type.
+
+def _business_type(p: dict[str, Any]) -> str | None:
+    """The AMS's own word for what this quote is, in the CRM's vocabulary.
+
+    Returns None on anything unrecognised so the caller falls back to a real
+    default rather than inventing a type the pipeline has no ladder for.
     """
     raw = str(p.get("businessType") or p.get("BusinessType") or "").strip().lower()
-    if not raw:
-        return None
-    if raw.startswith("renew"):
-        return opp.TYPE_RENEWAL if hasattr(opp, "TYPE_RENEWAL") else "Renewals"
-    if raw.startswith("new"):
-        return opp.TYPE_NEW_BUSINESS
-    if raw.startswith("rewrit"):
-        return "Competitive Replacements (BOR)" if "Competitive Replacements (BOR)" in opp.OPPORTUNITY_TYPES else opp.TYPE_NEW_BUSINESS
-    return None
+    mapped = _AMS_TYPE_MAP.get(raw)
+    if mapped is None:
+        for key, value in _AMS_TYPE_MAP.items():
+            if raw.startswith(key.split()[0]):
+                mapped = value
+                break
+    return mapped if mapped in opp.OPPORTUNITY_TYPES else None
 
 
 def _effective(p: dict[str, Any]):

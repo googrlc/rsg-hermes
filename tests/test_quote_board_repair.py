@@ -133,6 +133,7 @@ class FakeNC:
 
 def live_quote(**over):
     q = {"isQuote": True, "databaseId": "qg-1", "businessType": "Renewal",
+         "status": "Active", "quoteStageName": "Received",
          "totalPremium": 2253, "carrierName": "Progressive",
          "lineOfBusinesses": [{"lineOfBusinessName": "Personal Auto"}],
          "effectiveDate": "2025-04-18", "expirationDate": "2025-10-18"}
@@ -174,12 +175,12 @@ def test_a_board_row_whose_quote_is_no_longer_open_is_reported():
     since been bound, declined or expired is reported so a human can retire it —
     this tool corrects values, it does not remove somebody's work."""
     supa = FakeSupa([board()], [register()])
-    res = R.plan(supa, FakeNC([live_quote(quoteStageName="Bound")]))
+    res = R.plan(supa, FakeNC([live_quote(quoteStageName="Bound", status="Expired")]))
     assert res.closed and "Huff" in res.closed[0]
     assert supa.updates == []
 
 
 def test_an_open_quote_is_not_reported_as_closed():
     supa = FakeSupa([board()], [register()])
-    res = R.plan(supa, FakeNC([live_quote(active=True, quoteStageName="Received")]))
+    res = R.plan(supa, FakeNC([live_quote(status="Active", quoteStageName="Received")]))
     assert res.closed == []

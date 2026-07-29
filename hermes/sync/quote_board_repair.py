@@ -109,12 +109,9 @@ class RepairResult:
 
 
 def _norm_type(business_type: Any) -> str | None:
-    raw = str(business_type or "").strip().lower()
-    if raw.startswith("renew"):
-        return "Renewals"
-    if raw.startswith("new"):
-        return opp.TYPE_NEW_BUSINESS
-    return None
+    """One mapping, shared with the sync, so the repair cannot route a row to a
+    different board than the sync would have."""
+    return _business_type({"businessType": business_type})
 
 
 def _money(v: Any) -> float | None:
