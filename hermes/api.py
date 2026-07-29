@@ -847,9 +847,38 @@ async def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdat
     try:
         row = supa.update("opportunities", opportunity_id, fields)
     except Exception as exc:
+        dup = _duplicate_deal_detail(exc)
+        if dup:
+            # 409, not 502: nothing is broken, the change is simply refused.
+            raise HTTPException(status_code=409, detail=dup)
         log.exception("update opportunity failed: %s", opportunity_id)
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "opportunity": row}
+
+
+def _duplicate_deal_detail(exc: Exception) -> str | None:
+    """Turn Postgres 23505 on the opportunities unique index into a sentence.
+
+    The operator saw the raw driver error — `duplicate key value violates unique
+    constraint "uq_opportunities_client_lob_type"` with the key tuple inline —
+    while trying to correct a deal's type. That message names the constraint
+    rather than the situation, and the situation is specific: this client already
+    has a deal on this line in that type, so the row being edited is a duplicate
+    of it. Retyping cannot resolve that; one of the two has to go.
+    """
+    text = str(exc)
+    if "23505" not in text and "duplicate key" not in text:
+        return None
+    m = re.search(r"\)=\(([^)]*)\)", text)
+    if not m:
+        return "A deal like this already exists for that client and line of business."
+    parts = [p.strip() for p in m.group(1).split(",")]
+    if len(parts) >= 3:
+        client, lob, otype = parts[0], parts[1], parts[2]
+        return (f"{client} already has a {lob} deal of type {otype}. This one is a "
+                f"duplicate of it — open that deal instead, or delete this row. "
+                f"Changing the type cannot merge them.")
+    return "A deal like this already exists for that client and line of business."
 
 
 @app.get("/api/opportunities/{opportunity_id}/events")

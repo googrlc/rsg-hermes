@@ -379,6 +379,17 @@ def main() -> int:
         help="Cap the number of quotes processed (useful for a first dry-run)",
     )
     parser.add_argument(
+        "--dedupe-opportunities",
+        action="store_true",
+        help="Merge duplicate deals (one client+LOB, a CRM row and a quote-sync twin) "
+             "into the CRM row. Previews by default; add --apply to write",
+    )
+    parser.add_argument(
+        "--dedupe-opportunities-apply",
+        action="store_true",
+        help="Actually merge and delete the duplicate deals found by --dedupe-opportunities",
+    )
+    parser.add_argument(
         "--sync-opportunities",
         action="store_true",
         help="Mirror NowCerts Opportunities (OpportunitiesList) → Supabase opportunities pipeline. "
@@ -503,6 +514,28 @@ def main() -> int:
         return 0 if book_result.ok else 1
 
     # --- NowCerts quotes → Supabase opportunities pipeline sync ---
+    if args.dedupe_opportunities or args.dedupe_opportunities_apply:
+        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.sync.opportunity_dedupe import run_dedupe
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        apply = bool(args.dedupe_opportunities_apply)
+        res = run_dedupe(supa, apply=apply)
+        head = "MERGING" if apply else "PREVIEW (nothing written — add --dedupe-opportunities-apply)"
+        print(f"Opportunity dedupe — {head}")
+        for pair in res.pairs:
+            print(f"  {pair.describe()}")
+        for s in res.skipped:
+            print(f"  SKIP {s}")
+        for e in res.errors:
+            print(f"  ERROR {e}")
+        print(res.message)
+        return 0 if not res.errors else 1
+
     if args.sync_quotes or args.sync_quotes_dry_run:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError

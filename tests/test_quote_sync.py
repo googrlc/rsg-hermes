@@ -201,3 +201,45 @@ def test_bound_opportunity_not_downgraded_or_promoted():
     assert res.promoted == 0
     row = supa.tables[opp.TABLE][0]
     assert row["stage"] == opp.STAGE_BOUND and row["status"] == opp.STATUS_WON
+
+
+def test_a_renewal_on_the_board_does_not_get_a_new_business_twin():
+    """The bug that put 43 duplicate deals on the pipeline.
+
+    create_opportunity is idempotent per (client, LOB, TYPE) and this sync always
+    asks for New Business, so a client whose renewal was already on the board got
+    a second row — the differing type slipped past the unique index. The premium
+    was counted twice and the renewal showed as new business, and the two could
+    not be merged by hand: retyping one collides with the constraint.
+    """
+    ci = opp.make_client_identifier("Craig P. Courtney", None)
+    supa = FakeSupabase({opp.TABLE: [{
+        "id": "opp-renewal", "client_identifier": ci, "line_of_business": "Personal Auto",
+        "opportunity_type": opp.TYPE_RENEWAL if hasattr(opp, "TYPE_RENEWAL") else "Renewals",
+        "stage": opp.STAGE_QUOTES_RECEIVED, "status": "open", "premium_estimate": 1170,
+    }]})
+    nc = FakeNowCerts(policies=[nc_quote("Q9", name="Craig P. Courtney", lob="Personal Auto")])
+    res = run(supa, nc)
+
+    rows = supa.tables[opp.TABLE]
+    assert len(rows) == 1, f"the sync created a duplicate deal: {rows}"
+    assert res.created == 0 and res.linked == 1
+    assert rows[0]["id"] == "opp-renewal"          # the human's row, not a twin
+    assert rows[0]["opportunity_type"] != opp.TYPE_NEW_BUSINESS
+    assert rows[0]["quote_number"] == "Q9"          # still enriched from the quote
+
+
+def test_the_live_path_agrees_with_what_the_dry_run_promised():
+    """The dry run counted by (client, LOB) and said `linked`; the live path
+    counted by (client, LOB, type) and created. A preview that does not predict
+    the run is worse than no preview."""
+    ci = opp.make_client_identifier("Craig P. Courtney", None)
+    seed = lambda: FakeSupabase({opp.TABLE: [{
+        "id": "opp-renewal", "client_identifier": ci, "line_of_business": "Personal Auto",
+        "opportunity_type": "Renewals", "stage": opp.STAGE_QUOTES_RECEIVED, "status": "open",
+    }]})
+    quote = [nc_quote("Q9", name="Craig P. Courtney", lob="Personal Auto")]
+
+    preview = run(seed(), FakeNowCerts(policies=quote), dry_run=True)
+    live = run(seed(), FakeNowCerts(policies=quote))
+    assert (preview.created, preview.linked) == (live.created, live.linked)
