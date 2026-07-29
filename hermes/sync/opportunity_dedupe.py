@@ -188,17 +188,44 @@ def open_quote_guids(nc: Any) -> set[str]:
             if _is_quote(q) and _is_open_quote(q) and _quote_guid(q)}
 
 
+def open_quote_deals(nc: Any) -> set[tuple[str, str]]:
+    """(client identifier, LOB) for every open quote.
+
+    The guid alone is not enough to decide a row is dead. Board rows still carry
+    whichever term's guid the old sync happened to write last, and that is often
+    a superseded six-month term rather than the live one. Retiring on the guid
+    took Tiffany Lombardo's live $3,213 renewal off the board because her row
+    pointed at the $2,972 term before it — a live deal deleted for holding a
+    stale pointer.
+
+    So a row survives if its client has an open quote on that line, whichever
+    term the row itself names.
+    """
+    from hermes.sync.quote_sync import _fein, _insured_name, _is_open_quote, _is_quote, _lob
+
+    out: set[tuple[str, str]] = set()
+    for q in nc.fetch_policies():
+        if not (_is_quote(q) and _is_open_quote(q)):
+            continue
+        name, lob = _insured_name(q), _lob(q)
+        if name and lob:
+            out.add((opp.make_client_identifier(name, _fein(q)), lob))
+    return out
+
+
 def plan_retirement(supa: Any, nc: Any) -> RetireResult:
     """Split the board into what the AMS still calls live, and everything else."""
     result = RetireResult()
-    live = open_quote_guids(nc)
+    live_guids = open_quote_guids(nc)
+    live_deals = open_quote_deals(nc)
     for row in supa.select(opp.TABLE, columns="*", limit=5000):
         guid = str(row.get("nowcerts_quote_guid") or "")
+        deal = (str(row.get("client_identifier") or ""), str(row.get("line_of_business") or ""))
         # A row with no quote guid was not created from the register — a lead
         # conversion, a hand-entered deal. Not this sweep's business.
         if not guid:
             result.keep.append(row)
-        elif guid in live:
+        elif guid in live_guids or deal in live_deals:
             result.keep.append(row)
         else:
             result.retire.append(row)
