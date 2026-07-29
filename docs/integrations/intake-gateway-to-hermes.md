@@ -304,8 +304,9 @@ curl -s 'http://hermes-api:8787/api/opportunities?status=open&limit=5'
 ```
 
 From a workstation on the tailnet, swap the base for
-`https://hermes-gretch.tail1cbc83.ts.net:8444`. The Kanban at `/cockpit#pipeline`
-shows the result immediately — use it to eyeball the first real run.
+`https://hermes-gretch.tail1cbc83.ts.net:8444`. The Pipeline board in the RSG
+Agency Portal (`:8447`) shows the result immediately — use it to eyeball the
+first real run.
 
 ## 11. Related
 

@@ -135,8 +135,8 @@ afterward; no successful writeback exists yet.
 | 31–60 | WATCH |
 | 61–90 | PIPELINE |
 
-Entry thresholds: **commercial 60 days, personal lines 30 days.** The cockpit's
-forward window is wider — 120 days commercial, 30 personal.
+Entry thresholds: **commercial 60 days, personal lines 30 days.** The renewal
+worklist's forward window is wider — 120 days commercial, 30 personal.
 
 These buckets are for *describing* an expiry horizon. They are **not** the
 retention risk model — that is `classify_risk` in `retention-risk-scout`

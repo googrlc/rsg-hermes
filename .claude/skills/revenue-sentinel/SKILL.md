@@ -86,7 +86,7 @@ payload with `approval_required: true`.
 
 Three buttons are attached to each sentinel post, but **nothing handles the
 clicks** — the Socket Mode listener that served them was retired July 2026.
-Do not tell anyone these work; act on the row in the cockpit instead.
+Do not tell anyone these work; act on the row in the portal instead.
 
 What they were meant to do:
 

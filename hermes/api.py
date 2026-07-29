@@ -18,11 +18,10 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from hermes.ams import book as ams_book
+from hermes.core import surfaces
 
 log = logging.getLogger(__name__)
 
@@ -76,16 +75,18 @@ if _cors_origins:
         allow_headers=["*"],
     )
 
-# Agency Command Center static UI (served at /command-center/).
-# Lives under hermes/webui/ and is bind-mounted in the container, so edits go
-# live; only new API routes need an `up -d hermes-api` recreate.
-_WEBUI_DIR = Path(__file__).parent / "webui"
-if _WEBUI_DIR.is_dir():
-    app.mount(
-        "/command-center",
-        StaticFiles(directory=str(_WEBUI_DIR), html=True),
-        name="command-center",
-    )
+# The cockpit UI that used to be mounted here — hermes/webui/{cockpit,index,
+# workspace}.html at /command-center/ — is gone. The RSG Agency Portal is the
+# agency's one screen now, and two CRMs answering the same questions from the
+# same tables is how they start disagreeing.
+#
+# What is NOT gone: every /api/command-center/* endpoint below. The portal is
+# built on five of them (renewals, tasks, tasks/{id}/complete, retention, ask),
+# so the path prefix stays exactly as it is. It reads as a leftover; it is load-
+# bearing. Renaming it is a portal outage, not a tidy-up.
+#
+# The Command Center intake lane keeps its own pages — they are part of the
+# intake subsystem, not the cockpit, and are mounted by its router below.
 
 # New Command Center intake lane (routes under /api/command-center/intake,
 # page at /api/command-center/intake/page). Additive; failure to load must not
@@ -352,24 +353,18 @@ class AgencyFactResponse(BaseModel):
 
 @app.get("/")
 async def root():
-    """Redirect visitors hitting the root URL to the Command Center UI."""
-    return RedirectResponse(url="/command-center/", status_code=307)
+    """What this service is, and where the screen went.
 
-
-@app.get("/cockpit")
-async def cockpit(request: Request):
-    """RSG Agency CRM cockpit — 8-view CRM UI served from hermes/webui/cockpit.html.
-    Forwards the query string so theme params (e.g. ?u=gretchen) survive the redirect."""
-    q = request.url.query
-    return RedirectResponse(url="/command-center/cockpit.html" + (f"?{q}" if q else ""), status_code=307)
-
-
-@app.get("/workspace")
-async def workspace(request: Request):
-    """RSG Master Workspace — the unified shell: every hub as a lane, each with its own
-    scoped AI assistant (served from hermes/webui/workspace.html)."""
-    q = request.url.query
-    return RedirectResponse(url="/command-center/workspace.html" + (f"?{q}" if q else ""), status_code=307)
+    This process serves no UI any more. Someone landing here has followed an old
+    bookmark to the cockpit, so say where the CRM actually is rather than 404ing
+    at them — and if nobody configured the portal's address, say that plainly
+    instead of inventing a URL."""
+    return {
+        "service": "rsg-hermes-api",
+        "ui": "none — the CRM is the RSG Agency Portal",
+        "portal": surfaces.portal_url() or "unset (HERMES_PORTAL_URL)",
+        "docs": "/docs",
+    }
 
 
 @app.get("/health")

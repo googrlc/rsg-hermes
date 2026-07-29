@@ -34,8 +34,8 @@ The sanctioned write door for renewals. Grounded in
   /api/command-center/renewals`) is the workstation. Gretchen and Lamar work
   renewals there. It reads, drafts, and — since 2026-07-29 — **corrects and
   removes** renewal records. None of that reaches NowCerts. (The Hermes cockpit
-  at `/cockpit` still serves the same worklist off `GET /api/renewals`, the
-  candidate ledger; the portal is the surface people actually use.)
+  that used to serve a second copy of this worklist was retired 2026-07-29 —
+  the portal is the only screen now.)
 - **Hermes — this skill — is the only thing that writes to the AMS.** Every
   mutation is staged as an approved queue row and executed by the renewal
   executor. **Hermes never talks to a client.**

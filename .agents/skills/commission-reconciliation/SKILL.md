@@ -53,7 +53,7 @@ workspace and the place this work actually gets done. It runs private on the
 tailnet (`:8446` on the box, container `rsg-commission-tracker-tailnet`), with a
 silent shared-account auto-login. The public Cloud Run deployment was deleted.
 
-The CRM cockpit's Commissions view is **read-only and reconciled-only** — it
+The CRM's Commissions view is **read-only and reconciled-only** — it
 shows settled money, never drafts. Don't write to it.
 
 The nightly `--sync-commissions` job seeds *expected* commission from won /
@@ -105,7 +105,7 @@ genuinely need a raw key, the live vault is `rsg_infrastructure`.
 3. **Never create a duplicate ledger entry.** Update on (policy, statement).
 4. **Dry-run first.** `run_reconciliation(..., dry_run=True)` is side-effect free
    and returns the same summary text.
-5. **The cockpit Commissions view is read-only.** Reconciled money only.
+5. **The CRM's Commissions view is read-only.** Reconciled money only.
 
 ---
 
