@@ -295,6 +295,10 @@ def summarize_renewals(
                     "risk_status": row.get("risk_status"),
                     "ai_strategy_notes": row.get("ai_strategy_notes"),
                     "last_contact_date": row.get("last_contact_date"),
+                    # What the source said before a human corrected it, carried
+                    # through so the desk sees a corrected number as a decision
+                    # rather than as the AMS's word.
+                    "_overridden": row.get("_overridden"),
                 }
             )
 

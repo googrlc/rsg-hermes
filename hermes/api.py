@@ -433,8 +433,13 @@ async def command_center_renewals():
 
     Server-side, service-role read of ``project_85_renewals`` aggregated into
     urgency buckets + the next-90-day list. No anon key ever reaches the browser.
+
+    Human corrections are overlaid before anything is counted, and renewals a
+    person removed are dropped — so the buckets, the premium totals and the list
+    all agree with what the desk actually decided.
     """
     from hermes.operations.renewal_tracker import attach_policy_dates, summarize_renewals
+    from hermes.renewals import corrections as corr
 
     supa = _get_supa()
     rows = supa.select(
@@ -446,6 +451,8 @@ async def command_center_renewals():
         params={"order": "expiration_date.asc"},
         limit=1000,
     )
+    rows = [r for r in corr.apply(supa, rows)
+            if not corr.is_dismissed(corr.PROJECTION, r)]
     # The renewal table holds an expiration date and nothing else about the term.
     # Effective date, carrier and line come off the book so the desk can see the
     # whole policy period, not just the end of it.
@@ -3417,18 +3424,27 @@ async def list_renewals_endpoint(limit: int = 1000):
     Forward window only: personal lines +30 days, commercial +120 days. Rows on
     expired/inactive policies and non-events (eligibility_state='excluded') are
     dropped, so dead AMS deep-links and already-renewed future-dated rows never
-    appear. Carries the NowCerts insured GUID (AMS deep-link) and a derived
-    Won/Lost/Open outcome per renewal."""
-    rows = _get_supa().select(
+    appear. Carries the NowCerts insured GUID (AMS deep-link), the candidate id
+    and natural key (so a row can be corrected from the card) and a derived
+    Won/Lost/Open outcome per renewal.
+
+    Human corrections are overlaid before the filters run, so correcting an
+    expiration date moves the row into the window and dismissing a renewal drops
+    it out — both take effect on the next load, not at the next refresh."""
+    from hermes.renewals import corrections as corr
+
+    supa = _get_supa()
+    rows = supa.select(
         "renewal_candidates",
-        columns="insured_id,policy_number,client_name,line_of_business,renewal_event_date,"
-                "expiration_date,normalized_status,successor_policy_number,risk_status,segment,"
-                "in_working_queue,eligibility_state,premium_current,premium_renewal,policy_active",
+        columns="id,insured_id,policy_lineage_id,policy_number,client_name,line_of_business,"
+                "renewal_event_date,expiration_date,normalized_status,successor_policy_number,"
+                "risk_status,segment,in_working_queue,eligibility_state,premium_current,"
+                "premium_renewal,policy_active",
         params={"order": "expiration_date.asc"}, limit=limit,
     )
     today = date.today()
     out: list[dict[str, Any]] = []
-    for r in rows:
+    for r in corr.apply(supa, rows, surface=corr.CANDIDATES):
         if not r.get("policy_active"):
             continue
         if str(r.get("eligibility_state") or "").strip().lower() == "excluded":
@@ -3445,6 +3461,291 @@ async def list_renewals_endpoint(limit: int = 1000):
         r["outcome"] = _renewal_outcome(r)
         out.append(r)
     return {"renewals": out, "count": len(out)}
+
+
+# ---------------------------------------------------------------------------
+# Correcting a renewal.
+#
+# The renewal desk works project_85_renewals, and that table is re-projected from
+# renewal_candidates every night. A fix typed onto the row is therefore gone by
+# morning — which is why a premium that came over wrong has always stayed wrong.
+#
+# Every correction is recorded as an override keyed on the policy number
+# (hermes/renewals/corrections.py) AND written onto the row, so the number is
+# right immediately and the refresh re-applies the correction instead of
+# reverting it. Removing a renewal is the same mechanism, on both tables: the
+# projection stops showing it and the event stops being projected.
+#
+# None of this writes to NowCerts. The AMS is fixed by hand, and each correction
+# retires itself once the two agree.
+# ---------------------------------------------------------------------------
+@app.get("/api/renewals/overrides")
+async def list_renewal_overrides(status: str = "active", limit: int = 500):
+    """Corrections on renewals — active, plus anything a refresh conflicted."""
+    from hermes.renewals.corrections import PROJECTION
+
+    params: dict[str, str] = {"entity_type": f"eq.{PROJECTION.entity_type}",
+                              "order": "approved_at.desc"}
+    if status and status.lower() != "all":
+        params["status"] = f"eq.{status}"
+    rows = _get_supa().select("portal_overrides", columns="*", params=params, limit=limit)
+    return {"overrides": rows, "count": len(rows)}
+
+
+def _renewal_row(supa, renewal_id: str) -> dict[str, Any]:
+    rows = supa.select("project_85_renewals", columns="*",
+                       params={"id": f"eq.{renewal_id}"}, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail="renewal not found")
+    return rows[0]
+
+
+def _write_through(supa, table: str, record_id: str, fields: dict[str, Any]) -> None:
+    """Put the corrected value on the row itself.
+
+    The override is what makes a correction durable; this is what makes it
+    visible. Everything reading Supabase directly — the retention scan, the
+    renewal desk, the skills — would otherwise see the wrong number until the
+    next refresh. Best-effort: the override is already recorded, so a failure
+    here costs a night, not the correction."""
+    try:
+        supa.update(table, record_id,
+                    {**fields, "updated_at": datetime.now(timezone.utc).isoformat()})
+    except Exception:  # noqa: BLE001
+        log.exception("renewal write-through failed: %s %s %s", table, record_id, list(fields))
+
+
+def _dismiss_candidates(supa, policy_number: str | None, actor: str, reason: str | None) -> int:
+    """Take the underlying renewal EVENTS off the list too.
+
+    Dismissing only the projection row would last until 2:30am: the refresh
+    re-projects from renewal_candidates, and the renewal would be back with the
+    morning list. Excluding the event is what makes a removal stick."""
+    from hermes.renewals import corrections as corr
+    from hermes.overrides.store import set_override
+
+    if not policy_number:
+        return 0
+    try:
+        rows = supa.select("renewal_candidates", columns="*",
+                           params={"policy_number": f"eq.{policy_number}"}, limit=50)
+    except Exception:  # noqa: BLE001
+        log.exception("candidate lookup failed for %s", policy_number)
+        return 0
+
+    dismissed = 0
+    for row in rows:
+        if corr.is_dismissed(corr.CANDIDATES, row):
+            continue
+        try:
+            set_override(
+                supa,
+                entity_type=corr.CANDIDATES.entity_type,
+                entity_key=corr.candidate_key(row),
+                field_name=corr.CANDIDATES.dismiss_field,
+                override_value=corr.CANDIDATES.dismiss_value,
+                original_value=row.get(corr.CANDIDATES.dismiss_field),
+                approved_by=actor,
+                reason=reason or "removed from the renewal worklist",
+            )
+        except Exception:  # noqa: BLE001 — the projection dismissal still stands
+            log.exception("candidate dismissal failed for %s", row.get("policy_number"))
+            continue
+        _write_through(supa, "renewal_candidates", row["id"], {
+            corr.CANDIDATES.dismiss_field: corr.CANDIDATES.dismiss_value,
+            "eligibility_reason": f"removed from the worklist by {actor}"
+                                  + (f": {reason}" if reason else ""),
+        })
+        dismissed += 1
+    return dismissed
+
+
+def _restore_candidates(supa, policy_number: str, actor: str) -> int:
+    """Undo the event-level exclusions a removal wrote, so the renewal returns.
+
+    Keyed through the candidates themselves rather than by parsing override keys:
+    the natural key carries the lineage root, which is not always this policy's
+    own number."""
+    from hermes.renewals import corrections as corr
+    from hermes.overrides.store import withdraw
+
+    if not policy_number:
+        return 0
+    try:
+        rows = supa.select("renewal_candidates", columns="*",
+                           params={"policy_number": f"eq.{policy_number}"}, limit=50)
+    except Exception:  # noqa: BLE001
+        log.exception("candidate lookup failed for %s", policy_number)
+        return 0
+
+    restored = 0
+    for row in rows:
+        try:
+            active = supa.select("portal_overrides", columns="*", params={
+                "entity_type": f"eq.{corr.CANDIDATES.entity_type}",
+                "entity_key": f"eq.{corr.candidate_key(row)}",
+                "field_name": f"eq.{corr.CANDIDATES.dismiss_field}",
+                "status": "eq.active",
+            }, limit=1)
+            if not active:
+                continue
+            undone = withdraw(supa, active[0]["id"], actor=actor)
+        except Exception:  # noqa: BLE001 — the projection half already stands
+            log.exception("candidate restore failed for %s", row.get("policy_number"))
+            continue
+        _write_through(supa, "renewal_candidates", row["id"], {
+            corr.CANDIDATES.dismiss_field: undone.get("original_value"),
+            "eligibility_reason": f"put back on the worklist by {actor}",
+        })
+        restored += 1
+    return restored
+
+
+class RenewalCorrectionRequest(BaseModel):
+    field_name: str
+    value: Any = None
+    approved_by: str
+    reason: str | None = None
+
+
+@app.post("/api/renewals/{renewal_id}/override")
+async def correct_renewal_field(renewal_id: str, req: RenewalCorrectionRequest):
+    """Correct one field on a renewal, durably.
+
+    The plain PATCH below writes the row and nothing else, so the nightly
+    projection overwrites it. This records the same change as a named, reversible
+    override first — that is what survives the rebuild."""
+    from hermes.renewals import corrections as corr
+    from hermes.overrides.store import set_override
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", req.approved_by)])
+
+    row = _renewal_row(supa, renewal_id)
+    field_name = (req.field_name or "").strip()
+    try:
+        value = corr.coerce(corr.PROJECTION, field_name, req.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    policy_number = row.get("policy_number")
+    if not policy_number:
+        raise HTTPException(
+            status_code=409,
+            detail="this renewal has no policy number to key a correction on",
+        )
+
+    try:
+        override = set_override(
+            supa,
+            entity_type=corr.PROJECTION.entity_type,
+            entity_key=policy_number,
+            field_name=field_name,
+            override_value=value,
+            original_value=row.get(field_name),   # the SOURCE value, for reconcile
+            approved_by=req.approved_by,
+            reason=req.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("renewal correction failed: %s %s", renewal_id, field_name)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    _write_through(supa, corr.PROJECTION.entity_type, renewal_id, {field_name: value})
+    return {"ok": True, "override": override,
+            "note": "Corrected in the CRM and held through the nightly refresh. "
+                    "NowCerts still needs the same fix by hand."}
+
+
+class RenewalDismissRequest(BaseModel):
+    deleted_by: str
+    reason: str | None = None
+
+
+@app.delete("/api/renewals/{renewal_id}")
+async def dismiss_renewal(renewal_id: str, req: RenewalDismissRequest):
+    """Take a renewal off the worklist.
+
+    Recorded as a removal, not a row DELETE. renewal_actions cascades off this
+    table, so deleting the row would erase the record of the work already done on
+    the renewal, and the nightly refresh would re-project it from the same policy
+    anyway. The event underneath is excluded too, which is what makes it stick.
+    Reversible: undo the correction and the renewal comes back."""
+    from hermes.renewals import corrections as corr
+    from hermes.overrides.store import set_override
+
+    supa = _get_supa()
+    _require_users(supa, [("deleted_by", req.deleted_by)])
+    row = _renewal_row(supa, renewal_id)
+    policy_number = row.get("policy_number")
+    if not policy_number:
+        raise HTTPException(
+            status_code=409,
+            detail="this renewal has no policy number to key a removal on",
+        )
+
+    try:
+        override = set_override(
+            supa,
+            entity_type=corr.PROJECTION.entity_type,
+            entity_key=policy_number,
+            field_name=corr.PROJECTION.dismiss_field,
+            override_value=corr.PROJECTION.dismiss_value,
+            original_value=None,      # not a column — the source never says this
+            approved_by=req.deleted_by,
+            reason=req.reason or "removed from the renewal worklist",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("renewal removal failed: %s", renewal_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    events = _dismiss_candidates(supa, policy_number, req.deleted_by, req.reason)
+    return {"ok": True, "override": override, "events_excluded": events,
+            "note": "Off the worklist. The renewal and its history are kept, "
+                    "marked removed — undo the correction to bring it back."}
+
+
+@app.delete("/api/renewals/overrides/{override_id}")
+async def withdraw_renewal_override(override_id: str, approved_by: str):
+    """Undo a correction — including a removal, which puts the renewal back.
+
+    Withdrawing restores what the source said on the row as well, so the list
+    stops showing a number nobody stands behind."""
+    from hermes.renewals import corrections as corr
+    from hermes.overrides.store import withdraw
+
+    supa = _get_supa()
+    _require_users(supa, [("approved_by", approved_by)])
+    try:
+        row = withdraw(supa, override_id, actor=approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        log.exception("renewal override withdraw failed: %s", override_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    field_name = row.get("field_name")
+    if field_name == corr.PROJECTION.dismiss_field:
+        # Putting a renewal back means putting the EVENT back too. The removal
+        # excluded both; undoing only the projection half would leave the
+        # renewal visible today and gone again after the next refresh.
+        restored = _restore_candidates(supa, str(row.get("entity_key") or ""), approved_by)
+        return {"ok": True, "override": row, "events_restored": restored}
+
+    if field_name and field_name in corr.PROJECTION.editable:
+        try:
+            rows = supa.select("project_85_renewals", columns="id",
+                               params={"policy_number": f"eq.{row.get('entity_key')}"}, limit=1)
+        except Exception:  # noqa: BLE001 — the withdraw itself stands
+            log.exception("renewal restore lookup failed: %s", override_id)
+            rows = []
+        if rows:
+            _write_through(supa, corr.PROJECTION.entity_type, rows[0]["id"],
+                           {field_name: row.get("original_value")})
+    return {"ok": True, "override": row}
 
 
 class RenewalUpdateRequest(BaseModel):
