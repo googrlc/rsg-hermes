@@ -420,3 +420,18 @@ def test_every_mapped_type_has_a_ladder_that_accepts_its_stage():
     for ams, crm in _AMS_TYPE_MAP.items():
         assert crm in opp.OPPORTUNITY_TYPES, f"{ams} maps to {crm}, which is not a CRM type"
         assert _stage_for(crm) in opp.stages_for_type(crm), f"{crm} has no usable stage"
+
+
+def test_an_open_quote_survives_every_filter():
+    """Regression: a bound-policy heuristic added earlier the same day suppressed
+    all four remaining quotes, so the board came out empty. The AMS's own status
+    already answers 'is this still live' — a second, inferred answer could only
+    disagree with it, and did."""
+    supa = FakeSupabase()
+    res = run(supa, FakeNowCerts(policies=[
+        nc_quote("Q1", name="Coates, Kimberly", lob="Personal Auto",
+                 business_type="Renewal", status="Active", stage="Received",
+                 effective="2026-08-06"),
+    ]))
+    assert res.created == 1, "an active, received quote must reach the board"
+    assert len(supa.tables[opp.TABLE]) == 1

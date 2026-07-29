@@ -50,8 +50,6 @@ class QuoteSyncResult:
     skipped_incomplete: int = 0
     # Older six-month terms of a deal whose newest term we took instead.
     superseded_terms: int = 0
-    # Quotes whose policy is already bound — AMS term artifacts, not deals.
-    skipped_bound: int = 0
     # Register rows that are not open quotes: expired, bound, declined, inactive.
     skipped_closed: int = 0
     errors: list[str] = field(default_factory=list)
@@ -66,8 +64,7 @@ class QuoteSyncResult:
             f"quotes → opportunities: quotes={self.quotes_fetched} "
             f"created={self.created} linked={self.linked} enriched={self.enriched} "
             f"promoted={self.promoted} skipped_incomplete={self.skipped_incomplete} "
-            f"superseded_terms={self.superseded_terms} skipped_bound={self.skipped_bound} "
-            f"skipped_closed={self.skipped_closed} "
+            f"superseded_terms={self.superseded_terms} skipped_closed={self.skipped_closed} "
             f"errors={len(self.errors)}"
         )
 
@@ -336,36 +333,6 @@ def _stage_for(otype: str) -> str:
     return opp.default_stage_for_type(otype)
 
 
-def _bound_policy_index(supa: Any) -> set[tuple[str, str, str]]:
-    """(insured guid, LOB, effective date) for every bound policy in the book.
-
-    A quote whose bound counterpart already exists is not an opportunity — it is
-    the AMS's record of the term that was written. Those are the bulk of the
-    phantom board: the register was loaded whole, quotes and bound terms alike.
-
-    Best-effort: if the book cannot be read, the index is empty and nothing is
-    suppressed. Filtering the board is worth doing, but not at the cost of the
-    sync failing closed on a read it does not strictly need.
-    """
-    try:
-        from hermes.ams import book as ams_book
-
-        rows = ams_book.select_policies(
-            supa, columns="nowcerts_insured_guid,lines_of_business,effective_date", limit=100000,
-        )
-    except Exception:  # noqa: BLE001
-        log.exception("bound-policy index unavailable; not suppressing term artifacts")
-        return set()
-    out = set()
-    for r in rows:
-        guid = str(r.get("nowcerts_insured_guid") or "").strip()
-        lob = str(r.get("lines_of_business") or "").strip()
-        eff = str(r.get("effective_date") or "")[:10]
-        if guid and lob and eff:
-            out.add((guid, lob, eff))
-    return out
-
-
 def run_quote_sync(
     nc: Any,
     supa: Any,
@@ -397,7 +364,6 @@ def run_quote_sync(
     # so premium and dates come off the same record instead of two.
     quotes = _latest_term_per_deal(quotes)
     result.superseded_terms = max(0, result.quotes_fetched - len(quotes))
-    bound = _bound_policy_index(supa)
     log.info("quote sync: %d NowCerts quotes to process (dry_run=%s)", len(quotes), dry_run)
 
     cols = _discover_columns(supa) if not dry_run else set()
@@ -408,11 +374,6 @@ def run_quote_sync(
         if not name or not lob:
             result.skipped_incomplete += 1
             log.info("SKIP quote (missing insured name or LOB): %s", _quote_number(q) or _quote_guid(q))
-            continue
-
-        if bound and (str(_insured_guid(q) or ""), lob, str(_effective(q) or "")[:10]) in bound:
-            result.skipped_bound += 1
-            log.info("SKIP quote (policy already bound): %s %s", name, lob)
             continue
 
         client_identifier = opp.make_client_identifier(name, _fein(q))
