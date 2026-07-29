@@ -1,0 +1,25 @@
+# Run the hermes services as the box's own `hermes` user, not root.
+#
+# Compose loads this file automatically alongside docker-compose.yml. It lived
+# on the box as an untracked file, which meant one `git clean -fd` in
+# /opt/rsg-hermes — the kind of thing a deploy does to clear stale artefacts —
+# silently put the whole stack back to running as root. Tracking it is the fix.
+#
+# 995:983 are the numeric uid:gid of `hermes:hermes` on hermes-gretch. They are
+# NOT portable: on another machine those numbers belong to some other account,
+# or to nobody. Compose takes the numbers as given and does not check.
+#
+# So if you run this stack anywhere else — a laptop, a fresh box — either put
+# your own uid:gid here (`id -u`:`id -g`) or skip this file entirely:
+#
+#     COMPOSE_FILE=docker-compose.yml docker compose up -d
+#
+# The state volume is chown'd to this user; changing the numbers without
+# chowning /var/lib/hermes to match will fail on first write, not at startup.
+services:
+  hermes:
+    user: "995:983"
+  hermes-api:
+    user: "995:983"
+  hermes-intake-worker:
+    user: "995:983"
