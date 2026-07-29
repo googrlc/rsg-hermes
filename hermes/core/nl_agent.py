@@ -15,6 +15,7 @@ from typing import Any
 
 from hermes.core.dispatcher import DispatchResult
 
+from hermes import carriers as _carriers
 from hermes.ams import book as ams_book
 
 log = logging.getLogger(__name__)
@@ -603,11 +604,8 @@ def _join(v: Any) -> str:
     return str(v or "")
 
 
-def _norm_code(v: Any) -> str:
-    """Normalize a class code for comparison — "ISO 91341", "91341" and "91-341"
-    all reduce to "91341", so a lookup isn't defeated by how the code was typed."""
-    stripped = re.sub(r"\b(ISO|NCCI|SIC|NAICS|CLASS|CODE)\b", "", str(v or "").upper())
-    return re.sub(r"[^A-Z0-9]", "", stripped)
+# Shared with the /api/carriers endpoint so both answer "who writes this?" alike.
+_norm_code = _carriers.norm_code
 
 
 def _exec_lookup_class_code(args: dict[str, Any]) -> DispatchResult:
@@ -772,18 +770,8 @@ def _exec_carrier_appetite(args: dict[str, Any]) -> DispatchResult:
         )
     except Exception as exc:  # noqa: BLE001
         return DispatchResult(False, f"Appetite lookup failed: {exc}")
-    if state:
-        # states_approved is a text[] (e.g. ["GA"] or ["ALL"]) — filter in Python.
-        su = state.strip().upper()
-
-        def _writes_state(r: dict[str, Any]) -> bool:
-            arr = r.get("states_approved") or []
-            if not isinstance(arr, list):
-                arr = [arr]
-            up = [str(x).upper() for x in arr if x]
-            return "ALL" in up or any(su == x or su in x or x in su for x in up)
-
-        rows = [r for r in rows if _writes_state(r)]
+    # states_approved is a text[] (e.g. ["GA"] or ["ALL"]) — filter in Python.
+    rows = _carriers.filter_by_state(rows, state)
     bridge_note = ""
     if cls:
         # The bridge (carrier_appetite_class_codes) is the authoritative carrier↔code

@@ -302,14 +302,14 @@ def _mcp_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "carrier_appetite",
-            "description": "Carrier appetite reference — which carriers RSG can place a risk with, by line of business, state, and class code (read-only) via GET /api/carriers. Use for 'who writes this?', 'carrier fit for X', 'what carriers do we have for GL in TX'.",
+            "description": "Carrier appetite reference — which carriers RSG can place a risk with, by line of business, state, and class code (read-only) via GET /api/carriers. Use for 'who writes this?', 'carrier fit for X', 'what carriers do we have for GL in TX'. A carrier absent from the results is NOT a declination — the table is a reference, so confirm with the underwriter before telling anyone a risk can't be placed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "carrier": {"type": "string", "description": "Partial carrier name filter."},
-                    "state": {"type": "string", "description": "2-letter state filter, e.g. 'TX'."},
+                    "state": {"type": "string", "description": "2-letter state filter, e.g. 'TX'. Nationwide ('ALL') appointments always match."},
                     "lob": {"type": "string", "description": "Line of business filter (partial), e.g. 'General Liability'."},
-                    "naics": {"type": "string", "description": "Exact NAICS code filter."},
+                    "naics": {"type": "string", "description": "NAICS/class code filter, matched against the row's class_codes."},
                     "limit": {"type": "integer", "description": "Max rows to return (optional)."},
                 },
                 "required": [],

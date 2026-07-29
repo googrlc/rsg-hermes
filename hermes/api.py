@@ -3380,24 +3380,27 @@ async def list_carrier_appetite(
 ):
     """Carrier appetite reference — which carriers RSG can place a risk with, by
     line of business, state, and class code (read-only). Backs the Carrier Hub.
-    Filter by carrier (partial), state (2-letter), lob (line_of_business,
-    partial), or naics (exact NAICS code)."""
-    params: dict[str, str] = {"order": "carrier.asc"}
+    Filter by carrier (partial), state (2-letter), lob (partial), or naics/class
+    code.
+
+    `states_approved` and `class_codes` are text[] on the table, so state and code
+    filtering happens in Python — a row scoped ["ALL"] is a nationwide appointment
+    and must survive a state filter. Absence of a match here is not a declination:
+    the table is a reference, not the carrier's answer.
+    """
+    from hermes import carriers as CA
+
+    params: dict[str, str] = {"order": "carrier_name.asc", "active": "eq.true"}
     if carrier:
-        params["carrier"] = f"ilike.*{carrier}*"
-    if state:
-        params["state"] = f"eq.{state.upper()}"
+        params["carrier_name"] = f"ilike.*{carrier}*"
     if lob:
-        params["line_of_business"] = f"ilike.*{lob}*"
-    if naics:
-        params["naics_code"] = f"eq.{naics}"
+        params["lob"] = f"ilike.*{lob}*"
     rows = _get_supa().select(
-        "carrier_appetite",
-        columns="carrier,state,line_of_business,class_description,naics_code,sic_code,"
-                "gl_class_code,wc_class_code,appetite_level,commission_percent,notes,"
-                "source,last_verified",
-        params=params, limit=limit,
+        "carrier_appetite", columns=CA.APPETITE_COLUMNS, params=params, limit=limit,
     )
+    rows = CA.filter_by_state(rows, state)
+    if naics:
+        rows = [r for r in rows if CA.matches_code(r, naics)]
     return {"carriers": rows, "count": len(rows)}
 
 
