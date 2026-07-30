@@ -23,6 +23,8 @@ import re
 from typing import Any, Callable, Optional
 
 from hermes.deliverables import (
+    acord130,
+    acord131,
     acord140,
     acord_commercial_pack,
     acord_pdf,
@@ -32,6 +34,14 @@ from hermes.deliverables import (
 
 TEMPLATE_125_126_ENV = "HERMES_ACORD_125_126_TEMPLATE"
 TEMPLATE_140_ENV = "HERMES_ACORD_140_TEMPLATE"
+
+# Single-template, single-fill forms (their own PDF, not the combined 125/126 and
+# not per-building). Dispatched generically: add a form here + its filler module
+# and it generates from selection with no other change.
+_SIMPLE_FILLERS: dict[str, tuple[Any, str, str]] = {
+    "acord_130": (acord130, "HERMES_ACORD_130_TEMPLATE", "ACORD 130"),
+    "acord_131": (acord131, "HERMES_ACORD_131_TEMPLATE", "ACORD 131"),
+}
 
 
 def _safe_name(name: str) -> str:
@@ -96,6 +106,27 @@ def generate_pack(
                 })
         else:
             missing_templates.append(TEMPLATE_140_ENV)
+
+    # ── 3) single-template supplemental forms (130 WC, 131 Umbrella, …) ─────────
+    for form in plan.forms_to_fill:
+        simple = _SIMPLE_FILLERS.get(form.form_id)
+        if not simple:
+            continue
+        module, env_var, label = simple
+        tpl_s = _resolve_template(env_var, templates)
+        if not tpl_s:
+            missing_templates.append(env_var)
+            continue
+        obj = module.from_submission(sub)
+        checks = module.build_checkbox_map(obj) if hasattr(module, "build_checkbox_map") else None
+        out_path = f"{output_dir}/{account}_{label.replace(' ', '_')}.pdf"
+        result = fill_fn(tpl_s, module.build_field_map(obj), out_path,
+                         checkboxes=checks, form_label=label)
+        artifacts.append({
+            "form": label, "output_path": out_path,
+            "placed": result.get("placed", []), "skipped": result.get("skipped", []),
+            "auto_sent": False,
+        })
 
     return {
         "artifacts": artifacts,

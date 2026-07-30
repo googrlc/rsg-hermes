@@ -119,6 +119,8 @@ LOB_CHECKBOX: dict[str, str] = {
     "commercial_property": _P1 + "Policy_LineOfBusiness_CommercialProperty_A[0]",
     "package_bop": _P1 + "Policy_LineOfBusiness_BusinessOwnersIndicator_A[0]",
     "commercial_auto": _P1 + "Policy_LineOfBusiness_BusinessAutoIndicator_A[0]",
+    "commercial_umbrella": _P1 + "Policy_LineOfBusiness_UmbrellaIndicator_A[0]",
+    # workers_comp has no box on the commercial 125 — WC is a standalone ACORD 130.
 }
 
 # A new submission is a quote request.

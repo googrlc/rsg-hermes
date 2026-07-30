@@ -48,20 +48,28 @@ forms:
     filler: acord140
     per_building: true
 
+  - form_id: acord_130
+    title: "ACORD 130 — Workers Compensation"
+    role: lob
+    line_of_business: workers_comp   # standalone WC app; no 125 LOB box
+    template_env: HERMES_ACORD_130_TEMPLATE
+    filler: acord130
+    per_building: false
+
+  - form_id: acord_131
+    title: "ACORD 131 — Commercial Excess / Umbrella"
+    role: lob
+    line_of_business: commercial_umbrella   # checks the 125 Umbrella box
+    template_env: HERMES_ACORD_131_TEMPLATE
+    filler: acord131
+    per_building: false
+
   # ── Add more below. Examples (no PDF filler yet — selectable + opportunity +
   #    125 box today; add a filler module when you build the PDF): ──────────────
   - form_id: acord_137
     title: "ACORD 137 — Commercial Auto"
     role: lob
     line_of_business: commercial_auto
-    template_env: null
-    filler: null
-    per_building: false
-
-  - form_id: acord_130
-    title: "ACORD 130 — Workers Compensation"
-    role: lob
-    line_of_business: other        # no dedicated WC LineOfBusiness value yet
     template_env: null
     filler: null
     per_building: false
