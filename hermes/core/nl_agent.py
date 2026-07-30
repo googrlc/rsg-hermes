@@ -413,11 +413,12 @@ _TOOLS: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 # The system prompt is two parts:
-#   _DEFAULT_PERSONA  — identity, audience, and voice. This is what a persona file
-#                       (HERMES_PERSONA_FILE) replaces, so Gretchen's instance speaks
-#                       as her assistant while Lamar's speaks as his.
+#   _DEFAULT_PERSONA  — identity, audience, and voice. A persona file
+#                       (HERMES_PERSONA_FILE) or a per-request bundled persona
+#                       replaces this, so one instance can speak as Gretchen's
+#                       assistant or Lamar's without running a second container.
 #   _PLATFORM_GUIDE   — capabilities, field aliases, tool-routing, and write-safety
-#                       rules. Persona-agnostic; shared by every instance.
+#                       rules. Persona-agnostic; shared by every request.
 _DEFAULT_PERSONA = """\
 You are Hermes — the AI right hand and chief of staff for Risk Solutions Group (RSG),
 an independent insurance agency in Georgia. You are talking with Lamar Coates, RSG's
@@ -1502,11 +1503,7 @@ def ask(
         messages.extend(conversation)
     messages.append({"role": "user", "content": text})
 
-    # Per-instance tool scoping: Gretchen's CRM-only instance disables web_research.
-    from hermes.core.identity import disabled_tools
-
-    disabled = disabled_tools()
-    active_tools = _scoped_tools([t for t in _TOOLS if t["function"]["name"] not in disabled], hub)
+    active_tools = _scoped_tools(_TOOLS, hub)
 
     def _complete(with_model: str):
         return oai.chat.completions.create(
