@@ -64,11 +64,16 @@ def generate_pack(
     output_dir: str,
     templates: Optional[dict[str, str]] = None,
     fill_fn: Callable[..., dict[str, Any]] = acord_pdf.fill_pdf,
+    schedule_attachments: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Fill the selected ACORDs for a submission. Returns a manifest.
 
     ``templates`` overrides the ``*_TEMPLATE`` env lookups (tests pass fakes).
-    ``fill_fn`` defaults to the real filler but is injectable. Nothing is sent.
+    ``fill_fn`` defaults to the real filler but is injectable.
+    ``schedule_attachments`` are uploaded schedule files (e.g. a driver/vehicle
+    schedule CSV) that ride along to the underwriter with the filled ACORDs —
+    the practical way to convey per-row schedules without risking the ACORD's
+    out-of-order row fields. Nothing is sent.
     """
     templates = templates or {}
     plan = acord_selection.plan_selection(sub, form_ids)
@@ -130,8 +135,12 @@ def generate_pack(
             "auto_sent": False,
         })
 
+    # ── Uploaded schedules (driver/vehicle CSV, etc.) ride along as attachments ──
+    attachments = [{"path": p, "name": os.path.basename(p)} for p in (schedule_attachments or [])]
+
     return {
         "artifacts": artifacts,
+        "attachments": attachments,                   # schedule CSVs sent with the ACORDs
         "opportunities": plan.opportunities,          # one per checked line — caller stages
         "lines": plan.lines,
         "missing_templates": missing_templates,

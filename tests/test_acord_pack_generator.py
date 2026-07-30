@@ -81,6 +81,24 @@ def test_no_140_when_property_not_selected(tmp_path):
     assert all(a["form"] != "ACORD 140" for a in m["artifacts"])   # buildings exist but not selected
 
 
+def test_schedule_csv_rides_along_as_attachment(tmp_path):
+    fill, _ = _fake_fill()
+    csv_path = str(tmp_path / "driver_schedule.csv")
+    m = G.generate_pack(_sub(), ["acord_137"], output_dir=str(tmp_path),
+                        templates={**TEMPLATES, "HERMES_ACORD_137_TEMPLATE": "/t/137.pdf"},
+                        fill_fn=fill, schedule_attachments=[csv_path])
+    assert m["attachments"] == [{"path": csv_path, "name": "driver_schedule.csv"}]
+    # the ACORD 137 still fills its applicant block alongside the attached schedule.
+    assert any(a["form"] == "ACORD 137" for a in m["artifacts"])
+
+
+def test_no_attachments_by_default(tmp_path):
+    fill, _ = _fake_fill()
+    m = G.generate_pack(_sub(), ["acord_126"], output_dir=str(tmp_path),
+                        templates=TEMPLATES, fill_fn=fill)
+    assert m["attachments"] == []
+
+
 def test_missing_template_reported_not_fatal(tmp_path):
     fill, calls = _fake_fill()
     m = G.generate_pack(_sub(), ["acord_126"], output_dir=str(tmp_path),

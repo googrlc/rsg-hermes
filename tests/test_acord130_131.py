@@ -70,7 +70,7 @@ def test_137_fills_applicant_and_flags_schedules():
     fm = acord137.build_field_map(a)
     assert fm[acord137.FIELD_NAMES["named_insured"]] == "Bright HVAC LLC"
     md = acord137.render_preview(a, vehicle_count=2, driver_count=3)
-    assert "Vehicle schedule (2 vehicle(s)" in md and "ACORD 163" in md   # schedules flagged, not faked
+    assert "Vehicle schedule (2 vehicle(s)" in md and "upload as CSV" in md  # schedule via CSV, not faked
 
 
 def test_registry_130_131_now_have_fillers():

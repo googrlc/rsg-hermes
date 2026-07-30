@@ -79,7 +79,8 @@ forms:
     role: supplemental
     line_of_business: null
     template_env: HERMES_ACORD_163_TEMPLATE
-    filler: null       # driver rows map to sub.drivers, but row ORDER needs visual QA first
+    filler: null       # driver/vehicle schedules are conveyed as an uploaded CSV attachment
+                       # (generate_pack schedule_attachments), not row-filled into the form
     per_building: false
 
   - form_id: acord_139

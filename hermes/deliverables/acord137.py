@@ -74,14 +74,13 @@ def render_preview(a137: Acord137, *, vehicle_count: int = 0, driver_count: int 
         f"- **Proposed effective date:** {_dash(a137.proposed_eff_date)}",
         "",
         "## Still needed for a complete ACORD 137",
-        f"- Vehicle schedule ({vehicle_count} vehicle(s) on file) — year/make/model/VIN, "
-        "garaging, cost new, coverage symbols & limits per vehicle",
-        f"- Driver schedule ({driver_count} driver(s) on file) — attach the ACORD 163",
+        f"- Vehicle schedule ({vehicle_count} vehicle(s) on file) — **upload as CSV**",
+        f"- Driver schedule ({driver_count} driver(s) on file) — **upload as CSV**",
         "- Liability limits (CSL or split BI/PD), physical damage deductibles",
         "",
-        "_Applicant block filled from intake. The vehicle/driver schedules are row-based; "
-        "row order must be verified against the licensed template before auto-fill, so they "
-        "are added in review for now. Filled PDF via `draft_acord137` once installed._",
+        "_Applicant block filled from intake. The vehicle/driver schedules ride along as an "
+        "uploaded CSV attachment (cleaner than the ACORD's out-of-order row fields). "
+        "Filled PDF via `draft_acord137` once the template is installed._",
     ]
     return "\n".join(lines) + "\n"
 
