@@ -201,3 +201,31 @@ def test_a_failed_delete_is_reported_and_the_sweep_continues(tmp_path):
     res = dd.run_retirement(supa, NC([q()]), apply=True, backup_dir=str(tmp_path))
     assert res.deleted == 0 and len(res.errors) == 1
     assert res.archived_path       # archived even though the delete failed
+
+
+def test_a_stale_guid_does_not_retire_a_client_with_a_live_quote():
+    """Tiffany Lombardo's row pointed at her $2,972 six-month term while her live
+    quote was $3,213 on a different guid, so retiring on the guid deleted a live
+    renewal. A row survives if its CLIENT has an open quote on that line."""
+    supa = FakeSupa([{
+        "id": "stale", "insured_name": "Lombardo, Tiffany",
+        "client_identifier": "lombardo-tiffany", "line_of_business": "Personal Auto",
+        "nowcerts_quote_guid": "qg-superseded", "premium_estimate": 2972,
+    }])
+    live = dict(q("qg-current"))
+    live["insuredCommercialName"] = "Lombardo, Tiffany"
+    res = dd.plan_retirement(supa, NC([live]))
+    assert [r["id"] for r in res.keep] == ["stale"]
+    assert res.retire == []
+
+
+def test_a_client_with_no_live_quote_on_that_line_is_still_retired():
+    supa = FakeSupa([{
+        "id": "dead", "insured_name": "Trees of Georgia",
+        "client_identifier": "trees-of-georgia", "line_of_business": "Commercial Auto",
+        "nowcerts_quote_guid": "qg-old", "premium_estimate": 73000,
+    }])
+    live = dict(q("qg-current"))
+    live["insuredCommercialName"] = "Lombardo, Tiffany"
+    res = dd.plan_retirement(supa, NC([live]))
+    assert [r["id"] for r in res.retire] == ["dead"]
