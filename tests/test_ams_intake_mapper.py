@@ -87,11 +87,25 @@ def test_blank_fields_are_dropped():
 
 
 # ── classification (plan preview) ─────────────────────────────────────────────
-def test_classify_groups_by_home():
+def test_classify_only_present_fields_grouped_by_real_home():
     homes = M.classify_fields(_sub())
-    assert "ams_insured" in homes
-    assert any(f["path"] == "general_liability.each_occurrence" for f in homes.get("acord_only", []))
-    assert "opportunity" in homes
+    ams_paths = {f["path"] for f in homes.get("ams_insured", [])}
+    unsupported_paths = {f["path"] for f in homes.get("unsupported", [])}
+    # Verified, present fields land under ams_insured...
+    assert "applicant.legal_name" in ams_paths and "applicant.entity_type" in ams_paths
+    # ...unconfirmed keys are shown as unsupported (matching the actual write)...
+    assert {"applicant.naics", "applicant.sic", "applicant.website"} <= unsupported_paths
+    assert "applicant.naics" not in ams_paths
+    # ...and coverage paths not present on this submission are omitted, not invented.
+    assert "coverage" not in homes and "acord_only" not in homes
+
+
+def test_classify_omits_absent_fields():
+    empty = SubmissionObject(submission_id="e", intake=IntakeMeta(channel=SourceChannel.WEBUI),
+                             lane=Lane.COMMERCIAL_ACORD, applicant=Applicant(legal_name="Solo LLC"))
+    homes = M.classify_fields(empty)
+    present = {f["path"] for fs in homes.values() for f in fs}
+    assert present == {"applicant.legal_name"}   # only the one field it actually has
 
 
 # ── verify_readback ───────────────────────────────────────────────────────────
@@ -114,43 +128,77 @@ def test_verify_no_readback_is_unverified():
     assert not ok and mismatched == ["CommercialName"]
 
 
+def test_verify_resolves_nowcerts_read_aliases():
+    # NowCerts reads PhoneNumber/Zip/EMail back under different names — verify must
+    # map the aliases, or a correct write is falsely COMMITTED_UNVERIFIED.
+    sent = {"PhoneNumber": "404-555-0100", "Zip": "30301", "EMail": "a@b.com"}
+    after = {"phone": "404-555-0100", "zipCode": "30301", "eMail": "a@b.com"}
+    ok, mismatched = M.verify_readback(sent, after)
+    assert ok and mismatched == []
+
+
+_NO_DUPS = lambda _p: []   # explicit "already checked" for tests
+
+
 # ── create_and_verify (I/O injected) ──────────────────────────────────────────
 def test_create_verified_when_readback_matches():
-    def create_fn(payload):
-        return {"insuredDatabaseId": "guid-123"}
-
     def read_fn(guid):
         assert guid == "guid-123"
-        return {"CommercialName": "Bright HVAC LLC", "FEIN": "12-3456789",
-                "AddressLine1": "1 Main St", "City": "Atlanta", "State": "GA",
-                "Zip": "30301", "EMail": "ops@brighthvac.com", "PhoneNumber": "404-555-0100",
-                "typeOfBusiness": "LLC"}
+        return {"commercialName": "Bright HVAC LLC", "fein": "12-3456789",
+                "addressLine1": "1 Main St", "city": "Atlanta", "state": "GA",
+                "zipCode": "30301", "eMail": "ops@brighthvac.com", "phone": "404-555-0100",
+                "typeOfBusiness": "LLC"}      # real NowCerts read-back casing/aliases
 
-    receipt = M.create_and_verify(_sub(), create_fn=create_fn, read_fn=read_fn)
+    receipt = M.create_and_verify(_sub(), create_fn=lambda p: {"insuredDatabaseId": "guid-123"},
+                                  read_fn=read_fn, dup_search_fn=_NO_DUPS)
     assert receipt["status"] == M.STATUS_VERIFIED
-    assert receipt["nowcerts_guid"] == "guid-123"
-    assert receipt["mismatched"] == []
-    assert {u["path"] for u in receipt["unsupported_fields"]}      # still reported
+    assert receipt["nowcerts_guid"] == "guid-123" and receipt["mismatched"] == []
 
 
 def test_create_committed_unverified_on_mismatch():
     receipt = M.create_and_verify(
-        _sub(),
-        create_fn=lambda p: {"id": "g1"},
-        read_fn=lambda g: {"CommercialName": "WRONG NAME"},   # doesn't match
-    )
-    assert receipt["status"] == M.STATUS_UNVERIFIED
-    assert "CommercialName" in receipt["mismatched"]
+        _sub(), create_fn=lambda p: {"id": "g1"},
+        read_fn=lambda g: {"CommercialName": "WRONG NAME"}, dup_search_fn=_NO_DUPS)
+    assert receipt["status"] == M.STATUS_UNVERIFIED and "CommercialName" in receipt["mismatched"]
 
 
 def test_create_unverified_when_no_guid_or_readback():
     receipt = M.create_and_verify(
-        _sub(),
-        create_fn=lambda p: {"ok": True},   # no id in response
-        read_fn=lambda g: None,
-    )
-    assert receipt["status"] == M.STATUS_UNVERIFIED
-    assert receipt["nowcerts_guid"] is None
+        _sub(), create_fn=lambda p: {"ok": True}, read_fn=lambda g: None, dup_search_fn=_NO_DUPS)
+    assert receipt["status"] == M.STATUS_UNVERIFIED and receipt["nowcerts_guid"] is None
+
+
+def test_readback_exception_yields_unverified_not_a_raise():
+    def boom(_g):
+        raise TimeoutError("AMS read timed out")
+
+    receipt = M.create_and_verify(
+        _sub(), create_fn=lambda p: {"id": "g1"}, read_fn=boom, dup_search_fn=_NO_DUPS)
+    assert receipt["status"] == M.STATUS_UNVERIFIED          # committed, but unverified
+    assert "timed out" in (receipt["readback_error"] or "")
+
+
+def test_dup_search_is_required():
+    import pytest
+    with pytest.raises(ValueError, match="dup_search_fn is required"):
+        M.create_and_verify(_sub(), create_fn=lambda p: {}, read_fn=lambda g: {}, dup_search_fn=None)
+
+
+def test_personal_submission_is_refused():
+    import pytest
+    personal = SubmissionObject(submission_id="p", intake=IntakeMeta(channel=SourceChannel.WEBUI),
+                                lane=Lane.PERSONAL_NO_ACORD, applicant=Applicant(legal_name="Jane Roe"))
+    with pytest.raises(ValueError, match="COMMERCIAL"):
+        M.build_insured_payload(personal)
+
+
+def test_commercial_name_falls_back_to_client_name():
+    # legal_name absent but client_name present (Command Center accepts either).
+    sub = SubmissionObject(submission_id="c", client_name="Bright HVAC LLC",
+                           lane=Lane.COMMERCIAL_ACORD, intake=IntakeMeta(channel=SourceChannel.WEBUI),
+                           applicant=Applicant(fein="12-3456789"))
+    payload, _ = M.build_insured_payload(sub)
+    assert payload["CommercialName"] == "Bright HVAC LLC"
 
 
 def test_duplicate_search_blocks_create():

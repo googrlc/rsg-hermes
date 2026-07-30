@@ -39,6 +39,51 @@ _FIELD_MAP_PATH = Path(__file__).resolve().parent / "ams_field_map.yaml"
 _COMMERCIAL_INSURED_TYPE = "0"
 _PROSPECT_TYPE = 1
 
+# This mapper builds a COMMERCIAL insured (CommercialName + insuredType=0). A
+# personal-lines submission must not be force-written as commercial — it uses
+# FirstName/LastName + insuredType=1 via hermes.intake.nowcerts_map.map_to_insured.
+_PERSONAL_LANE = "personal_no_acord"
+
+# When a verified field is blank, fall back to another submission path before
+# dropping it — the Command Center creates submissions with client_name, and its
+# approval validator accepts either name field, so legal_name can legitimately be
+# absent on an approved submission.
+_PATH_FALLBACKS: dict[str, str] = {
+    "applicant.legal_name": "client_name",
+}
+
+# NowCerts writes PascalCase common fields but reads them back on the Insured in
+# camelCase with different names (InsuredDetailList shape). Verification maps the
+# write name to its read-back alias(es) so a correct write is not falsely flagged.
+_READ_ALIASES: dict[str, tuple[str, ...]] = {
+    "CommercialName": ("commercialName", "insuredName", "name"),
+    "FEIN": ("fein",),
+    "AddressLine1": ("addressLine1",),
+    "City": ("city",),
+    "State": ("state",),
+    "Zip": ("zipCode", "zip"),
+    "EMail": ("eMail", "email"),
+    "PhoneNumber": ("phone", "phoneNumber"),
+    "typeOfBusiness": ("typeOfBusiness",),
+}
+
+
+def _is_personal(sub: Any) -> bool:
+    """True if the submission is personal-lines (must not be written as commercial)."""
+    lane = getattr(sub, "lane", None)
+    lane_val = str(getattr(lane, "value", lane) or "").lower()
+    if lane_val:
+        return lane_val == _PERSONAL_LANE
+    # No lane set — infer from the line of business routing.
+    try:
+        from hermes.command_center.submission import LANE_BY_LOB
+        lob = getattr(sub, "lob", None)
+        if lob is not None:
+            return str(getattr(LANE_BY_LOB.get(lob), "value", "")).lower() == _PERSONAL_LANE
+    except Exception:  # pragma: no cover - routing table unavailable
+        pass
+    return False
+
 
 @functools.lru_cache(maxsize=1)
 def load_field_map() -> dict[str, Any]:
@@ -129,7 +174,16 @@ def build_insured_payload(sub: Any) -> tuple[dict[str, Any], list[dict[str, Any]
     Only ``ams_insured`` entries that are ``verified: true`` and have a present
     value reach the payload. Present-but-unverified fields become
     ``unsupported_fields`` — visible, never written.
+
+    Raises ``ValueError`` for a personal-lines submission — this mapper builds a
+    commercial insured; personal insureds go through ``nowcerts_map.map_to_insured``.
     """
+    if _is_personal(sub):
+        raise ValueError(
+            "ams_intake_mapper builds a COMMERCIAL insured; this submission is "
+            "personal-lines. Use hermes.intake.nowcerts_map.map_to_insured instead."
+        )
+
     fm = load_field_map()
     payload: dict[str, Any] = {}
     unsupported: list[dict[str, Any]] = []
@@ -145,6 +199,8 @@ def build_insured_payload(sub: Any) -> tuple[dict[str, Any], list[dict[str, Any]
             continue
 
         value = _resolve(sub, path)
+        if _blank(value) and path in _PATH_FALLBACKS:
+            value = _resolve(sub, _PATH_FALLBACKS[path])
         if _blank(value):
             continue
 
@@ -163,19 +219,31 @@ def build_insured_payload(sub: Any) -> tuple[dict[str, Any], list[dict[str, Any]
 
 
 def classify_fields(sub: Any) -> dict[str, list[dict[str, Any]]]:
-    """Group every present, mapped field by its home — the plan preview.
+    """Group the submission's PRESENT fields by where they will actually land.
 
-    Covers all sections of the map (insured/coverage/opportunity/questions), so a
-    reviewer can see exactly what lands in the AMS vs the ACORD/pipeline vs is
-    unsupported, before anything is written.
+    Reads ``sub``: only fields with a value on this submission are grouped, so the
+    preview reflects the real record, not the whole map. An ``ams_insured`` field
+    whose NowCerts key is unconfirmed (``verified: false``) is grouped under
+    ``unsupported`` — matching what ``build_insured_payload`` actually does — so a
+    reviewer is never told data will reach the AMS when the write drops it.
     """
     fm = load_field_map()
     out: dict[str, list[dict[str, Any]]] = {}
-    for section in ("insured", "coverage", "opportunity", "questions"):
+    for section in ("insured", "coverage"):
         for entry in fm.get(section, []):
+            path = entry.get("path", "")
+            if path in ("(commercial)", "(prospect)"):
+                continue
+            value = _resolve(sub, path)
+            if _blank(value) and path in _PATH_FALLBACKS:
+                value = _resolve(sub, _PATH_FALLBACKS[path])
+            if _blank(value):
+                continue                       # not present on this submission — omit
             home = entry.get("home", "unsupported")
+            if home == "ams_insured" and not (entry.get("verified") and entry.get("nowcerts_field")):
+                home = "unsupported"           # unconfirmed key → not actually written
             out.setdefault(home, []).append({
-                "path": entry.get("path") or entry.get("class"),
+                "path": path,
                 "nowcerts_field": entry.get("nowcerts_field"),
                 "verified": bool(entry.get("verified")),
             })
@@ -200,9 +268,17 @@ def verify_readback(sent: dict[str, Any], after: dict[str, Any] | None) -> tuple
     if not after:
         return (False, checkable)
     lowered = {str(k).lower(): v for k, v in after.items()}
+
+    def _read_value(write_key: str) -> Any:
+        # Try the write name and each known read-back alias (all case-insensitive).
+        for candidate in (write_key, *_READ_ALIASES.get(write_key, ())):
+            if candidate.lower() in lowered:
+                return lowered[candidate.lower()]
+        return None
+
     mismatched: list[str] = []
     for key in checkable:
-        got = lowered.get(key.lower())
+        got = _read_value(key)
         if str(got or "").strip().casefold() != str(sent[key]).strip().casefold():
             mismatched.append(key)
     return (not mismatched, mismatched)
@@ -233,29 +309,45 @@ def create_and_verify(
     *,
     create_fn: Callable[[dict[str, Any]], Any],
     read_fn: Callable[[str], dict[str, Any] | None],
-    dup_search_fn: Optional[Callable[[dict[str, Any]], list[dict[str, Any]]]] = None,
+    dup_search_fn: Callable[[dict[str, Any]], list[dict[str, Any]]],
 ) -> dict[str, Any]:
     """Create the insured in NowCerts and prove it landed. Returns a receipt.
 
     ``create_fn(payload)`` creates and returns the AMS response; ``read_fn(guid)``
-    reads the record back; ``dup_search_fn(payload)`` (optional) returns candidate
-    duplicates — if any, nothing is created and the receipt is DUPLICATE_FOUND.
+    reads the record back; ``dup_search_fn(payload)`` returns candidate duplicates.
+
+    ``dup_search_fn`` is **required**: create_insured upserts by ``CommercialName``,
+    so creating without a duplicate check could overwrite an existing insured and
+    still read back as ``VERIFIED``. A caller that has genuinely already checked
+    must pass an explicit ``lambda _p: []`` — the gate is never implicit.
     """
+    if dup_search_fn is None:
+        raise ValueError("dup_search_fn is required — creating without a duplicate check "
+                         "can overwrite an existing insured (create_insured upserts by name)")
+
     payload, unsupported = build_insured_payload(sub)
 
-    if dup_search_fn:
-        dups = dup_search_fn(payload) or []
-        if dups:
-            return {
-                "status": STATUS_DUPLICATE,
-                "duplicates": dups,
-                "sent": payload,
-                "unsupported_fields": unsupported,
-            }
+    dups = dup_search_fn(payload) or []
+    if dups:
+        return {
+            "status": STATUS_DUPLICATE,
+            "duplicates": dups,
+            "sent": payload,
+            "unsupported_fields": unsupported,
+        }
 
     created = create_fn(payload)
     guid = _extract_guid(created)
-    after = read_fn(guid) if guid else None
+    # The create may have committed even if the read-back fails (timeout / AMS read
+    # down). Never propagate — report COMMITTED_UNVERIFIED so the caller doesn't
+    # blindly retry an ambiguous write.
+    readback_error: str | None = None
+    after: dict[str, Any] | None = None
+    if guid:
+        try:
+            after = read_fn(guid)
+        except Exception as exc:  # noqa: BLE001 — a failed read must not lose the receipt
+            readback_error = str(exc)
     verified, mismatched = verify_readback(payload, after)
 
     return {
@@ -263,6 +355,7 @@ def create_and_verify(
         "nowcerts_guid": guid,
         "sent": payload,
         "read_back": after,
+        "readback_error": readback_error,
         "mismatched": mismatched,
         "unsupported_fields": unsupported,
     }
