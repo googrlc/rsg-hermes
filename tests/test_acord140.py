@@ -95,8 +95,5 @@ def test_draft_never_auto_sends(monkeypatch, tmp_path):
     assert summary["auto_sent"] is False and posted and "Property" in posted[0]
 
 
-# ── command-center wiring ─────────────────────────────────────────────────────
-def test_commercial_lane_builds_acord_140_deliverable():
-    lane = load_all_lanes()["lamar-commercial"]
-    by_kind = {d["kind"]: d for d in build_all(lane, _property())}
-    assert "acord_140" in by_kind and "ACORD 140" in by_kind["acord_140"]["content"]
+# ACORD 140 is generated on demand via acord_selection, not auto-built as a lane
+# deliverable — see tests/test_acord_selection.py.

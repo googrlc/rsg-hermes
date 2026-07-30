@@ -190,13 +190,20 @@ def build_field_map(a125: Acord125, field_names: Optional[dict[str, str]] = None
     return {k: v for k, v in out.items() if v}
 
 
-def build_checkbox_map(a125: Acord125) -> dict[str, str]:
-    """Checkbox fields -> on-state. Entity type, line of business, quote status."""
+def build_checkbox_map(a125: Acord125, *, selected_lobs: Optional[list[str]] = None) -> dict[str, str]:
+    """Checkbox fields -> on-state. Entity type, line(s) of business, quote status.
+
+    ``selected_lobs`` checks every chosen line's box (the agent selecting multiple
+    lines on the 125). When omitted, it falls back to the submission's single
+    ``lob`` — the pre-selection default.
+    """
+    lobs = selected_lobs if selected_lobs is not None else ([a125.lob_key] if a125.lob_key else [])
     out: dict[str, str] = {STATUS_QUOTE_CHECKBOX: CHECKBOX_ON}
     if a125.entity_key in ENTITY_CHECKBOX:
         out[ENTITY_CHECKBOX[a125.entity_key]] = CHECKBOX_ON
-    if a125.lob_key in LOB_CHECKBOX:
-        out[LOB_CHECKBOX[a125.lob_key]] = CHECKBOX_ON
+    for lob in lobs:
+        if lob in LOB_CHECKBOX:
+            out[LOB_CHECKBOX[lob]] = CHECKBOX_ON
     return out
 
 

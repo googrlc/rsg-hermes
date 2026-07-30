@@ -162,10 +162,5 @@ def test_supabase_logger_stamps_agent_and_form(monkeypatch):
     assert row["form"] == "ACORD 125" and row["auto_sent"] is False
 
 
-# ── command-center wiring (behind the review gate) ────────────────────────────
-def test_commercial_lane_builds_acord_125_deliverable():
-    lane = load_all_lanes()["lamar-commercial"]
-    by_kind = {d["kind"]: d for d in build_all(lane, _commercial())}
-    assert "acord_125" in by_kind
-    assert "ACORD 125" in by_kind["acord_125"]["content"]
-    assert "Bright HVAC LLC" in by_kind["acord_125"]["content"]
+# ACORD 125/126/140 are generated on demand via acord_selection, not auto-built
+# as lane deliverables — see tests/test_acord_selection.py.

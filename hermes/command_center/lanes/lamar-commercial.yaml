@@ -26,13 +26,11 @@ validators:
   - address_present              # blocking
   - current_carrier_present      # blocking
 deliverables:
+  # ACORD 125/126/140 are generated ON DEMAND via the selection model
+  # (deliverables/acord_selection.py), not auto-built here — the agent chooses
+  # which lines/forms to complete for the underwriter. This lane keeps the
+  # lightweight combined data sheet + carrier shortlist.
   - kind: acord_data
     title: "ACORD 125/126/140 data"
-  - kind: acord_125
-    title: "ACORD 125 (Commercial Application)"
-  - kind: acord_126
-    title: "ACORD 126 (General Liability)"
-  - kind: acord_140
-    title: "ACORD 140 (Property)"
   - kind: carrier_shortlist
     title: "Carrier shortlist"

@@ -102,8 +102,5 @@ def test_draft_never_auto_sends(monkeypatch, tmp_path):
     assert summary["auto_sent"] is False and posted and "GL" in posted[0]
 
 
-# ── command-center wiring ─────────────────────────────────────────────────────
-def test_commercial_lane_builds_acord_126_deliverable():
-    lane = load_all_lanes()["lamar-commercial"]
-    by_kind = {d["kind"]: d for d in build_all(lane, _gl({"each_occurrence": "1,000,000"}))}
-    assert "acord_126" in by_kind and "ACORD 126" in by_kind["acord_126"]["content"]
+# ACORD 126 is generated on demand via acord_selection, not auto-built as a lane
+# deliverable — see tests/test_acord_selection.py.
