@@ -31,11 +31,16 @@ def combined_field_map(
     """
     a125 = acord125.from_submission(sub)
     lobs = selected_lobs if selected_lobs is not None else ([a125.lob_key] if a125.lob_key else [])
-    text = dict(acord125.build_field_map(a125))
+    # Apply the documented HERMES_ACORD125/126_FIELDMAP overrides so a different
+    # licensed template revision reconciles in the on-demand path too, not only in
+    # the draft_* helpers.
+    ov125 = acord_pdf.load_fieldmap_override(acord125.FIELDMAP_ENV)
+    text = dict(acord125.build_field_map(a125, ov125))
     checks = dict(acord125.build_checkbox_map(a125, selected_lobs=lobs))
     if "commercial_gl" in lobs:
         a126 = acord126.from_submission(sub)
-        text.update(acord126.build_field_map(a126))
+        ov126 = acord_pdf.load_fieldmap_override(acord126.FIELDMAP_ENV)
+        text.update(acord126.build_field_map(a126, ov126))
         checks.update(acord126.build_checkbox_map(a126))
     return text, checks
 

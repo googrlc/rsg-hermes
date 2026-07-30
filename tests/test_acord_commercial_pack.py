@@ -43,11 +43,13 @@ def test_combined_map_merges_125_and_126():
     assert checks[acord126.OCCURRENCE_CHECKBOX] == "/1"
 
 
-def test_shared_identity_field_has_one_consistent_value():
+def test_125_and_126_headers_are_separate_pages():
     text, _ = pack.combined_field_map(_sub())
-    # named_insured maps to the same AcroForm name in both 125 and 126 -> no clash.
-    assert acord125.FIELD_NAMES["named_insured"] == acord126.FIELD_NAMES["named_insured"]
-    assert text[acord125.FIELD_NAMES["named_insured"]] == "Bright HVAC LLC"
+    # The 126 GL-section header is on its own page (P5), distinct from the 125 P1
+    # header — filling both, not overwriting one with the other.
+    assert acord125.FIELD_NAMES["named_insured"] != acord126.FIELD_NAMES["named_insured"]
+    assert text[acord125.FIELD_NAMES["named_insured"]] == "Bright HVAC LLC"   # 125 P1 header
+    assert text[acord126.FIELD_NAMES["named_insured"]] == "Bright HVAC LLC"   # 126 P5 header
 
 
 def test_draft_pack_fills_once_and_never_auto_sends(monkeypatch, tmp_path):

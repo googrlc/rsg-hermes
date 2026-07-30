@@ -47,8 +47,11 @@ class Acord126:
 
 
 FIELD_NAMES: dict[str, str] = {
-    "named_insured": _P1 + "NamedInsured_FullName_A[0]",
-    "proposed_eff_date": _P1 + "Policy_EffectiveDate_A[0]",
+    # The 126 GL SECTION header lives on page 5 — not the page-1 ACORD 125 header
+    # (filling P1 here would just rewrite the 125's already-filled values and leave
+    # the GL section header blank in the combined pack).
+    "named_insured": _P5 + "NamedInsured_FullName_A[0]",
+    "proposed_eff_date": _P5 + "Policy_EffectiveDate_A[0]",
     "gl_class_code": _P1 + "NamedInsured_GeneralLiabilityCode_A[0]",
     "naics": _P1 + "NamedInsured_NAICSCode_A[0]",
     "each_occurrence": _P5 + "GeneralLiability_EachOccurrence_LimitAmount_A[0]",
@@ -60,9 +63,9 @@ FIELD_NAMES: dict[str, str] = {
     "medical_expense": _P5 + "GeneralLiability_MedicalExpense_EachPersonLimitAmount_A[0]",
 }
 
-# Coverage-basis is a checkbox on the form (occurrence). Claims-made has no
-# single indicator on this template, so only occurrence is auto-checked.
+# Coverage-basis checkboxes on the GL section.
 OCCURRENCE_CHECKBOX = _P5 + "GeneralLiability_OccurrenceIndicator_A[0]"
+CLAIMS_MADE_CHECKBOX = _P5 + "GeneralLiability_ClaimsMadeIndicator_A[0]"
 
 _LIMIT_KEYS: dict[str, tuple[str, ...]] = {
     "each_occurrence": ("each_occurrence", "eachOccurrence", "occurrence", "per_occurrence"),
@@ -137,8 +140,11 @@ def build_field_map(a126: Acord126, field_names: Optional[dict[str, str]] = None
 
 
 def build_checkbox_map(a126: Acord126) -> dict[str, str]:
-    """Occurrence basis checkbox, only when the submission says occurrence."""
-    if a126.coverage_basis and "occurrence" in a126.coverage_basis.lower():
+    """Coverage-basis checkbox: occurrence OR claims-made, per the submission."""
+    basis = (a126.coverage_basis or "").lower()
+    if "claims" in basis:
+        return {CLAIMS_MADE_CHECKBOX: CHECKBOX_ON}
+    if "occurrence" in basis:
         return {OCCURRENCE_CHECKBOX: CHECKBOX_ON}
     return {}
 

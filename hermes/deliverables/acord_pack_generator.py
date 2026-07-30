@@ -57,6 +57,22 @@ def _resolve_template(env_var: Optional[str], templates: dict[str, str]) -> Opti
     return templates.get(env_var) or (os.environ.get(env_var) or "").strip() or None
 
 
+# Forms handled explicitly (the combined 125/126 and per-building 140); everything
+# else fillable dispatches through _SIMPLE_FILLERS.
+_COMBINED_FORMS = {"acord_125", "acord_126"}
+_PER_BUILDING_FORMS = {"acord_140"}
+
+
+def _answer_checkboxes(answers: Optional[dict[str, str]]) -> dict[str, str]:
+    """Reviewed Y/N answers → checkbox on-states. A 'yes' checks the box; 'no'/blank
+    leaves it unchecked (the field name is the ACORD checkbox field)."""
+    out: dict[str, str] = {}
+    for field, val in (answers or {}).items():
+        if str(val).strip().lower() in ("yes", "y", "true", "1"):
+            out[field] = "/1"
+    return out
+
+
 def generate_pack(
     sub: Any,
     form_ids: list[str],
@@ -65,19 +81,21 @@ def generate_pack(
     templates: Optional[dict[str, str]] = None,
     fill_fn: Callable[..., dict[str, Any]] = acord_pdf.fill_pdf,
     schedule_attachments: Optional[list[str]] = None,
+    answers: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """Fill the selected ACORDs for a submission. Returns a manifest.
 
     ``templates`` overrides the ``*_TEMPLATE`` env lookups (tests pass fakes).
     ``fill_fn`` defaults to the real filler but is injectable.
     ``schedule_attachments`` are uploaded schedule files (e.g. a driver/vehicle
-    schedule CSV) that ride along to the underwriter with the filled ACORDs —
-    the practical way to convey per-row schedules without risking the ACORD's
-    out-of-order row fields. Nothing is sent.
+    schedule CSV) that ride along to the underwriter with the filled ACORDs.
+    ``answers`` are the reviewed Y/N question answers (checkbox field → yes/no);
+    'yes' answers are checked on the generated 125/126 PDF. Nothing is sent.
     """
     templates = templates or {}
     plan = acord_selection.plan_selection(sub, form_ids)
     account = _safe_name(sub.client_name or getattr(sub.applicant, "legal_name", "") or "client")
+    answer_checks = _answer_checkboxes(answers)
 
     artifacts: list[dict[str, Any]] = []
     missing_templates: list[str] = []
@@ -86,6 +104,7 @@ def generate_pack(
     tpl = _resolve_template(TEMPLATE_125_126_ENV, templates)
     if tpl:
         text, checks = acord_commercial_pack.combined_field_map(sub, selected_lobs=plan.lines)
+        checks = {**checks, **answer_checks}          # reviewed Y/N answers checked on the form
         out_path = f"{output_dir}/{account}_ACORD_125_126.pdf"
         result = fill_fn(tpl, text, out_path, checkboxes=checks, form_label="ACORD 125/126")
         artifacts.append({
@@ -100,11 +119,12 @@ def generate_pack(
     if "commercial_property" in plan.lines:
         tpl140 = _resolve_template(TEMPLATE_140_ENV, templates)
         if tpl140:
+            ov140 = acord_pdf.load_fieldmap_override(acord140.FIELDMAP_ENV)
             n = max(1, len(sub.property_locations or []))
             for i in range(n):
                 a140 = acord140.from_submission(sub, location_index=i)
                 out_path = f"{output_dir}/{account}_ACORD_140_Location_{i + 1}.pdf"
-                result = fill_fn(tpl140, acord140.build_field_map(a140), out_path,
+                result = fill_fn(tpl140, acord140.build_field_map(a140, ov140), out_path,
                                  form_label="ACORD 140")
                 artifacts.append({
                     "form": "ACORD 140", "location": i + 1, "output_path": out_path,
@@ -114,10 +134,16 @@ def generate_pack(
         else:
             missing_templates.append(TEMPLATE_140_ENV)
 
-    # ── 3) single-template supplemental forms (130 WC, 131 Umbrella, …) ─────────
+    # ── 3) single-template supplemental forms (130 WC, 131 Umbrella, 137 auto) ──
+    unmapped_fillers: list[str] = []
     for form in plan.forms_to_fill:
+        if form.form_id in _COMBINED_FORMS or form.form_id in _PER_BUILDING_FORMS:
+            continue                                  # handled above
         simple = _SIMPLE_FILLERS.get(form.form_id)
         if not simple:
+            # A registry form marked fillable but with no dispatcher here — never
+            # silently drop it; surface it so the gap is visible.
+            unmapped_fillers.append(form.form_id)
             continue
         module, env_var, label = simple
         tpl_s = _resolve_template(env_var, templates)
@@ -125,9 +151,10 @@ def generate_pack(
             missing_templates.append(env_var)
             continue
         obj = module.from_submission(sub)
+        ov = acord_pdf.load_fieldmap_override(getattr(module, "FIELDMAP_ENV", ""))
         checks = module.build_checkbox_map(obj) if hasattr(module, "build_checkbox_map") else None
         out_path = f"{output_dir}/{account}_{label.replace(' ', '_')}.pdf"
-        result = fill_fn(tpl_s, module.build_field_map(obj), out_path,
+        result = fill_fn(tpl_s, module.build_field_map(obj, ov), out_path,
                          checkboxes=checks, form_label=label)
         artifacts.append({
             "form": label, "output_path": out_path,
@@ -145,6 +172,7 @@ def generate_pack(
         "lines": plan.lines,
         "missing_templates": missing_templates,
         "needs_filler": plan.selectable_without_filler,   # checked lines with no PDF yet
+        "unmapped_fillers": unmapped_fillers,         # fillable in the registry, no dispatcher here
         "unknown_form_ids": plan.unknown_form_ids,
         "auto_sent": False,
     }

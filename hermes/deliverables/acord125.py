@@ -95,10 +95,11 @@ FIELD_NAMES: dict[str, str] = {
     "proposed_eff_date": _P1 + "Policy_EffectiveDate_A[0]",
     "proposed_exp_date": _P1 + "Policy_ExpirationDate_A[0]",
     "email": _P2 + "NamedInsured_Contact_PrimaryEmailAddress_A[0]",
-    "prior_carrier": _P3 + "PriorCoverage_GeneralLiability_InsurerFullName_A[0]",
-    "prior_policy_number": _P3 + "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_A[0]",
-    "prior_premium": _P3 + "PriorCoverage_GeneralLiability_TotalPremiumAmount_A[0]",
-    "prior_expiration": _P3 + "PriorCoverage_GeneralLiability_ExpirationDate_A[0]",
+    # NOTE: prior_carrier/policy/premium/expiration are intentionally NOT mapped to
+    # the ACORD 125 PriorCoverage_GeneralLiability_* fields. `prior_carriers` has no
+    # per-carrier line of business, so writing the first entry under GL would put a
+    # property/auto carrier's history on the GL prior-coverage row. Kept in the
+    # preview as informational; fill only after an explicit line match.
 }
 
 # EntityType value -> the LegalEntity indicator checkbox on the form.

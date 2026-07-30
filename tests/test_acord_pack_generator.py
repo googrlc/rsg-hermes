@@ -123,3 +123,33 @@ def test_default_fill_fn_is_the_real_filler():
     # fill_fn defaults to acord_pdf.fill_pdf (wired for real use).
     import inspect
     assert inspect.signature(G.generate_pack).parameters["fill_fn"].default is acord_pdf.fill_pdf
+
+
+def test_answered_questions_are_checked_on_the_125_126(tmp_path):
+    fill, calls = _fake_fill()
+    q_field = "F[0].P1[0].CommercialPolicy_FormalSafetyProgram_OSHAIndicator_A[0]"
+    m = G.generate_pack(_sub(), ["acord_126"], output_dir=str(tmp_path),
+                        templates=TEMPLATES, fill_fn=fill,
+                        answers={q_field: "yes", "some_other": "no"})
+    combined = next(c for c in calls if c["label"] == "ACORD 125/126")
+    assert combined["checks"][q_field] == "/1"          # yes → checked
+    assert "some_other" not in combined["checks"]        # no → not checked
+
+
+def test_unmapped_fillable_form_is_reported(monkeypatch, tmp_path):
+    # A registry form marked fillable but absent from the generator's dispatch must
+    # surface in unmapped_fillers, never be silently dropped.
+    from hermes.deliverables import acord_selection
+    real = acord_selection.plan_selection
+
+    def fake_plan(sub, form_ids):
+        plan = real(sub, form_ids)
+        plan.forms_to_fill.append(acord_selection.FormToFill(
+            form_id="acord_999", template_env="X", count=1, has_filler=True))
+        return plan
+
+    monkeypatch.setattr(G.acord_selection, "plan_selection", fake_plan)
+    fill, _ = _fake_fill()
+    m = G.generate_pack(_sub(), ["acord_126"], output_dir=str(tmp_path),
+                        templates=TEMPLATES, fill_fn=fill)
+    assert "acord_999" in m["unmapped_fillers"]

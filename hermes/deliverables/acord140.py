@@ -48,6 +48,7 @@ class Acord140:
 FIELD_NAMES: dict[str, str] = {
     "named_insured": _P9 + "NamedInsured_FullName_A[0]",
     "proposed_eff_date": _P9 + "Policy_EffectiveDate_A[0]",
+    "premises_address": _P9 + "CommercialStructure_PhysicalAddress_LineOne_A[0]",
     "year_built": _P9 + "CommercialStructure_BuiltYear_A[0]",
     "building_area": _P9 + "Construction_BuildingArea_A[0]",
     "construction_code": _P9 + "Construction_ConstructionCode_A[0]",

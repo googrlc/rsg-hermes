@@ -31,10 +31,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-_QUESTIONS_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "docs" / "acord" / "field-catalogs" / "acord_125_126.questions.json"
-)
+# Packaged with the module (not under docs/) so load_questions works in a wheel
+# install and in the Dockerfile image, which copy only `hermes`.
+_QUESTIONS_PATH = Path(__file__).resolve().parent / "acord_125_126_questions.json"
 
 CLASS_STRUCTURAL = "structural"
 CLASS_DERIVED = "derived"
@@ -65,7 +64,11 @@ _DERIVED_TOKENS = (
     "AdditionalInterest_Interest_",   # interest type (mortgagee/lienholder/…)
 )
 # Field-name tokens → the line of business a question belongs to (scope).
+# More specific prefixes first: "GeneralLiabilityLineOfBusiness" must match before
+# the shorter "GeneralLiability_", and inland-marine before the generic property.
 _SECTION_TOKENS = (
+    ("GeneralLiabilityLineOfBusiness", "commercial_gl"),
+    ("CommercialInlandMarine", "commercial_inland_marine"),
     ("GeneralLiability_", "commercial_gl"),
     ("CommercialProperty_", "commercial_property"),
     ("CommercialStructure_", "commercial_property"),

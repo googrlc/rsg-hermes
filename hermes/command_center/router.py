@@ -190,7 +190,8 @@ def stage_routing(supa, plan: dict[str, Any], *, approved_by: str) -> dict[str, 
 
 
 def stage_selection_opportunities(
-    supa, sub: SubmissionObject, form_ids: list[str], *, approved_by: str
+    supa, sub: SubmissionObject, form_ids: list[str], *, approved_by: str,
+    answers: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Stage one gated ``intake_crm`` opportunity per ACORD line the agent selected.
 
@@ -199,10 +200,22 @@ def stage_selection_opportunities(
     are created — not the submission's inferred LOBs. Reuses ``stage_routing`` so the
     queue-row shape and the human-approved gate are identical; a supplemental (163)
     makes no opportunity, so nothing is staged for it.
+
+    Enforces the ACORD Y/N question gate: ``answers`` (checkbox field → answer) must
+    resolve every in-scope agent question for the selected lines, or this raises —
+    nothing stages to the queue (and therefore not to CRM/AMS) while a required
+    underwriting question is unanswered.
     """
-    from hermes.deliverables import acord_selection
+    from hermes.deliverables import acord_selection, acord_questions
 
     plan = acord_selection.plan_selection(sub, form_ids)
+
+    unanswered = acord_questions.unanswered_required(plan.lines, answers or {})
+    if unanswered:
+        raise ValueError(
+            f"{len(unanswered)} required ACORD question(s) unanswered — cannot stage. "
+            f"First: {unanswered[0].question[:80]}"
+        )
     crm = [
         {
             **opp,

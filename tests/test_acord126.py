@@ -77,8 +77,14 @@ def test_occurrence_basis_checks_the_box():
     assert checks[acord126.OCCURRENCE_CHECKBOX] == "/1"
 
 
-def test_claims_made_does_not_check_occurrence():
+def test_claims_made_checks_the_claims_made_box():
     checks = acord126.build_checkbox_map(acord126.from_submission(_gl({"gl_basis": "Claims-Made"})))
+    assert checks == {acord126.CLAIMS_MADE_CHECKBOX: "/1"}
+    assert acord126.OCCURRENCE_CHECKBOX not in checks
+
+
+def test_no_basis_checks_nothing():
+    checks = acord126.build_checkbox_map(acord126.from_submission(_gl({})))
     assert checks == {}
 
 

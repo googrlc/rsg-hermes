@@ -50,3 +50,5 @@ include = ["hermes*"]
 [tool.setuptools.package-data]
 "hermes.data" = ["*.csv"]
 "hermes.renewals" = ["templates/*.j2"]
+# ACORD form catalog + question catalog are loaded at runtime — must ship in the wheel/image.
+"hermes.deliverables" = ["*.yaml", "*.json"]
