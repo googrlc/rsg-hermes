@@ -60,7 +60,7 @@ def test_canonical_tables_are_probed_by_their_guid_key():
     """The regression: probing `id` 400s on the canonical book."""
     supa = SchemaAwareSupa()
 
-    report = OD.run_ops_doctor(supa, check_movement=False)
+    report = OD.run_ops_doctor(supa, check_movement=False, check_llm=False)
 
     assert supa.probed["canonical_clients"] == "nowcerts_insured_guid"
     assert supa.probed["canonical_policies"] == "policy_guid"
@@ -71,7 +71,7 @@ def test_canonical_tables_are_probed_by_their_guid_key():
 def test_tables_without_an_override_still_probe_id():
     supa = SchemaAwareSupa()
 
-    OD.run_ops_doctor(supa, check_movement=False)
+    OD.run_ops_doctor(supa, check_movement=False, check_llm=False)
 
     assert supa.probed["outbound_sync_queue"] == "id"
     assert supa.probed["commission_ledger"] == "id"
@@ -89,7 +89,7 @@ def test_a_bad_probe_column_is_still_reported_as_a_failure(table):
     """The error path stays intact — this is a fix, not a silencer."""
     supa = SchemaAwareSupa({table: {"some_other_column"}})
 
-    report = OD.run_ops_doctor(supa, check_movement=False)
+    report = OD.run_ops_doctor(supa, check_movement=False, check_llm=False)
 
     assert not report.ok
     assert any(table in e and "does not exist" in e for e in report.errors)
