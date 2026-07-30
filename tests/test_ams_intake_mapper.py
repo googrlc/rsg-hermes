@@ -52,18 +52,30 @@ def test_payload_carries_only_verified_fields():
     assert payload["Zip"] == "30301"
     assert payload["EMail"] == "ops@brighthvac.com"
     assert payload["PhoneNumber"] == "404-555-0100"
+    assert payload["typeOfBusiness"] == "LLC"        # EntityType.llc → NowCerts picklist label
     assert payload["insuredType"] == "0" and payload["type"] == 1
 
 
 def test_unconfirmed_fields_are_flagged_not_written():
     payload, unsupported = M.build_insured_payload(_sub())
     unsupported_paths = {u["path"] for u in unsupported}
-    # DBA / entity / NAICS / SIC / website are present but not verified -> flagged.
-    assert {"applicant.dbas", "applicant.entity_type", "applicant.naics",
-            "applicant.sic", "applicant.website"} <= unsupported_paths
-    # ...and none of them leaked into the AMS payload.
+    # DBA / NAICS / SIC / website are present but their keys aren't confirmed -> flagged.
+    assert {"applicant.dbas", "applicant.naics", "applicant.sic",
+            "applicant.website"} <= unsupported_paths
+    # entity_type is now confirmed, so it is NOT flagged.
+    assert "applicant.entity_type" not in unsupported_paths
+    # ...and none of the unconfirmed values leaked into the AMS payload.
     assert "238220" not in payload.values()
     assert all("Bright Air" != v for v in payload.values())
+
+
+def test_business_type_maps_to_nowcerts_picklist():
+    from hermes.command_center.submission import EntityType
+    assert M._business_type(EntityType.llc) == "LLC"
+    assert M._business_type(EntityType.s_corp) == "Subchapter Corp"
+    assert M._business_type(EntityType.not_for_profit) == "Not For Profit Org"
+    assert M._business_type("individual") == "Individual"
+    assert M._business_type("something_else") == "Other"    # unknown → Other, never invented
 
 
 def test_blank_fields_are_dropped():
@@ -111,7 +123,8 @@ def test_create_verified_when_readback_matches():
         assert guid == "guid-123"
         return {"CommercialName": "Bright HVAC LLC", "FEIN": "12-3456789",
                 "AddressLine1": "1 Main St", "City": "Atlanta", "State": "GA",
-                "Zip": "30301", "EMail": "ops@brighthvac.com", "PhoneNumber": "404-555-0100"}
+                "Zip": "30301", "EMail": "ops@brighthvac.com", "PhoneNumber": "404-555-0100",
+                "typeOfBusiness": "LLC"}
 
     receipt = M.create_and_verify(_sub(), create_fn=create_fn, read_fn=read_fn)
     assert receipt["status"] == M.STATUS_VERIFIED

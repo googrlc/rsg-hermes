@@ -81,14 +81,14 @@ insured:
   # ── CANDIDATES — NowCerts almost certainly has a home; confirm the key first ──
   - path: applicant.dbas
     home: ams_insured
-    nowcerts_field: null       # DBA / "doing business as" — verify connector key
+    nowcerts_field: null       # DBA is a confirmed insured field (AMS UI); connector key not in sync — confirm
     verified: false
     normalize: join_comma
   - path: applicant.entity_type
     home: ams_insured
-    nowcerts_field: null       # legal entity / business type — verify key + code set
-    verified: false
-    normalize: entity_code
+    nowcerts_field: typeOfBusiness   # confirmed: insured read maps typeOfBusiness (canonical_book_sync)
+    verified: true                   # option set confirmed from the NowCerts "Type of Business" picklist
+    normalize: business_type         # EntityType → "LLC" / "Corporation" / "Subchapter Corp" / …
   - path: applicant.naics
     home: ams_insured
     nowcerts_field: null       # NAICS — verify connector key

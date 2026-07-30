@@ -65,6 +65,28 @@ def _join_comma(v: Any) -> str:
     return str(v).strip()
 
 
+# SubmissionObject EntityType value → NowCerts "Type of Business" option string.
+# The option set is the NowCerts insured "Type of Business" picklist (confirmed
+# from the AMS UI); the field key is `typeOfBusiness` (confirmed from the insured
+# read mapping in sync/canonical_book_sync). A value not in the picklist -> "Other".
+ENTITY_TYPE_LABELS: dict[str, str] = {
+    "individual": "Individual",
+    "llc": "LLC",
+    "corporation": "Corporation",
+    "s_corp": "Subchapter Corp",
+    "partnership": "Partnership",
+    "joint_venture": "Joint Venture",
+    "not_for_profit": "Not For Profit Org",
+    "trust": "Trust",
+}
+
+
+def _business_type(v: Any) -> str:
+    """EntityType (enum or value) → NowCerts 'Type of Business' option label."""
+    key = str(getattr(v, "value", v)).strip().lower()
+    return ENTITY_TYPE_LABELS.get(key, "Other")
+
+
 _NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "trim": _trim,
     "fein": _trim,          # send as-entered; confirm digit-vs-dashed with NowCerts later
@@ -75,7 +97,7 @@ _NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "join_comma": _join_comma,
     "money": _trim,
     "date": _trim,
-    "entity_code": _trim,   # placeholder until the entity code set is confirmed
+    "business_type": _business_type,   # EntityType → NowCerts "Type of Business" label
 }
 
 
