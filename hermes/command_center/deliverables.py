@@ -102,8 +102,29 @@ def acord_data(sub: SubmissionObject) -> str:
             f"{_dash(p.construction_type)}, {_dash(p.square_footage)} sqft"
             for p in sub.property_locations
         ]
-    lines += ["", "_Field data for the ACORD 125/126/140 filler. PDF fill = the freshhermes ACORD port (next)._"]
+    lines += [
+        "",
+        "_Combined field sheet across 125/126/140. Per-form drafts: the `acord_125` "
+        "and `acord_126` deliverables (filled PDFs via `hermes.deliverables.acord125` / "
+        "`acord126` once the licensed templates are installed). 140 PDF fill is next._",
+    ]
     return "\n".join(lines) + "\n"
+
+
+def acord_125(sub: SubmissionObject) -> str:
+    """ACORD 125 (Commercial Application) preview — the exact values that fill
+    the PDF via ``hermes.deliverables.acord125``."""
+    from hermes.deliverables import acord125
+
+    return acord125.render_preview(acord125.from_submission(sub))
+
+
+def acord_126(sub: SubmissionObject) -> str:
+    """ACORD 126 (General Liability) preview — same values that fill the PDF via
+    ``hermes.deliverables.acord126``."""
+    from hermes.deliverables import acord126
+
+    return acord126.render_preview(acord126.from_submission(sub))
 
 
 def benefits_worksheet(sub: SubmissionObject) -> str:
@@ -151,6 +172,8 @@ GENERATORS = {
     "quote_worksheet": quote_worksheet,
     "carrier_shortlist": carrier_shortlist,
     "acord_data": acord_data,
+    "acord_125": acord_125,
+    "acord_126": acord_126,
     "benefits_worksheet": benefits_worksheet,
     "medicare_checklist": medicare_checklist,
     "peo_worksheet": peo_worksheet,
