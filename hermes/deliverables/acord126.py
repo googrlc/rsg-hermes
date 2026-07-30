@@ -1,22 +1,16 @@
 """ACORD 126 — Commercial General Liability Section.
 
-The GL coverage section that rides with a commercial application (the 125). Filled
-from the Command Center **SubmissionObject** (intake candidate data). Same design
-and hard rules as ``acord125.py``:
+The GL coverage section of the combined commercial application (the 125/126
+template). Filled from the Command Center **SubmissionObject**. Same design and
+hard rules as ``acord125.py``. On RSG's combined template the 125 and 126 fill
+the one PDF together — see ``acord_commercial_pack``.
 
-  SubmissionObject  --from_submission-->  Acord126 (logical model)
-  Acord126          --build_field_map-->  {pdf_field_name: value}
-  Acord126          --render_preview--->  markdown preview (template-free)
-  {field: value}    --fill_pdf--------->  filled PDF bytes (licensed template)
-  filled PDF        --draft_acord126--->  Nextcloud + Slack + Supabase log
+Field names below are the **real** AcroForm names from the licensed template (the
+GL section lives on page 5, ``F[0].P5[0].GeneralLiability_…``). Limits come from
+the submission's free-form ``coverage_request`` when present; nothing is assumed.
 
-HARD RULE — never fabricate. GL exposure/limit fields the submission does not
-carry stay blank and surface in ``render_preview`` as "still needed", so a human
-collects them before the 126 is complete. Limits are read from the submission's
-free-form ``coverage_request`` when present; nothing is assumed.
-
-Template field names vary — reconcile ``FIELD_NAMES`` against our licensed
-template via the ``field_names`` arg or ``HERMES_ACORD126_FIELDMAP``.
+HARD RULE — never fabricate. GL limits the submission does not carry stay blank
+and surface in ``render_preview`` as "still needed". **Never auto-sent.**
 """
 
 from __future__ import annotations
@@ -31,11 +25,12 @@ log = logging.getLogger(__name__)
 
 FIELDMAP_ENV = "HERMES_ACORD126_FIELDMAP"
 FORM_LABEL = "ACORD 126"
+CHECKBOX_ON = "/1"
+
+_P1 = "F[0].P1[0]."
+_P5 = "F[0].P5[0]."
 
 
-# ---------------------------------------------------------------------------
-# Logical model — the GL section, PDF-independent.
-# ---------------------------------------------------------------------------
 @dataclass
 class Acord126:
     named_insured: str = ""
@@ -52,20 +47,23 @@ class Acord126:
 
 
 FIELD_NAMES: dict[str, str] = {
-    "named_insured": "NAMED INSURED",
-    "proposed_eff_date": "PROPOSED EFF DATE",
-    "gl_class_code": "GL CLASS CODE",
-    "naics": "NAICS",
-    "coverage_basis": "COVERAGE BASIS",
-    "each_occurrence": "EACH OCCURRENCE",
-    "general_aggregate": "GENERAL AGGREGATE",
-    "products_completed_ops_aggregate": "PRODUCTS COMPLETED OPS AGGREGATE",
-    "personal_advertising_injury": "PERSONAL ADVERTISING INJURY",
-    "damage_to_premises": "DAMAGE TO PREMISES",
-    "medical_expense": "MEDICAL EXPENSE",
+    "named_insured": _P1 + "NamedInsured_FullName_A[0]",
+    "proposed_eff_date": _P1 + "Policy_EffectiveDate_A[0]",
+    "gl_class_code": _P1 + "NamedInsured_GeneralLiabilityCode_A[0]",
+    "naics": _P1 + "NamedInsured_NAICSCode_A[0]",
+    "each_occurrence": _P5 + "GeneralLiability_EachOccurrence_LimitAmount_A[0]",
+    "general_aggregate": _P5 + "GeneralLiability_GeneralAggregate_LimitAmount_A[0]",
+    "products_completed_ops_aggregate":
+        _P5 + "GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A[0]",
+    "personal_advertising_injury": _P5 + "GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A[0]",
+    "damage_to_premises": _P5 + "GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A[0]",
+    "medical_expense": _P5 + "GeneralLiability_MedicalExpense_EachPersonLimitAmount_A[0]",
 }
 
-# coverage_request keys we recognize for each GL limit (casing/spelling tolerant).
+# Coverage-basis is a checkbox on the form (occurrence). Claims-made has no
+# single indicator on this template, so only occurrence is auto-checked.
+OCCURRENCE_CHECKBOX = _P5 + "GeneralLiability_OccurrenceIndicator_A[0]"
+
 _LIMIT_KEYS: dict[str, tuple[str, ...]] = {
     "each_occurrence": ("each_occurrence", "eachOccurrence", "occurrence", "per_occurrence"),
     "general_aggregate": ("general_aggregate", "generalAggregate", "aggregate"),
@@ -91,11 +89,7 @@ def _s(v: Any) -> str:
 
 
 def _gl_request(sub: Any) -> dict[str, Any]:
-    """The GL slice of the free-form coverage_request, tolerant of nesting.
-
-    Accepts limits at the top level of ``coverage_request`` or under a
-    ``general_liability`` / ``gl`` sub-dict; a submission with neither yields {}.
-    """
+    """The GL slice of coverage_request — top-level or nested under gl/general_liability."""
     cr = getattr(sub, "coverage_request", None) or {}
     if not isinstance(cr, dict):
         return {}
@@ -104,7 +98,6 @@ def _gl_request(sub: Any) -> dict[str, Any]:
         nested = cr.get(nested_key)
         if isinstance(nested, dict):
             merged.update(nested)
-    # Top-level wins over nested only where explicitly set.
     merged.update({k: v for k, v in cr.items() if not isinstance(v, dict)})
     return merged
 
@@ -117,7 +110,6 @@ def _first(d: dict[str, Any], keys: tuple[str, ...]) -> str:
 
 
 def from_submission(sub: Any) -> Acord126:
-    """Build an Acord126 from a SubmissionObject. Missing data stays blank."""
     a = sub.applicant
     gl = _gl_request(sub)
     return Acord126(
@@ -136,16 +128,23 @@ def from_submission(sub: Any) -> Acord126:
 
 
 # ---------------------------------------------------------------------------
-# Acord126 -> {pdf_field_name: value}  (pure)
+# Acord126 -> field maps  (pure)
 # ---------------------------------------------------------------------------
 def build_field_map(a126: Acord126, field_names: Optional[dict[str, str]] = None) -> dict[str, str]:
     names = {**FIELD_NAMES, **(field_names or {})}
-    out = {pdf_name: _s(getattr(a126, logical, "")) for logical, pdf_name in names.items()}
+    out = {pdf: _s(getattr(a126, logical, "")) for logical, pdf in names.items()}
     return {k: v for k, v in out.items() if v}
 
 
+def build_checkbox_map(a126: Acord126) -> dict[str, str]:
+    """Occurrence basis checkbox, only when the submission says occurrence."""
+    if a126.coverage_basis and "occurrence" in a126.coverage_basis.lower():
+        return {OCCURRENCE_CHECKBOX: CHECKBOX_ON}
+    return {}
+
+
 # ---------------------------------------------------------------------------
-# Acord126 -> markdown preview (template-free; the Command Center deliverable)
+# Acord126 -> markdown preview (template-free)
 # ---------------------------------------------------------------------------
 _COMPLETENESS_FIELDS = [
     ("named_insured", "Named insured"),
@@ -179,15 +178,12 @@ def render_preview(a126: Acord126) -> str:
     ]
     missing = [label for attr, label in _COMPLETENESS_FIELDS if not getattr(a126, attr)]
     if missing:
-        lines += [
-            "",
-            "## Still needed for a complete ACORD 126",
-            *[f"- {m}" for m in missing],
-        ]
+        lines += ["", "## Still needed for a complete ACORD 126", *[f"- {m}" for m in missing]]
     lines += [
         "",
-        "_Draft field data for the ACORD 126. Filled PDF is generated from the "
-        "same values via `draft_acord126` once the licensed template is installed._",
+        "_Draft field data for the ACORD 126. Filled PDF is generated from the same "
+        "values via `draft_acord126` (or the combined 125/126 pack) once the licensed "
+        "template is installed._",
     ]
     return "\n".join(lines) + "\n"
 
@@ -239,7 +235,9 @@ def draft_acord126(
     """Fill → (Nextcloud) → (Slack) → (Supabase log). Never auto-sends."""
     overrides = {**acord_pdf.load_fieldmap_override(FIELDMAP_ENV), **(field_names or {})}
     values = build_field_map(a126, overrides)
-    fill_result = acord_pdf.fill_pdf(template_path, values, output_path, form_label=FORM_LABEL)
+    checks = build_checkbox_map(a126)
+    fill_result = acord_pdf.fill_pdf(template_path, values, output_path,
+                                     checkboxes=checks, form_label=FORM_LABEL)
 
     file_url = file_upload(output_path) if file_upload else None
     if slack_post:

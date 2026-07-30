@@ -127,6 +127,14 @@ def acord_126(sub: SubmissionObject) -> str:
     return acord126.render_preview(acord126.from_submission(sub))
 
 
+def acord_140(sub: SubmissionObject) -> str:
+    """ACORD 140 (Property) preview for the first location — same values that fill
+    the PDF via ``hermes.deliverables.acord140``."""
+    from hermes.deliverables import acord140
+
+    return acord140.render_preview(acord140.from_submission(sub))
+
+
 def benefits_worksheet(sub: SubmissionObject) -> str:
     a = sub.applicant
     return (
@@ -174,6 +182,7 @@ GENERATORS = {
     "acord_data": acord_data,
     "acord_125": acord_125,
     "acord_126": acord_126,
+    "acord_140": acord_140,
     "benefits_worksheet": benefits_worksheet,
     "medicare_checklist": medicare_checklist,
     "peo_worksheet": peo_worksheet,

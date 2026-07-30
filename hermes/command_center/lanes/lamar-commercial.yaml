@@ -32,5 +32,7 @@ deliverables:
     title: "ACORD 125 (Commercial Application)"
   - kind: acord_126
     title: "ACORD 126 (General Liability)"
+  - kind: acord_140
+    title: "ACORD 140 (Property)"
   - kind: carrier_shortlist
     title: "Carrier shortlist"
