@@ -189,6 +189,41 @@ def stage_routing(supa, plan: dict[str, Any], *, approved_by: str) -> dict[str, 
     return staged
 
 
+def stage_selection_opportunities(
+    supa, sub: SubmissionObject, form_ids: list[str], *, approved_by: str
+) -> dict[str, Any]:
+    """Stage one gated ``intake_crm`` opportunity per ACORD line the agent selected.
+
+    The counterpart to ``stage_routing`` for the on-demand ACORD flow: the lines the
+    agent *checked* (via ``acord_selection.plan_selection``) drive which opportunities
+    are created — not the submission's inferred LOBs. Reuses ``stage_routing`` so the
+    queue-row shape and the human-approved gate are identical; a supplemental (163)
+    makes no opportunity, so nothing is staged for it.
+    """
+    from hermes.deliverables import acord_selection
+
+    plan = acord_selection.plan_selection(sub, form_ids)
+    crm = [
+        {
+            **opp,
+            "premium_estimate": sub.current_premium,
+            "carrier": sub.current_carrier,
+            "submission_id": sub.submission_id,
+        }
+        for opp in plan.opportunities
+    ]
+    routing_plan = {
+        "submission_id": sub.submission_id,
+        "client_name": _client_name(sub),
+        "crm": crm,
+        "ams": {},                       # this bridge stages opportunities only
+        "pdf_kept_on_document": [],
+    }
+    staged = stage_routing(supa, routing_plan, approved_by=approved_by)
+    staged["lines"] = plan.lines
+    return staged
+
+
 def process_intake(supa, sub: SubmissionObject, text: str, *, doc_type: str = "dec_page",
                    approved_by: str | None = None, model: str | None = None) -> dict[str, Any]:
     """The whole intake router in one call: synthesize (top model) → route → stage.
