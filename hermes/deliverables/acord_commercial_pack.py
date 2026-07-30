@@ -17,17 +17,26 @@ from typing import Any, Callable, Optional
 from hermes.deliverables import acord125, acord126, acord140, acord_pdf
 
 
-def combined_field_map(sub: Any) -> tuple[dict[str, str], dict[str, str]]:
+def combined_field_map(
+    sub: Any, *, selected_lobs: list[str] | None = None
+) -> tuple[dict[str, str], dict[str, str]]:
     """(text_values, checkbox_values) for the combined 125/126 template.
 
-    125 fills first; 126 adds the GL-section fields. Shared identity fields
-    (named insured, effective date, GL class code, NAICS) resolve to the same
-    AcroForm name with the same value, so the merge is a no-op on those.
+    125 (the applicant hub) always fills, with every selected line's LOB box
+    checked. The 126 GL section is added only when GL is among the selected lines
+    — filling GL limits on a submission that isn't marketing GL would be wrong.
+    ``selected_lobs`` defaults to the submission's single ``lob`` (pre-selection).
+    Shared identity fields resolve to the same AcroForm name/value, so the merge
+    is a no-op on those.
     """
     a125 = acord125.from_submission(sub)
-    a126 = acord126.from_submission(sub)
-    text = {**acord125.build_field_map(a125), **acord126.build_field_map(a126)}
-    checks = {**acord125.build_checkbox_map(a125), **acord126.build_checkbox_map(a126)}
+    lobs = selected_lobs if selected_lobs is not None else ([a125.lob_key] if a125.lob_key else [])
+    text = dict(acord125.build_field_map(a125))
+    checks = dict(acord125.build_checkbox_map(a125, selected_lobs=lobs))
+    if "commercial_gl" in lobs:
+        a126 = acord126.from_submission(sub)
+        text.update(acord126.build_field_map(a126))
+        checks.update(acord126.build_checkbox_map(a126))
     return text, checks
 
 
