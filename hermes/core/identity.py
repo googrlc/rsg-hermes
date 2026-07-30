@@ -1,15 +1,16 @@
-"""Per-instance identity — which Hermes is running.
+"""Instance identity — which Hermes is running.
 
-Two containers run from this single repo, differentiated *only* by env. Nothing
-about the code changes between them; these three knobs do:
+RSG runs a *single* Hermes for both owners (Lamar and Gretchen), who share the
+same authority and do the same work. Voice is switched per request via a bundled
+persona (see ``load_named_persona`` and ``nl_agent._compose_system_prompt``), not
+by running a second container. These knobs remain, all optional, all env-driven:
 
-  HERMES_AGENT_ID      stable id stamped on every write so Lamar's and Gretchen's
-                       actions are attributable and never confused
-                       (e.g. "hermes-lamar" | "hermes-gretch").
+  HERMES_AGENT_ID      stable id stamped on every write for attribution. Optional
+                       now that one instance serves both owners; defaults to
+                       "hermes". Set it only if you want per-actor stamping.
   HERMES_PERSONA_FILE  path to a markdown persona that overrides the default
                        system identity/voice used by the conversational agent.
-  HERMES_MEMORY_SCOPE  Supermemory container scope so one instance's memory never
-                       bleeds into the other's (defaults to the agent id).
+  HERMES_MEMORY_SCOPE  Supermemory container scope (defaults to the agent id).
 
 Keeping these in one module means there is exactly one definition of "who am I"
 for the whole process.
@@ -41,16 +42,6 @@ def memory_scope() -> str:
     override with HERMES_MEMORY_SCOPE when several instances should share a scope.
     """
     return (os.environ.get("HERMES_MEMORY_SCOPE") or agent_id()).strip()
-
-
-def disabled_tools() -> frozenset[str]:
-    """Tool names this instance must NOT expose (comma-separated HERMES_DISABLED_TOOLS).
-
-    Gretchen's instance is CRM-scoped — it sets HERMES_DISABLED_TOOLS=web_research
-    so the agent never offers public-web business research.
-    """
-    raw = os.environ.get("HERMES_DISABLED_TOOLS", "")
-    return frozenset(t.strip() for t in raw.split(",") if t.strip())
 
 
 @functools.lru_cache(maxsize=8)
