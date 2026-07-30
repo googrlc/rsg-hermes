@@ -69,9 +69,17 @@ forms:
   - form_id: acord_137
     title: "ACORD 137 — Commercial Auto"
     role: lob
-    line_of_business: commercial_auto
-    template_env: null
-    filler: null
+    line_of_business: commercial_auto    # checks the 125 Business Auto box
+    template_env: HERMES_ACORD_137_TEMPLATE
+    filler: acord137                      # applicant block only; vehicle/driver schedules pending
+    per_building: false
+
+  - form_id: acord_163
+    title: "ACORD 163 — Commercial Driver Schedule (supplemental)"
+    role: supplemental
+    line_of_business: null
+    template_env: HERMES_ACORD_163_TEMPLATE
+    filler: null       # driver rows map to sub.drivers, but row ORDER needs visual QA first
     per_building: false
 
   - form_id: acord_139

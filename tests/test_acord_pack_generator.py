@@ -90,14 +90,14 @@ def test_missing_template_reported_not_fatal(tmp_path):
     assert len(m["opportunities"]) == 1                 # opportunity still planned
 
 
-def test_selectable_line_without_filler_is_reported(tmp_path):
+def test_supplemental_without_filler_is_reported(tmp_path):
     fill, _ = _fake_fill()
-    m = G.generate_pack(_sub(), ["acord_137"], output_dir=str(tmp_path),
+    # 163 driver schedule is selectable/attachable but has no filler yet (row QA pending).
+    m = G.generate_pack(_sub(), ["acord_163"], output_dir=str(tmp_path),
                         templates=TEMPLATES, fill_fn=fill)
-    # 137 (auto) has no filler: opportunity yes, PDF no.
-    assert m["needs_filler"] == ["acord_137"]
-    assert len(m["opportunities"]) == 1
-    assert all(a["form"] != "ACORD 137" for a in m["artifacts"])
+    assert m["needs_filler"] == ["acord_163"]
+    assert all(a["form"] != "ACORD 163" for a in m["artifacts"])
+    assert m["opportunities"] == []              # a supplemental is not a line → no opportunity
 
 
 def test_default_fill_fn_is_the_real_filler():

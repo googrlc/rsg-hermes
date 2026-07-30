@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from hermes.deliverables import (
-    acord130, acord131, acord_registry, acord_selection, acord125,
+    acord130, acord131, acord137, acord_registry, acord_selection, acord125,
     acord_pack_generator as G,
 )
 from hermes.command_center.submission import (
@@ -65,6 +65,14 @@ def test_131_flags_missing_umbrella_limit():
 
 
 # ── registry: promoted from placeholders to fillable ──────────────────────────
+def test_137_fills_applicant_and_flags_schedules():
+    a = acord137.from_submission(_sub())
+    fm = acord137.build_field_map(a)
+    assert fm[acord137.FIELD_NAMES["named_insured"]] == "Bright HVAC LLC"
+    md = acord137.render_preview(a, vehicle_count=2, driver_count=3)
+    assert "Vehicle schedule (2 vehicle(s)" in md and "ACORD 163" in md   # schedules flagged, not faked
+
+
 def test_registry_130_131_now_have_fillers():
     assert acord_registry.get("acord_130").has_filler is True
     assert acord_registry.get("acord_131").has_filler is True

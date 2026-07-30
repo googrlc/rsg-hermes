@@ -46,11 +46,14 @@ def test_lob_checkbox_resolves_to_the_125_box():
     assert acord_registry.get("acord_140").lob_checkbox_125 == acord125.LOB_CHECKBOX["commercial_property"]
 
 
-def test_forms_without_a_filler_are_still_selectable_lines():
-    # 137 (auto) has no filler yet but is a selectable line of business.
-    f137 = acord_registry.get("acord_137")
-    assert f137.selectable_line is True and f137.has_filler is False
-    assert any(f.form_id == "acord_137" for f in acord_registry.selectable_lines())
+def test_selectable_line_and_filler_are_independent():
+    # A line can be selectable (checks the 125 box + makes an opportunity) with or
+    # without a PDF filler — the two are independent properties.
+    from hermes.deliverables.acord_registry import AcordForm
+    no_filler = AcordForm(form_id="x", title="X", role="lob",
+                          line_of_business="commercial_gl", template_env=None, filler=None)
+    assert no_filler.selectable_line is True and no_filler.has_filler is False
+    assert acord_registry.get("acord_126").has_filler is True    # a real one does have a filler
 
 
 # ── selection ─────────────────────────────────────────────────────────────────
@@ -76,12 +79,18 @@ def test_select_property_expands_140_one_per_building():
     assert len(plan.lob_checkboxes_125) == 2       # both LOB boxes checked on the 125
 
 
-def test_selectable_line_without_filler_makes_opportunity_but_no_pdf():
-    plan = acord_selection.plan_selection(_sub(), ["acord_137"])   # auto, no filler yet
+def test_selected_line_makes_opportunity_and_is_fillable():
+    plan = acord_selection.plan_selection(_sub(), ["acord_137"])   # auto, now fillable
     assert plan.lines == ["commercial_auto"]
-    assert len(plan.opportunities) == 1            # opportunity still created
-    assert plan.forms_to_fill == []               # ...but nothing to fill
-    assert plan.selectable_without_filler == ["acord_137"]
+    assert len(plan.opportunities) == 1                            # opportunity created
+    assert [f.form_id for f in plan.forms_to_fill] == ["acord_137"]
+    assert plan.selectable_without_filler == []
+
+
+def test_supplemental_without_filler_is_reported_not_an_opportunity():
+    plan = acord_selection.plan_selection(_sub(), ["acord_163"])   # driver schedule, no filler yet
+    assert plan.selectable_without_filler == ["acord_163"]
+    assert plan.forms_to_fill == [] and plan.opportunities == []   # supplemental → no line, no opp
 
 
 def test_unknown_form_id_is_reported_not_silent():

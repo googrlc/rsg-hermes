@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 from hermes.deliverables import (
     acord130,
     acord131,
+    acord137,
     acord140,
     acord_commercial_pack,
     acord_pdf,
@@ -41,6 +42,7 @@ TEMPLATE_140_ENV = "HERMES_ACORD_140_TEMPLATE"
 _SIMPLE_FILLERS: dict[str, tuple[Any, str, str]] = {
     "acord_130": (acord130, "HERMES_ACORD_130_TEMPLATE", "ACORD 130"),
     "acord_131": (acord131, "HERMES_ACORD_131_TEMPLATE", "ACORD 131"),
+    "acord_137": (acord137, "HERMES_ACORD_137_TEMPLATE", "ACORD 137"),
 }
 
 
