@@ -20,7 +20,7 @@ import re
 from typing import TYPE_CHECKING
 
 from hermes.commands.renewal_desk import _parse_identity
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 from hermes.renewals import writeback
 from hermes.renewals.executor import (
     ACTION_CLIENT_FOLLOW_UP,

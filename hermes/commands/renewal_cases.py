@@ -17,7 +17,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from hermes.commands.renewal_desk import _get_nowcerts, _parse_identity
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 from hermes.renewals import cases, resolve
 
 if TYPE_CHECKING:

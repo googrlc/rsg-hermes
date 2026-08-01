@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 import os
 
-from hermes.core.dispatcher import Dispatcher
+from hermes.agent.dispatcher import Dispatcher
 
 COMMAND_CATALOG = """Hermes command catalog
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from hermes.commands.renewal_worksheet import _candidates_by_name, escape_ilike
-from hermes.core.dispatcher import Dispatcher
+from hermes.agent.dispatcher import Dispatcher
 from hermes.operations import intake_worker as w
 
 

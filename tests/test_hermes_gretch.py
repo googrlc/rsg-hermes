@@ -55,7 +55,7 @@ def test_load_persona_missing_file_is_empty(monkeypatch, tmp_path):
 
 # ── persona overlay in the system prompt ─────────────────────────────────────
 def test_compose_system_prompt_uses_persona(monkeypatch, tmp_path):
-    from hermes.core import nl_agent
+    from hermes.agent import nl_agent
 
     identity.load_persona.cache_clear()
     monkeypatch.delenv("HERMES_PERSONA_FILE", raising=False)

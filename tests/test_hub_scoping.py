@@ -1,7 +1,7 @@
 """Per-hub AI scoping harness + Carrier hub tools."""
 from __future__ import annotations
 
-from hermes.core import nl_agent as A
+from hermes.agent import nl_agent as A
 
 
 class FakeSupa:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from hermes.core.dispatcher import Dispatcher
+from hermes.agent.dispatcher import Dispatcher
 
 
 def _make_dispatcher() -> Dispatcher:
@@ -69,7 +69,7 @@ class FactRouteTests(unittest.TestCase):
         """
         d = _make_dispatcher()
         with patch("hermes.commands.fact_retriever.handle") as fact_handle:
-            from hermes.core.dispatcher import DispatchResult
+            from hermes.core.dispatch import DispatchResult
             fact_handle.return_value = DispatchResult(True, "fact ran")
             d.dispatch("find Acme")
             fact_handle.assert_not_called()
@@ -79,7 +79,7 @@ class IntakeRouteTests(unittest.TestCase):
     def test_stage_intake_routes_to_agency_intake(self) -> None:
         d = _make_dispatcher()
         with patch("hermes.commands.agency_intake.handle") as ai_handle:
-            from hermes.core.dispatcher import DispatchResult
+            from hermes.core.dispatch import DispatchResult
             ai_handle.return_value = DispatchResult(
                 True, "draft staged", {"draft_id": "x", "slack_blocks": [{}, {}]}
             )
@@ -91,7 +91,7 @@ class IntakeRouteTests(unittest.TestCase):
     def test_new_commercial_prospect_routes_to_agency_intake(self) -> None:
         d = _make_dispatcher()
         with patch("hermes.commands.agency_intake.handle") as ai_handle:
-            from hermes.core.dispatcher import DispatchResult
+            from hermes.core.dispatch import DispatchResult
             ai_handle.return_value = DispatchResult(True, "ok", {})
             d.dispatch("new commercial prospect: 3D Pumps")
             ai_handle.assert_called_once()
@@ -110,7 +110,7 @@ class IntakeRouteTests(unittest.TestCase):
             "RECORD NAME: Jarod Denero Mattison\n"
         )
         with patch("hermes.commands.agency_intake.handle") as ai_handle:
-            from hermes.core.dispatcher import DispatchResult
+            from hermes.core.dispatch import DispatchResult
             ai_handle.return_value = DispatchResult(True, "draft staged", {})
             result = d.dispatch(post)
             ai_handle.assert_called_once()

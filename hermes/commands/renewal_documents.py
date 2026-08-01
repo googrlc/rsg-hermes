@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from hermes.commands.renewal_cases import _resolve_or_error
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 from hermes.renewals import cases, pdf, resolve
 
 if TYPE_CHECKING:

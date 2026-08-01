@@ -118,7 +118,7 @@ _nowcerts = None
 def _get_dispatcher():
     global _dispatcher
     if _dispatcher is None:
-        from hermes.core.dispatcher import Dispatcher
+        from hermes.agent.dispatcher import Dispatcher
 
         use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
         _dispatcher = Dispatcher(use_openai=use_openai)
@@ -515,7 +515,7 @@ async def command_center_complete_task(task_id: str):
 @app.get("/api/command-center/skills")
 async def command_center_skills():
     """List Hermes's capabilities — live tools + domain playbooks."""
-    from hermes.operations.skills_catalog import catalog
+    from hermes.agent.skills_catalog import catalog
 
     return catalog()
 
@@ -606,7 +606,7 @@ async def command_center_ask(req: AskRequest):
     # has CRM lookups, reports, renewals, and web_research). Going straight to the
     # agent avoids the dispatcher's "who/what/find" route hijacking natural questions
     # into a name search. confirmed=False → any write intent is previewed, never run.
-    from hermes.core.nl_agent import ask as nl_ask
+    from hermes.agent.nl_agent import ask as nl_ask
 
     try:
         result = nl_ask(prompt, confirmed=False, persona=(req.persona or None), hub=(req.hub or None))

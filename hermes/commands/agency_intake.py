@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient

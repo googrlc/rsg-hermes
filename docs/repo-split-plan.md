@@ -47,14 +47,34 @@ each repeated across many domains:
 
 Fixing those three establishes the layering the repo split needs:
 
-```
+```text
         scheduler / agent / api        <- orchestration, top
    renewals cases intake finance ...   <- domains, siblings, no cross-imports
-          hermes.core (+ clients)      <- primitives, bottom, depends on nothing
+   hermes.core + hermes.integrations   <- primitives + clients, depends on nothing
 ```
 
-Phase 1 of this plan does exactly that and nothing else. It is a pure refactor:
-no behavior change, no route change, same 1,600 tests.
+Phase 1 does exactly that and nothing else — a pure refactor, no behavior
+change, no route change, same 1,600 tests.
+
+### Phase 1 result
+
+| | before | after |
+|---|---|---|
+| Bidirectional package pairs | 13 | 1 |
+| Modules pulled in by `import hermes.core.field_utils` | 6 | 3 |
+| `hermes/core` imports outside itself | yes | **none** — it is a leaf |
+
+`hermes.core` importing nothing outside itself is the property that makes
+Phase 4 possible: the bottom layer can be lifted into its own package without
+dragging a domain along.
+
+The one remaining cycle is **`ams` ↔ `sync`**: `ams.book` imports
+`sync.canonical_book_sync`, and `sync.commission_sync` / `sync.opportunity_sync`
+import `ams.book`. Unlike the other twelve this is not a misfiling — the two
+modules are both "the canonical book mirror" and the overlap is real. Left
+as-is deliberately: both land in the hub repo, so it blocks no extraction, and
+merging them is a design change that does not belong in a refactor. Worth doing
+before anyone tries to split `ams` and `sync` from each other.
 
 ## Target topology
 

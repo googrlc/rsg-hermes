@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes.api import app
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 
 
 @pytest.fixture(autouse=True)

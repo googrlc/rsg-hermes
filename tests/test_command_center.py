@@ -261,9 +261,9 @@ class TestPhase2Endpoints:
 
 
 class TestAskHermes:
-    @patch("hermes.core.nl_agent.ask")
+    @patch("hermes.agent.nl_agent.ask")
     def test_ask_non_renewal_routes_to_agent(self, mock_ask, client) -> None:
-        from hermes.core.dispatcher import DispatchResult
+        from hermes.core.dispatch import DispatchResult
         mock_ask.return_value = DispatchResult(True, "We have 554 accounts.")
         resp = client.post("/api/command-center/ask", json={"prompt": "How many accounts do we have?"})
         assert resp.status_code == 200
@@ -394,13 +394,13 @@ class TestFilesEndpoints:
 
 class TestNlAgentTools:
     def test_core_tools_registered(self):
-        from hermes.core.nl_agent import _EXECUTORS, _TOOLS
+        from hermes.agent.nl_agent import _EXECUTORS, _TOOLS
         names = {t["function"]["name"] for t in _TOOLS}
         for tool in ("renewals_overview", "web_research", "list_skills"):
             assert tool in names and tool in _EXECUTORS
 
     def test_renewals_tool_executes(self):
-        from hermes.core.nl_agent import _EXECUTORS
+        from hermes.agent.nl_agent import _EXECUTORS
         with patch("hermes.integrations.supabase_client.SupabaseClient") as cls:
             inst = MagicMock()
             inst.select.return_value = [
@@ -413,7 +413,7 @@ class TestNlAgentTools:
             assert res.ok and "Acme" in res.message
 
     def test_list_skills_tool(self):
-        from hermes.core.nl_agent import _EXECUTORS
+        from hermes.agent.nl_agent import _EXECUTORS
         res = _EXECUTORS["list_skills"]({})
         assert res.ok and "tools I can run" in res.message
 
@@ -514,7 +514,7 @@ class TestTeamQueueEndpoints:
 
 class TestSkillsCatalog:
     def test_catalog_lists_tools_and_skills(self):
-        from hermes.operations.skills_catalog import catalog
+        from hermes.agent.skills_catalog import catalog
         cat = catalog()
         names = {t["name"] for t in cat["runtime_tools"]}
         assert {"renewals_overview", "web_research", "list_skills"} <= names

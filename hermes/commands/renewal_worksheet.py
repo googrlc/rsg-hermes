@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 from hermes.renewals import resolve, worksheet
 
 if TYPE_CHECKING:

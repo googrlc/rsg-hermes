@@ -8,7 +8,7 @@ import os
 import re
 from typing import Any
 
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 from hermes.integrations import retrieval_client
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 

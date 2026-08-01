@@ -13,7 +13,7 @@ import os
 import re
 from typing import Any
 
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 
 from hermes import carriers as _carriers
 from hermes.ams import book as ams_book
@@ -512,7 +512,7 @@ def _exec_report(args: dict[str, Any]) -> DispatchResult:
 
 
 def _exec_list_skills(args: dict[str, Any]) -> DispatchResult:
-    from hermes.operations.skills_catalog import render_text
+    from hermes.agent.skills_catalog import render_text
 
     return DispatchResult(True, render_text())
 
@@ -1447,7 +1447,7 @@ def _get_report_dispatcher() -> Any:
     """Return a cached Dispatcher(use_openai=False) for running reports."""
     global _report_dispatcher
     if _report_dispatcher is None:
-        from hermes.core.dispatcher import Dispatcher
+        from hermes.agent.dispatcher import Dispatcher
         _report_dispatcher = Dispatcher(use_openai=False)
     return _report_dispatcher
 

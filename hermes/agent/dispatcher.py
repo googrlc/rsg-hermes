@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from hermes.core.dispatch import DispatchResult, Handler
 from hermes.operations.write_gate import parse_approval_token
 
 if TYPE_CHECKING:
@@ -81,14 +82,10 @@ def _should_retry_with_intent(text: str, result: DispatchResult) -> bool:
     return True
 
 
-@dataclass
-class DispatchResult:
-    ok: bool
-    message: str
-    data: dict[str, Any] | None = None
-
-
-Handler = Callable[[str], DispatchResult]
+# DispatchResult and Handler are the dispatch *contract*, defined in
+# hermes.core.dispatch so the eight command modules that return one do not have
+# to import the engine that routes to them. Re-exported here for callers that
+# reach for this module as their historical home.
 
 
 class Dispatcher:
@@ -390,7 +387,7 @@ class Dispatcher:
                 self._capture_write_intent(result)
                 return result
         if self.use_openai and _allow_intent:
-            from hermes.core.nl_agent import ask as nl_ask
+            from hermes.agent.nl_agent import ask as nl_ask
 
             return nl_ask(text, confirmed=confirmed)
         return DispatchResult(

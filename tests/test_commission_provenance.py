@@ -7,7 +7,7 @@ quoting one as the other, which is only enforceable if the tools carry the split
 """
 from __future__ import annotations
 
-from hermes.core import nl_agent as A
+from hermes.agent import nl_agent as A
 
 
 class FakeSupa:

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from hermes.commands.renewal_worksheet import escape_ilike
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 from hermes.integrations import retrieval_client
 
 if TYPE_CHECKING:

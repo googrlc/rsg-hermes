@@ -20,7 +20,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from hermes.commands.renewal_worksheet import _candidates_by_name, parse_request
-from hermes.core.dispatcher import DispatchResult
+from hermes.core.dispatch import DispatchResult
 from hermes.renewals import resolve
 
 if TYPE_CHECKING:

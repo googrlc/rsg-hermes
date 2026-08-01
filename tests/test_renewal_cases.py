@@ -11,7 +11,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from hermes.commands import renewal_cases as rc
-from hermes.core.dispatcher import DispatchResult, Dispatcher
+from hermes.agent.dispatcher import Dispatcher
+from hermes.core.dispatch import DispatchResult
 from hermes.renewals import cases
 
 
