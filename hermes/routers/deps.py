@@ -113,3 +113,17 @@ def require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
                 status_code=400,
                 detail=f"{label} '{email}' is not an active agency_crm_users identity",
             )
+
+
+class ExecutorRunRequest(BaseModel):
+    """How much of a queue to drain, and whether to only preview it.
+
+    Shared by every "run the executor" endpoint (/api/casework/run,
+    /api/intake/run) — they take the same two knobs, so the shape lives here
+    rather than in whichever router happened to define it first. It was
+    `CaseworkRunRequest` in api.py and the intake route borrowed it, which is
+    how a casework-named model ended up in the intake contract.
+    """
+
+    limit: int = 5
+    dry_run: bool = False

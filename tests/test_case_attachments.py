@@ -193,9 +193,9 @@ def test_an_empty_file_is_rejected(client):
 
 def test_an_oversized_file_is_rejected_with_the_limit(client):
     c, _ = client
-    import hermes.api as api_mod
+    from hermes.routers import cases as cases_router
 
-    r = _post(c, content=b"x" * (api_mod._CASE_DOC_MAX_BYTES + 1))
+    r = _post(c, content=b"x" * (cases_router._CASE_DOC_MAX_BYTES + 1))
     assert r.status_code == 413
     assert "limit is 25MB" in r.json()["detail"]
 
