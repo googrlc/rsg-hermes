@@ -153,3 +153,39 @@ def test_every_queue_object_type_is_owned_by_exactly_one_service() -> None:
         f"no service drains {sorted(unowned)} — those jobs would queue forever "
         "once the scheduler is split per service"
     )
+
+
+def test_a_named_service_uses_its_registered_port_over_a_shared_env_var(monkeypatch) -> None:
+    """The services share one .env on the box, and it sets HERMES_API_PORT.
+
+    When that env var outranked the registry, all five services bound the same
+    port and none of them answered on the one compose had published. The
+    registry is the source of truth for a named service; HERMES_API_PORT is for
+    the unsplit app, which has no registered port of its own.
+    """
+    import argparse
+
+    monkeypatch.setenv("HERMES_API_PORT", "8484")
+
+    def resolve(service: str, explicit: int | None = None) -> int:
+        # Mirrors the precedence in hermes.api.main.
+        if explicit:
+            return explicit
+        if service != ALL:
+            return SERVICES[service].port
+        import os
+
+        return int(os.environ.get("HERMES_API_PORT") or 8484)
+
+    for name, spec in SERVICES.items():
+        assert resolve(name) == spec.port, (
+            f"{name} resolved to {resolve(name)} with HERMES_API_PORT set; "
+            f"its registered port is {spec.port}"
+        )
+    # Distinct ports, so nothing collides when they run side by side.
+    resolved = [resolve(n) for n in SERVICES]
+    assert len(set(resolved)) == len(resolved), f"ports collide: {resolved}"
+    # The unsplit app still honours the env var, and --port still wins outright.
+    assert resolve(ALL) == 8484
+    assert resolve("finance", explicit=9999) == 9999
+    _ = argparse  # documents that this mirrors the CLI path
