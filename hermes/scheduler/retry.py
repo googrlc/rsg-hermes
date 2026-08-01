@@ -60,10 +60,20 @@ def compute_backoff_seconds(attempt: int) -> int:
     return int(min(BACKOFF_CAP_SECONDS, exp))
 
 
-def requeue_or_deadletter(supa: "SupabaseClient", *, now: datetime | None = None) -> dict[str, Any]:
+def requeue_or_deadletter(
+    supa: "SupabaseClient",
+    *,
+    now: datetime | None = None,
+    object_types: tuple[str, ...] = BACKED_OFF_OBJECT_TYPES,
+) -> dict[str, Any]:
     """Re-queue failed NowCerts jobs with backoff, or dead-letter past the cap.
 
     Returns metrics incl. the exact dead-lettered queue ids (for alerting/audit).
+
+    ``object_types`` narrows the pass to one service's rows. A per-service worker
+    must pass its own types: two workers running the unscoped pass would each
+    count and dead-letter the other's failures, so a job could burn its attempt
+    budget without either worker having tried it.
     """
     now = now or _utcnow()
     try:
@@ -71,7 +81,7 @@ def requeue_or_deadletter(supa: "SupabaseClient", *, now: datetime | None = None
             QUEUE_TABLE,
             columns="id,object_type,object_id,attempt_count",
             params={
-                "object_type": f"in.({','.join(_OBJECT_TYPES)})",
+                "object_type": f"in.({','.join(object_types)})",
                 "destination_system": _DESTINATION_FILTER,
                 "status": f"eq.{QUEUE_FAILED}",
                 "order": "created_at.asc",
@@ -107,11 +117,18 @@ def requeue_or_deadletter(supa: "SupabaseClient", *, now: datetime | None = None
 
 
 def reclaim_stalled(
-    supa: "SupabaseClient", *, now: datetime | None = None, threshold_seconds: int = STALLED_PROCESSING_SECONDS
+    supa: "SupabaseClient",
+    *,
+    now: datetime | None = None,
+    threshold_seconds: int = STALLED_PROCESSING_SECONDS,
+    object_types: tuple[str, ...] = BACKED_OFF_OBJECT_TYPES,
 ) -> dict[str, Any]:
     """Reset jobs stuck in 'processing' past the threshold back to 'queued'.
 
     Returns the reclaimed ids (a crashed/killed executor left them claimed).
+
+    ``object_types`` narrows the pass to one service's rows — a worker must not
+    reclaim a job another service's worker is actively processing.
     """
     now = now or _utcnow()
     cutoff = (now - timedelta(seconds=threshold_seconds)).isoformat()
@@ -120,7 +137,7 @@ def reclaim_stalled(
             QUEUE_TABLE,
             columns="id,object_type,updated_at",
             params={
-                "object_type": f"in.({','.join(_OBJECT_TYPES)})",
+                "object_type": f"in.({','.join(object_types)})",
                 "destination_system": _DESTINATION_FILTER,
                 "status": f"eq.{QUEUE_PROCESSING}",
                 "updated_at": f"lt.{cutoff}",

@@ -275,6 +275,14 @@ def main() -> int:
         help="Max jobs each executor processes per cycle (default 10)",
     )
     parser.add_argument(
+        "--scheduler-service",
+        default=os.environ.get("HERMES_SERVICE") or None,
+        help="Run the worker for ONE service (renewals, intake, cases, hub): its "
+             "own lock, only its object types, only its executors. Omit for the "
+             "single scheduler that drives everything. Run one or the other "
+             "against a queue, never both.",
+    )
+    parser.add_argument(
         "--scheduler-health",
         action="store_true",
         help="Print scheduler health (NowCerts queue depths + lock state) and exit",
@@ -1032,7 +1040,14 @@ def main() -> int:
             return 0
         from hermes.scheduler.runner import run_scheduler_loop
 
-        run_scheduler_loop(interval_seconds=args.scheduler_interval, batch=args.scheduler_batch)
+        service = (args.scheduler_service or "").strip().lower() or None
+        if service in ("", "all"):
+            service = None
+        run_scheduler_loop(
+            interval_seconds=args.scheduler_interval,
+            batch=args.scheduler_batch,
+            service=service,
+        )
         return 0
 
     if args.revenue_sentinel_health:

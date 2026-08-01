@@ -147,11 +147,54 @@ it — the routers are the same either way.
 - **Phase 2 — routers.** Split `api.py`'s 118 routes into per-domain
   `APIRouter`s, one file per app, mounted by a thin shell. Makes the future repo
   boundary visible in one file and reviewable before any code moves out.
-- **Phase 3 — processes.** Give each domain its own container/port off the same
-  image. This is what actually delivers failure isolation: today all 118 routes
-  share one uvicorn worker with 85 of 93 handlers declared `async def` over sync
-  bodies, so one slow renewal call stalls finance, cases, and intake with it
-  (measured 0.17s → 28.4s).
+- **Phase 3 — processes. DONE.** Two separate problems, and the first was the
+  one actually causing the outages:
+
+  1. **An app freezing itself.** 111 of the 118 handlers were `async def` with
+     no `await` in the body. FastAPI runs those ON the event loop, so every
+     blocking Supabase/NowCerts call stopped the whole process — measured
+     turning a 0.17s endpoint into 28.4s, presenting as "the CRM buttons don't
+     work". Declaring them `def` hands them to a 40-worker threadpool.
+     `tests/test_event_loop_not_blocked.py` prevents a relapse; the mistake is
+     invisible in review because `async` reads as more modern, not as a
+     process-wide stall. Two consequences handled with it: the lazy client
+     singletons in `routers/deps.py` are now reached from many threads, so they
+     got double-checked locking (losing that race against NowCerts costs a
+     second ~26s password grant), and `SupabaseClient.pool_maxsize` went 20 → 40
+     to match the threadpool.
+
+  2. **One app freezing the others.** `hermes/services.py` holds a registry of
+     six services — name, routers, path prefixes, port, and the queue object
+     types its worker drains. `create_app("finance")` returns an app carrying
+     only the finance routes. Each gets its own process, event loop, threadpool,
+     restart and log stream, via `docker-compose.services.yml`.
+
+  Both are **opt-in**: `create_app("all")` returns the existing
+  `hermes.api.app` object unchanged and is the default, so a deploy that sets no
+  `HERMES_SERVICE` behaves exactly as before.
+
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.services.yml \
+    --profile services up -d --build          # add --profile workers for the queues
+  ```
+
+  **The one rule:** never run `hermes-api` and the split services against the
+  same traffic, and never run `hermes-scheduler` alongside the per-service
+  workers — the unsplit scheduler claims every object type and would race them
+  for the same queue rows.
+
+  What `tests/test_services.py` guarantees, because these fail silently
+  otherwise: the union of the split services serves *exactly* the routes the
+  single app serves (an unclaimed route works in the monolith and 404s once
+  split), no two services claim the same route or prefix, every declared prefix
+  has routes behind it, every queue object type has exactly one drainer, and the
+  compose ports match the registry.
+
+  **Services talking to each other.** They share one image and one database, so
+  a service needing another app's *logic* imports it — no HTTP hop. `base_url()`
+  in the registry is for reaching another app's HTTP surface, which is what
+  separate images or repos will need. The ports are already there, so that day
+  is a config change rather than a redesign.
 - **Phase 4 — `rsg-hermes-core`.** Extract the bottom layer as an installable
   package, pinned by commit in each consumer.
 - **Phase 5 — repos.** Extract domains one at a time in the order above, with

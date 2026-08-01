@@ -64,13 +64,137 @@ def _alert(text: str) -> None:
         log.exception("scheduler: alert to #systems-check failed: %s", text)
 
 
+def service_executors(service: str) -> tuple[str, ...]:
+    """Which executors a per-service worker runs.
+
+    Only the executors this scheduler actually drives today. The command-center
+    intake executor (intake_ams / intake_crm) is deliberately absent: it has
+    always been manual, via POST /api/intake/run, and a split is the wrong place
+    to quietly start running something on a timer.
+    """
+    return {
+        "renewals": ("renewal",),
+        "intake": ("intake",),
+        "cases": ("casework",),
+        "hub": ("quote", "opportunity_writeback"),
+    }.get(service, ())
+
+
+def run_service_cycle(
+    supa: "SupabaseClient",
+    *,
+    service: str,
+    lock: SchedulerLock,
+    batch: int = DEFAULT_BATCH,
+) -> dict[str, Any]:
+    """One cycle for a single service's queue work.
+
+    The difference from `run_one_cycle` is scope, and scope is the whole point:
+    this worker takes a lock named for its service (so services do not wait on
+    each other), and its retry/reclaim pass is filtered to its own object types
+    (so it never dead-letters or reclaims a job belonging to another worker).
+    """
+    from hermes.services import SERVICES
+
+    if service not in SERVICES:
+        raise ValueError(f"unknown service {service!r}")
+    object_types = SERVICES[service].queue_object_types
+    names = service_executors(service)
+    if not object_types or not names:
+        log.info("scheduler[%s]: no queue work for this service", service)
+        return {"acquired": False, "service": service, "reason": "no queue work"}
+
+    if not lock.acquire():
+        log.info("scheduler[%s]: lock held by another replica; skipping cycle", service)
+        return {"acquired": False, "service": service}
+
+    started = _utcnow()
+    metrics: dict[str, Any] = {
+        "acquired": True, "service": service,
+        "started_at": started.isoformat(), "owner": lock.owner,
+    }
+    problems: list[str] = []
+    try:
+        metrics["stalled"] = reclaim_stalled(supa, now=started, object_types=object_types)
+        metrics["retry"] = requeue_or_deadletter(supa, now=started, object_types=object_types)
+        lock.renew()
+
+        for name in names:
+            try:
+                metrics[name] = _run_executor(name, supa=supa, batch=batch)
+            except Exception as exc:  # noqa: BLE001 — one executor must not cost the rest
+                log.exception("scheduler[%s]: %s executor failed", service, name)
+                problems.append(f"{name} executor aborted: {exc}")
+            lock.renew()
+
+        if metrics["retry"]["dead"]:
+            problems.append(
+                f"{metrics['retry']['dead']} job(s) DEAD-LETTERED: {metrics['retry']['dead_ids']}"
+            )
+        if metrics["stalled"]["reclaimed"]:
+            problems.append(
+                f"{metrics['stalled']['reclaimed']} stalled job(s) reclaimed: "
+                f"{metrics['stalled']['reclaimed_ids']}"
+            )
+        for name in names:
+            if metrics.get(name, {}).get("failed"):
+                problems.append(f"{name} executor: {metrics[name]['failed']} failed this pass")
+    except Exception as exc:  # noqa: BLE001 — a bad cycle must not kill the loop
+        log.exception("scheduler[%s]: cycle crashed", service)
+        problems.append(f"scheduler cycle crashed: {exc}")
+    finally:
+        metrics["finished_at"] = _utcnow().isoformat()
+        metrics["problems"] = problems
+        lock.release()
+
+    log.info("scheduler_cycle %s", json.dumps(metrics, default=str))
+    if problems:
+        _alert(f":rotating_light: Hermes {service} worker — " + " | ".join(problems))
+    return metrics
+
+
+def _run_executor(name: str, *, supa: "SupabaseClient", batch: int) -> dict[str, Any]:
+    """Run one named executor. NowCerts-bound ones share a client per call so a
+    cycle authenticates once."""
+    if name == "renewal":
+        from hermes.renewals.executor import run_executor
+
+        return run_executor(supa=supa, limit=batch)
+    if name == "intake":
+        from hermes.intake.executor import run_intake_executor
+
+        return run_intake_executor(supa=supa, limit=batch)
+
+    from hermes.integrations.nowcerts_client import NowCertsClient
+
+    nc = NowCertsClient()
+    if name == "quote":
+        from hermes.quotes.executor import run_quote_executor
+
+        return run_quote_executor(supa=supa, nowcerts=nc, limit=batch)
+    if name == "casework":
+        from hermes.casework.executor import run_casework_executor
+
+        return run_casework_executor(supa=supa, nowcerts=nc, limit=batch)
+    if name == "opportunity_writeback":
+        from hermes.sync.opportunity_writeback import run_opportunity_writeback_executor
+
+        return run_opportunity_writeback_executor(supa=supa, nowcerts=nc, limit=batch)
+    raise ValueError(f"unknown executor {name!r}")
+
+
 def run_one_cycle(
     supa: "SupabaseClient",
     *,
     lock: SchedulerLock,
     batch: int = DEFAULT_BATCH,
 ) -> dict[str, Any]:
-    """One locked cycle. Returns structured metrics (also emitted to the audit log)."""
+    """One locked cycle over EVERY service's queue work.
+
+    This is the unsplit scheduler and remains the default. A split deployment
+    runs `run_service_cycle` per service instead — do not run both against the
+    same queue.
+    """
     from hermes.casework.executor import run_casework_executor
     from hermes.intake.executor import run_intake_executor
     from hermes.quotes.executor import run_quote_executor
@@ -146,8 +270,18 @@ def run_scheduler_loop(
     interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     batch: int = DEFAULT_BATCH,
     supa: "SupabaseClient | None" = None,
+    service: str | None = None,
 ) -> None:
-    """Continuous scheduler. Runs until SIGTERM/SIGINT, finishing the in-flight cycle."""
+    """Continuous scheduler. Runs until SIGTERM/SIGINT, finishing the in-flight cycle.
+
+    With ``service``, this is that service's own worker: its own lock, its own
+    object types, only its executors. Without it, the single scheduler that
+    drives everything — still the default.
+
+    Run one or the other against a queue, never both: the unsplit scheduler
+    claims every object type, so it would race the per-service workers for the
+    same rows.
+    """
     if supa is None:
         from hermes.integrations.supabase_client import SupabaseClient
 
@@ -157,18 +291,30 @@ def run_scheduler_loop(
     signal.signal(signal.SIGINT, lambda *_: _stop.set())
 
     # Lease TTL just under the interval so a dead holder is replaced next cycle.
-    lock = SchedulerLock(supa, LOCK_NAME, ttl_seconds=max(30, interval_seconds - 10))
-    log.info("scheduler: starting (interval=%ss, batch=%s, owner=%s)", interval_seconds, batch, lock.owner)
+    # A per-service worker locks on its own name so services never queue behind
+    # each other for the lease.
+    lock_name = f"{LOCK_NAME}_{service}" if service else LOCK_NAME
+    lock = SchedulerLock(supa, lock_name, ttl_seconds=max(30, interval_seconds - 10))
+    log.info(
+        "scheduler[%s]: starting (interval=%ss, batch=%s, owner=%s)",
+        service or "all", interval_seconds, batch, lock.owner,
+    )
 
     while not _stop.is_set():
         try:
-            run_one_cycle(supa, lock=lock, batch=batch)
+            if service:
+                run_service_cycle(supa, service=service, lock=lock, batch=batch)
+            else:
+                run_one_cycle(supa, lock=lock, batch=batch)
         except Exception:  # noqa: BLE001
-            log.exception("scheduler: unexpected error at loop level")
+            log.exception("scheduler[%s]: unexpected error at loop level", service or "all")
         # Interruptible wait — a shutdown signal wakes us immediately.
         _stop.wait(interval_seconds)
 
-    log.info("scheduler: graceful shutdown (in-flight cycle completed; no jobs abandoned)")
+    log.info(
+        "scheduler[%s]: graceful shutdown (in-flight cycle completed; no jobs abandoned)",
+        service or "all",
+    )
 
 
 def scheduler_health(supa: "SupabaseClient") -> dict[str, Any]:

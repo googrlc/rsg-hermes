@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
@@ -46,6 +46,12 @@ def openapi_schema() -> dict[str, Any]:
     """Expose schema for backwards-compatibility tests."""
     return app.openapi()
 
+
+# The hub's own routes hang off this router rather than off `app` directly, so
+# the app factory in hermes/services.py can compose a process out of any subset
+# of routers — hub alone, one app alone, or everything (the default). It is
+# included at the BOTTOM of this file, after every route below is defined.
+router = APIRouter()
 
 app = FastAPI(
     title="Hermes API",
@@ -208,7 +214,7 @@ class AgencyFactResponse(BaseModel):
     notes: str | None = None
 
 
-@app.get("/")
+@router.get("/")
 def root():
     """What this service is, and where the screen went.
 
@@ -224,12 +230,12 @@ def root():
     }
 
 
-@app.get("/health")
+@router.get("/health")
 def health():
     return {"status": "ok", "service": "hermes"}
 
 
-@app.get("/hermes/ping", response_model=DispatchResponse)
+@router.get("/hermes/ping", response_model=DispatchResponse)
 def hermes_ping():
     """Compatibility ping endpoint for WebUI connectors that call /hermes/ping."""
     return DispatchResponse(
@@ -240,7 +246,7 @@ def hermes_ping():
     )
 
 
-@app.post("/dispatch", response_model=DispatchResponse)
+@router.post("/dispatch", response_model=DispatchResponse)
 def dispatch(req: DispatchRequest):
     if not req.command or not req.command.strip():
         raise HTTPException(status_code=400, detail="Empty command.")
@@ -260,7 +266,7 @@ def dispatch(req: DispatchRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/api/hermes/dispatch", response_model=AsyncAcceptedResponse)
+@router.post("/api/hermes/dispatch", response_model=AsyncAcceptedResponse)
 async def dashboard_dispatch(req: DispatchRequest):
     """Dashboard async dispatch entrypoint."""
     if req.command and req.command.strip():
@@ -279,7 +285,7 @@ async def dashboard_dispatch(req: DispatchRequest):
     raise HTTPException(status_code=400, detail="Provide a command.")
 
 
-@app.get("/api/command-center/renewals")
+@router.get("/api/command-center/renewals")
 def command_center_renewals():
     """Live Renewals Cockpit data (Command Center, Phase 1).
 
@@ -311,7 +317,7 @@ def command_center_renewals():
     return summarize_renewals(attach_policy_dates(supa, rows))
 
 
-@app.get("/api/command-center/lapse-check")
+@router.get("/api/command-center/lapse-check")
 def command_center_lapse_check():
     """Past-due-but-still-active renewals, kept OFF the forward renewals pipeline.
 
@@ -323,7 +329,7 @@ def command_center_lapse_check():
     return lapse_check(_get_supa())
 
 
-@app.get("/api/command-center/tasks")
+@router.get("/api/command-center/tasks")
 def command_center_tasks():
     """Open team tasks (Gretchen/Lamar) in plain English, most urgent first."""
     # EspoCRM decommissioned 2026-07-23. Team tasks now live in Supabase
@@ -352,7 +358,7 @@ def command_center_tasks():
     return {"tasks": tasks, "count": len(tasks), "by_assignee": by_assignee, "source": "agency_crm_tasks"}
 
 
-@app.post("/api/command-center/tasks/{task_id}/complete")
+@router.post("/api/command-center/tasks/{task_id}/complete")
 def command_center_complete_task(task_id: str):
     """Mark a team task done in agency_crm_tasks."""
     from hermes.operations.team_queue import complete_task
@@ -369,7 +375,7 @@ def command_center_complete_task(task_id: str):
     return {"ok": True, "id": task_id, "status": "completed"}
 
 
-@app.get("/api/command-center/skills")
+@router.get("/api/command-center/skills")
 def command_center_skills():
     """List Hermes's capabilities — live tools + domain playbooks."""
     from hermes.agent.skills_catalog import catalog
@@ -385,7 +391,7 @@ class FileSaveRequest(BaseModel):
     file_ext: str = "md"
 
 
-@app.post("/api/command-center/files")
+@router.post("/api/command-center/files")
 def command_center_save_file(req: FileSaveRequest):
     """Save a file Hermes created (note/report/answer/save-list) for the Files panel."""
     from hermes.operations.files_store import save_file
@@ -406,7 +412,7 @@ def command_center_save_file(req: FileSaveRequest):
         raise HTTPException(status_code=502, detail=str(exc))
 
 
-@app.get("/api/command-center/files")
+@router.get("/api/command-center/files")
 def command_center_list_files():
     """List files Hermes has created (newest first)."""
     from hermes.operations.files_store import list_files
@@ -414,7 +420,7 @@ def command_center_list_files():
     return {"files": list_files(_get_supa())}
 
 
-@app.get("/api/command-center/files/{file_id}/download")
+@router.get("/api/command-center/files/{file_id}/download")
 def command_center_download_file(file_id: str):
     """Download a Hermes file as an attachment."""
     from hermes.operations.files_store import download_filename, get_file
@@ -435,7 +441,7 @@ class AskRequest(BaseModel):
     hub: str | None = None
 
 
-@app.post("/api/command-center/ask")
+@router.post("/api/command-center/ask")
 def command_center_ask(req: AskRequest):
     """Ask Hermes from the Command Center command bar (Phase 3).
 
@@ -479,7 +485,7 @@ def command_center_ask(req: AskRequest):
     }
 
 
-@app.get("/api/command-center/retention")
+@router.get("/api/command-center/retention")
 def command_center_retention():
     """Latest retention snapshot for the loud Retention card (Phase 2)."""
     supa = _get_supa()
@@ -500,7 +506,7 @@ class SaveListRequest(BaseModel):
     within_days: int = 60
 
 
-@app.post("/api/command-center/save-list")
+@router.post("/api/command-center/save-list")
 def command_center_build_save_list(req: SaveListRequest):
     """Build + stage a retention save-list (top at-risk renewals → DRAFT outreach).
 
@@ -511,7 +517,7 @@ def command_center_build_save_list(req: SaveListRequest):
     return create_save_list(_get_supa(), limit=req.limit, within_days=req.within_days)
 
 
-@app.get("/api/command-center/save-list")
+@router.get("/api/command-center/save-list")
 def command_center_list_save_list():
     """Open (DRAFT) outreach awaiting human review/send."""
     from hermes.operations.save_list import list_open_drafts
@@ -552,7 +558,7 @@ class OpportunityCreateRequest(BaseModel):
         return self
 
 
-@app.post("/api/opportunities")
+@router.post("/api/opportunities")
 def create_opportunity_endpoint(req: OpportunityCreateRequest, background_tasks: BackgroundTasks):
     """Create (or return existing) a pipeline opportunity for ANY client — new,
     inactive, or a cross-sell on a current client. Idempotent per
@@ -628,7 +634,7 @@ def create_opportunity_endpoint(req: OpportunityCreateRequest, background_tasks:
     return {"ok": True, "created": created, "opportunity": row}
 
 
-@app.get("/api/opportunities")
+@router.get("/api/opportunities")
 def list_opportunities_endpoint(stage: str | None = None, status: str | None = "open", limit: int = 100):
     """List pipeline opportunities (default open), newest-updated first.
 
@@ -682,7 +688,7 @@ class OpportunityUpdateRequest(BaseModel):
 _OPP_EDITABLE = set(OpportunityUpdateRequest.model_fields.keys())
 
 
-@app.patch("/api/opportunities/{opportunity_id}")
+@router.patch("/api/opportunities/{opportunity_id}")
 def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdateRequest):
     """Edit an opportunity's fields in the CRM. Supabase-only — an opportunity is
     worked in the CRM and does not write back to the AMS until it's Bound/Won or
@@ -738,7 +744,7 @@ def _duplicate_deal_detail(exc: Exception) -> str | None:
     return "A deal like this already exists for that client and line of business."
 
 
-@app.get("/api/opportunities/{opportunity_id}/events")
+@router.get("/api/opportunities/{opportunity_id}/events")
 def list_opportunity_events_endpoint(opportunity_id: str, limit: int = 200):
     """A deal's timeline — notes, stage moves, creation, AMS filings, newest first.
 
@@ -760,7 +766,7 @@ class OpportunityNoteRequest(BaseModel):
     author_email: str | None = None
 
 
-@app.post("/api/opportunities/{opportunity_id}/notes")
+@router.post("/api/opportunities/{opportunity_id}/notes")
 def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteRequest):
     """Write down what happened on a deal. Appended to the same timeline the stage
     moves land on, so one list answers "what happened here"."""
@@ -784,7 +790,7 @@ def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteReque
     return {"ok": True, "note": note}
 
 
-@app.delete("/api/opportunities/{opportunity_id}")
+@router.delete("/api/opportunities/{opportunity_id}")
 def delete_opportunity_endpoint(opportunity_id: str):
     """Delete an opportunity from the CRM. Supabase-only — opportunities never write
     to the AMS, so there's nothing to unwind in NowCerts. Any attached quotes are
@@ -817,7 +823,7 @@ def delete_opportunity_endpoint(opportunity_id: str):
 
 
 
-@app.get("/api/cross-sell")
+@router.get("/api/cross-sell")
 def cross_sell_search_endpoint(q: str = "", limit: int = 25):
     """Search active clients (canonical mirror) to pull one into the pipeline as a
     cross-sell. Returns each client's current LOBs + premium; opening the cross-sell
@@ -835,7 +841,7 @@ class SendQuoteRequest(BaseModel):
     approved_by: str
 
 
-@app.post("/api/opportunities/{opportunity_id}/send-to-nowcerts")
+@router.post("/api/opportunities/{opportunity_id}/send-to-nowcerts")
 def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
     """Approved push: enqueue this opportunity to NowCerts as a quote (Policy · IsQuote).
     Writes nothing synchronously — the quote executor completes it and stamps the
@@ -870,7 +876,7 @@ class StageUpdateRequest(BaseModel):
     moved_by: str | None = None
 
 
-@app.post("/api/opportunities/{opportunity_id}/stage")
+@router.post("/api/opportunities/{opportunity_id}/stage")
 def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest):
     """Move an opportunity to a new pipeline stage (Kanban drag). Syncs status
     (won/lost). The move itself is Supabase-only; when it lands on a terminal stage
@@ -976,7 +982,7 @@ async def _file_quote_pdf(supa, quote: dict[str, Any], upload: "UploadFile") -> 
         return {"document_warning": f"Quote saved, but the PDF could not be filed to Nextcloud: {exc}"}
 
 
-@app.post("/api/opportunities/{opportunity_id}/quotes")
+@router.post("/api/opportunities/{opportunity_id}/quotes")
 async def create_quote_endpoint(
     opportunity_id: str,
     file: UploadFile | None = File(None),
@@ -1011,7 +1017,7 @@ async def create_quote_endpoint(
     return {"ok": True, "quote": fresh, **(warn or {})}
 
 
-@app.get("/api/opportunities/{opportunity_id}/quotes")
+@router.get("/api/opportunities/{opportunity_id}/quotes")
 def list_opportunity_quotes_endpoint(opportunity_id: str):
     """Quotes attached to one opportunity (newest first)."""
     from hermes.quotes import store as quote_store
@@ -1020,7 +1026,7 @@ def list_opportunity_quotes_endpoint(opportunity_id: str):
     return {"quotes": rows, "count": len(rows)}
 
 
-@app.get("/api/quotes")
+@router.get("/api/quotes")
 def list_quotes_endpoint(insured_id: str | None = None, limit: int = 500):
     """All carrier quotes — the Quotes module (grouped by opportunity). Pass
     insured_id to get one client's quotes across their opportunities."""
@@ -1034,7 +1040,7 @@ def list_quotes_endpoint(insured_id: str | None = None, limit: int = 500):
     return {"quotes": rows, "count": len(rows)}
 
 
-@app.post("/api/quotes/{quote_id}/document")
+@router.post("/api/quotes/{quote_id}/document")
 async def attach_quote_document_endpoint(quote_id: str, file: UploadFile = File(...)):
     """Attach (or replace) the quote PDF on an existing quote."""
     from hermes.quotes import store as quote_store
@@ -1049,7 +1055,7 @@ async def attach_quote_document_endpoint(quote_id: str, file: UploadFile = File(
     return {"ok": True, "quote": quote_store.get_quote(supa, quote_id)}
 
 
-@app.post("/api/quotes/{quote_id}/send-to-nowcerts")
+@router.post("/api/quotes/{quote_id}/send-to-nowcerts")
 def send_quote_to_nowcerts(quote_id: str, req: SendQuoteRequest):
     """Approved push: enqueue this carrier quote to NowCerts (Policy · IsQuote).
     Writes nothing synchronously — the quote executor completes it and stamps the
@@ -1102,7 +1108,7 @@ class ProposalStatusRequest(BaseModel):
     status: str
 
 
-@app.post("/api/proposals")
+@router.post("/api/proposals")
 def create_proposal_endpoint(req: ProposalCreateRequest):
     """Create a proposal from selected carrier quotes, render it (LOB-grouped),
     and file it into the client's Nextcloud Proposals/ folder. fmt: html|pdf|both."""
@@ -1126,7 +1132,7 @@ def create_proposal_endpoint(req: ProposalCreateRequest):
     return {"ok": True, "proposal": result["proposal"], "warnings": result["warnings"]}
 
 
-@app.get("/api/proposals")
+@router.get("/api/proposals")
 def list_proposals_endpoint(insured_id: str | None = None, limit: int = 500):
     """All proposals (newest first), or one client's when insured_id is given."""
     from hermes.proposals import store as prop_store
@@ -1139,7 +1145,7 @@ def list_proposals_endpoint(insured_id: str | None = None, limit: int = 500):
     return {"proposals": rows, "count": len(rows)}
 
 
-@app.get("/api/proposals/{proposal_id}")
+@router.get("/api/proposals/{proposal_id}")
 def get_proposal_endpoint(proposal_id: str):
     from hermes.proposals import store as prop_store
 
@@ -1149,7 +1155,7 @@ def get_proposal_endpoint(proposal_id: str):
     return {"proposal": row}
 
 
-@app.get("/api/proposals/{proposal_id}/view", response_class=HTMLResponse)
+@router.get("/api/proposals/{proposal_id}/view", response_class=HTMLResponse)
 def view_proposal_endpoint(proposal_id: str):
     """The rendered proposal HTML — open in a tab or print to PDF from the browser."""
     from hermes.proposals import store as prop_store
@@ -1160,7 +1166,7 @@ def view_proposal_endpoint(proposal_id: str):
     return HTMLResponse(content=row.get("content_html") or "<p>Not yet rendered.</p>")
 
 
-@app.post("/api/proposals/{proposal_id}/regenerate")
+@router.post("/api/proposals/{proposal_id}/regenerate")
 def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerateRequest):
     """Re-render a proposal (picks up edited quotes/notes). fmt: html|pdf|both."""
     from hermes.proposals import documents as prop_docs
@@ -1178,7 +1184,7 @@ def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerateReques
     return {"ok": True, "proposal": result["proposal"], "warnings": result["warnings"]}
 
 
-@app.post("/api/proposals/{proposal_id}/status")
+@router.post("/api/proposals/{proposal_id}/status")
 def set_proposal_status_endpoint(proposal_id: str, req: ProposalStatusRequest):
     from hermes.proposals import store as prop_store
 
@@ -1186,7 +1192,7 @@ def set_proposal_status_endpoint(proposal_id: str, req: ProposalStatusRequest):
     return {"ok": True, "proposal": row}
 
 
-@app.get("/api/clients/search")
+@router.get("/api/clients/search")
 def search_clients_endpoint(q: str, limit: int = 20):
     """Search the canonical book by insured name — powers the New-Opportunity client
     picker (active OR inactive clients). Returns the NowCerts guid + display fields.
@@ -1231,7 +1237,7 @@ def _deck():
     return DeckClient()
 
 
-@app.get("/api/deck/boards")
+@router.get("/api/deck/boards")
 def deck_boards_endpoint():
     """Boards, and the stacks (lists) on each — what a caller needs to address a card."""
     from hermes.integrations.nextcloud_deck import DeckError
@@ -1263,7 +1269,7 @@ class DeckCardRequest(BaseModel):
     skip_if_exists: bool = True
 
 
-@app.post("/api/deck/cards")
+@router.post("/api/deck/cards")
 def deck_create_card_endpoint(req: DeckCardRequest):
     """Add a card. Idempotent by title within the list, so a job that runs twice
     doesn't leave two identical cards."""
@@ -1287,7 +1293,7 @@ def deck_create_card_endpoint(req: DeckCardRequest):
         raise HTTPException(status_code=502, detail=str(exc))
 
 
-@app.get("/api/agency-users")
+@router.get("/api/agency-users")
 def list_agency_users_endpoint(assignable: bool = False):
     """Active CRM users — powers owner/assignee pickers (valid FK targets).
 
@@ -1428,7 +1434,7 @@ class ClientOverrideRequest(BaseModel):
     reason: str | None = None
 
 
-@app.post("/api/clients/{insured_guid}/override")
+@router.post("/api/clients/{insured_guid}/override")
 def override_client_field(insured_guid: str, req: ClientOverrideRequest):
     """Correct a client field in the portal.
 
@@ -1516,7 +1522,7 @@ class PolicyOverrideRequest(BaseModel):
     reason: str | None = None
 
 
-@app.post("/api/policies/{policy_guid}/override")
+@router.post("/api/policies/{policy_guid}/override")
 def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
     """Correct a policy field in the portal. Keyed on the NowCerts policy GUID,
     so the correction survives a re-seed of the mirror. Not an AMS write."""
@@ -1626,7 +1632,7 @@ class PolicyCreateRequest(BaseModel):
     reason: str | None = None
 
 
-@app.post("/api/policies")
+@router.post("/api/policies")
 def create_policy_endpoint(req: PolicyCreateRequest):
     """Add a policy to a client, in NowCerts.
 
@@ -1678,7 +1684,7 @@ def create_policy_endpoint(req: PolicyCreateRequest):
     return {"ok": True, "policy": created, "sent": payload}
 
 
-@app.get("/api/ams/failed-pushes")
+@router.get("/api/ams/failed-pushes")
 def list_failed_pushes(limit: int = 50):
     """Corrections that never reached NowCerts.
 
@@ -1700,7 +1706,7 @@ class AmsRetryRequest(BaseModel):
     retried_by: str
 
 
-@app.post("/api/ams/failed-pushes/{queue_id}/retry")
+@router.post("/api/ams/failed-pushes/{queue_id}/retry")
 def retry_failed_push(queue_id: str, req: AmsRetryRequest):
     """Re-drive one failed push from its own queue row. Safe to repeat — both AMS
     endpoints upsert on DatabaseId."""
@@ -1714,7 +1720,7 @@ def retry_failed_push(queue_id: str, req: AmsRetryRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.post("/api/clients/{insured_guid}/push-to-ams")
+@router.post("/api/clients/{insured_guid}/push-to-ams")
 def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
     """Write a client's corrected fields to NowCerts, keyed on the insured GUID."""
     from hermes.ams.writeback import OBJECT_TYPE_CLIENT
@@ -1722,7 +1728,7 @@ def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
     return _ams_push(OBJECT_TYPE_CLIENT, insured_guid, req)
 
 
-@app.post("/api/policies/{policy_guid}/push-to-ams")
+@router.post("/api/policies/{policy_guid}/push-to-ams")
 def push_policy_to_ams(policy_guid: str, req: AmsPushRequest):
     """Write a policy's corrected fields to NowCerts, keyed on the policy GUID."""
     from hermes.ams.writeback import OBJECT_TYPE_POLICY
@@ -1730,7 +1736,7 @@ def push_policy_to_ams(policy_guid: str, req: AmsPushRequest):
     return _ams_push(OBJECT_TYPE_POLICY, policy_guid, req)
 
 
-@app.get("/api/clients")
+@router.get("/api/clients")
 def list_clients_endpoint(limit: int = 500):
     """Full canonical client book, with any portal corrections applied."""
     supa = _get_supa()
@@ -1742,7 +1748,7 @@ def list_clients_endpoint(limit: int = 500):
     return {"clients": _apply_client_overrides(supa, rows), "count": len(rows)}
 
 
-@app.get("/api/clients/{insured_guid}")
+@router.get("/api/clients/{insured_guid}")
 def client_360_endpoint(insured_guid: str):
     """Client 360 — the insured's record plus their whole book: policies,
     opportunities, and cases, keyed on the NowCerts insured GUID."""
@@ -1849,7 +1855,7 @@ def _collapse_to_current_terms(policies: list[dict[str, Any]]) -> tuple[list[dic
     return current, folded
 
 
-@app.get("/api/policies")
+@router.get("/api/policies")
 def list_policies_endpoint(limit: int = 1000, include_history: bool = False):
     """Canonical policy book (read-only mirror), soonest-expiring first.
 
@@ -1897,7 +1903,7 @@ def list_policies_endpoint(limit: int = 1000, include_history: bool = False):
 # Moved to hermes/routers/carriers.py and hermes/routers/renewals.py
 # (docs/repo-split-plan.md, Phase 2). Mounted at app creation.
 
-@app.get("/api/workspace-stats")
+@router.get("/api/workspace-stats")
 def workspace_stats_endpoint():
     """KPI tile counts for the Workspace home."""
     supa = _get_supa()
@@ -1929,7 +1935,7 @@ def workspace_stats_endpoint():
     }
 
 
-@app.get("/api/hermes/sync-health")
+@router.get("/api/hermes/sync-health")
 def sync_health():
     """Queue-centric health snapshot for dashboard SyncHealthCheck component.
 
@@ -1991,7 +1997,7 @@ def sync_health():
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/hermes/book-sync")
+@router.get("/api/hermes/book-sync")
 def book_sync_health(request: Request, max_pages: int = 50):
     """Drift report: policy counts, tombstones, per-carrier premium, rate drift.
 
@@ -2023,7 +2029,7 @@ def book_sync_health(request: Request, max_pages: int = 50):
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/ams/search-insured")
+@router.get("/api/ams/search-insured")
 def ams_search_insured(
     request: Request,
     name: str | None = None,
@@ -2103,7 +2109,7 @@ class DocumentSaveRequest(BaseModel):
     created_by: str | None = None
 
 
-@app.post("/api/documents/save")
+@router.post("/api/documents/save")
 def documents_save(req: DocumentSaveRequest):
     """Save a document to the library (Supermemory + Drive mirror + index).
 
@@ -2132,7 +2138,7 @@ def documents_save(req: DocumentSaveRequest):
     return row
 
 
-@app.get("/api/documents/folders")
+@router.get("/api/documents/folders")
 def documents_folders():
     """Folder tree for Agent OS: one entry per (space, name) with a count."""
     from hermes.documents.store import list_folders
@@ -2140,7 +2146,7 @@ def documents_folders():
     return {"folders": list_folders(_get_supa())}
 
 
-@app.get("/api/documents")
+@router.get("/api/documents")
 def documents_in_folder(space: str, name: str):
     """Documents in one folder. ``space`` is 'client' or 'internal';
     ``name`` is the account (client) or freeform folder (internal)."""
@@ -2151,7 +2157,7 @@ def documents_in_folder(space: str, name: str):
     return {"documents": list_documents(space=space, name=name, supa=_get_supa())}
 
 
-@app.get("/api/documents/{doc_id}")
+@router.get("/api/documents/{doc_id}")
 def document_detail(doc_id: str):
     """One document index row (title, preview, supermemory_id, …)."""
     from hermes.documents.store import get_document
@@ -2222,7 +2228,7 @@ def _validated_nextcloud_path(raw: str) -> str:
     return path
 
 
-@app.get("/api/nextcloud/folders")
+@router.get("/api/nextcloud/folders")
 def nextcloud_list_folder(path: str = ""):
     """List one real Nextcloud WebDAV folder, not the document index."""
     from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
@@ -2241,7 +2247,7 @@ def nextcloud_list_folder(path: str = ""):
     return {"path": clean, "exists": exists, "entries": entries}
 
 
-@app.post("/api/nextcloud/folders/ensure")
+@router.post("/api/nextcloud/folders/ensure")
 def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
     """Preview or idempotently create exact Nextcloud folder paths."""
     from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
@@ -2280,7 +2286,7 @@ def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
     return {"ok": True, "requires_confirmation": False, "results": results}
 
 
-@app.post("/api/nextcloud/upload")
+@router.post("/api/nextcloud/upload")
 def nextcloud_upload(req: NextcloudUploadRequest):
     """Upload one approved PDF into the standardized RSG client tree."""
     from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
@@ -2330,7 +2336,7 @@ def nextcloud_upload(req: NextcloudUploadRequest):
 
 
 
-@app.post("/agency-fact", response_model=AgencyFactResponse)
+@router.post("/agency-fact", response_model=AgencyFactResponse)
 def agency_fact(req: AgencyFactRequest):
     """Answer a structured fact-retrieval question with citation + confidence.
 
@@ -2391,7 +2397,7 @@ def agency_fact(req: AgencyFactRequest):
 
 
 
-@app.post("/command", response_model=DispatchResponse)
+@router.post("/command", response_model=DispatchResponse)
 async def command(req: DispatchRequest):
     """Compatibility alias for older clients."""
     return await dispatch(req)
@@ -2447,7 +2453,7 @@ async def _generate_tts_audio(text: str, voice: str) -> bytes | None:
         return None
 
 
-@app.post("/api/hermes/tts")
+@router.post("/api/hermes/tts")
 async def hermes_tts(req: TTSRequest, request: Request):
     """Generate a voice clip from text and return the audio.
 
@@ -2480,6 +2486,13 @@ async def hermes_tts(req: TTSRequest, request: Request):
 
 
 
+# Every hub route above is now defined; mount them. This goes last so the
+# relative order matches what it has always been — the domain routers were
+# included near the top of this file, and the hub's own routes were registered
+# after them as the module body ran.
+app.include_router(router)
+
+
 def main() -> int:
     load_dotenv()
     logging.basicConfig(level=os.environ.get("HERMES_API_LOG_LEVEL", "INFO"))
@@ -2492,9 +2505,30 @@ def main() -> int:
             "`docker compose up -d hermes-api` (restart does not reload env_file)."
         )
 
+    from hermes.services import ALL, SERVICES, create_app, current_service
+
     parser = argparse.ArgumentParser(description="Hermes private HTTP API")
     parser.add_argument("--host", default=os.environ.get("HERMES_API_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("HERMES_API_PORT", "8484")))
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument(
+        "--service",
+        default=current_service(),
+        choices=[ALL, *sorted(SERVICES)],
+        help="Which app this process serves. Defaults to HERMES_SERVICE, or "
+             "'all' — the whole API in one process, as it has always run. "
+             "Naming one app gives it its own event loop, threadpool and "
+             "restart, so it cannot be stalled or taken down by the others.",
+    )
     args = parser.parse_args()
-    uvicorn.run(app, host=args.host, port=args.port)
+
+    served = create_app(args.service)
+    # An explicit --port/HERMES_API_PORT wins; otherwise a named service uses
+    # its registered port, so two services cannot be started on the same one by
+    # forgetting a flag.
+    port = args.port or int(
+        os.environ.get("HERMES_API_PORT")
+        or (SERVICES[args.service].port if args.service != ALL else 8484)
+    )
+    log.info("serving %s on %s:%s", args.service, args.host, port)
+    uvicorn.run(served, host=args.host, port=port)
     return 0
