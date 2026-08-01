@@ -1,13 +1,21 @@
-"""Carriers — the appetite read.
+"""Carrier appetite — which carriers RSG can place a risk with.
 
-A single endpoint over `carrier_appetite`: which carriers RSG can place a risk
-with, filtered by carrier, state, line of business and NAICS.
+Served at `/api/carrier-appetite`, with `/api/carriers` kept as a deprecated
+alias. It queries the `carrier_appetite` table by carrier, state, line of
+business and NAICS, and it applies the rule that a row scoped `["ALL"]` is a
+nationwide appointment which must survive a state filter.
 
-Note there are TWO /api/carriers in the estate. This one is the Hermes read off
-Supabase; rsg-carrierhub serves its own on :3200/:8445 with a different shape.
-They are not interchangeable — check which one a caller means before changing
-either. This router is the natural thing to retire into carrierhub when that
-app takes the surface over (docs/repo-split-plan.md, extraction #2).
+This does NOT belong in rsg-carrierhub, despite the name, and the earlier plan
+to retire it there was wrong. carrierhub's `/api/carriers` returns the carrier
+DIRECTORY — the `carriers` table with nested contacts and appetite, unfiltered,
+for its own React app to map client-side. Different table, different shape, no
+filtering, different consumer. Repointing this endpoint's caller at carrierhub
+would silently drop every filter and the nationwide rule.
+
+Its consumer is the `carrier_appetite` MCP tool (deploy/mcp-bridge/app.py), and
+the same matching logic backs the agent's "who writes this?" answer via
+hermes/carriers.py — both of which live on this side. So it stays here, and the
+collision ends by naming rather than by moving.
 """
 
 from __future__ import annotations
@@ -23,7 +31,16 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/api/carriers")
+# Canonical path. This endpoint answers "which carriers write this risk?" — it
+# queries carrier_appetite with filters. carrierhub's /api/carriers is a
+# different thing: the carrier DIRECTORY (the carriers table with nested
+# contacts), unfiltered, feeding its own React app. Two endpoints, two shapes,
+# two consumers — they only ever collided on the path.
+#
+# /api/carriers is kept below as a deprecated alias so the MCP bridge keeps
+# working across a deploy where only one of the two containers has restarted.
+@router.get("/api/carrier-appetite")
+@router.get("/api/carriers", deprecated=True)
 def list_carrier_appetite(
     limit: int = 500,
     carrier: str | None = None,
