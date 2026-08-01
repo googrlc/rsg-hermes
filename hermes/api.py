@@ -2543,13 +2543,23 @@ def main() -> int:
     args = parser.parse_args()
 
     served = create_app(args.service)
-    # An explicit --port/HERMES_API_PORT wins; otherwise a named service uses
-    # its registered port, so two services cannot be started on the same one by
-    # forgetting a flag.
-    port = args.port or int(
-        os.environ.get("HERMES_API_PORT")
-        or (SERVICES[args.service].port if args.service != ALL else 8484)
-    )
+    # Port precedence: an explicit --port always wins. After that a NAMED service
+    # uses its registered port, ahead of HERMES_API_PORT.
+    #
+    # That ordering is the whole point. The services share one .env on the box,
+    # and it sets HERMES_API_PORT. Letting the env var outrank the registry made
+    # all five services bind the same port — the exact collision the registry
+    # exists to prevent, and it only showed up on deploy because nothing in the
+    # test suite runs main() against a populated environment.
+    #
+    # HERMES_API_PORT still applies to the unsplit app, which has no registered
+    # port of its own.
+    if args.port:
+        port = args.port
+    elif args.service != ALL:
+        port = SERVICES[args.service].port
+    else:
+        port = int(os.environ.get("HERMES_API_PORT") or 8484)
     log.info("serving %s on %s:%s", args.service, args.host, port)
     uvicorn.run(served, host=args.host, port=port)
     return 0
