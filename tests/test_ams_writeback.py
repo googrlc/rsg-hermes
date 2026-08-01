@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from hermes import api
 from hermes.ams import writeback
+from hermes.routers import deps
 
 GUID = "bfe42b77-b1a8-4729-aa10-af8494d05a9b"
 POLICY = "6f1c2d84-3b90-4f5e-9a21-0c7ad3e51b44"
@@ -160,9 +161,9 @@ def test_the_push_is_audited(supa):
 
 @pytest.fixture
 def client(monkeypatch, supa):
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
-    monkeypatch.setattr(api, "_require_users", lambda *a, **k: None)
-    monkeypatch.setattr(api, "_get_nowcerts", lambda: _nowcerts([{"id": GUID, "city": "Atlanta"}]))
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "require_users", lambda *a, **k: None)
+    monkeypatch.setattr(deps, "get_nowcerts", lambda: _nowcerts([{"id": GUID, "city": "Atlanta"}]))
     return TestClient(api.app)
 
 
@@ -189,7 +190,7 @@ def test_a_push_needs_a_named_approver(client):
 
 def test_a_policy_is_created_against_a_confirmed_insured(client, monkeypatch):
     nc = _nowcerts([{"id": GUID}])
-    monkeypatch.setattr(api, "_get_nowcerts", lambda: nc)
+    monkeypatch.setattr(deps, "get_nowcerts", lambda: nc)
     r = client.post("/api/policies", json={
         "insured_id": GUID, "policy_number": "CPP-9001", "carrier": "Travelers",
         "premium_amount": 4200, "approved_by": LAMAR})
@@ -202,7 +203,7 @@ def test_a_policy_is_created_against_a_confirmed_insured(client, monkeypatch):
 def test_a_policy_against_an_unknown_insured_is_refused(client, monkeypatch):
     """A typo'd insured id would otherwise spawn an orphan policy."""
     nc = _nowcerts([])
-    monkeypatch.setattr(api, "_get_nowcerts", lambda: nc)
+    monkeypatch.setattr(deps, "get_nowcerts", lambda: nc)
     r = client.post("/api/policies", json={
         "insured_id": GUID, "policy_number": "CPP-9001", "approved_by": LAMAR})
     assert r.status_code == 404

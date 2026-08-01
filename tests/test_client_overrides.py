@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes import api
+from hermes.routers import deps
 
 GUID = "bfe42b77-b1a8-4729-aa10-af8494d05a9b"
 CLIENT = {
@@ -26,8 +27,8 @@ CLIENT = {
 def client_and_supa(monkeypatch):
     supa = MagicMock()
     supa.select.return_value = [dict(CLIENT)]
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
-    monkeypatch.setattr(api, "_require_users", lambda *a, **k: None)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "require_users", lambda *a, **k: None)
     return TestClient(api.app), supa
 
 
@@ -78,7 +79,7 @@ def test_corrections_are_applied_when_the_book_is_read(monkeypatch):
 
     supa = MagicMock()
     supa.select.return_value = [dict(CLIENT)]
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
     ov = Override(entity_type=api.CLIENT_ENTITY_TYPE, entity_key=GUID,
                   field_name="phone", override_value="404-555-0101",
                   original_value=None, status="active")

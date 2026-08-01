@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes import api
+from hermes.routers import deps
 
 GUID = "6f1c2d84-3b90-4f5e-9a21-0c7ad3e51b44"
 INSURED = "bfe42b77-b1a8-4729-aa10-af8494d05a9b"
@@ -29,8 +30,8 @@ POLICY = {
 @pytest.fixture
 def client_and_supa(monkeypatch):
     supa = MagicMock()
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
-    monkeypatch.setattr(api, "_require_users", lambda *a, **k: None)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "require_users", lambda *a, **k: None)
     monkeypatch.setattr(api.ams_book, "select_policies",
                         lambda *a, **k: [dict(POLICY)])
     return TestClient(api.app), supa
@@ -110,7 +111,7 @@ def test_a_corrected_date_is_in_effect_before_the_terms_are_ranked(monkeypatch):
     supa.select.return_value = []
     other = dict(POLICY, policy_guid="a" * 36, policy_number="CA-88120",
                  lines_of_business="Commercial Auto", expiration_date="2026-06-01")
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
     monkeypatch.setattr(api.ams_book, "select_policies",
                         lambda *a, **k: [dict(POLICY), other])
     ov = Override(entity_type=api.POLICY_ENTITY_TYPE, entity_key=GUID,

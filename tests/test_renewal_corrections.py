@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from hermes import api
 from hermes.renewals import corrections as corr
+from hermes.routers import deps
 
 REN_ID = "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f"
 CAND_ID = "aa11bb22-cc33-4d44-8e55-f66677778888"
@@ -32,8 +33,8 @@ CANDIDATE = {"id": CAND_ID, "insured_id": "guid-1", "policy_lineage_id": "guid-1
 @pytest.fixture
 def c_supa(monkeypatch):
     supa = MagicMock()
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
-    monkeypatch.setattr(api, "_require_users", lambda *a, **k: None)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "require_users", lambda *a, **k: None)
     return TestClient(api.app), supa
 
 
@@ -238,7 +239,7 @@ def test_the_cockpit_list_shows_corrections_and_hides_removals(c_supa, monkeypat
                 corr_override("GONE-1", "dismissed", True),
         },
     )
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
     body = c.get("/api/command-center/renewals").json()
     listed = body.get("upcoming") or body.get("renewals") or []
     numbers = {r.get("policy_number") for r in listed}

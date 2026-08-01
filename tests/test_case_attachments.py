@@ -15,6 +15,7 @@ import io
 
 import pytest
 from fastapi.testclient import TestClient
+from hermes.routers import deps
 
 
 CASE = {
@@ -74,7 +75,7 @@ def client(monkeypatch):
     import hermes.api as api_mod
     import hermes.integrations.nextcloud_client as nc_mod
 
-    monkeypatch.setattr(api_mod, "_get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
     monkeypatch.setattr(nc_mod, "NextcloudClient", FakeNextcloud)
     return TestClient(api_mod.app), supa
 
