@@ -90,19 +90,54 @@ Every domain repo depends on this; it depends on no domain.
 - Queue contract: `queue_types` — object types, destinations, `due_filter`
 - Shared write surface: `overrides` (`portal_overrides`)
 
-### Domain repos, in extraction order
+### Domain targets — four of six go to repos that already exist
 
-Order is by measured coupling — cheapest and safest first. Route counts are from
-the 118 in `api.py`.
+**Do not create `rsg-hermes-finance` / `-carriers` / `-intake` / `-crm`.** Those
+apps already have repos. A parallel `rsg-hermes-*` set would mean two repos per
+app, which is the opposite of the goal. Only cases and renewals have no home.
 
-| # | Repo | Owns | Routes | Coupling |
-|---|---|---|---|---|
-| 1 | `rsg-hermes-finance` | `commissions/*`, `jobs/commission_*`, `sync/commission_sync` | 12 | Outbound only (`ams`, `core`, `overrides`); 1 inbound. Nearly free. |
-| 2 | carriers → fold into `rsg-carrierhub` | `carriers.py` (68 lines) | 1 | carrierhub already owns the real surface. Mostly a deletion. |
-| 3 | `rsg-hermes-cases` | `casework/*` | 21 | Shares `/api/tasks` with renewals — see open question below. |
-| 4 | `rsg-hermes-intake` | `intake/*`, `command_center/{extract,ocr,quote_extract,synthesis,intake_executor,submission,validators,review,router}`, `operations/intake_worker` | 13 | `sync.opportunity_*` imports `intake.opportunities` 6× — that module is CRM pipeline code misfiled under intake; move it to the hub first. |
-| 5 | `rsg-hermes-renewals` | `renewals/*`, `operations/renewal_tracker` | 6+ | Most central: 21 inbound edges. Extract last. |
-| — | `rsg-hermes` (stays) | the hub: `api.py` shell, clients/opportunities/quotes/policies/documents/deck, `ams`, `sync`, `book_sync`, `scheduler`, `agent`, `commands`, `proposals` | ~65 | This is the remainder, not an extraction. |
+Order is by measured coupling — cheapest and safest first. Route counts are the
+routers built in Phase 2.
+
+| # | Router | Target repo | Owns | Routes | Coupling |
+|---|---|---|---|---|---|
+| 1 | `routers/finance.py` | **`rsg-commission-tracker`** (exists) | `commissions/*`, `jobs/commission_*`, `sync/commission_sync` | 12 | Outbound only (`ams`, `core`, `overrides`); 1 inbound. Nearly free. |
+| 2 | `routers/carriers.py` | **`rsg-carrierhub`** (exists) | `carriers.py` (68 lines) | 1 | carrierhub already serves its own `/api/carriers`. Mostly a deletion — see the collision note below. |
+| 3 | `routers/cases.py` | **new** — no existing repo | `casework/*` + the generic half of `renewals/cases.py` | 21 | Blocked on the `renewals/cases.py` split below. |
+| 4 | `routers/intake.py` | **`rsg-cptintake`** (exists) | `intake/*`, `command_center/{extract,ocr,quote_extract,synthesis,intake_executor,submission,validators,review,router}`, `operations/intake_worker` | 13 | `sync.opportunity_*` imports `intake.opportunities` 6× — CRM pipeline code misfiled under intake; move it to the hub first. |
+| 5 | `routers/renewals.py` | **new** — no existing repo | `renewals/*`, `operations/renewal_tracker` | 6 | Most central. Extract last. |
+| — | `api.py` (stays) | `rsg-hermes` + **`rsg-agency-portal`** for the UI | the hub: app shell, clients/opportunities/quotes/policies/documents/deck, `ams`, `sync`, `book_sync`, `scheduler`, `agent`, `commands`, `proposals` | 65 | The remainder, not an extraction. |
+
+Related repos that are not split targets: `rsg-infrastructure` (deploy/infra) and
+`rsg-obsidian-vault` (notes).
+
+#### Two naming collisions to fix before consolidating
+
+- **`/api/intake` vs `/api/intakes`.** `rsg-cptintake` is the NowCerts
+  *submission gateway* (`rsg-intake-gate`, an MCP/AMS relay with its own operator
+  UI) and owns `/api/intakes/*` and `/api/intake/documents`. `routers/intake.py`
+  is the *CRM intake desk* — leads, the intake queue, agency-intake drafting.
+  The portal routes between the two backends on that single trailing "s"
+  (`rsg-agency-portal/server.js`). Fix the naming before merging them.
+- **Two `/api/carriers`.** Hermes serves one off Supabase; carrierhub serves
+  another on :3200/:8445 with a different shape. They are not interchangeable.
+
+#### The polyglot question (decide before extraction #1)
+
+`rsg-commission-tracker`, `rsg-carrierhub` and `rsg-agency-portal` are Node/TS
+front ends. The routers are Python/FastAPI. Moving a router into one of those
+repos makes it polyglot — two toolchains, two Dockerfiles, one repo. Only
+`rsg-cptintake` is already Python. Three ways to go:
+
+1. **Polyglot app repos.** Each app repo holds its UI *and* its Python backend.
+   Truly one repo per app; costs two toolchains per repo.
+2. **Backends stay in `rsg-hermes`.** App repos remain front-end only. Cheapest,
+   but "one repo per app" stays half-true — which is roughly today.
+3. **Split by runtime.** Extract Python backends only where the target is
+   already Python (intake → cptintake), leave the rest mounted in the hub.
+
+This is a real fork and it is not mine to pick. Nothing in Phase 2 depends on
+it — the routers are the same either way.
 
 ## Phases
 

@@ -13,7 +13,6 @@ app takes the surface over (docs/repo-split-plan.md, extraction #2).
 from __future__ import annotations
 
 import logging
-import re
 
 from fastapi import APIRouter
 
