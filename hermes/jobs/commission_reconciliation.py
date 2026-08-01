@@ -11,8 +11,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.slack_notifier import SlackNotifier, SlackNotifierError
 
 
 @dataclass

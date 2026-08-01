@@ -32,7 +32,7 @@ from hermes.renewals.executor import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 
 def _utcnow_iso() -> str:

@@ -301,11 +301,11 @@ def run_commission_sync(
 
     # Portal corrections: retire the ones the AMS has caught up to, flag the ones
     # where it moved somewhere unexpected. Never silently discard a correction —
-    # see hermes.overrides.core for why the third branch is a conflict, not a
+    # see hermes_core.overrides.core for why the third branch is a conflict, not a
     # retirement. Best-effort: an override hiccup must not fail the seed.
     try:
         from hermes.commissions.surface import OVERRIDABLE_FIELDS
-        from hermes.overrides.store import reconcile_overrides
+        from hermes_core.overrides.store import reconcile_overrides
 
         ledger_now = {
             str(r.get("policy_number") or "").strip(): r

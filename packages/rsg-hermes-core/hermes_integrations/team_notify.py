@@ -109,7 +109,7 @@ class TeamNotifier:
             )
         message = render_blocks_to_markdown(text, blocks)
         try:
-            from hermes.integrations.nextcloud_client import NextcloudClient
+            from hermes_integrations.nextcloud_client import NextcloudClient
 
             NextcloudClient().post_talk_message(room, message)
         except Exception as exc:  # noqa: BLE001

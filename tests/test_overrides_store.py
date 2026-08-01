@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from hermes.overrides import core, store
+from hermes_core.overrides import core, store
 
 E = "commission_ledger"
 

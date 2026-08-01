@@ -1,0 +1,143 @@
+# One container per app — the split deployment.
+#
+# OPT-IN. A plain `docker compose up -d` does not read this file, so the box
+# keeps running the single `hermes-api` container serving all 140 routes. Start
+# the split explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml \
+#     --profile services up -d --build
+#
+# Why bother: until now every app shared one uvicorn worker, so a slow NowCerts
+# call in renewals stalled finance, a bad deploy took all six down together, and
+# a traceback in the log could have come from any of them. Declaring the sync
+# handlers `def` (see tests/test_event_loop_not_blocked.py) stopped an app
+# freezing itself. This stops one app freezing the others: separate process,
+# separate event loop and threadpool, separate restart, separate log stream.
+#
+# THE ONE RULE: do not run hermes-api and these at the same time against the
+# same traffic, and do not run hermes-scheduler alongside the per-service
+# workers. The unsplit scheduler claims every object_type, so it would race the
+# per-service workers for the same queue rows. Pick one shape.
+#
+# Ports are declared once, in hermes/services.py — the SERVICES registry is the
+# source of truth and tests/test_services.py asserts no two services claim the
+# same route or prefix. The ports below must match it.
+#
+# Routing: whatever sits in front (nginx on the box, or the portal's proxy)
+# sends each prefix to its service. `spec.path_prefixes` in the registry is that
+# contract; the hub is the default backend for everything unclaimed.
+#
+#   /api/commissions,/api/commission-rules,/api/commission-statements -> 8801
+#   /api/cases,/api/case-templates,/api/casework,/api/tasks,/api/queue -> 8802
+#   /api/intake,/api/leads,/api/pipeline,/agency-intake,/api/extract   -> 8803
+#   /api/renewals                                                      -> 8804
+#   /api/carriers                                                      -> 8805
+#   everything else                                                    -> 8787
+
+x-hermes-service: &hermes-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  volumes:
+    - hermes-state:/var/lib/hermes
+  restart: unless-stopped
+  profiles: ["services"]
+  networks:
+    - hermes-shared
+
+services:
+  hermes-hub:
+    <<: *hermes-service
+    container_name: rsg-hermes-hub
+    environment:
+      HERMES_SERVICE: hub
+    ports:
+      - "8787:8787"
+    command: ["hermes-api", "--host", "0.0.0.0", "--service", "hub"]
+
+  hermes-finance:
+    <<: *hermes-service
+    container_name: rsg-hermes-finance
+    environment:
+      HERMES_SERVICE: finance
+    ports:
+      - "8801:8801"
+    command: ["hermes-api", "--host", "0.0.0.0", "--service", "finance"]
+
+  hermes-cases:
+    <<: *hermes-service
+    container_name: rsg-hermes-cases
+    environment:
+      HERMES_SERVICE: cases
+    ports:
+      - "8802:8802"
+    command: ["hermes-api", "--host", "0.0.0.0", "--service", "cases"]
+
+  hermes-intake:
+    <<: *hermes-service
+    container_name: rsg-hermes-intake
+    environment:
+      HERMES_SERVICE: intake
+    ports:
+      - "8803:8803"
+    command: ["hermes-api", "--host", "0.0.0.0", "--service", "intake"]
+
+  hermes-renewals:
+    <<: *hermes-service
+    container_name: rsg-hermes-renewals
+    environment:
+      HERMES_SERVICE: renewals
+    ports:
+      - "8804:8804"
+    command: ["hermes-api", "--host", "0.0.0.0", "--service", "renewals"]
+
+  hermes-carriers:
+    <<: *hermes-service
+    container_name: rsg-hermes-carriers
+    environment:
+      HERMES_SERVICE: carriers
+    ports:
+      - "8805:8805"
+    command: ["hermes-api", "--host", "0.0.0.0", "--service", "carriers"]
+
+  # ── Per-service workers ────────────────────────────────────────────────────
+  # Each drains ONLY its own object_types, under a lock named for its service,
+  # so a stuck renewal executor no longer holds the lease that casework needs.
+  # Only the four services with queue work get one; finance and carriers have
+  # none (their sync is a cron job, not a queue).
+  #
+  # Disabled two ways, exactly like the unsplit scheduler: the "workers" profile
+  # AND SCHEDULER_ENABLED. Starting the split API does not start the workers.
+  hermes-renewals-worker:
+    <<: *hermes-service
+    container_name: rsg-hermes-renewals-worker
+    profiles: ["workers"]
+    stop_grace_period: 60s
+    command: ["hermes", "--run-scheduler", "--scheduler-service", "renewals",
+              "--scheduler-interval", "300", "--scheduler-batch", "10"]
+
+  hermes-intake-worker-svc:
+    <<: *hermes-service
+    container_name: rsg-hermes-intake-worker-svc
+    profiles: ["workers"]
+    stop_grace_period: 60s
+    command: ["hermes", "--run-scheduler", "--scheduler-service", "intake",
+              "--scheduler-interval", "300", "--scheduler-batch", "10"]
+
+  hermes-cases-worker:
+    <<: *hermes-service
+    container_name: rsg-hermes-cases-worker
+    profiles: ["workers"]
+    stop_grace_period: 60s
+    command: ["hermes", "--run-scheduler", "--scheduler-service", "cases",
+              "--scheduler-interval", "300", "--scheduler-batch", "10"]
+
+  hermes-hub-worker:
+    <<: *hermes-service
+    container_name: rsg-hermes-hub-worker
+    profiles: ["workers"]
+    stop_grace_period: 60s
+    command: ["hermes", "--run-scheduler", "--scheduler-service", "hub",
+              "--scheduler-interval", "300", "--scheduler-batch", "10"]

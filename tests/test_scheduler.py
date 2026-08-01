@@ -101,7 +101,7 @@ def _nowcerts_group(**overrides):
         "opportunity_writeback": "hermes.sync.opportunity_writeback.run_opportunity_writeback_executor",
     }
     with ExitStack() as stack:
-        stack.enter_context(patch("hermes.sync.nowcerts_client.NowCertsClient"))
+        stack.enter_context(patch("hermes_integrations.nowcerts_client.NowCertsClient"))
         yield {
             name: stack.enter_context(
                 patch(target, return_value=overrides.get(name, dict(clean)))
@@ -168,7 +168,7 @@ def test_missing_nowcerts_credentials_does_not_hide_renewal_problems():
     supa.select.return_value = []
     with patch("hermes.renewals.executor.run_executor", return_value={"failed": 3}), \
          patch("hermes.intake.executor.run_intake_executor", return_value={"failed": 0}), \
-         patch("hermes.sync.nowcerts_client.NowCertsClient", side_effect=RuntimeError("no creds")), \
+         patch("hermes_integrations.nowcerts_client.NowCertsClient", side_effect=RuntimeError("no creds")), \
          patch("hermes.scheduler.runner._alert") as alert:
         m = run_one_cycle(supa, lock=_lock())
     assert any("NowCerts executors aborted" in p for p in m["problems"])

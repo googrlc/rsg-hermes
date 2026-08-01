@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 log = logging.getLogger(__name__)
 

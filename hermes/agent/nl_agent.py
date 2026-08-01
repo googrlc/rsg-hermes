@@ -13,7 +13,7 @@ import os
 import re
 from typing import Any
 
-from hermes.core.dispatcher import DispatchResult
+from hermes_core.dispatch import DispatchResult
 
 from hermes import carriers as _carriers
 from hermes.ams import book as ams_book
@@ -479,7 +479,7 @@ def _compose_system_prompt(persona_key: str | None = None) -> str:
     the built-in default. The shared platform guide (tools, field aliases,
     write-safety) is always appended so capabilities/guardrails never change.
     """
-    from hermes.core.identity import load_named_persona, load_persona
+    from hermes_core.identity import load_named_persona, load_persona
 
     persona = ""
     if persona_key:
@@ -512,7 +512,7 @@ def _exec_report(args: dict[str, Any]) -> DispatchResult:
 
 
 def _exec_list_skills(args: dict[str, Any]) -> DispatchResult:
-    from hermes.operations.skills_catalog import render_text
+    from hermes.agent.skills_catalog import render_text
 
     return DispatchResult(True, render_text())
 
@@ -527,7 +527,7 @@ def _exec_web_research(args: dict[str, Any]) -> DispatchResult:
 
 
 def _exec_renewals(args: dict[str, Any]) -> DispatchResult:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
     from hermes.operations.command_center_qa import renewals_facts
 
     scope = args.get("scope", "upcoming")
@@ -541,7 +541,7 @@ def _exec_renewals(args: dict[str, Any]) -> DispatchResult:
 
 def _exec_list_carriers(args: dict[str, Any]) -> DispatchResult:
     """Carrier hub tool — list carriers from the Supabase carrier book (read-only)."""
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     try:
         supa = SupabaseClient()
@@ -618,7 +618,7 @@ def _exec_lookup_class_code(args: dict[str, Any]) -> DispatchResult:
     a code, this answers what the code IS. A correctly classified risk on a carrier
     with no appetite is still a dead submission, and vice versa.
     """
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     query = (args.get("query") or "").strip()
     system = (args.get("code_system") or "").strip().lower()
@@ -702,7 +702,7 @@ def _exec_appointments_by_line(args: dict[str, Any]) -> DispatchResult:
     """Carrier hub tool — the panel inverted: for each line of business, which
     carriers RSG can actually place it with. "Who can write this?" is usually a
     question about the appointment list, not about one carrier."""
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     try:
         supa = SupabaseClient()
@@ -751,7 +751,7 @@ def _exec_appointments_by_line(args: dict[str, Any]) -> DispatchResult:
 
 def _exec_carrier_appetite(args: dict[str, Any]) -> DispatchResult:
     """Carrier hub tool — match carriers to a risk via the carrier_appetite table."""
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     try:
         supa = SupabaseClient()
@@ -881,7 +881,7 @@ def _exec_commission_summary(args: dict[str, Any]) -> DispatchResult:
     """Commissions hub tool — expected vs received vs outstanding from commission_ledger."""
     from collections import Counter
 
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     try:
         supa = SupabaseClient()
@@ -916,7 +916,7 @@ def _exec_commission_summary(args: dict[str, Any]) -> DispatchResult:
 
 def _exec_commission_shortfalls(args: dict[str, Any]) -> DispatchResult:
     """Commissions hub tool — the specific underpaid/missing-statement policies RSG is chasing."""
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     try:
         supa = SupabaseClient()
@@ -958,7 +958,7 @@ def _exec_commission_shortfalls(args: dict[str, Any]) -> DispatchResult:
 
 def _exec_find_client(args: dict[str, Any]) -> DispatchResult:
     """CRM hub tool — search the canonical client book (Supabase, NowCerts-sourced)."""
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     q = (args.get("query") or "").strip()
     if not q:
@@ -988,7 +988,7 @@ def _exec_find_client(args: dict[str, Any]) -> DispatchResult:
 
 def _exec_client_policies(args: dict[str, Any]) -> DispatchResult:
     """CRM hub tool — a client's policies from the canonical book (Supabase)."""
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     who = (args.get("client") or "").strip()
     if not who:
@@ -1044,7 +1044,7 @@ def _exec_ams_snapshot(args: dict[str, Any]) -> DispatchResult:
     if not who:
         return DispatchResult(False, "Tell me which client to pull from the AMS.")
     try:
-        from hermes.sync.nowcerts_client import NowCertsClient
+        from hermes_integrations.nowcerts_client import NowCertsClient
         nc = NowCertsClient()
     except Exception as exc:  # noqa: BLE001
         return DispatchResult(False, f"AMS (NowCerts) unavailable: {exc}")
@@ -1105,7 +1105,7 @@ def _exec_crm_activity(args: dict[str, Any]) -> DispatchResult:
     who = (args.get("client") or "").strip()
     if not who:
         return DispatchResult(False, "Tell me which client.")
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     try:
         supa = SupabaseClient()
@@ -1162,7 +1162,7 @@ def _exec_client_documents(args: dict[str, Any]) -> DispatchResult:
     who = (args.get("client") or "").strip()
     if not who:
         return DispatchResult(False, "Which client's documents?")
-    from hermes.integrations.nextcloud_client import NextcloudClient, _sanitize_segment
+    from hermes_integrations.nextcloud_client import NextcloudClient, _sanitize_segment
 
     nc = NextcloudClient()
     if not nc.is_configured():
@@ -1232,7 +1232,7 @@ def _exec_client_documents(args: dict[str, Any]) -> DispatchResult:
 
 def _exec_list_intake(args: dict[str, Any]) -> DispatchResult:
     """Intake hub tool — the intake submission queue and its statuses (Supabase)."""
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     try:
         supa = SupabaseClient()
@@ -1266,7 +1266,7 @@ def _exec_intake(args: dict[str, Any], *, confirmed: bool = False) -> DispatchRe
             {"requires_confirmation": True, "action": "intake", "raw_text": raw_text},
         )
     from hermes.commands.agency_intake import handle as intake_handle
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     try:
         supa = SupabaseClient()
@@ -1296,7 +1296,7 @@ def _exec_email_search(args: dict[str, Any]) -> DispatchResult:
         return DispatchResult(False, "No mailbox is connected (set HERMES_ASK_MAILBOX or MS365_MAILBOXES). Email search is unavailable.")
 
     try:
-        from hermes.integrations.ms365_client import MS365Client
+        from hermes_integrations.ms365_client import MS365Client
 
         since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         msgs = MS365Client().list_inbox_messages(mailbox, since_iso=since, top=50)
@@ -1447,7 +1447,7 @@ def _get_report_dispatcher() -> Any:
     """Return a cached Dispatcher(use_openai=False) for running reports."""
     global _report_dispatcher
     if _report_dispatcher is None:
-        from hermes.core.dispatcher import Dispatcher
+        from hermes.agent.dispatcher import Dispatcher
         _report_dispatcher = Dispatcher(use_openai=False)
     return _report_dispatcher
 
@@ -1474,7 +1474,7 @@ def ask(
     Returns:
         DispatchResult with the agent's response.
     """
-    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+    from hermes_core.llm_client import get_client, resolve_model, LLMConfigError
 
     try:
         oai = get_client()

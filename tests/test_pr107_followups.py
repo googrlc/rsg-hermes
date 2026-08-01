@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from hermes.commands.renewal_worksheet import _candidates_by_name, escape_ilike
-from hermes.core.dispatcher import Dispatcher
+from hermes.agent.dispatcher import Dispatcher
 from hermes.operations import intake_worker as w
 
 
@@ -47,7 +47,7 @@ def test_no_success_log_after_failed_completion_transition():
          patch("hermes.intake.commit.commit_draft",
                return_value={"opportunities": [], "opportunity_count": 0,
                              "intake_job_id": "j", "nextcloud_folder": None}), \
-         patch("hermes.integrations.intake_submissions.transition", side_effect=_transition), \
+         patch("hermes.intake.submissions.transition", side_effect=_transition), \
          patch("hermes.operations.agency_intake_approval._insert_retrieval_rows", return_value={}), \
          patch.object(w, "_safe_transition_to_failed") as stf, \
          patch.object(w, "log") as logm:
@@ -62,7 +62,7 @@ def test_no_success_log_after_failed_completion_transition():
 
 def test_shared_nowcerts_created_once_and_reused():
     d = Dispatcher(use_openai=False)
-    with patch("hermes.sync.nowcerts_client.NowCertsClient") as NC:
+    with patch("hermes_integrations.nowcerts_client.NowCertsClient") as NC:
         sentinel = object()
         NC.return_value = sentinel
         a = d._get_shared_nowcerts()
@@ -73,8 +73,8 @@ def test_shared_nowcerts_created_once_and_reused():
 
 def test_shared_nowcerts_failure_not_cached():
     d = Dispatcher(use_openai=False)
-    with patch("hermes.sync.nowcerts_client.NowCertsClient", side_effect=RuntimeError("no creds")):
+    with patch("hermes_integrations.nowcerts_client.NowCertsClient", side_effect=RuntimeError("no creds")):
         assert d._get_shared_nowcerts() is None
-    with patch("hermes.sync.nowcerts_client.NowCertsClient") as NC:
+    with patch("hermes_integrations.nowcerts_client.NowCertsClient") as NC:
         NC.return_value = object()
         assert d._get_shared_nowcerts() is not None  # retried, not stuck on None

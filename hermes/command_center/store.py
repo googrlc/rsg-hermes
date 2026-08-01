@@ -25,7 +25,7 @@ def _now_iso() -> str:
 # ---- submissions ---------------------------------------------------------
 
 def create_submission(supa, *, lane: str, client_name: str, created_by: str = "gretchen") -> dict:
-    from hermes.core.identity import agent_id
+    from hermes_core.identity import agent_id
 
     row = supa.insert(SUBMISSIONS, {
         "lane": lane,

@@ -83,7 +83,7 @@ _SYSTEM_PROMPT = (
 
 def _llm_classify(sender: str, subject: str, preview: str) -> Classification | None:
     """Ask the configured OpenAI model. Returns None if unavailable/errored."""
-    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+    from hermes_core.llm_client import get_client, resolve_model, LLMConfigError
 
     try:
         client = get_client()

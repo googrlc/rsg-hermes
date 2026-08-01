@@ -16,13 +16,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from hermes.commands.renewal_cases import _resolve_or_error
-from hermes.core.dispatcher import DispatchResult
+from hermes_core.dispatch import DispatchResult
 from hermes.renewals import cases, pdf, resolve
 
 if TYPE_CHECKING:
-    from hermes.integrations.nextcloud_client import NextcloudClient
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes_integrations.nextcloud_client import NextcloudClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 
 def generate_pdf_handle(
@@ -51,7 +51,7 @@ def generate_pdf_handle(
 
     nc = nextcloud
     if nc is None:
-        from hermes.integrations.nextcloud_client import NextcloudClient
+        from hermes_integrations.nextcloud_client import NextcloudClient
 
         nc = NextcloudClient()
 

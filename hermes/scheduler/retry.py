@@ -18,20 +18,20 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.intake.commit import OBJECT_TYPE_INTAKE
-from hermes.casework.executor import OBJECT_TYPE_CASE, OBJECT_TYPE_TASK
-from hermes.command_center.router import OBJECT_TYPE_AMS as OBJECT_TYPE_INTAKE_AMS, OBJECT_TYPE_CRM
-from hermes.quotes.executor import OBJECT_TYPE_QUOTE
-from hermes.renewals.executor import (
-    DESTINATION_CRM,
-    DESTINATION_NOWCERTS,
-    OBJECT_TYPE_RENEWAL,
+from hermes_core.queue import (
+    BACKED_OFF_DESTINATIONS,
+    BACKED_OFF_OBJECT_TYPES,
+    QUEUE_DEAD,
+    QUEUE_FAILED,
+    QUEUE_PROCESSING,
+    QUEUE_QUEUED,
     QUEUE_TABLE,
+    due_filter,
+    utcnow as _utcnow,
 )
-from hermes.sync.opportunity_writeback import OBJECT_TYPE as OBJECT_TYPE_OPPORTUNITY_WRITEBACK
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
@@ -41,64 +41,17 @@ BACKOFF_CAP_SECONDS = 3600
 BACKOFF_FACTOR = 2
 STALLED_PROCESSING_SECONDS = 900  # 15 min stuck in 'processing' => crashed executor
 
-QUEUE_QUEUED = "queued"
-QUEUE_PROCESSING = "processing"
-QUEUE_FAILED = "failed"
-QUEUE_DEAD = "dead"
-
-# Every object_type whose failures should back off. This tuple and
-# `due_filter()` below are a matched pair: a type listed here gets scheduled_for
-# set on failure, and ONLY an executor that honours scheduled_for will then wait.
+# The object types that back off, the destinations whose rows this pass manages,
+# and `due_filter` are all defined in hermes_core.queue alongside the rest of the
+# queue contract. They used to be assembled here by importing six domain
+# executors purely for their OBJECT_TYPE constants, which made the scheduler a
+# dependent of every domain it schedules.
 #
-# Until 2026-07-26 this held just (renewal, intake) — which happened to be exactly
-# the two executors that honour it, so the system was accidentally consistent.
-# Adding a type here without its executor honouring the column means a failing job
-# is retried immediately, every scheduler cycle, forever: an exponential backoff
-# that silently does nothing. test_retry_backoff_is_honoured_everywhere guards it.
-_OBJECT_TYPES = (
-    OBJECT_TYPE_RENEWAL,
-    OBJECT_TYPE_INTAKE,
-    OBJECT_TYPE_QUOTE,
-    OBJECT_TYPE_CASE,
-    OBJECT_TYPE_TASK,
-    OBJECT_TYPE_OPPORTUNITY_WRITEBACK,
-    OBJECT_TYPE_INTAKE_AMS,
-    OBJECT_TYPE_CRM,
-)
-# Every destination system whose failed/stalled jobs should be requeued or
-# reclaimed. `requeue_or_deadletter` and `reclaim_stalled` filter
-# destination_system against DESTINATIONS below, so any object_type listed here
-# is only acted on if its destination is too — the two sets are a matched pair.
-#
-# intake_crm (destination_system='crm') was absent until 2026-07-26 because the
-# destination filter was hardcoded to 'nowcerts', so listing it would have looked
-# like coverage while every CRM row was silently dropped. The filter now covers
-# both destinations, so CRM-destination failures back off and dead-letter on the
-# same schedule as NowCerts writes. The intake executor already honours
-# scheduled_for (via due_filter), so the backoff is real, not a no-op.
-
-
-# Destination systems whose queue rows the retry pass manages. Adding a
-# new destination here without an executor that honours scheduled_for would
-# make its backoff a no-op — test_every_executor_honours_the_backoff guards that.
-DESTINATIONS = (DESTINATION_NOWCERTS, DESTINATION_CRM)
-
-_DESTINATION_FILTER = f"in.({','.join(DESTINATIONS)})"
-
-
-def due_filter(now: datetime | None = None) -> dict[str, str]:
-    """The PostgREST filter every executor must apply to respect a backoff.
-
-    One home for it. It existed as a copy-pasted `or=(...)` string in two
-    executors and was absent from the other five, so honouring the backoff was a
-    property of where you happened to look rather than of the queue.
-    """
-    stamp = (now or _utcnow()).isoformat()
-    return {"or": f"(scheduled_for.is.null,scheduled_for.lte.{stamp})"}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+# `DESTINATIONS` and the `_OBJECT_TYPES` / `_DESTINATION_FILTER` aliases below
+# keep the historical names available to callers and tests.
+DESTINATIONS = BACKED_OFF_DESTINATIONS
+_OBJECT_TYPES = BACKED_OFF_OBJECT_TYPES
+_DESTINATION_FILTER = f"in.({','.join(BACKED_OFF_DESTINATIONS)})"
 
 
 def compute_backoff_seconds(attempt: int) -> int:
@@ -107,10 +60,20 @@ def compute_backoff_seconds(attempt: int) -> int:
     return int(min(BACKOFF_CAP_SECONDS, exp))
 
 
-def requeue_or_deadletter(supa: "SupabaseClient", *, now: datetime | None = None) -> dict[str, Any]:
+def requeue_or_deadletter(
+    supa: "SupabaseClient",
+    *,
+    now: datetime | None = None,
+    object_types: tuple[str, ...] = BACKED_OFF_OBJECT_TYPES,
+) -> dict[str, Any]:
     """Re-queue failed NowCerts jobs with backoff, or dead-letter past the cap.
 
     Returns metrics incl. the exact dead-lettered queue ids (for alerting/audit).
+
+    ``object_types`` narrows the pass to one service's rows. A per-service worker
+    must pass its own types: two workers running the unscoped pass would each
+    count and dead-letter the other's failures, so a job could burn its attempt
+    budget without either worker having tried it.
     """
     now = now or _utcnow()
     try:
@@ -118,7 +81,7 @@ def requeue_or_deadletter(supa: "SupabaseClient", *, now: datetime | None = None
             QUEUE_TABLE,
             columns="id,object_type,object_id,attempt_count",
             params={
-                "object_type": f"in.({','.join(_OBJECT_TYPES)})",
+                "object_type": f"in.({','.join(object_types)})",
                 "destination_system": _DESTINATION_FILTER,
                 "status": f"eq.{QUEUE_FAILED}",
                 "order": "created_at.asc",
@@ -154,11 +117,18 @@ def requeue_or_deadletter(supa: "SupabaseClient", *, now: datetime | None = None
 
 
 def reclaim_stalled(
-    supa: "SupabaseClient", *, now: datetime | None = None, threshold_seconds: int = STALLED_PROCESSING_SECONDS
+    supa: "SupabaseClient",
+    *,
+    now: datetime | None = None,
+    threshold_seconds: int = STALLED_PROCESSING_SECONDS,
+    object_types: tuple[str, ...] = BACKED_OFF_OBJECT_TYPES,
 ) -> dict[str, Any]:
     """Reset jobs stuck in 'processing' past the threshold back to 'queued'.
 
     Returns the reclaimed ids (a crashed/killed executor left them claimed).
+
+    ``object_types`` narrows the pass to one service's rows — a worker must not
+    reclaim a job another service's worker is actively processing.
     """
     now = now or _utcnow()
     cutoff = (now - timedelta(seconds=threshold_seconds)).isoformat()
@@ -167,7 +137,7 @@ def reclaim_stalled(
             QUEUE_TABLE,
             columns="id,object_type,updated_at",
             params={
-                "object_type": f"in.({','.join(_OBJECT_TYPES)})",
+                "object_type": f"in.({','.join(object_types)})",
                 "destination_system": _DESTINATION_FILTER,
                 "status": f"eq.{QUEUE_PROCESSING}",
                 "updated_at": f"lt.{cutoff}",

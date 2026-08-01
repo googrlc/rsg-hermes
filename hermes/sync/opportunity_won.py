@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from hermes.intake import opportunities as opp
-from hermes.renewals.executor import (
+from hermes_core.queue import (
     DESTINATION_NOWCERTS,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
@@ -42,8 +42,8 @@ from hermes.renewals.executor import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -203,7 +203,7 @@ def run_opportunity_won_executor(
 ) -> dict[str, Any]:
     """Drain approved won-deal jobs → NowCerts. ``dry_run`` previews only."""
     if supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
     summary: dict[str, Any] = {"claimed": 0, "completed": 0, "failed": 0, "previews": []}
@@ -231,7 +231,7 @@ def run_opportunity_won_executor(
         summary["claimed"] += 1
 
         if nowcerts is None:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
 

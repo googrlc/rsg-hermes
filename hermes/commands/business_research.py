@@ -8,9 +8,9 @@ import os
 import re
 from typing import Any
 
-from hermes.core.dispatcher import DispatchResult
-from hermes.integrations import retrieval_client
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_core.dispatch import DispatchResult
+from hermes_integrations import retrieval_client
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def _extract_json(raw: str) -> dict[str, Any] | None:
 
 
 def _research_business(query: str) -> dict[str, Any] | None:
-    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+    from hermes_core.llm_client import get_client, resolve_model, LLMConfigError
 
     try:
         client = get_client()

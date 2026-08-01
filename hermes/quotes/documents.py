@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from hermes.integrations.nextcloud_client import QUOTES_CATEGORY, NextcloudClient
+from hermes_integrations.nextcloud_client import QUOTES_CATEGORY, NextcloudClient
 from hermes.quotes import store
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 
 def _sanitize(part: str) -> str:

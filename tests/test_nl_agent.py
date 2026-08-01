@@ -6,11 +6,11 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from hermes.core.nl_agent import (
+from hermes.agent.nl_agent import (
     _exec_report,
     ask,
 )
-from hermes.core.dispatcher import DispatchResult
+from hermes_core.dispatch import DispatchResult
 
 
 class AskTests(unittest.TestCase):

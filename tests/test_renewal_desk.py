@@ -9,7 +9,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from hermes.commands import renewal_desk as rd
-from hermes.core.dispatcher import DispatchResult, Dispatcher
+from hermes.agent.dispatcher import Dispatcher
+from hermes_core.dispatch import DispatchResult
 
 
 def _make_dispatcher() -> Dispatcher:

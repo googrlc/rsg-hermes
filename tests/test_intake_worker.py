@@ -608,7 +608,7 @@ class TestPostDraftToSlack:
         """If the draft post fails, the helper must NOT crash the worker —
         it should log and post a warning to the alert channel so the
         operator knows the row is stuck at awaiting_approval."""
-        from hermes.integrations.slack_notifier import SlackNotifierError
+        from hermes_integrations.slack_notifier import SlackNotifierError
         from hermes.operations.intake_worker import post_draft_to_slack
 
         notifier = MockNotifier.return_value
@@ -777,7 +777,7 @@ class TestProcessOneApproved:
         supa.update.return_value = {"id": "sub-1"}
 
         with patch("hermes.intake.commit.commit_draft") as commit_draft, \
-             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.intake.submissions.transition"), \
              patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                    return_value={}), \
              patch.object(intake_worker, "_post_alert"):
@@ -847,7 +847,7 @@ class TestProcessOneApproved:
 
         supa = self._claimed_supa("APPROVE ALL")
         with patch("hermes.intake.commit.commit_draft") as commit_draft, \
-             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.intake.submissions.transition"), \
              patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                    return_value={}) as insert_retrieval, \
              patch.object(intake_worker, "_post_alert"):
@@ -866,7 +866,7 @@ class TestProcessOneApproved:
 
         supa = self._claimed_supa("APPROVE CRM ONLY")
         with patch("hermes.intake.commit.commit_draft") as commit_draft, \
-             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.intake.submissions.transition"), \
              patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                    return_value={}) as insert_retrieval, \
              patch.object(intake_worker, "_post_alert"):
@@ -883,7 +883,7 @@ class TestProcessOneApproved:
 
         supa = self._claimed_supa("APPROVE SUPABASE ONLY")
         with patch("hermes.intake.commit.commit_draft") as commit_draft, \
-             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.intake.submissions.transition"), \
              patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                    return_value={"client_entities": ["e1"]}) as insert_retrieval, \
              patch.object(intake_worker, "_post_alert"):
@@ -899,7 +899,7 @@ class TestProcessOneApproved:
 
         supa = self._claimed_supa("APPROVE TASKS ONLY")
         with patch("hermes.intake.commit.commit_draft") as commit_draft, \
-             patch("hermes.integrations.intake_submissions.transition") as transition, \
+             patch("hermes.intake.submissions.transition") as transition, \
              patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                    return_value={}) as insert_retrieval, \
              patch.object(intake_worker, "_post_alert"):
@@ -917,7 +917,7 @@ class TestProcessOneApproved:
 
         supa = self._claimed_supa(None)
         with patch("hermes.intake.commit.commit_draft") as commit_draft, \
-             patch("hermes.integrations.intake_submissions.transition"), \
+             patch("hermes.intake.submissions.transition"), \
              patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                    return_value={}) as insert_retrieval, \
              patch.object(intake_worker, "_post_alert"):

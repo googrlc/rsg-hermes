@@ -23,7 +23,7 @@ import logging
 import re
 from typing import Any, Iterable
 
-from hermes.integrations.supabase_client import SupabaseClient
+from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 

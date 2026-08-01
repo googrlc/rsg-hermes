@@ -70,7 +70,7 @@ def _read_persona_file(key: str) -> str:
 
     if not key or not re.fullmatch(r"[a-z0-9_-]+", key):
         return ""
-    path = Path(__file__).resolve().parent.parent / "personas" / f"{key}.md"
+    path = Path(__file__).resolve().parent / "personas" / f"{key}.md"
     try:
         return path.read_text(encoding="utf-8").strip()
     except OSError:

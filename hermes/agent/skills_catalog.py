@@ -21,7 +21,7 @@ _SKILLS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "skills"
 
 def runtime_tools() -> list[dict[str, str]]:
     """The agent's live, executable tools (name + one-line description)."""
-    from hermes.core.nl_agent import _TOOLS
+    from hermes.agent.nl_agent import _TOOLS
 
     out: list[dict[str, str]] = []
     for tool in _TOOLS:

@@ -20,7 +20,7 @@ import re
 from typing import TYPE_CHECKING
 
 from hermes.commands.renewal_desk import _parse_identity
-from hermes.core.dispatcher import DispatchResult
+from hermes_core.dispatch import DispatchResult
 from hermes.renewals import writeback
 from hermes.renewals.executor import (
     ACTION_CLIENT_FOLLOW_UP,
@@ -30,7 +30,7 @@ from hermes.renewals.executor import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 # NL phrase -> (action, human expected-result label). First match wins.
 _ACTION_KEYWORDS: list[tuple[re.Pattern[str], str, str]] = [

@@ -1,0 +1,36 @@
+[project]
+name = "rsg-hermes-core"
+version = "0.1.0"
+description = "Shared bottom layer for the RSG Hermes apps: primitives and system clients"
+readme = "README.md"
+requires-python = ">=3.11,<4"
+
+# Deliberately thin. Every RSG app repo installs this, so a dependency added
+# here is a dependency added to all of them. Anything only one app needs belongs
+# to that app, not in here.
+dependencies = [
+  "requests>=2.28.0",
+  "python-dotenv>=1.0.0",
+  "openai>=1.30.0",
+  # hermes_app only. Every consumer is a FastAPI service, so this is not an
+  # imposition — but keep it out of hermes_core, which must stay importable
+  # without a web framework.
+  "fastapi>=0.100.0",
+  "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+# Gmail lane (hermes_integrations/gmail_client.py): service-account token
+# minting + domain-wide delegation. Only the apps that read mail need it.
+gmail = ["google-auth>=2.20"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["hermes_core", "hermes_core.data", "hermes_core.overrides", "hermes_app", "hermes_integrations"]
+
+[tool.setuptools.package-data]
+# Loaded at runtime by identity.py / schema_registry.py — must ship in the wheel.
+"hermes_core" = ["personas/*.md", "data/*.csv"]

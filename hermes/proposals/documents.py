@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from hermes.integrations.nextcloud_client import NextcloudClient
+from hermes_integrations.nextcloud_client import NextcloudClient
 from hermes.proposals import generator, store
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 PROPOSALS_CATEGORY = "Proposals"
 

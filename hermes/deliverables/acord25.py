@@ -310,7 +310,7 @@ def pre_send_checklist(coi: Coi) -> str:
 # ---------------------------------------------------------------------------
 def supabase_logger(supa) -> Callable[[dict[str, Any]], None]:
     """A ``supa_log`` callable that records a draft into coi_drafts, agent_id-stamped."""
-    from hermes.core.identity import agent_id
+    from hermes_core.identity import agent_id
 
     def _log(summary: dict[str, Any]) -> None:
         supa.insert("coi_drafts", {

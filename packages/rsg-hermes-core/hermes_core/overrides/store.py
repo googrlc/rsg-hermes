@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.overrides.core import (
+from hermes_core.overrides.core import (
     ACTION_CONFLICT,
     ACTION_RETIRE,
     STATUS_ACTIVE,
@@ -23,7 +23,7 @@ from hermes.overrides.core import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 

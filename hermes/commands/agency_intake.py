@@ -21,10 +21,10 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.dispatcher import DispatchResult
+from hermes_core.dispatch import DispatchResult
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ class AgencyIntakeError(Exception):
 
 def _extract_payload(raw_text: str) -> dict[str, Any]:
     """Call the configured LLM (via LiteLLM) to produce the unified intake JSON."""
-    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+    from hermes_core.llm_client import get_client, resolve_model, LLMConfigError
 
     try:
         client = get_client()
@@ -649,7 +649,7 @@ def stage_draft(
     if warnings:
         log.warning("Agency intake validation warnings: %s", warnings)
 
-    from hermes.core.identity import agent_id
+    from hermes_core.identity import agent_id
 
     row = supa.insert(
         "agency_intake_drafts",

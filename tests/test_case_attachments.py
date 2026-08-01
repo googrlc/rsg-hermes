@@ -15,6 +15,7 @@ import io
 
 import pytest
 from fastapi.testclient import TestClient
+from hermes_app import deps
 
 
 CASE = {
@@ -72,9 +73,9 @@ def client(monkeypatch):
     FakeNextcloud.instances.clear()
     supa = FakeSupa()
     import hermes.api as api_mod
-    import hermes.integrations.nextcloud_client as nc_mod
+    import hermes_integrations.nextcloud_client as nc_mod
 
-    monkeypatch.setattr(api_mod, "_get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
     monkeypatch.setattr(nc_mod, "NextcloudClient", FakeNextcloud)
     return TestClient(api_mod.app), supa
 
@@ -192,9 +193,9 @@ def test_an_empty_file_is_rejected(client):
 
 def test_an_oversized_file_is_rejected_with_the_limit(client):
     c, _ = client
-    import hermes.api as api_mod
+    from hermes.routers import cases as cases_router
 
-    r = _post(c, content=b"x" * (api_mod._CASE_DOC_MAX_BYTES + 1))
+    r = _post(c, content=b"x" * (cases_router._CASE_DOC_MAX_BYTES + 1))
     assert r.status_code == 413
     assert "limit is 25MB" in r.json()["detail"]
 

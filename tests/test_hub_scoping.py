@@ -1,7 +1,7 @@
 """Per-hub AI scoping harness + Carrier hub tools."""
 from __future__ import annotations
 
-from hermes.core import nl_agent as A
+from hermes.agent import nl_agent as A
 
 
 class FakeSupa:
@@ -38,7 +38,7 @@ def test_carrier_hub_cannot_reach_write_tools():
 
 # --- carrier tools ---
 def test_list_carriers(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     fake = FakeSupa([{"name": "Travelers", "segment": "Commercial", "lines_of_business": "GL, Auto"}])
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
     res = A._exec_list_carriers({"query": "trav", "line_of_business": "GL"})
@@ -49,7 +49,7 @@ def test_list_carriers(monkeypatch):
 
 
 def test_carrier_appetite_match(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     fake = FakeSupa([{"carrier_name": "Progressive", "lob": "Commercial Auto",
                       "appetite_level": "Strong", "min_premium": 1000, "max_premium": 50000,
                       "states_approved": ["GA"]}])
@@ -63,7 +63,7 @@ def test_carrier_appetite_match(monkeypatch):
 
 
 def test_carrier_appetite_state_filters_and_all(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     rows = [
         {"carrier_name": "GA-Only", "lob": "GL", "states_approved": ["GA"]},
         {"carrier_name": "Nationwide-ALL", "lob": "GL", "states_approved": ["ALL"]},
@@ -76,7 +76,7 @@ def test_carrier_appetite_state_filters_and_all(monkeypatch):
 
 
 def test_carrier_appetite_empty_is_honest(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa([]))
     res = A._exec_carrier_appetite({"line_of_business": "Aviation"})
     assert res.ok and "No carriers" in res.message
@@ -112,7 +112,7 @@ class CodeTablesFake:
 
 
 def test_lookup_class_code_by_code(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: CodeTablesFake(gl=GL_ROWS))
     res = A._exec_lookup_class_code({"query": "ISO 91341"})
     assert res.ok
@@ -123,7 +123,7 @@ def test_lookup_class_code_by_code(monkeypatch):
 
 def test_lookup_class_code_reverse_from_description(monkeypatch):
     """The high-leverage direction: the producer knows what the business DOES."""
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: CodeTablesFake(gl=GL_ROWS))
     res = A._exec_lookup_class_code({"query": "cabinets and countertops install"})
     assert res.ok and res.data["codes"][0]["code"] == "91341"
@@ -132,21 +132,21 @@ def test_lookup_class_code_reverse_from_description(monkeypatch):
 def test_lookup_class_code_flags_rows_with_no_detail(monkeypatch):
     """A thin row must announce it's thin — ranking low is a gap in our data,
     not evidence the code is wrong for the risk."""
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: CodeTablesFake(gl=[GL_ROWS[2]]))
     res = A._exec_lookup_class_code({"query": "91343"})
     assert res.ok and "no scope detail recorded" in res.message
 
 
 def test_lookup_class_code_no_match_is_honest(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: CodeTablesFake(gl=GL_ROWS))
     res = A._exec_lookup_class_code({"query": "aviation hull"})
     assert res.ok and "No manual class code matches" in res.message
 
 
 def test_appointments_by_line_groups_panel(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
 
     class PanelFake:
         def select(self, table, *, columns="*", params=None, limit=100):
@@ -173,7 +173,7 @@ def test_commissions_hub_scoped_and_registered():
 
 
 def test_commission_summary(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     rows = [
         {"carrier_name": "Travelers", "expected_commission": "1000", "actual_commission": "400", "reconciliation_status": "underpaid"},
         {"carrier_name": "Progressive", "expected_commission": "500", "actual_commission": "500", "reconciliation_status": "paid"},
@@ -186,7 +186,7 @@ def test_commission_summary(monkeypatch):
 
 
 def test_commission_shortfalls_ranks_owed(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     rows = [
         {"client_name": "Acme", "carrier_name": "Travelers", "expected_commission": "1000", "actual_commission": "400", "reconciliation_status": "underpaid"},
         {"client_name": "Beta", "carrier_name": "Hartford", "expected_commission": "800", "actual_commission": "0", "reconciliation_status": "missing_statement"},
@@ -201,7 +201,7 @@ def test_commission_shortfalls_ranks_owed(monkeypatch):
 
 
 def test_commission_shortfalls_none(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     rows = [{"client_name": "Ok", "carrier_name": "X", "expected_commission": "100", "actual_commission": "100", "reconciliation_status": "paid"}]
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: FakeSupa(rows))
     res = A._exec_commission_shortfalls({})
@@ -219,7 +219,7 @@ def test_crm_and_intake_hubs_scoped_and_registered():
 
 
 def test_find_client(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     fake = FakeSupa([{"insured_name": "Dream Chaser Trucking", "client_type": "Commercial",
                       "city": "Atlanta", "state": "Georgia", "nowcerts_insured_guid": "g1"}])
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
@@ -230,7 +230,7 @@ def test_find_client(monkeypatch):
 
 
 def test_client_policies_resolves_name(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
 
     class TwoStep:
         def __init__(self):
@@ -252,7 +252,7 @@ def test_client_policies_resolves_name(monkeypatch):
 
 
 def test_list_intake_filters_status(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     fake = FakeSupa([{"client_identifier": "Acme", "intake_kind": "commercial", "status": "awaiting_approval"}])
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
     res = A._exec_list_intake({"status": "awaiting_approval"})
@@ -301,7 +301,7 @@ class FakeNowCerts:
 
 
 def test_ams_client_snapshot_live(monkeypatch):
-    import hermes.sync.nowcerts_client as ncmod
+    import hermes_integrations.nowcerts_client as ncmod
     fake = FakeNowCerts(
         insureds=[{"databaseId": "g-123", "commercialName": "Acme Trucking", "active": True}],
         policies=[{"lineOfBusiness": "Commercial Auto", "carrierName": "Progressive",
@@ -319,14 +319,14 @@ def test_ams_client_snapshot_live(monkeypatch):
 
 
 def test_ams_client_snapshot_no_match(monkeypatch):
-    import hermes.sync.nowcerts_client as ncmod
+    import hermes_integrations.nowcerts_client as ncmod
     monkeypatch.setattr(ncmod, "NowCertsClient", lambda *a, **k: FakeNowCerts(insureds=[]))
     res = A._exec_ams_snapshot({"client": "nobody"})
     assert res.ok and "No AMS insured" in res.message
 
 
 def test_crm_client_activity(monkeypatch):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
 
     class CasesThenTasks:
         def __init__(self):
@@ -366,13 +366,13 @@ class FakeNextcloud:
     def read_file(self, rel_path):
         self.read_calls.append(rel_path)
         if rel_path not in self._files:
-            from hermes.integrations.nextcloud_client import NextcloudError
+            from hermes_integrations.nextcloud_client import NextcloudError
             raise NextcloudError(f"Not found: {rel_path}")
         return self._files[rel_path]
 
 
 def _patch_nextcloud(monkeypatch, fake):
-    import hermes.integrations.nextcloud_client as ncmod
+    import hermes_integrations.nextcloud_client as ncmod
     monkeypatch.setattr(ncmod, "NextcloudClient", lambda *a, **k: fake)
 
 
@@ -463,7 +463,7 @@ def test_no_desk_can_reach_a_write_tool():
 
 
 def test_every_persona_named_by_a_hub_exists_on_disk():
-    from hermes.core.identity import load_named_persona
+    from hermes_core.identity import load_named_persona
 
     for hub, key in A._HUB_PERSONA.items():
         assert load_named_persona(key).strip(), f"{hub} names persona {key!r} with no file"
@@ -473,7 +473,7 @@ def test_every_persona_named_by_a_hub_exists_on_disk():
 def test_judgment_desks_get_the_escalation_model():
     """A class code or a commission shortfall is a judgment the agency acts on;
     a CRM lookup is reading a row back. They should not run on the same model."""
-    from hermes.core.llm_client import resolve_model
+    from hermes_core.llm_client import resolve_model
 
     for desk in ("carrier", "commissions", "renewals"):
         assert A._HUB_MODEL[desk] == "hard_judgment_escalation"

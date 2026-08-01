@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from hermes.api import IntakeSubmissionRequest
+from hermes.routers.intake import IntakeSubmissionRequest
 
 BASE = {
     "idempotency_key": "rsg-intake-gate:abc",

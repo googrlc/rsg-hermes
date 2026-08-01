@@ -115,7 +115,7 @@ def _retrieve(supa, prompt: str, today: date) -> str | None:
 
 def _llm_answer(prompt: str, context: str) -> str | None:
     """Phrase a warm, grounded answer with the LLM. None if unavailable."""
-    from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+    from hermes_core.llm_client import get_client, resolve_model, LLMConfigError
 
     try:
         client = get_client()

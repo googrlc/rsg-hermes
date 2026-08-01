@@ -123,7 +123,7 @@ class SupermemoryClient:
         (rule 3c). The allowlist builder ``phi.build_medicare_memory`` is the
         primary control; this is defense in depth.
         """
-        from hermes.core import phi
+        from hermes_core import phi
 
         medicare = phi.is_medicare_context(container_tags)
         if medicare:

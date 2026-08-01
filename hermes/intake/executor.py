@@ -14,19 +14,19 @@ from typing import TYPE_CHECKING, Any
 
 from hermes.intake import opportunities as opp
 from hermes.intake.commit import OBJECT_TYPE_INTAKE
-from hermes.renewals.executor import (
+from hermes_core.queue import (
     DESTINATION_NOWCERTS,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
     QUEUE_PROCESSING,
     QUEUE_QUEUED,
     QUEUE_TABLE,
-    _utcnow,
+    utcnow as _utcnow,
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def run_intake_executor(
 ) -> dict[str, Any]:
     """Process up to ``limit`` approved intake jobs. ``dry_run`` is side-effect-free."""
     if supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
     now = now or _utcnow()
@@ -103,7 +103,7 @@ def run_intake_executor(
         summary["claimed"] += 1
 
         if nowcerts is None:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
 

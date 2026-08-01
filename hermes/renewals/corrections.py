@@ -46,7 +46,7 @@ from hermes.operations.renewal_tracker import VALID_RISK_STATUSES
 from . import eligibility as elig
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
@@ -211,8 +211,8 @@ def apply(
     Best-effort: a correction is an enrichment, and losing the overrides table
     must not take the renewal worklist down with it.
     """
-    from hermes.overrides.core import apply_overrides
-    from hermes.overrides.store import active_overrides
+    from hermes_core.overrides.core import apply_overrides
+    from hermes_core.overrides.store import active_overrides
 
     keyed = with_keys(rows) if surface is CANDIDATES else rows
     try:

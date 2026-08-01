@@ -28,8 +28,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 # Chargeback / clawback ledger rows are not commission blind spots — exclude them.
 _CHARGEBACK_STATUSES = {"chargeback"}

@@ -39,8 +39,8 @@ from hermes.sync.canonical_book_sync import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -289,7 +289,7 @@ def _pull_book(
         # don't thread a client through (15 call sites, nearly none of them do),
         # so building one here meant a brand-new empty token cache — and a fresh
         # ~26s password grant — on every single book read.
-        from hermes.sync.nowcerts_client import get_client
+        from hermes_integrations.nowcerts_client import get_client
 
         nowcerts = get_client()
 
@@ -481,7 +481,7 @@ def _pull_clients(
     supa: "SupabaseClient", nowcerts: "NowCertsClient | None" = None
 ) -> list[dict[str, Any]]:
     if nowcerts is None:
-        from hermes.sync.nowcerts_client import get_client
+        from hermes_integrations.nowcerts_client import get_client
 
         nowcerts = get_client()
     try:

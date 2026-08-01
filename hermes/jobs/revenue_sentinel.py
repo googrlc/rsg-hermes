@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 # Data source: the custom CRM (Command Center) — read directly from its Supabase
 # tables via SupabaseClient, the same in-process path renewal-refresh /

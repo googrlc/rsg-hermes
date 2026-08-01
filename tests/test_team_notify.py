@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from hermes.integrations import team_notify as T
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes_integrations import team_notify as T
+from hermes_integrations.slack_notifier import SlackNotifier, SlackNotifierError
 
 
 def _rooms(monkeypatch):
@@ -53,7 +53,7 @@ def test_notifier_posts_to_resolved_room(monkeypatch):
             sent["token"] = token
             sent["message"] = message
 
-    import hermes.integrations.nextcloud_client as nc
+    import hermes_integrations.nextcloud_client as nc
     monkeypatch.setattr(nc, "NextcloudClient", lambda *a, **k: FakeNC())
 
     res = SlackNotifier(channel="C0ANQUENX4P").post_message(text="hi", blocks=None)
@@ -83,7 +83,7 @@ def _talk_rooms(monkeypatch):
 def test_a_category_name_routes_to_its_own_room(monkeypatch, category, expected):
     """Passing the category name is the obvious thing to do, and it used to fall
     through to the boss room because only three hardcoded Slack ids were mapped."""
-    from hermes.integrations.team_notify import resolve_room
+    from hermes_integrations.team_notify import resolve_room
 
     _talk_rooms(monkeypatch)
     assert resolve_room(category) == expected
@@ -91,7 +91,7 @@ def test_a_category_name_routes_to_its_own_room(monkeypatch, category, expected)
 
 def test_legacy_slack_ids_still_route(monkeypatch):
     """Already-deployed callers pass ids; they must keep working."""
-    from hermes.integrations.team_notify import _CHANNEL_CATEGORY, resolve_room
+    from hermes_integrations.team_notify import _CHANNEL_CATEGORY, resolve_room
 
     _talk_rooms(monkeypatch)
     for channel_id, category in _CHANNEL_CATEGORY.items():
@@ -101,7 +101,7 @@ def test_legacy_slack_ids_still_route(monkeypatch):
 
 def test_an_unknown_value_falls_back_to_boss_rather_than_raising(monkeypatch):
     """Losing a report to a routing typo is worse than posting it somewhere visible."""
-    from hermes.integrations.team_notify import resolve_room
+    from hermes_integrations.team_notify import resolve_room
 
     _talk_rooms(monkeypatch)
     assert resolve_room("C0-NOT-A-REAL-CHANNEL") == "room-boss"
@@ -112,7 +112,7 @@ def test_an_unknown_value_falls_back_to_boss_rather_than_raising(monkeypatch):
 def test_the_systems_alert_paths_reach_the_systems_room(monkeypatch):
     """The actual defect: both defaults were Slack ids absent from the map, so
     scheduler alerts and renewal escalations all landed in the boss room."""
-    from hermes.integrations.team_notify import resolve_room
+    from hermes_integrations.team_notify import resolve_room
     from hermes.scheduler.runner import _systems_check_channel
 
     _talk_rooms(monkeypatch)
@@ -129,7 +129,7 @@ def test_the_systems_alert_paths_reach_the_systems_room(monkeypatch):
 
 def test_no_systems_default_is_an_unmapped_slack_id():
     """Regression guard: a bare Slack id as a default is how this broke."""
-    from hermes.integrations.team_notify import _CATEGORY_ENV, _CHANNEL_CATEGORY
+    from hermes_integrations.team_notify import _CATEGORY_ENV, _CHANNEL_CATEGORY
     from hermes.scheduler.runner import _systems_check_channel
 
     default = _systems_check_channel()

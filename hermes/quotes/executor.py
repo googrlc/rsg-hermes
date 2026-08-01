@@ -19,22 +19,23 @@ from typing import TYPE_CHECKING, Any
 
 from hermes.intake import opportunities as opp
 from hermes.quotes import store as quote_store
-from hermes.renewals.executor import (
+from hermes_core.queue import (
     DESTINATION_NOWCERTS,
+    OBJECT_TYPE_QUOTE,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
     QUEUE_PROCESSING,
     QUEUE_QUEUED,
     QUEUE_TABLE,
+    utcnow as _utcnow,
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
-OBJECT_TYPE_QUOTE = "quote"
 QUOTE_ACTION = "insert_quote"
 
 
@@ -192,7 +193,7 @@ def _extract_quote_ref(resp: Any) -> tuple[str | None, str | None]:
 def _eligible_jobs(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
     # Local import: retry.py imports OBJECT_TYPE_QUOTE from here, so a module-level
     # import would be circular.
-    from hermes.scheduler.retry import due_filter
+    from hermes_core.queue import due_filter
 
     return supa.select(
         QUEUE_TABLE, columns="*",
@@ -216,7 +217,7 @@ def run_quote_executor(
 ) -> dict[str, Any]:
     """Process up to ``limit`` approved quote jobs. ``dry_run`` is side-effect-free."""
     if supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
     summary: dict[str, Any] = {"claimed": 0, "completed": 0, "failed": 0, "previews": []}
@@ -243,7 +244,7 @@ def run_quote_executor(
         summary["claimed"] += 1
 
         if nowcerts is None:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
 

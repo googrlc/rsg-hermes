@@ -154,7 +154,7 @@ def pre_send_checklist(a140: Acord140) -> str:
 
 
 def supabase_logger(supa) -> Callable[[dict[str, Any]], None]:
-    from hermes.core.identity import agent_id
+    from hermes_core.identity import agent_id
 
     def _log(summary: dict[str, Any]) -> None:
         supa.insert("acord_drafts", {

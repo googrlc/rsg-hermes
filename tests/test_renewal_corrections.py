@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from hermes import api
 from hermes.renewals import corrections as corr
+from hermes_app import deps
 
 REN_ID = "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f"
 CAND_ID = "aa11bb22-cc33-4d44-8e55-f66677778888"
@@ -32,8 +33,8 @@ CANDIDATE = {"id": CAND_ID, "insured_id": "guid-1", "policy_lineage_id": "guid-1
 @pytest.fixture
 def c_supa(monkeypatch):
     supa = MagicMock()
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
-    monkeypatch.setattr(api, "_require_users", lambda *a, **k: None)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "require_users", lambda *a, **k: None)
     return TestClient(api.app), supa
 
 
@@ -195,7 +196,7 @@ def test_a_removal_needs_a_named_actor(c_supa):
 def test_undoing_a_correction_restores_what_the_source_said(c_supa, monkeypatch):
     c, supa = c_supa
     monkeypatch.setattr(
-        "hermes.overrides.store.withdraw",
+        "hermes_core.overrides.store.withdraw",
         lambda supa, oid, actor: {"id": oid, "entity_type": "project_85_renewals",
                                   "entity_key": "CPP4471902", "field_name": "premium_current",
                                   "original_value": 4200, "status": "retired"},
@@ -212,7 +213,7 @@ def test_undoing_a_removal_touches_no_column(c_supa, monkeypatch):
     """'dismissed' is not a column — restoring it would 400 the whole undo."""
     c, supa = c_supa
     monkeypatch.setattr(
-        "hermes.overrides.store.withdraw",
+        "hermes_core.overrides.store.withdraw",
         lambda supa, oid, actor: {"id": oid, "entity_type": "project_85_renewals",
                                   "entity_key": "CPP4471902", "field_name": "dismissed",
                                   "original_value": None, "status": "retired"},
@@ -230,7 +231,7 @@ def test_the_cockpit_list_shows_corrections_and_hides_removals(c_supa, monkeypat
                                 client_name="Removed Co")]
     supa.select.side_effect = _table_select({"project_85_renewals": rows})
     monkeypatch.setattr(
-        "hermes.overrides.store.active_overrides",
+        "hermes_core.overrides.store.active_overrides",
         lambda supa, entity_type, **k: {
             ("project_85_renewals", "CPP4471902", "premium_current"):
                 corr_override("CPP4471902", "premium_current", 4500),
@@ -238,7 +239,7 @@ def test_the_cockpit_list_shows_corrections_and_hides_removals(c_supa, monkeypat
                 corr_override("GONE-1", "dismissed", True),
         },
     )
-    monkeypatch.setattr(api, "_get_supa", lambda: supa)
+    monkeypatch.setattr(deps, "get_supa", lambda: supa)
     body = c.get("/api/command-center/renewals").json()
     listed = body.get("upcoming") or body.get("renewals") or []
     numbers = {r.get("policy_number") for r in listed}
@@ -247,7 +248,7 @@ def test_the_cockpit_list_shows_corrections_and_hides_removals(c_supa, monkeypat
 
 
 def corr_override(key, field, value):
-    from hermes.overrides.core import Override
+    from hermes_core.overrides.core import Override
 
     return Override.from_row({
         "id": f"o-{key}-{field}", "entity_type": "project_85_renewals", "entity_key": key,
@@ -266,7 +267,7 @@ def test_the_refresh_does_not_overwrite_a_corrected_premium(monkeypatch):
     supa = MagicMock()
     supa.select.return_value = []          # no renewal_actions to protect
     monkeypatch.setattr(
-        "hermes.overrides.store.active_overrides",
+        "hermes_core.overrides.store.active_overrides",
         lambda s, entity_type, **k: (
             {("project_85_renewals", "CPP4471902", "premium_current"):
                 corr_override("CPP4471902", "premium_current", 4500)}
@@ -286,7 +287,7 @@ def test_the_refresh_does_not_hand_back_a_removed_renewal(monkeypatch):
     supa = MagicMock()
     supa.select.return_value = []
     monkeypatch.setattr(
-        "hermes.overrides.store.active_overrides",
+        "hermes_core.overrides.store.active_overrides",
         lambda s, entity_type, **k: (
             {("project_85_renewals", "CPP4471902", "dismissed"):
                 corr_override("CPP4471902", "dismissed", True)}

@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 
-from hermes.overrides import core as ov
+from hermes_core.overrides import core as ov
 
 E, K, F = "commission_ledger", "P1", "gross_premium"
 

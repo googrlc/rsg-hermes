@@ -31,15 +31,19 @@ from typing import TYPE_CHECKING, Any
 
 from hermes.intake import nowcerts_map
 from hermes.intake import opportunities as opp
-from hermes.renewals.executor import DESTINATION_NOWCERTS, QUEUE_QUEUED, QUEUE_TABLE
+from hermes_core.queue import (
+    DESTINATION_NOWCERTS,
+    OBJECT_TYPE_INTAKE,
+    QUEUE_QUEUED,
+    QUEUE_TABLE,
+)
 
 if TYPE_CHECKING:
-    from hermes.integrations.nextcloud_client import NextcloudClient
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nextcloud_client import NextcloudClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
-OBJECT_TYPE_INTAKE = "intake"
 INTAKE_ACTION_CREATE_INSURED = "create_insured"
 DEFAULT_ASSIGNEE = "gretchen"
 
@@ -191,7 +195,7 @@ def commit_intake(
     folder = None
     nc = nextcloud
     if nc is None:
-        from hermes.integrations.nextcloud_client import NextcloudClient
+        from hermes_integrations.nextcloud_client import NextcloudClient
 
         nc = NextcloudClient()
     try:

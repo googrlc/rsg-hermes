@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hermes.integrations.team_notify import TeamNotifier, TeamNotifyError
+from hermes_integrations.team_notify import TeamNotifier, TeamNotifyError
 
 # Back-compat: #systems-check id, still accepted as a default channel.
 DEFAULT_SENTINEL_CHANNEL = "C0B6MPN1U3U"

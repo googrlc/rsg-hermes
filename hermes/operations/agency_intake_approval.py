@@ -25,10 +25,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from hermes.commands.agency_intake import ALLOWED_APPROVAL_TOKENS
-from hermes.integrations import retrieval_client
+from hermes_integrations import retrieval_client
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
@@ -209,7 +209,7 @@ def approve_draft(
     """
     from datetime import datetime, timezone
 
-    from hermes.integrations.intake_submissions import (
+    from hermes.intake.submissions import (
         IntakeError,
         fetch_by_id,
         transition,

@@ -71,7 +71,7 @@ def vision_read(images: list[bytes], *, model: str | None = None,
     if not images:
         return ""
     try:
-        from hermes.core.llm_client import get_client, resolve_model
+        from hermes_core.llm_client import get_client, resolve_model
         from hermes.command_center.synthesis import synthesis_model
 
         oai = get_client()

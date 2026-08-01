@@ -27,6 +27,9 @@ RUN poetry lock \
     && poetry install --only main --no-interaction --no-ansi --no-root
 
 COPY . .
+# The shared bottom layer first — the app imports hermes_core / hermes_integrations
+# at module scope, so it must be installed before the app is.
+RUN pip install -e './packages/rsg-hermes-core[gmail]'
 # [gmail] extra pulls google-auth, needed at runtime by the Gmail email-triage
 # lane and the Google Drive document mirror.
 RUN pip install -e '.[gmail]'

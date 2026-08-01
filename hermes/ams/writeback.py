@@ -28,7 +28,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.renewals.executor import (
+from hermes_core.queue import (
     DESTINATION_NOWCERTS,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
@@ -37,8 +37,8 @@ from hermes.renewals.executor import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -181,7 +181,7 @@ def _audit(
     actor: str,
     note: str | None,
 ) -> None:
-    from hermes.overrides.store import write_log
+    from hermes_core.overrides.store import write_log
 
     write_log(
         supa,

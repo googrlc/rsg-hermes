@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hermes.intake import opportunities as opp
-from hermes.core.field_utils import strip_date
+from hermes_core.field_utils import strip_date
 
 from hermes.ams import book as ams_book
 

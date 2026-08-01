@@ -31,7 +31,7 @@ from datetime import date
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
@@ -268,8 +268,8 @@ def commission_overview(
 
     # Human corrections outrank the synced values, and say so on the row.
     try:
-        from hermes.overrides.core import apply_overrides
-        from hermes.overrides.store import active_overrides
+        from hermes_core.overrides.core import apply_overrides
+        from hermes_core.overrides.store import active_overrides
 
         overrides = active_overrides(supa, ENTITY_TYPE)
     except Exception:  # noqa: BLE001 — a correction layer must not break the read

@@ -11,10 +11,10 @@ from hermes.api import app
 
 @pytest.fixture(autouse=True)
 def _reset_singletons():
-    import hermes.api as api_mod
-    api_mod._supa = None
+    from hermes_app import deps
+    deps.reset_clients()
     yield
-    api_mod._supa = None
+    deps.reset_clients()
 
 
 @pytest.fixture
@@ -55,7 +55,7 @@ class FakeSupa:
 
 def test_create_opportunity_from_name(client):
     supa = FakeSupa()
-    with patch("hermes.api._get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/opportunities", json={
             "insured_name": "Acme LLC", "line_of_business": "General Liability",
             "stage": "Quotes Received", "premium_estimate": 1500,
@@ -74,7 +74,7 @@ def test_cross_sell_on_existing_client_creates_separate(client):
         {"id": "o1", "client_identifier": "acme-llc", "line_of_business": "General Liability",
          "opportunity_type": "New Business", "stage": "Bound / Won"}
     ]})
-    with patch("hermes.api._get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/opportunities", json={
             "insured_name": "Acme LLC", "line_of_business": "Commercial Auto",
             "insured_id": "guid-123",
@@ -88,7 +88,7 @@ def test_create_is_idempotent(client):
         {"id": "o1", "client_identifier": "acme-llc", "line_of_business": "General Liability",
          "opportunity_type": "New Business", "stage": "Bound / Won"}
     ]})
-    with patch("hermes.api._get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/opportunities", json={
             "insured_name": "Acme LLC", "line_of_business": "General Liability",
         })
@@ -104,7 +104,7 @@ def test_missing_client_is_422(client):
 
 def test_unknown_stage_is_400(client):
     supa = FakeSupa()
-    with patch("hermes.api._get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/opportunities", json={
             "insured_name": "Acme LLC", "line_of_business": "GL", "stage": "Bogus",
         })
@@ -115,7 +115,7 @@ def test_list_opportunities(client):
     supa = FakeSupa({"opportunities": [
         {"id": "o1", "client_identifier": "a", "line_of_business": "GL", "stage": "New", "status": "open"},
     ]})
-    with patch("hermes.api._get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.get("/api/opportunities")
     assert r.status_code == 200 and r.json()["count"] == 1
 
@@ -125,7 +125,7 @@ def test_client_search_matches_book(client):
         {"nowcerts_insured_guid": "g1", "insured_name": "Acme LLC", "client_type": "Commercial"},
         {"nowcerts_insured_guid": "g2", "insured_name": "Beta Inc", "client_type": "Commercial"},
     ]})
-    with patch("hermes.api._get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.get("/api/clients/search", params={"q": "acme"})
     assert r.status_code == 200 and r.json()["count"] == 1
     assert r.json()["clients"][0]["nowcerts_insured_guid"] == "g1"

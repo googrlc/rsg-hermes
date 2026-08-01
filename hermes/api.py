@@ -5,23 +5,23 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
-import hmac
-import json
 import logging
 import os
 import re
-from datetime import date, datetime, timedelta, timezone
+import threading
+from datetime import date
 from typing import Any, Literal
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from pydantic import BaseModel, Field, model_validator
 
 from hermes.ams import book as ams_book
-from hermes.core import surfaces
+from hermes_core import surfaces
+from hermes_app import deps
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,12 @@ def openapi_schema() -> dict[str, Any]:
     """Expose schema for backwards-compatibility tests."""
     return app.openapi()
 
+
+# The hub's own routes hang off this router rather than off `app` directly, so
+# the app factory in hermes/services.py can compose a process out of any subset
+# of routers — hub alone, one app alone, or everything (the default). It is
+# included at the BOTTOM of this file, after every route below is defined.
+router = APIRouter()
 
 app = FastAPI(
     title="Hermes API",
@@ -102,6 +108,22 @@ try:
 except Exception:  # pragma: no cover - surfaced in logs, never fatal
     log.exception("command_center routes unavailable")
 
+# Per-app routers (docs/repo-split-plan.md, Phase 2). Each owns its own routes,
+# models and helpers; this file is the shell that mounts them. Not wrapped in
+# try/except like the two below — a finance router that fails to import is a
+# broken deploy, not a degraded one, and must not start serving 404s quietly.
+from hermes.routers import carriers as _carriers_router
+from hermes.routers import cases as _cases_router
+from hermes.routers import finance as _finance_router
+from hermes.routers import intake as _intake_router
+from hermes.routers import renewals as _renewals_router
+
+app.include_router(_finance_router.router)
+app.include_router(_carriers_router.router)
+app.include_router(_renewals_router.router)
+app.include_router(_cases_router.router)
+app.include_router(_intake_router.router)
+
 # General document extractor (OCR-aware quote-field extraction) — POST /api/extract.
 try:
     from hermes.command_center.extract_api import router as _extract_router
@@ -110,59 +132,44 @@ try:
 except Exception:  # pragma: no cover - surfaced in logs, never fatal
     log.exception("extract routes unavailable")
 
+# The clients, the bearer gate and the agency_crm_users guard live in
+# hermes/routers/deps.py so a route can move to a router module without leaving
+# its dependencies behind. These delegators keep every call site in this file —
+# and the tests that patch them — working unchanged.
 _dispatcher = None
-_supa = None
-_nowcerts = None
+_dispatcher_lock = threading.Lock()
 
 
 def _get_dispatcher():
+    """The natural-language Dispatcher — the hub's own, not shared plumbing.
+
+    It lives here rather than in hermes_app.deps because building one imports
+    hermes.agent, and a shared layer that reaches into an app would put the hub
+    inside every other app repo.
+    """
     global _dispatcher
     if _dispatcher is None:
-        from hermes.core.dispatcher import Dispatcher
+        with _dispatcher_lock:
+            if _dispatcher is None:
+                from hermes.agent.dispatcher import Dispatcher
 
-        use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
-        _dispatcher = Dispatcher(use_openai=use_openai)
+                use_openai = bool(
+                    os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY")
+                )
+                _dispatcher = Dispatcher(use_openai=use_openai)
     return _dispatcher
 
 
 def _get_supa():
-    global _supa
-    if _supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
-
-        _supa = SupabaseClient()
-    return _supa
+    return deps.get_supa()
 
 
 def _get_nowcerts():
-    """The shared NowCertsClient. Reads NOWCERTS_USERNAME/PASSWORD from env.
-
-    Delegates to ``nowcerts_client.get_client()`` rather than keeping a second
-    singleton of its own: two singletons meant two tokens and two ~26s password
-    grants in one process, and the API and the book reads each paying their own.
-    """
-    global _nowcerts
-    if _nowcerts is None:
-        from hermes.sync.nowcerts_client import get_client
-
-        _nowcerts = get_client()
-    return _nowcerts
+    return deps.get_nowcerts()
 
 
 def _require_hermes_token(request: Request) -> None:
-    """Bearer-token gate for mutating / privileged endpoints.
-
-    Reads HERMES_API_TOKEN from env. If unset, the gate is disabled (dev mode);
-    log a warning so it's visible.
-    """
-    expected = os.environ.get("HERMES_API_TOKEN")
-    if not expected:
-        log.warning("HERMES_API_TOKEN not set; bearer gate disabled")
-        return
-    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
-    scheme, _, token = auth.partition(" ")
-    if scheme.lower() != "bearer" or not hmac.compare_digest(token, expected):
-        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+    return deps.require_hermes_token(request)
 
 
 class DispatchRequest(BaseModel):
@@ -189,145 +196,22 @@ class AsyncAcceptedResponse(BaseModel):
 # synthesizes an intake from PDFs, transcripts and operator facts and submits the
 # result here. Named rather than folded into "manual_curl" so the pipeline can tell
 # a reviewed, cited intake apart from a hand-rolled request.
-IntakeSource = Literal["cowork", "voice_tool", "manual_curl", "n8n", "intake_gate"]
-IntakeAgent = Literal["lamar", "gretchen"]
-IntakeKind = Literal["full_intake", "task", "note", "update", "other"]
 
 
-class IntakeDocument(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    type: str | None = None
-    extracted_data: dict[str, Any] | None = None
-    raw_text: str | None = None
-    source_file: str | None = None
 
 
-class IntakeCoachingSnapshot(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    covered_topics: list[str] = Field(default_factory=list)
-    remaining_gaps: list[str] = Field(default_factory=list)
-    flags_detected: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class IntakeSubmissionRequest(BaseModel):
-    # Required
-    idempotency_key: str = Field(..., min_length=1, max_length=512)
-    source: IntakeSource
-    agent: IntakeAgent
-    captured_at: datetime
-
-    # Optional with default
-    intake_kind: IntakeKind = "full_intake"
-
-    # Optional structured envelope fields
-    client_identifier: str | None = None
-    lob_code: str | None = None
-
-    # Payload content — at least one of transcript/documents is required
-    transcript: str | None = None
-    documents: list[IntakeDocument] = Field(default_factory=list)
-    coaching_snapshot: IntakeCoachingSnapshot | None = None
-    notes: str | None = None
-
-    # An already-synthesized `crm-intake-writer` payload (account, contacts,
-    # opportunities, note, facts). Supply this when the CALLER has done the
-    # extraction and its result is better than a second pass would be — the RSG
-    # intake gate, for instance, synthesizes against the same contract and then
-    # adds cited PDF text, reference-table NAICS/SIC/class codes and split
-    # contact names. Re-extracting from raw text there would silently discard
-    # all of it and produce a different answer from the one the operator
-    # reviewed. When present the worker uses it verbatim and skips synthesis.
-    synthesized_payload: dict[str, Any] | None = None
-
-    # Who approved this intake BEFORE it was sent, when the caller owns the review.
-    #
-    # The intake gate does: an operator reads the synthesized bundle, resolves the
-    # flagged items and presses Approve, and only then is anything sent here. That
-    # review has already happened, so parking the row at `awaiting_approval` asks
-    # the same person the same question twice — and with no Slack in the loop the
-    # second question is never asked at all, leaving the intake stuck forever.
-    #
-    # Absent, nothing changes: the row waits for an approver exactly as before.
-    approved_by: str | None = None
-    approval_token: str | None = None   # defaults to APPROVE ALL when approved_by is set
-
-    @model_validator(mode="after")
-    def _validate_approval(self) -> "IntakeSubmissionRequest":
-        """A token without an approver is an unsigned approval — refuse it."""
-        if self.approval_token and not (self.approved_by or "").strip():
-            raise ValueError("approval_token requires approved_by — an approval must name who gave it")
-        if self.approved_by is not None and not self.approved_by.strip():
-            raise ValueError("approved_by cannot be blank")
-        from hermes.commands.agency_intake import ALLOWED_APPROVAL_TOKENS
-
-        token = (self.approval_token or "").strip().upper()
-        if token and token not in ALLOWED_APPROVAL_TOKENS:
-            raise ValueError(
-                f"approval_token {token!r} is not allowed; use one of {sorted(ALLOWED_APPROVAL_TOKENS)}"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def _require_transcript_or_documents(self) -> "IntakeSubmissionRequest":
-        has_transcript = bool(self.transcript and self.transcript.strip())
-        has_documents = bool(self.documents)
-        # A synthesized payload IS the content; requiring raw text alongside it
-        # would force callers to send a transcript nothing will ever read.
-        if self.synthesized_payload:
-            return self
-        if not (has_transcript or has_documents):
-            raise ValueError(
-                "at least one of `transcript`, `documents` or `synthesized_payload` is required"
-            )
-        return self
 
 
-class IntakeSubmissionResponse(BaseModel):
-    submission_id: str
-    status: str
-    status_url: str
-    created_at: str
-    idempotent_replay: bool = False
-    # Set when the submission was committed inline (already synthesized, already
-    # approved). Carries what was actually created so the caller can say "it is in
-    # the CRM" instead of "it was accepted" — those are different claims, and only
-    # one of them is checkable.
-    commit: dict[str, Any] | None = None
 
 
-class AgencyIntakeRequest(BaseModel):
-    raw_text: str
-    submitted_by: str | None = None
-    source_type: str = "manual"
-    source_ref: str | None = None
 
 
-class AgencyIntakeResponse(BaseModel):
-    ok: bool
-    draft_id: str
-    approval_prompt: str
-    validation_warnings: list[str] = []
-    payload_preview: dict | None = None
-    requires_confirmation: bool = True
 
 
-class AgencyIntakeApprovalRequest(BaseModel):
-    draft_id: str
-    token: str
-    approver: str | None = None
 
 
-class AgencyIntakeApprovalResponse(BaseModel):
-    ok: bool
-    draft_id: str
-    token: str
-    status: str
-    summary: str
-    enqueued_queue_ids: list[str] = []
-    retrieval_row_ids: dict[str, list[str]] = {}
-    error: str | None = None
 
 
 class AgencyFactRequest(BaseModel):
@@ -351,8 +235,8 @@ class AgencyFactResponse(BaseModel):
     notes: str | None = None
 
 
-@app.get("/")
-async def root():
+@router.get("/")
+def root():
     """What this service is, and where the screen went.
 
     This process serves no UI any more. Someone landing here has followed an old
@@ -367,13 +251,13 @@ async def root():
     }
 
 
-@app.get("/health")
-async def health():
+@router.get("/health")
+def health():
     return {"status": "ok", "service": "hermes"}
 
 
-@app.get("/hermes/ping", response_model=DispatchResponse)
-async def hermes_ping():
+@router.get("/hermes/ping", response_model=DispatchResponse)
+def hermes_ping():
     """Compatibility ping endpoint for WebUI connectors that call /hermes/ping."""
     return DispatchResponse(
         ok=True,
@@ -383,8 +267,8 @@ async def hermes_ping():
     )
 
 
-@app.post("/dispatch", response_model=DispatchResponse)
-async def dispatch(req: DispatchRequest):
+@router.post("/dispatch", response_model=DispatchResponse)
+def dispatch(req: DispatchRequest):
     if not req.command or not req.command.strip():
         raise HTTPException(status_code=400, detail="Empty command.")
     if requires_confirmation(req.command) and not req.confirm:
@@ -403,7 +287,7 @@ async def dispatch(req: DispatchRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/api/hermes/dispatch", response_model=AsyncAcceptedResponse)
+@router.post("/api/hermes/dispatch", response_model=AsyncAcceptedResponse)
 async def dashboard_dispatch(req: DispatchRequest):
     """Dashboard async dispatch entrypoint."""
     if req.command and req.command.strip():
@@ -422,8 +306,8 @@ async def dashboard_dispatch(req: DispatchRequest):
     raise HTTPException(status_code=400, detail="Provide a command.")
 
 
-@app.get("/api/command-center/renewals")
-async def command_center_renewals():
+@router.get("/api/command-center/renewals")
+def command_center_renewals():
     """Live Renewals Cockpit data (Command Center, Phase 1).
 
     Server-side, service-role read of ``project_85_renewals`` aggregated into
@@ -454,8 +338,8 @@ async def command_center_renewals():
     return summarize_renewals(attach_policy_dates(supa, rows))
 
 
-@app.get("/api/command-center/lapse-check")
-async def command_center_lapse_check():
+@router.get("/api/command-center/lapse-check")
+def command_center_lapse_check():
     """Past-due-but-still-active renewals, kept OFF the forward renewals pipeline.
 
     The renewals board only carries the forward window (June-1 floor → +120 days);
@@ -466,8 +350,8 @@ async def command_center_lapse_check():
     return lapse_check(_get_supa())
 
 
-@app.get("/api/command-center/tasks")
-async def command_center_tasks():
+@router.get("/api/command-center/tasks")
+def command_center_tasks():
     """Open team tasks (Gretchen/Lamar) in plain English, most urgent first."""
     # EspoCRM decommissioned 2026-07-23. Team tasks now live in Supabase
     # (agency_crm_tasks); read open tasks there, grouped by assignee, most urgent
@@ -495,8 +379,8 @@ async def command_center_tasks():
     return {"tasks": tasks, "count": len(tasks), "by_assignee": by_assignee, "source": "agency_crm_tasks"}
 
 
-@app.post("/api/command-center/tasks/{task_id}/complete")
-async def command_center_complete_task(task_id: str):
+@router.post("/api/command-center/tasks/{task_id}/complete")
+def command_center_complete_task(task_id: str):
     """Mark a team task done in agency_crm_tasks."""
     from hermes.operations.team_queue import complete_task
 
@@ -512,10 +396,10 @@ async def command_center_complete_task(task_id: str):
     return {"ok": True, "id": task_id, "status": "completed"}
 
 
-@app.get("/api/command-center/skills")
-async def command_center_skills():
+@router.get("/api/command-center/skills")
+def command_center_skills():
     """List Hermes's capabilities — live tools + domain playbooks."""
-    from hermes.operations.skills_catalog import catalog
+    from hermes.agent.skills_catalog import catalog
 
     return catalog()
 
@@ -528,8 +412,8 @@ class FileSaveRequest(BaseModel):
     file_ext: str = "md"
 
 
-@app.post("/api/command-center/files")
-async def command_center_save_file(req: FileSaveRequest):
+@router.post("/api/command-center/files")
+def command_center_save_file(req: FileSaveRequest):
     """Save a file Hermes created (note/report/answer/save-list) for the Files panel."""
     from hermes.operations.files_store import save_file
 
@@ -549,16 +433,16 @@ async def command_center_save_file(req: FileSaveRequest):
         raise HTTPException(status_code=502, detail=str(exc))
 
 
-@app.get("/api/command-center/files")
-async def command_center_list_files():
+@router.get("/api/command-center/files")
+def command_center_list_files():
     """List files Hermes has created (newest first)."""
     from hermes.operations.files_store import list_files
 
     return {"files": list_files(_get_supa())}
 
 
-@app.get("/api/command-center/files/{file_id}/download")
-async def command_center_download_file(file_id: str):
+@router.get("/api/command-center/files/{file_id}/download")
+def command_center_download_file(file_id: str):
     """Download a Hermes file as an attachment."""
     from hermes.operations.files_store import download_filename, get_file
 
@@ -578,8 +462,8 @@ class AskRequest(BaseModel):
     hub: str | None = None
 
 
-@app.post("/api/command-center/ask")
-async def command_center_ask(req: AskRequest):
+@router.post("/api/command-center/ask")
+def command_center_ask(req: AskRequest):
     """Ask Hermes from the Command Center command bar (Phase 3).
 
     Routes the prompt through the real dispatcher. Read-only posture: write-intent
@@ -606,7 +490,7 @@ async def command_center_ask(req: AskRequest):
     # has CRM lookups, reports, renewals, and web_research). Going straight to the
     # agent avoids the dispatcher's "who/what/find" route hijacking natural questions
     # into a name search. confirmed=False → any write intent is previewed, never run.
-    from hermes.core.nl_agent import ask as nl_ask
+    from hermes.agent.nl_agent import ask as nl_ask
 
     try:
         result = nl_ask(prompt, confirmed=False, persona=(req.persona or None), hub=(req.hub or None))
@@ -622,8 +506,8 @@ async def command_center_ask(req: AskRequest):
     }
 
 
-@app.get("/api/command-center/retention")
-async def command_center_retention():
+@router.get("/api/command-center/retention")
+def command_center_retention():
     """Latest retention snapshot for the loud Retention card (Phase 2)."""
     supa = _get_supa()
     snap = supa.select("agency_snapshots", params={"order": "snapshot_date.desc"}, limit=1)
@@ -643,8 +527,8 @@ class SaveListRequest(BaseModel):
     within_days: int = 60
 
 
-@app.post("/api/command-center/save-list")
-async def command_center_build_save_list(req: SaveListRequest):
+@router.post("/api/command-center/save-list")
+def command_center_build_save_list(req: SaveListRequest):
     """Build + stage a retention save-list (top at-risk renewals → DRAFT outreach).
 
     Writes DRAFT rows only; nothing is auto-sent. The sole write action in Phase 2.
@@ -654,8 +538,8 @@ async def command_center_build_save_list(req: SaveListRequest):
     return create_save_list(_get_supa(), limit=req.limit, within_days=req.within_days)
 
 
-@app.get("/api/command-center/save-list")
-async def command_center_list_save_list():
+@router.get("/api/command-center/save-list")
+def command_center_list_save_list():
     """Open (DRAFT) outreach awaiting human review/send."""
     from hermes.operations.save_list import list_open_drafts
 
@@ -695,8 +579,8 @@ class OpportunityCreateRequest(BaseModel):
         return self
 
 
-@app.post("/api/opportunities")
-async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_tasks: BackgroundTasks):
+@router.post("/api/opportunities")
+def create_opportunity_endpoint(req: OpportunityCreateRequest, background_tasks: BackgroundTasks):
     """Create (or return existing) a pipeline opportunity for ANY client — new,
     inactive, or a cross-sell on a current client. Idempotent per
     (client_identifier, line_of_business); the smart create logic (identifier,
@@ -771,8 +655,8 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
     return {"ok": True, "created": created, "opportunity": row}
 
 
-@app.get("/api/opportunities")
-async def list_opportunities_endpoint(stage: str | None = None, status: str | None = "open", limit: int = 100):
+@router.get("/api/opportunities")
+def list_opportunities_endpoint(stage: str | None = None, status: str | None = "open", limit: int = 100):
     """List pipeline opportunities (default open), newest-updated first.
 
     Each row carries a derived ``projected_close_date`` (+ the ``projected_close_basis``
@@ -825,8 +709,8 @@ class OpportunityUpdateRequest(BaseModel):
 _OPP_EDITABLE = set(OpportunityUpdateRequest.model_fields.keys())
 
 
-@app.patch("/api/opportunities/{opportunity_id}")
-async def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdateRequest):
+@router.patch("/api/opportunities/{opportunity_id}")
+def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdateRequest):
     """Edit an opportunity's fields in the CRM. Supabase-only — an opportunity is
     worked in the CRM and does not write back to the AMS until it's Bound/Won or
     Lost. Only the fields present in the request are changed; setting ``stage``
@@ -881,8 +765,8 @@ def _duplicate_deal_detail(exc: Exception) -> str | None:
     return "A deal like this already exists for that client and line of business."
 
 
-@app.get("/api/opportunities/{opportunity_id}/events")
-async def list_opportunity_events_endpoint(opportunity_id: str, limit: int = 200):
+@router.get("/api/opportunities/{opportunity_id}/events")
+def list_opportunity_events_endpoint(opportunity_id: str, limit: int = 200):
     """A deal's timeline — notes, stage moves, creation, AMS filings, newest first.
 
     The pipeline was the one working surface with no history: `description` was
@@ -903,8 +787,8 @@ class OpportunityNoteRequest(BaseModel):
     author_email: str | None = None
 
 
-@app.post("/api/opportunities/{opportunity_id}/notes")
-async def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteRequest):
+@router.post("/api/opportunities/{opportunity_id}/notes")
+def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteRequest):
     """Write down what happened on a deal. Appended to the same timeline the stage
     moves land on, so one list answers "what happened here"."""
     from hermes.intake import opportunities as opp
@@ -927,8 +811,8 @@ async def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNot
     return {"ok": True, "note": note}
 
 
-@app.delete("/api/opportunities/{opportunity_id}")
-async def delete_opportunity_endpoint(opportunity_id: str):
+@router.delete("/api/opportunities/{opportunity_id}")
+def delete_opportunity_endpoint(opportunity_id: str):
     """Delete an opportunity from the CRM. Supabase-only — opportunities never write
     to the AMS, so there's nothing to unwind in NowCerts. Any attached quotes are
     removed automatically (opportunity_quotes FK is ON DELETE CASCADE)."""
@@ -940,192 +824,28 @@ async def delete_opportunity_endpoint(opportunity_id: str):
     return {"ok": True, "deleted": opportunity_id}
 
 
-@app.get("/api/leads")
-async def list_leads_endpoint(limit: int = 200, status: str | None = None, include_ams: bool = True):
-    """The lead station — the agency's own leads, plus live NowCerts prospects.
-
-    A lead lives in the CRM (``crm_leads``) and never goes to the AMS; it reaches
-    NowCerts only by being converted to an opportunity and that opportunity being
-    won. Prospects created directly in NowCerts appear here too, read-only, marked
-    ``source='nowcerts'`` — and a prospect already held as a CRM lead is shown once.
-
-    The AMS half is best-effort: it is the slowest read the backend does, and our
-    own leads must not disappear because it was slow. When it fails the response
-    carries ``ams_error`` rather than 502-ing the whole screen."""
-    from hermes import leads as L
-
-    try:
-        return L.combined_leads(
-            _get_supa(),
-            _get_nowcerts() if include_ams else None,
-            status=status,
-            limit=limit,
-        )
-    except Exception as exc:
-        log.exception("leads list failed")
-        raise HTTPException(status_code=502, detail=str(exc))
 
 
-class LeadWriteRequest(BaseModel):
-    """A lead. Only a name is required — a lead is often just a name and a number,
-    and demanding a full record is how leads stay on a napkin."""
-    name: str | None = None
-    company: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    city: str | None = None
-    state: str | None = None
-    lead_type: str | None = None            # Personal | Commercial
-    lines_of_business: str | None = None
-    premium_estimate: float | None = None
-    x_date: str | None = None               # when their current cover expires
-    status: str | None = None
-    lead_source: str | None = None
-    owner_email: str | None = None
-    next_action: str | None = None
-    next_action_date: str | None = None
-    nowcerts_insured_guid: str | None = None
-    lost_reason: str | None = None
-    created_by_email: str | None = None
 
 
-@app.post("/api/leads")
-async def create_lead_endpoint(req: LeadWriteRequest):
-    """Add a lead. Written to the CRM only — nothing reaches NowCerts here."""
-    from hermes import leads as L
-
-    supa = _get_supa()
-    fields = req.model_dump(exclude_unset=True)
-    creator = fields.pop("created_by_email", None)
-    if fields.get("owner_email"):
-        _require_users(supa, [("owner_email", fields["owner_email"])])
-    try:
-        lead = L.create_lead(supa, fields, created_by=creator)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("create lead failed: %s", fields.get("name"))
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "lead": lead}
 
 
-@app.get("/api/leads/{lead_id}")
-async def get_lead_endpoint(lead_id: str):
-    """One lead and everything said to them so far."""
-    from hermes import leads as L
-
-    supa = _get_supa()
-    try:
-        lead = L.get_lead(supa, lead_id)
-    except Exception:
-        lead = None                 # malformed uuid → not found, not a 502
-    if not lead:
-        raise HTTPException(status_code=404, detail="lead not found")
-    try:
-        notes = L.list_notes(supa, lead_id)
-    except Exception:  # noqa: BLE001 — a lead without its notes still opens
-        log.exception("lead notes read failed: %s", lead_id)
-        notes = []
-    return {"lead": lead, "notes": notes, "statuses": list(L.LEAD_STATUSES)}
 
 
-@app.patch("/api/leads/{lead_id}")
-async def update_lead_endpoint(lead_id: str, req: LeadWriteRequest):
-    """Work a lead: status, owner, next action, the x-date you just found out."""
-    from hermes import leads as L
-
-    supa = _get_supa()
-    fields = req.model_dump(exclude_unset=True)
-    fields.pop("created_by_email", None)
-    if fields.get("owner_email"):
-        _require_users(supa, [("owner_email", fields["owner_email"])])
-    try:
-        lead = L.update_lead(supa, lead_id, fields)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("update lead failed: %s", lead_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "lead": lead}
 
 
-@app.delete("/api/leads/{lead_id}")
-async def delete_lead_endpoint(lead_id: str):
-    """Delete a lead. Its notes go with it (FK cascade). Prefer status='lost',
-    which keeps the x-date — a lead that went elsewhere this year is a call to
-    make next year."""
-    from hermes import leads as L
-
-    try:
-        _get_supa().delete(L.TABLE, lead_id)
-    except Exception as exc:
-        log.exception("delete lead failed: %s", lead_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "deleted": lead_id}
 
 
-class LeadNoteRequest(BaseModel):
-    body: str
-    author_email: str | None = None
 
 
-@app.post("/api/leads/{lead_id}/notes")
-async def add_lead_note_endpoint(lead_id: str, req: LeadNoteRequest):
-    """Write down what was said. Append-only — the history is why the next call
-    is not the same call again."""
-    from hermes import leads as L
-
-    supa = _get_supa()
-    if not L.get_lead(supa, lead_id):
-        raise HTTPException(status_code=404, detail="lead not found")
-    try:
-        note = L.add_note(supa, lead_id, req.body, author_email=req.author_email)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("add lead note failed: %s", lead_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "note": note}
 
 
-class LeadConvertRequest(BaseModel):
-    line_of_business: str
-    opportunity_type: str | None = None
-    premium_estimate: float | None = None
-    assigned_to_email: str | None = None
-    created_by: str | None = None
 
 
-@app.post("/api/leads/{lead_id}/convert")
-async def convert_lead_endpoint(lead_id: str, req: LeadConvertRequest):
-    """Turn a lead into a pipeline opportunity.
-
-    Still nothing written to NowCerts: the deal is worked in the CRM and reaches
-    the AMS when it is won. Idempotent — converting twice returns the same deal."""
-    from hermes import leads as L
-
-    supa = _get_supa()
-    if req.assigned_to_email:
-        _require_users(supa, [("assigned_to_email", req.assigned_to_email)])
-    try:
-        lead, opportunity = L.convert_to_opportunity(
-            supa, lead_id,
-            line_of_business=req.line_of_business,
-            opportunity_type=req.opportunity_type,
-            premium_estimate=req.premium_estimate,
-            assigned_to_email=req.assigned_to_email,
-            created_by=req.created_by,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("lead conversion failed: %s", lead_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "lead": lead, "opportunity": opportunity}
 
 
-@app.get("/api/cross-sell")
-async def cross_sell_search_endpoint(q: str = "", limit: int = 25):
+@router.get("/api/cross-sell")
+def cross_sell_search_endpoint(q: str = "", limit: int = 25):
     """Search active clients (canonical mirror) to pull one into the pipeline as a
     cross-sell. Returns each client's current LOBs + premium; opening the cross-sell
     is a POST /api/opportunities with opportunity_type='Cross-selling'."""
@@ -1142,8 +862,8 @@ class SendQuoteRequest(BaseModel):
     approved_by: str
 
 
-@app.post("/api/opportunities/{opportunity_id}/send-to-nowcerts")
-async def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
+@router.post("/api/opportunities/{opportunity_id}/send-to-nowcerts")
+def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
     """Approved push: enqueue this opportunity to NowCerts as a quote (Policy · IsQuote).
     Writes nothing synchronously — the quote executor completes it and stamps the
     quote id/number back onto the opportunity. approved_by must be a real user."""
@@ -1177,8 +897,8 @@ class StageUpdateRequest(BaseModel):
     moved_by: str | None = None
 
 
-@app.post("/api/opportunities/{opportunity_id}/stage")
-async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest):
+@router.post("/api/opportunities/{opportunity_id}/stage")
+def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest):
     """Move an opportunity to a new pipeline stage (Kanban drag). Syncs status
     (won/lost). The move itself is Supabase-only; when it lands on a terminal stage
     (Bound/Won or Lost) it QUEUES an approval-gated writeback to NowCerts — nothing
@@ -1283,7 +1003,7 @@ async def _file_quote_pdf(supa, quote: dict[str, Any], upload: "UploadFile") -> 
         return {"document_warning": f"Quote saved, but the PDF could not be filed to Nextcloud: {exc}"}
 
 
-@app.post("/api/opportunities/{opportunity_id}/quotes")
+@router.post("/api/opportunities/{opportunity_id}/quotes")
 async def create_quote_endpoint(
     opportunity_id: str,
     file: UploadFile | None = File(None),
@@ -1318,8 +1038,8 @@ async def create_quote_endpoint(
     return {"ok": True, "quote": fresh, **(warn or {})}
 
 
-@app.get("/api/opportunities/{opportunity_id}/quotes")
-async def list_opportunity_quotes_endpoint(opportunity_id: str):
+@router.get("/api/opportunities/{opportunity_id}/quotes")
+def list_opportunity_quotes_endpoint(opportunity_id: str):
     """Quotes attached to one opportunity (newest first)."""
     from hermes.quotes import store as quote_store
 
@@ -1327,8 +1047,8 @@ async def list_opportunity_quotes_endpoint(opportunity_id: str):
     return {"quotes": rows, "count": len(rows)}
 
 
-@app.get("/api/quotes")
-async def list_quotes_endpoint(insured_id: str | None = None, limit: int = 500):
+@router.get("/api/quotes")
+def list_quotes_endpoint(insured_id: str | None = None, limit: int = 500):
     """All carrier quotes — the Quotes module (grouped by opportunity). Pass
     insured_id to get one client's quotes across their opportunities."""
     from hermes.quotes import store as quote_store
@@ -1341,7 +1061,7 @@ async def list_quotes_endpoint(insured_id: str | None = None, limit: int = 500):
     return {"quotes": rows, "count": len(rows)}
 
 
-@app.post("/api/quotes/{quote_id}/document")
+@router.post("/api/quotes/{quote_id}/document")
 async def attach_quote_document_endpoint(quote_id: str, file: UploadFile = File(...)):
     """Attach (or replace) the quote PDF on an existing quote."""
     from hermes.quotes import store as quote_store
@@ -1356,8 +1076,8 @@ async def attach_quote_document_endpoint(quote_id: str, file: UploadFile = File(
     return {"ok": True, "quote": quote_store.get_quote(supa, quote_id)}
 
 
-@app.post("/api/quotes/{quote_id}/send-to-nowcerts")
-async def send_quote_to_nowcerts(quote_id: str, req: SendQuoteRequest):
+@router.post("/api/quotes/{quote_id}/send-to-nowcerts")
+def send_quote_to_nowcerts(quote_id: str, req: SendQuoteRequest):
     """Approved push: enqueue this carrier quote to NowCerts (Policy · IsQuote).
     Writes nothing synchronously — the quote executor completes it and stamps the
     quote number/guid back onto the quote row. approved_by must be a real user."""
@@ -1409,8 +1129,8 @@ class ProposalStatusRequest(BaseModel):
     status: str
 
 
-@app.post("/api/proposals")
-async def create_proposal_endpoint(req: ProposalCreateRequest):
+@router.post("/api/proposals")
+def create_proposal_endpoint(req: ProposalCreateRequest):
     """Create a proposal from selected carrier quotes, render it (LOB-grouped),
     and file it into the client's Nextcloud Proposals/ folder. fmt: html|pdf|both."""
     from hermes.proposals import documents as prop_docs
@@ -1433,8 +1153,8 @@ async def create_proposal_endpoint(req: ProposalCreateRequest):
     return {"ok": True, "proposal": result["proposal"], "warnings": result["warnings"]}
 
 
-@app.get("/api/proposals")
-async def list_proposals_endpoint(insured_id: str | None = None, limit: int = 500):
+@router.get("/api/proposals")
+def list_proposals_endpoint(insured_id: str | None = None, limit: int = 500):
     """All proposals (newest first), or one client's when insured_id is given."""
     from hermes.proposals import store as prop_store
 
@@ -1446,8 +1166,8 @@ async def list_proposals_endpoint(insured_id: str | None = None, limit: int = 50
     return {"proposals": rows, "count": len(rows)}
 
 
-@app.get("/api/proposals/{proposal_id}")
-async def get_proposal_endpoint(proposal_id: str):
+@router.get("/api/proposals/{proposal_id}")
+def get_proposal_endpoint(proposal_id: str):
     from hermes.proposals import store as prop_store
 
     row = prop_store.get_proposal(_get_supa(), proposal_id)
@@ -1456,8 +1176,8 @@ async def get_proposal_endpoint(proposal_id: str):
     return {"proposal": row}
 
 
-@app.get("/api/proposals/{proposal_id}/view", response_class=HTMLResponse)
-async def view_proposal_endpoint(proposal_id: str):
+@router.get("/api/proposals/{proposal_id}/view", response_class=HTMLResponse)
+def view_proposal_endpoint(proposal_id: str):
     """The rendered proposal HTML — open in a tab or print to PDF from the browser."""
     from hermes.proposals import store as prop_store
 
@@ -1467,8 +1187,8 @@ async def view_proposal_endpoint(proposal_id: str):
     return HTMLResponse(content=row.get("content_html") or "<p>Not yet rendered.</p>")
 
 
-@app.post("/api/proposals/{proposal_id}/regenerate")
-async def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerateRequest):
+@router.post("/api/proposals/{proposal_id}/regenerate")
+def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerateRequest):
     """Re-render a proposal (picks up edited quotes/notes). fmt: html|pdf|both."""
     from hermes.proposals import documents as prop_docs
     from hermes.proposals import store as prop_store
@@ -1485,16 +1205,16 @@ async def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerate
     return {"ok": True, "proposal": result["proposal"], "warnings": result["warnings"]}
 
 
-@app.post("/api/proposals/{proposal_id}/status")
-async def set_proposal_status_endpoint(proposal_id: str, req: ProposalStatusRequest):
+@router.post("/api/proposals/{proposal_id}/status")
+def set_proposal_status_endpoint(proposal_id: str, req: ProposalStatusRequest):
     from hermes.proposals import store as prop_store
 
     row = prop_store.set_status(_get_supa(), proposal_id, req.status)
     return {"ok": True, "proposal": row}
 
 
-@app.get("/api/clients/search")
-async def search_clients_endpoint(q: str, limit: int = 20):
+@router.get("/api/clients/search")
+def search_clients_endpoint(q: str, limit: int = 20):
     """Search the canonical book by insured name — powers the New-Opportunity client
     picker (active OR inactive clients). Returns the NowCerts guid + display fields.
     """
@@ -1516,26 +1236,11 @@ async def search_clients_endpoint(q: str, limit: int = 20):
 
 # ── Cases + Tasks (workflow) — sanctioned create/list for any cockpit ──
 def _active_user_emails(supa) -> set[str]:
-    rows = supa.select(
-        "agency_crm_users", columns="email",
-        params={"active": "eq.true"}, limit=1000,
-    )
-    return {str(r.get("email")).lower() for r in rows if r.get("email")}
+    return deps.active_user_emails(supa)
 
 
 def _require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
-    """Reject any *_email that isn't an active agency_crm_users identity.
-
-    This is the API-level guard for the FK that made CRM task creation fail
-    silently — the cockpit picks emails from /api/agency-users, never free-typed.
-    """
-    valid = _active_user_emails(supa)
-    for label, email in pairs:
-        if email and email.lower() not in valid:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{label} '{email}' is not an active agency_crm_users identity",
-            )
+    return deps.require_users(supa, pairs)
 
 
 # ---------------------------------------------------------------------------
@@ -1548,15 +1253,15 @@ def _require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
 # this process and is not copied into a second container.
 # ---------------------------------------------------------------------------
 def _deck():
-    from hermes.integrations.nextcloud_deck import DeckClient
+    from hermes_integrations.nextcloud_deck import DeckClient
 
     return DeckClient()
 
 
-@app.get("/api/deck/boards")
-async def deck_boards_endpoint():
+@router.get("/api/deck/boards")
+def deck_boards_endpoint():
     """Boards, and the stacks (lists) on each — what a caller needs to address a card."""
-    from hermes.integrations.nextcloud_deck import DeckError
+    from hermes_integrations.nextcloud_deck import DeckError
 
     try:
         client = _deck()
@@ -1585,11 +1290,11 @@ class DeckCardRequest(BaseModel):
     skip_if_exists: bool = True
 
 
-@app.post("/api/deck/cards")
-async def deck_create_card_endpoint(req: DeckCardRequest):
+@router.post("/api/deck/cards")
+def deck_create_card_endpoint(req: DeckCardRequest):
     """Add a card. Idempotent by title within the list, so a job that runs twice
     doesn't leave two identical cards."""
-    from hermes.integrations.nextcloud_deck import DeckError
+    from hermes_integrations.nextcloud_deck import DeckError
 
     try:
         return _deck().create_card(
@@ -1609,8 +1314,8 @@ async def deck_create_card_endpoint(req: DeckCardRequest):
         raise HTTPException(status_code=502, detail=str(exc))
 
 
-@app.get("/api/agency-users")
-async def list_agency_users_endpoint(assignable: bool = False):
+@router.get("/api/agency-users")
+def list_agency_users_endpoint(assignable: bool = False):
     """Active CRM users — powers owner/assignee pickers (valid FK targets).
 
     ``assignable=true`` excludes service accounts. lc-rsg@ is the machine identity
@@ -1628,551 +1333,38 @@ async def list_agency_users_endpoint(assignable: bool = False):
     return {"users": rows, "count": len(rows)}
 
 
-class CaseCreateRequest(BaseModel):
-    title: str
-    case_type: str = "service"          # renewal|service|claims|marketing|endorsement|...
-    description: str | None = None
-    priority: str = "medium"
-    owner_email: str
-    created_by_email: str | None = None
-    insured_name: str | None = None
-    insured_database_id: str | None = None   # NowCerts insured guid
-    policy_number: str | None = None
-    due_at: str | None = None
-
-
-@app.post("/api/cases")
-async def create_case_endpoint(req: CaseCreateRequest):
-    """Create a general agency_crm_cases row (any case_type) for any cockpit.
-    Owner/creator emails are validated against agency_crm_users (FK guard)."""
-    from hermes.core.due_dates import normalize_due
-    from hermes.renewals import cases as C
-
-    supa = _get_supa()
-    creator = req.created_by_email or C._service_email()
-    _require_users(supa, [("owner_email", req.owner_email), ("created_by_email", creator)])
-
-    case_number = C.case_number(req.case_type)
-    try:
-        due_at = normalize_due(req.due_at)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    try:
-        case = supa.insert("agency_crm_cases", C._compact({
-            "case_type": req.case_type,
-            "case_number": case_number,
-            "title": req.title,
-            "description": req.description,
-            "status": "open",
-            "priority": req.priority or "medium",
-            "owner_email": req.owner_email,
-            "created_by_email": creator,
-            "insured_name": req.insured_name,
-            "insured_database_id": req.insured_database_id,
-            "policy_number": req.policy_number,
-            "due_at": due_at,
-        }))
-        C.log_case_event(
-            supa, case_id=str(case.get("id")), event_type="case_created",
-            summary=f"{req.case_type} case opened: {req.title}", actor_email=creator,
-        )
-    except Exception as exc:
-        log.exception("create case failed: %s", req.title)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "case": case}
-
-
-@app.get("/api/case-templates")
-async def list_case_templates_endpoint():
-    """The case-template menu (onboarding, off-boarding, endorsement, COI, ...).
-
-    Static definitions, not a table — a checklist is code the agency reviews in a
-    PR, not data somebody can quietly edit into meaninglessness.
-    """
-    from hermes.casework import templates as T
-
-    return {"templates": T.list_templates()}
-
-
-class CaseFromTemplateRequest(BaseModel):
-    """Open a case from a template, with its whole checklist attached."""
-    template_key: str
-    owner_email: str
-    insured_name: str | None = None
-    insured_database_id: str | None = None
-    policy_number: str | None = None
-    created_by_email: str | None = None
-    assigned_to_email: str | None = None   # default assignee for the checklist
-    title: str | None = None               # override the template's title
-    description: str | None = None
-    priority: str | None = None
-    due_at: str | None = None
-
-
-@app.post("/api/cases/from-template")
-async def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
-    """Create a case AND its checklist in one call.
-
-    This is the whole point of templates: an onboarding that exists as a case
-    with no tasks is the same half-onboarded client we already had. If the tasks
-    cannot be written the case is rolled back, so a caller never ends up with a
-    bare case it believes is a full checklist.
-    """
-    from hermes.casework import templates as T
-    from hermes.core.due_dates import due_in_days, normalize_due
-    from hermes.renewals import cases as C
-
-    tpl = T.get_template(req.template_key)
-    if not tpl:
-        raise HTTPException(
-            status_code=404,
-            detail=f"unknown template '{req.template_key}'; "
-                   f"valid: {', '.join(sorted(T.CASE_TEMPLATES))}",
-        )
-
-    supa = _get_supa()
-    creator = req.created_by_email or C._service_email()
-    _require_users(supa, [
-        ("owner_email", req.owner_email),
-        ("created_by_email", creator),
-        ("assigned_to_email", req.assigned_to_email),
-    ])
-
-    case_type = tpl["case_type"]
-    case_number = C.case_number(case_type)
-    # A template's due_days is a number of DAYS: counted from today's date, agency
-    # time, and landing at close of business — not `utcnow() + n`, which carried
-    # the creation second and, after 8pm ET, the wrong date outright.
-    try:
-        case_due = normalize_due(req.due_at) or (
-            due_in_days(tpl["due_days"]) if tpl.get("due_days") else None
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    try:
-        case = supa.insert("agency_crm_cases", C._compact({
-            "case_type": case_type,
-            "case_number": case_number,
-            "template_key": req.template_key,
-            "title": req.title or T.render_title(req.template_key, req.insured_name),
-            "description": req.description or tpl.get("description"),
-            "status": "open",
-            "priority": req.priority or tpl.get("priority") or "medium",
-            "owner_email": req.owner_email,
-            "created_by_email": creator,
-            "insured_name": req.insured_name,
-            "insured_database_id": req.insured_database_id,
-            "policy_number": req.policy_number,
-            "due_at": case_due,
-        }))
-    except Exception as exc:
-        log.exception("create case from template failed: %s", req.template_key)
-        raise HTTPException(status_code=502, detail=str(exc))
-
-    case_id = str(case.get("id"))
-    try:
-        created = C.create_tasks(
-            supa,
-            case_id=case_id,
-            insured_database_id=req.insured_database_id,
-            default_assignee_email=req.assigned_to_email or req.owner_email,
-            created_by_email=creator,
-            tasks=[{
-                "title": t["title"],
-                "description": t.get("description"),
-                "priority": t.get("priority", "medium"),
-                "is_required": bool(t.get("required")),
-                "sort_order": i,
-                "template_key": req.template_key,
-                "due_at": due_in_days(t.get("due_days", 0)),
-            } for i, t in enumerate(tpl["tasks"])],
-        )
-    except Exception as exc:
-        # Roll the case back rather than leave a checklist-less shell behind.
-        log.exception("template tasks failed for %s; rolling back case", case_number)
-        try:
-            supa.delete("agency_crm_cases", params={"id": f"eq.{case_id}"})
-        except Exception:  # noqa: BLE001
-            log.exception("rollback of case %s failed — orphaned case left behind", case_number)
-        raise HTTPException(status_code=502, detail=f"checklist creation failed: {exc}")
-
-    C.log_case_event(
-        supa, case_id=case_id, event_type="case_created",
-        summary=f"{tpl['label']} opened from template with {len(created)} tasks",
-        actor_email=creator,
-    )
-    return {"ok": True, "case": case, "tasks": created, "task_count": len(created)}
-
-
-@app.get("/api/cases/{case_id}/progress")
-async def case_progress_endpoint(case_id: str):
-    """Checklist progress plus whether every required task is satisfied."""
-    rows = _get_supa().select(
-        "v_case_progress", columns="*", params={"case_id": f"eq.{case_id}"}, limit=1
-    )
-    if not rows:
-        raise HTTPException(status_code=404, detail="case not found")
-    return rows[0]
-
-
-class CaseCloseRequest(BaseModel):
-    """Close a case. ``resolution`` is what goes to the AMS — the checklist does not."""
-    resolution: str
-    resolved_by_email: str | None = None
-    push_to_ams: bool = True
-
-
-@app.post("/api/cases/{case_id}/close")
-async def close_case_endpoint(case_id: str, req: CaseCloseRequest):
-    """Close a case, refusing while required tasks are open.
-
-    The database enforces the same rule (trigger, migration 20260727000000) so
-    closing straight through PostgREST cannot bypass it. This endpoint checks
-    first anyway, to return a list of what is actually blocking rather than a
-    raw constraint error.
-
-    On close the resolution summary is pushed to the AMS; the per-task detail
-    stays in the CRM, which is the system that needs it.
-    """
-    from hermes.casework import templates as T
-    from hermes.renewals import cases as C
-
-    supa = _get_supa()
-    actor = req.resolved_by_email or C._service_email()
-    _require_users(supa, [("resolved_by_email", req.resolved_by_email)])
-
-    cases = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
-    if not cases:
-        raise HTTPException(status_code=404, detail="case not found")
-    case = cases[0]
-
-    tasks = supa.select(
-        "agency_crm_tasks", columns="*",
-        params={"case_id": f"eq.{case_id}", "order": "sort_order.asc"}, limit=500,
-    )
-    blocking = [
-        t for t in tasks
-        if t.get("is_required") and t.get("status") not in ("completed", "cancelled")
-    ]
-    if blocking:
-        raise HTTPException(status_code=409, detail={
-            "error": "required tasks still open",
-            "case_number": case.get("case_number"),
-            "blocking": [{"id": t.get("id"), "title": t.get("title"),
-                          "status": t.get("status")} for t in blocking],
-            "hint": "complete them, or cancel the ones that did not apply to this case",
-        })
-
-    closed_at = datetime.utcnow().isoformat()
-    try:
-        # supa.update is (table, record_id, payload) — this used to pass the
-        # payload as the id with a params= kwarg, so every close raised TypeError
-        # and came back as a 502. Closing a case has never worked from the portal.
-        updated = supa.update("agency_crm_cases", case_id, {
-            "status": "closed",
-            "closed_at": closed_at,
-            "resolution": req.resolution,
-            "resolved_by_email": actor,
-        })
-    except Exception as exc:
-        log.exception("close case %s failed", case_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-
-    if isinstance(updated, list):
-        updated = updated[0] if updated else None
-    case = updated or {**case, "status": "closed", "closed_at": closed_at,
-                       "resolution": req.resolution}
-    summary = T.build_summary(case, tasks)
-
-    ams = {"pushed": False, "reason": "not requested"}
-    if req.push_to_ams:
-        try:
-            from hermes.casework.executor import push_case_summary_to_ams
-
-            ams = push_case_summary_to_ams(supa, case=case, summary=summary)
-            if ams.get("pushed"):
-                supa.update("agency_crm_cases", case_id,
-                            {"ams_summary_sent_at": datetime.utcnow().isoformat()})
-        except Exception as exc:  # noqa: BLE001
-            # A closed case is closed. An AMS hiccup is a sync problem, not a
-            # reason to refuse the close and make somebody redo the work.
-            log.exception("AMS summary push failed for case %s", case_id)
-            ams = {"pushed": False, "reason": str(exc)}
-
-    C.log_case_event(
-        supa, case_id=case_id, event_type="case_closed",
-        summary=f"Closed: {req.resolution}", actor_email=actor,
-    )
-    return {"ok": True, "case": case, "summary": summary, "ams": ams}
-
-
-@app.get("/api/cases")
-async def list_cases_endpoint(
-    status: str | None = None,
-    case_type: str | None = None,
-    limit: int = 100,
-    include_progress: bool = False,
-):
-    """List cases, newest first.
-
-    ``include_progress`` merges each case's checklist state from v_case_progress —
-    how far through it is, whether every required task is satisfied
-    (``can_close``), and how many are still blocking. That is the question anyone
-    actually asks about a case, and answering it here avoids a per-case round trip
-    from callers that can only make one request (the MCP bridge, a morning brief).
-
-    One extra query for the whole page, not one per case.
-    """
-    params: dict[str, str] = {"order": "created_at.desc"}
-    if status:
-        params["status"] = f"eq.{status}"
-    if case_type:
-        params["case_type"] = f"eq.{case_type}"
-    supa = _get_supa()
-    rows = supa.select("agency_crm_cases", columns="*", params=params, limit=limit)
-
-    if include_progress and rows:
-        prog_params: dict[str, str] = {}
-        if status:
-            prog_params["status"] = f"eq.{status}"
-        prog = supa.select("v_case_progress", columns="*", params=prog_params, limit=max(limit, len(rows)))
-        by_id = {str(p.get("case_id")): p for p in prog}
-        for r in rows:
-            p = by_id.get(str(r.get("id")))
-            if not p:
-                continue
-            r["progress"] = {
-                "tasks_total": p.get("tasks_total"),
-                "tasks_done": p.get("tasks_done"),
-                "required_total": p.get("required_total"),
-                "required_done": p.get("required_done"),
-                "required_blocking": p.get("required_blocking"),
-                "can_close": p.get("can_close"),
-            }
-    return {"cases": rows, "count": len(rows)}
-
-
-@app.get("/api/cases/blocked")
-async def list_blocked_cases_endpoint(limit: int = 100):
-    """Open cases that cannot close yet, and the specific tasks blocking each.
-
-    The morning-brief question: "what is stopping these from being finished?"
-    Returns the blocking task titles, not just a count — a number tells you there
-    is a problem, a title tells you what to do about it.
-    """
-    supa = _get_supa()
-    prog = supa.select(
-        "v_case_progress", columns="*",
-        params={"status": "eq.open", "can_close": "is.false", "order": "opened_at.asc"},
-        limit=limit,
-    )
-    out: list[dict[str, Any]] = []
-    for p in prog:
-        tasks = supa.select(
-            "agency_crm_tasks", columns="id,title,status,due_at,assigned_to_email,is_required",
-            params={"case_id": f"eq.{p.get('case_id')}", "is_required": "is.true",
-                    "order": "sort_order.asc"},
-            limit=100,
-        )
-        blocking = [t for t in tasks if t.get("status") not in ("completed", "cancelled")]
-        out.append({
-            "case_id": p.get("case_id"),
-            "case_number": p.get("case_number"),
-            "case_type": p.get("case_type"),
-            "insured_name": p.get("insured_name"),
-            "title": p.get("title"),
-            "tasks_done": p.get("tasks_done"),
-            "tasks_total": p.get("tasks_total"),
-            "blocking": [{"title": t.get("title"), "assigned_to_email": t.get("assigned_to_email"),
-                          "due_at": t.get("due_at")} for t in blocking],
-        })
-    return {"blocked_cases": out, "count": len(out)}
-
-
-@app.get("/api/intake/queue")
-async def intake_queue_endpoint(limit: int = 50):
-    """Intake submissions waiting on a human, oldest first.
-
-    Oldest first on purpose: the useful signal is what has been sitting, not what
-    just arrived. ``oldest_age_days`` is surfaced because a queue that stopped
-    moving looks identical to a busy one if you only report the count.
-    """
-    supa = _get_supa()
-    rows = supa.select(
-        "intake_submissions",
-        columns="id,source,agent,intake_kind,client_identifier,lob_code,status,"
-                "approval_token,retry_count,created_at,updated_at",
-        params={"status": "eq.awaiting_approval", "order": "created_at.asc"},
-        limit=limit,
-    )
-    failed = supa.select(
-        "intake_submissions", columns="id,client_identifier,status,error_log,updated_at",
-        params={"status": "eq.failed", "order": "updated_at.desc"}, limit=20,
-    )
-    oldest_age = None
-    if rows:
-        try:
-            oldest = datetime.fromisoformat(str(rows[0].get("created_at")).replace("Z", "+00:00"))
-            oldest_age = (datetime.now(oldest.tzinfo) - oldest).days
-        except (ValueError, TypeError):
-            oldest_age = None
-    return {
-        "awaiting_approval": rows,
-        "awaiting_count": len(rows),
-        "oldest_age_days": oldest_age,
-        "failed_recent": failed,
-        "failed_count": len(failed),
-    }
-
-
-class TaskCreateRequest(BaseModel):
-    """Create a task. As of issue #195 a task has three legitimate shapes:
-    case-linked (case_id), client-but-no-case (insured_database_id), or purely
-    internal (neither) — "update commission percentage" is not client work and
-    should not have to borrow somebody's case to exist."""
-    case_id: str | None = None
-    insured_database_id: str | None = None
-    title: str
-    description: str | None = None
-    priority: str = "medium"
-    assigned_to_email: str | None = None
-    created_by_email: str | None = None
-    due_at: str | None = None
-
-
-@app.post("/api/tasks")
-async def create_task_endpoint(req: TaskCreateRequest):
-    """Create a task. assigned_to/created_by validated vs agency_crm_users.
-
-    ``case_id`` is optional — omit it for internal work. Idempotent per title
-    within the task's scope (its case, else its client, else the internal
-    bucket), counting only OPEN tasks so a recurring chore isn't blocked forever
-    by last month's completed copy.
-    """
-    from hermes.core.due_dates import normalize_due
-    from hermes.renewals import cases as C
-
-    supa = _get_supa()
-    creator = req.created_by_email or C._service_email()
-    _require_users(supa, [("assigned_to_email", req.assigned_to_email), ("created_by_email", creator)])
-
-    try:
-        due_at = normalize_due(req.due_at)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    try:
-        created = C.create_tasks(
-            supa, case_id=req.case_id,
-            insured_database_id=req.insured_database_id,
-            tasks=[{"title": req.title, "description": req.description,
-                    "assigned_to_email": req.assigned_to_email,
-                    "priority": req.priority, "due_at": due_at}],
-            created_by_email=creator,
-        )
-    except Exception as exc:
-        log.exception("create task failed: %s", req.title)
-        raise HTTPException(status_code=502, detail=str(exc))
-    if not created:
-        # Title already open in this scope (idempotent no-op).
-        return {"ok": True, "created": False, "task": None}
-    # Best-effort: ping the team chat (Nextcloud Talk) about the new task. Never
-    # let a chat hiccup fail the task create — it's fire-and-forget.
-    try:
-        from hermes.operations.task_notify import notify_task_created
-
-        notify_task_created(created[0], kind="task")
-    except Exception:  # noqa: BLE001
-        log.exception("task_notify failed for %s", req.title)
-    return {"ok": True, "created": True, "task": created[0]}
-
-
-@app.post("/api/tasks/digest")
-async def post_task_digest():
-    """Post the open-task digest to the team chat (Nextcloud Talk). Meant to be
-    hit on a daily schedule (pg_cron / scheduler). No-op if NEXTCLOUD_TALK_TOKEN
-    is unset."""
-    from hermes.operations.task_notify import daily_task_digest
-
-    return daily_task_digest(_get_supa())
-
-
-@app.get("/api/tasks")
-async def list_tasks_endpoint(
-    case_id: str | None = None,
-    insured_id: str | None = None,
-    scope: str | None = None,
-    open_only: bool = False,
-    limit: int = 200,
-):
-    """List tasks.
-
-    ``scope='internal'`` returns only standalone tasks (no case) — the queue of
-    things that are nobody's client work but still somebody's job. Without it the
-    internal items are buried among case tasks, which is how they get missed.
-    """
-    params: dict[str, str] = {"order": "created_at.desc"}
-    if case_id:
-        params["case_id"] = f"eq.{case_id}"
-    if insured_id:
-        params["insured_database_id"] = f"eq.{insured_id}"
-    if scope == "internal":
-        params["case_id"] = "is.null"
-    elif scope == "case":
-        params["case_id"] = "not.is.null"
-    if open_only:
-        from hermes.renewals.cases import TASK_STATUS_CLOSED
-
-        params["status"] = f"not.in.({','.join(TASK_STATUS_CLOSED)})"
-    rows = _get_supa().select("agency_crm_tasks", columns="*", params=params, limit=limit)
-    return {"tasks": rows, "count": len(rows)}
-
-
-class TaskUpdateRequest(BaseModel):
-    """Editable task fields. All optional — only what's provided is written."""
-    title: str | None = None
-    description: str | None = None
-    status: str | None = None
-    priority: str | None = None
-    assigned_to_email: str | None = None
-    due_at: str | None = None
-    case_id: str | None = None
-    insured_database_id: str | None = None
-
-
-@app.patch("/api/tasks/{task_id}")
-async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
-    """Update a task (issue #195 — tasks were create-only and view-only).
-
-    ``completed_at`` is derived from ``status``, never accepted from the caller.
-    A reassignment is validated against agency_crm_users: assigned_to_email is a
-    real FK, so an unknown address fails at the database with a message nobody
-    can act on.
-    """
-    from hermes.core.due_dates import normalize_due
-    from hermes.renewals import cases as C
-
-    supa = _get_supa()
-    fields = req.model_dump(exclude_unset=True)
-    if not fields:
-        raise HTTPException(status_code=400, detail="no fields provided")
-    if "due_at" in fields:
-        try:
-            fields["due_at"] = normalize_due(fields["due_at"])
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    if not C.get_task(supa, task_id):
-        raise HTTPException(status_code=404, detail="task not found")
-    if fields.get("assigned_to_email"):
-        _require_users(supa, [("assigned_to_email", fields["assigned_to_email"])])
-    try:
-        row = C.update_task(supa, task_id, fields)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("update task failed: %s", task_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "task": row}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -2184,246 +1376,34 @@ async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
 # record as it was, because "it disappeared and nobody knows who" is how a
 # shared queue stops being trusted.
 # ---------------------------------------------------------------------------
-class DeleteRequest(BaseModel):
-    deleted_by: str
-    reason: str | None = None
 
 
-def _log_deletion(supa, *, entity_type: str, entity_key: str, actor: str,
-                  before: dict, reason: str | None) -> None:
-    from hermes.overrides.store import write_log
-
-    write_log(supa, entity_type=entity_type, entity_key=entity_key,
-              action="deleted", actor=actor, before=before, note=reason)
 
 
-@app.delete("/api/tasks/{task_id}")
-async def delete_task_endpoint(task_id: str, req: DeleteRequest):
-    """Delete a task outright. Cancelling keeps it in the record; this removes it."""
-    from hermes.renewals import cases as C
-
-    supa = _get_supa()
-    _require_users(supa, [("deleted_by", req.deleted_by)])
-    task = C.get_task(supa, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="task not found")
-    try:
-        C.delete_task(supa, task_id)
-    except Exception as exc:
-        log.exception("delete task failed: %s", task_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    _log_deletion(supa, entity_type="agency_crm_tasks", entity_key=task_id,
-                  actor=req.deleted_by, before=task, reason=req.reason)
-    # A case-linked task leaves its trace on the case timeline too — the case is
-    # where anyone will go looking for why the checklist got shorter.
-    if task.get("case_id"):
-        try:
-            C.log_case_event(
-                supa, case_id=str(task["case_id"]), event_type="task_deleted",
-                summary=f"Task deleted: {task.get('title')}", actor_email=req.deleted_by,
-            )
-        except Exception:  # noqa: BLE001 — the task is already gone
-            log.exception("case event for deleted task %s failed", task_id)
-    return {"ok": True, "deleted": task_id, "task": task}
 
 
-class CaseUpdateRequest(BaseModel):
-    """Editable case fields. All optional — only what's provided is written.
-
-    ``status`` is absent on purpose: closing a case runs the required-task
-    checks, records a resolution and pushes a summary to the AMS. Use /close.
-    Extras are rejected rather than dropped, so a caller who sends ``status``
-    is told it is not editable instead of getting a silent no-op.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    title: str | None = None
-    description: str | None = None
-    priority: str | None = None
-    owner_email: str | None = None
-    due_at: str | None = None
-    case_type: str | None = None
-    insured_name: str | None = None
-    policy_number: str | None = None
 
 
-@app.patch("/api/cases/{case_id}")
-async def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
-    """Edit a case. Cases were create-and-close-only; a typo'd title or the wrong
-    owner meant the case stayed wrong."""
-    from hermes.core.due_dates import normalize_due
-    from hermes.renewals import cases as C
-
-    supa = _get_supa()
-    fields = req.model_dump(exclude_unset=True)
-    if not fields:
-        raise HTTPException(status_code=400, detail="no fields provided")
-    if "due_at" in fields:
-        try:
-            fields["due_at"] = normalize_due(fields["due_at"])
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
-    if not rows:
-        raise HTTPException(status_code=404, detail="case not found")
-    if fields.get("owner_email"):
-        _require_users(supa, [("owner_email", fields["owner_email"])])
-    try:
-        row = C.update_case(supa, case_id, fields)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("update case failed: %s", case_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "case": row}
 
 
-@app.delete("/api/cases/{case_id}")
-async def delete_case_endpoint(case_id: str, req: DeleteRequest):
-    """Delete a case and everything filed against it — tasks, timeline, document
-    links, renewal detail. The Nextcloud documents themselves are left alone."""
-    from hermes.renewals import cases as C
-
-    supa = _get_supa()
-    _require_users(supa, [("deleted_by", req.deleted_by)])
-    rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
-    if not rows:
-        raise HTTPException(status_code=404, detail="case not found")
-    case = rows[0]
-    try:
-        removed = C.delete_case(supa, case_id)
-    except Exception as exc:
-        log.exception("delete case failed: %s", case_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    _log_deletion(supa, entity_type="agency_crm_cases", entity_key=case_id,
-                  actor=req.deleted_by, before=case, reason=req.reason)
-    return {"ok": True, "deleted": case_id, "case": case, "removed": removed}
 
 
-class PushToAmsRequest(BaseModel):
-    approved_by: str
 
 
-class QueueRetryRequest(BaseModel):
-    requeued_by: str
-    run_now: bool = True
 
 
-class CaseworkRunRequest(BaseModel):
-    limit: int = 5
-    dry_run: bool = False
 
 
-@app.post("/api/cases/{case_id}/push-to-ams")
-async def push_case_to_ams(case_id: str, req: PushToAmsRequest):
-    """Approved push: log this case in the NowCerts task ledger. approved_by must be a user."""
-    from hermes.casework.executor import stage_case_job
-
-    supa = _get_supa()
-    _require_users(supa, [("approved_by", req.approved_by)])
-    try:
-        rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
-    except Exception:
-        rows = []
-    if not rows:
-        raise HTTPException(status_code=404, detail="case not found")
-    try:
-        job = stage_case_job(supa, case=rows[0], approved_by=req.approved_by)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("push case failed: %s", case_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "queued": True, "queue_id": job.get("id"),
-            "note": "Case queued to NowCerts (approved). Writes when the casework executor runs."}
 
 
-@app.post("/api/tasks/{task_id}/push-to-ams")
-async def push_task_to_ams(task_id: str, req: PushToAmsRequest):
-    """Approved push: log this task in the NowCerts task ledger (uses its case's insured)."""
-    from hermes.casework.executor import stage_task_job
-
-    supa = _get_supa()
-    _require_users(supa, [("approved_by", req.approved_by)])
-    try:
-        rows = supa.select("agency_crm_tasks", columns="*", params={"id": f"eq.{task_id}"}, limit=1)
-    except Exception:
-        rows = []
-    if not rows:
-        raise HTTPException(status_code=404, detail="task not found")
-    task = rows[0]
-    insured_id, policy_number = None, None
-    if task.get("case_id"):
-        try:
-            crows = supa.select("agency_crm_cases", columns="insured_database_id,policy_number",
-                                params={"id": f"eq.{task['case_id']}"}, limit=1)
-            if crows:
-                insured_id = crows[0].get("insured_database_id")
-                policy_number = crows[0].get("policy_number")
-        except Exception:
-            pass
-    try:
-        job = stage_task_job(supa, task=task, insured_database_id=insured_id,
-                             policy_number=policy_number, approved_by=req.approved_by)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("push task failed: %s", task_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "queued": True, "queue_id": job.get("id"),
-            "note": "Task queued to NowCerts (approved). Writes when the casework executor runs."}
 
 
-@app.get("/api/queue/failed")
-async def list_failed_ams_writebacks(limit: int = 100):
-    """Service-request/client-task write-backs that failed or exhausted retries —
-    the retry queue surfaced in the cockpit."""
-    rows = _get_supa().select(
-        "outbound_sync_queue", columns="*",
-        params={"object_type": "in.(case,task)", "status": "in.(failed,dead)",
-                "order": "updated_at.desc"}, limit=limit,
-    )
-    return {"jobs": rows, "count": len(rows)}
 
 
-@app.post("/api/queue/{queue_id}/retry")
-async def retry_ams_writeback(queue_id: str, req: QueueRetryRequest):
-    """Retriable on command: re-open a failed/dead case or task write-back and
-    (by default) run the executor now so it relays to NowCerts immediately."""
-    from hermes.casework.executor import requeue_job, run_casework_executor
-
-    supa = _get_supa()
-    _require_users(supa, [("requeued_by", req.requeued_by)])
-    try:
-        job = requeue_job(supa, queue_id=queue_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:  # noqa: BLE001
-        log.exception("requeue failed: %s", queue_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    run = run_casework_executor(supa=supa, limit=5) if req.run_now else {}
-    return {"ok": True, "requeued": True, "queue_id": queue_id, "job": job, "run": run}
 
 
-@app.post("/api/casework/run")
-async def run_casework_writebacks(req: CaseworkRunRequest):
-    """Run the case/task → NowCerts write-back executor on command (opt-in, no cron).
-    ``dry_run`` previews without writing."""
-    from hermes.casework.executor import run_casework_executor
-
-    summary = run_casework_executor(supa=_get_supa(), limit=req.limit, dry_run=req.dry_run)
-    return {"ok": True, **summary}
 
 
-@app.post("/api/intake/run")
-async def run_intake_writebacks(req: CaseworkRunRequest):
-    """Drain approved intake routing intents to CRM (opportunities) + NowCerts (insured)
-    on command (opt-in, no cron). ``dry_run`` previews without writing."""
-    from hermes.command_center.intake_executor import run_intake_executor
-
-    summary = run_intake_executor(supa=_get_supa(), limit=req.limit, dry_run=req.dry_run)
-    return {"ok": True, **summary}
 
 
 # Case attachments (issue #195). Case-level only, deliberately: every task already
@@ -2433,119 +1413,10 @@ async def run_intake_writebacks(req: CaseworkRunRequest):
 #
 # Filing category follows the case type, so a renewal's paperwork lands in the
 # client's "Renewal Reviews" folder rather than a generic dump.
-_CASE_TYPE_CATEGORY = {
-    "renewal": "Renewal Reviews",
-    "marketing": "Quotes",
-    "service": "Correspondence",
-}
-_CASE_DOC_MAX_BYTES = 25 * 1024 * 1024
 
 
-@app.post("/api/cases/{case_id}/documents")
-async def upload_case_document(
-    case_id: str,
-    file: UploadFile = File(...),
-    uploaded_by: str = Form(""),
-    category: str = Form(""),
-    title: str = Form(""),
-):
-    """Attach a file to a case: Nextcloud for the bytes, a doc-link row for the CRM.
-
-    Same path the renewal PDF filer already uses (file_document -> link_document),
-    so a hand-attached document lands in the same client folder tree as a generated
-    one instead of a parallel store.
-    """
-    from hermes.integrations.nextcloud_client import CLIENT_CATEGORIES, NextcloudClient
-    from hermes.renewals import cases as C
-
-    supa = _get_supa()
-    rows = []
-    try:
-        rows = supa.select("agency_crm_cases", columns="*", params={"id": f"eq.{case_id}"}, limit=1)
-    except Exception:
-        rows = []  # malformed uuid -> not found
-    if not rows:
-        raise HTTPException(status_code=404, detail="case not found")
-    case = rows[0]
-
-    uploader = uploaded_by.strip() or C._service_email()
-    _require_users(supa, [("uploaded_by", uploader)])
-
-    if category and category not in CLIENT_CATEGORIES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"unknown category '{category}'; must be one of {list(CLIENT_CATEGORIES)}",
-        )
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="uploaded file is empty")
-    if len(content) > _CASE_DOC_MAX_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"file is {len(content) // 1024 // 1024}MB; the limit is "
-                   f"{_CASE_DOC_MAX_BYTES // 1024 // 1024}MB",
-        )
-
-    filename = (file.filename or "attachment").strip()
-    folder = category or _CASE_TYPE_CATEGORY.get(
-        str(case.get("case_type") or ""), "Correspondence"
-    )
-    client_name = case.get("insured_name") or None
-
-    try:
-        filed = NextcloudClient().file_document(
-            content=content,
-            filename=filename,
-            content_type=file.content_type or "application/octet-stream",
-            # No insured on the case -> Internal/Case Files rather than a client
-            # folder. Guessing a client name would misfile it under someone.
-            client=client_name,
-            category=folder,
-            internal_folder=None if client_name else "Case Files",
-        )
-    except Exception as exc:
-        log.exception("case document upload failed: case=%s file=%s", case_id, filename)
-        raise HTTPException(status_code=502, detail=f"Nextcloud upload failed: {exc}")
-
-    try:
-        link = C.link_document(
-            supa,
-            case_id=case_id,
-            title=title.strip() or filename,
-            nextcloud_path=filed["path"],
-            nextcloud_url=filed.get("url"),
-            insured_id=case.get("insured_database_id"),
-            content_type=file.content_type,
-            uploaded_by_email=uploader,
-        )
-    except Exception as exc:
-        # The bytes are safely in Nextcloud; only the CRM link failed. Say so —
-        # "upload failed" would send someone hunting for a file that is right there.
-        log.exception("case document link failed: case=%s path=%s", case_id, filed["path"])
-        raise HTTPException(
-            status_code=502,
-            detail=f"File stored at {filed['path']} but linking it to the case failed: {exc}",
-        )
-
-    # Keep the case's folder pointer current, as the renewal filer does.
-    try:
-        supa.update("agency_crm_cases", case_id,
-                    {"nextcloud_folder_url": filed.get("url") or filed["path"]})
-    except Exception:  # noqa: BLE001 — a pointer refresh must not fail the upload
-        log.exception("case folder pointer update failed: %s", case_id)
-
-    return {"ok": True, "document": link, "filed_to": filed["path"]}
 
 
-@app.get("/api/cases/{case_id}/documents")
-async def case_documents_endpoint(case_id: str):
-    """Nextcloud document links filed against a case (agency_crm_document_links)."""
-    rows = _get_supa().select(
-        "agency_crm_document_links", columns="*",
-        params={"case_id": f"eq.{case_id}", "order": "created_at.desc"}, limit=200,
-    )
-    return {"documents": rows, "count": len(rows)}
 
 
 # ── Book reads + Workspace KPIs (power the CRM cockpit views) ──
@@ -2584,14 +1455,14 @@ class ClientOverrideRequest(BaseModel):
     reason: str | None = None
 
 
-@app.post("/api/clients/{insured_guid}/override")
-async def override_client_field(insured_guid: str, req: ClientOverrideRequest):
+@router.post("/api/clients/{insured_guid}/override")
+def override_client_field(insured_guid: str, req: ClientOverrideRequest):
     """Correct a client field in the portal.
 
     Keyed on the NowCerts insured GUID so the correction survives a re-seed of
     the mirror. Retires itself once NowCerts reports the same value.
     """
-    from hermes.overrides.store import set_override
+    from hermes_core.overrides.store import set_override
 
     supa = _get_supa()
     _require_users(supa, [("approved_by", req.approved_by)])
@@ -2632,8 +1503,8 @@ async def override_client_field(insured_guid: str, req: ClientOverrideRequest):
 def _apply_client_overrides(supa, records: list[dict]) -> list[dict]:
     """Overlay active corrections onto client rows. Best-effort: a correction is
     an enrichment, and losing it must not take the client list down."""
-    from hermes.overrides.core import apply_overrides
-    from hermes.overrides.store import active_overrides
+    from hermes_core.overrides.core import apply_overrides
+    from hermes_core.overrides.store import active_overrides
 
     try:
         ovr = active_overrides(supa, CLIENT_ENTITY_TYPE)
@@ -2672,11 +1543,11 @@ class PolicyOverrideRequest(BaseModel):
     reason: str | None = None
 
 
-@app.post("/api/policies/{policy_guid}/override")
-async def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
+@router.post("/api/policies/{policy_guid}/override")
+def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
     """Correct a policy field in the portal. Keyed on the NowCerts policy GUID,
     so the correction survives a re-seed of the mirror. Not an AMS write."""
-    from hermes.overrides.store import set_override
+    from hermes_core.overrides.store import set_override
 
     supa = _get_supa()
     _require_users(supa, [("approved_by", req.approved_by)])
@@ -2715,8 +1586,8 @@ async def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
 
 def _apply_policy_overrides(supa, records: list[dict]) -> list[dict]:
     """Overlay active corrections onto policy rows. Best-effort, like clients."""
-    from hermes.overrides.core import apply_overrides
-    from hermes.overrides.store import active_overrides
+    from hermes_core.overrides.core import apply_overrides
+    from hermes_core.overrides.store import active_overrides
 
     try:
         ovr = active_overrides(supa, POLICY_ENTITY_TYPE)
@@ -2765,36 +1636,6 @@ def _ams_push(object_type: str, object_id: str, req: AmsPushRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.get("/api/pipeline/stages")
-async def pipeline_stages_endpoint():
-    """The stage vocabulary, in order, per pipeline.
-
-    A kanban has to know its columns and their order before it can draw them, and
-    hardcoding the list in the browser is how the board drifts from what the
-    backend will accept on a stage move. Same source both sides.
-    """
-    from hermes.intake.opportunities import (
-        LOST_STAGES,
-        NEW_BUSINESS_STAGES,
-        OPPORTUNITY_TYPES,
-        RENEWAL_STAGES,
-        RENEWAL_TYPES,
-        WON_STAGES,
-    )
-
-    return {
-        "new_business": list(NEW_BUSINESS_STAGES),
-        "renewal": list(RENEWAL_STAGES),
-        "won": sorted(WON_STAGES),
-        "lost": sorted(LOST_STAGES),
-        # Which types are worked on the renewal ladder, and the full vocabulary.
-        # Shipped rather than re-derived in the browser: "is this a renewal" has
-        # to mean the same thing on the board as it does when a stage move is
-        # validated, and a substring test on the type name would quietly sweep in
-        # "Remarket" — a different pipeline with a different ladder.
-        "renewal_types": sorted(RENEWAL_TYPES),
-        "types": list(OPPORTUNITY_TYPES),
-    }
 
 
 class PolicyCreateRequest(BaseModel):
@@ -2812,8 +1653,8 @@ class PolicyCreateRequest(BaseModel):
     reason: str | None = None
 
 
-@app.post("/api/policies")
-async def create_policy_endpoint(req: PolicyCreateRequest):
+@router.post("/api/policies")
+def create_policy_endpoint(req: PolicyCreateRequest):
     """Add a policy to a client, in NowCerts.
 
     Deliberately NOT a write to canonical_policies: that table is a mirror under a
@@ -2856,7 +1697,7 @@ async def create_policy_endpoint(req: PolicyCreateRequest):
         log.exception("create policy failed: %s", req.policy_number)
         raise HTTPException(status_code=502, detail=f"NowCerts refused the policy: {exc}")
 
-    from hermes.overrides.store import write_log
+    from hermes_core.overrides.store import write_log
 
     write_log(supa, entity_type="nowcerts_policy", entity_key=req.policy_number,
               action="ams_create", actor=req.approved_by, before=None, after=payload,
@@ -2864,8 +1705,8 @@ async def create_policy_endpoint(req: PolicyCreateRequest):
     return {"ok": True, "policy": created, "sent": payload}
 
 
-@app.get("/api/ams/failed-pushes")
-async def list_failed_pushes(limit: int = 50):
+@router.get("/api/ams/failed-pushes")
+def list_failed_pushes(limit: int = 50):
     """Corrections that never reached NowCerts.
 
     Worth surfacing rather than leaving in a table: the CRM shows the corrected
@@ -2886,8 +1727,8 @@ class AmsRetryRequest(BaseModel):
     retried_by: str
 
 
-@app.post("/api/ams/failed-pushes/{queue_id}/retry")
-async def retry_failed_push(queue_id: str, req: AmsRetryRequest):
+@router.post("/api/ams/failed-pushes/{queue_id}/retry")
+def retry_failed_push(queue_id: str, req: AmsRetryRequest):
     """Re-drive one failed push from its own queue row. Safe to repeat — both AMS
     endpoints upsert on DatabaseId."""
     from hermes.ams import writeback
@@ -2900,24 +1741,24 @@ async def retry_failed_push(queue_id: str, req: AmsRetryRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.post("/api/clients/{insured_guid}/push-to-ams")
-async def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
+@router.post("/api/clients/{insured_guid}/push-to-ams")
+def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
     """Write a client's corrected fields to NowCerts, keyed on the insured GUID."""
     from hermes.ams.writeback import OBJECT_TYPE_CLIENT
 
     return _ams_push(OBJECT_TYPE_CLIENT, insured_guid, req)
 
 
-@app.post("/api/policies/{policy_guid}/push-to-ams")
-async def push_policy_to_ams(policy_guid: str, req: AmsPushRequest):
+@router.post("/api/policies/{policy_guid}/push-to-ams")
+def push_policy_to_ams(policy_guid: str, req: AmsPushRequest):
     """Write a policy's corrected fields to NowCerts, keyed on the policy GUID."""
     from hermes.ams.writeback import OBJECT_TYPE_POLICY
 
     return _ams_push(OBJECT_TYPE_POLICY, policy_guid, req)
 
 
-@app.get("/api/clients")
-async def list_clients_endpoint(limit: int = 500):
+@router.get("/api/clients")
+def list_clients_endpoint(limit: int = 500):
     """Full canonical client book, with any portal corrections applied."""
     supa = _get_supa()
     rows = supa.select(
@@ -2928,8 +1769,8 @@ async def list_clients_endpoint(limit: int = 500):
     return {"clients": _apply_client_overrides(supa, rows), "count": len(rows)}
 
 
-@app.get("/api/clients/{insured_guid}")
-async def client_360_endpoint(insured_guid: str):
+@router.get("/api/clients/{insured_guid}")
+def client_360_endpoint(insured_guid: str):
     """Client 360 — the insured's record plus their whole book: policies,
     opportunities, and cases, keyed on the NowCerts insured GUID."""
     from hermes.intake import opportunities as opp
@@ -3035,8 +1876,8 @@ def _collapse_to_current_terms(policies: list[dict[str, Any]]) -> tuple[list[dic
     return current, folded
 
 
-@app.get("/api/policies")
-async def list_policies_endpoint(limit: int = 1000, include_history: bool = False):
+@router.get("/api/policies")
+def list_policies_endpoint(limit: int = 1000, include_history: bool = False):
     """Canonical policy book (read-only mirror), soonest-expiring first.
 
     By default, renewal-overlap pairs and duplicate imports are collapsed to one
@@ -3074,760 +1915,17 @@ async def list_policies_endpoint(limit: int = 1000, include_history: bool = Fals
             "collapsed": not include_history}
 
 
-class CommissionRuleRequest(BaseModel):
-    id: str | None = None
-    carrier_name: str
-    lob: str
-    nb_percent: float | None = None
-    renewal_percent: float | None = None
-    commission_basis: str | None = "gross"
-    active: bool = True
+# ── Finance (commissions) ────────────────────────────────────────────────────
+# The commission surface moved to hermes/routers/finance.py — the first app
+# split out under docs/repo-split-plan.md Phase 2. Mounted at app creation.
 
 
-@app.get("/api/commission-rules")
-async def list_commission_rules(limit: int = 500):
-    """Commission terms — carrier/LOB → new-business % and renewal %."""
-    rows = _get_supa().select(
-        "commission_rules",
-        columns="id,carrier_name,lob,nb_percent,renewal_percent,commission_basis,active",
-        params={"order": "carrier_name.asc"}, limit=limit,
-    )
-    return {"rules": rows, "count": len(rows)}
+# ── Carriers + Renewals ──────────────────────────────────────────────────────
+# Moved to hermes/routers/carriers.py and hermes/routers/renewals.py
+# (docs/repo-split-plan.md, Phase 2). Mounted at app creation.
 
-
-@app.post("/api/commission-rules")
-async def upsert_commission_rule(req: CommissionRuleRequest):
-    """Add or update a commission term (carrier + LOB rate). Feeds expected
-    commission when NowCerts doesn't carry an agency commission amount."""
-    supa = _get_supa()
-    payload = {k: v for k, v in {
-        "carrier_name": (req.carrier_name or "").strip(),
-        "lob": (req.lob or "").strip(),
-        "nb_percent": req.nb_percent,
-        "renewal_percent": req.renewal_percent,
-        "commission_basis": req.commission_basis or "gross",
-        "active": req.active,
-    }.items() if v is not None}
-    if not payload.get("carrier_name") or not payload.get("lob"):
-        raise HTTPException(status_code=400, detail="carrier_name and lob are required")
-    try:
-        row = supa.update("commission_rules", req.id, payload) if req.id else supa.insert("commission_rules", payload)
-    except Exception as exc:
-        log.exception("commission rule upsert failed")
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "rule": row}
-
-
-@app.get("/api/commissions")
-async def list_commissions_endpoint(limit: int = 1000, status: str = "reconciled"):
-    """Commission ledger, plus the context that keeps an empty result honest.
-
-    Always returns ``counts_by_status`` (over the whole ledger) and ``coverage``
-    (how much of the active book reaches the surface, and why the rest doesn't)
-    — regardless of what ``status`` matches. Filtering to a status with no rows
-    used to render a blank table that read as "no commission data exists", which
-    was false for the entire life of the ledger. Pass ``status=all`` for everything.
-    """
-    from hermes.commissions.surface import commission_overview
-
-    try:
-        overview = commission_overview(_get_supa(), status=status, limit=limit)
-    except Exception as exc:
-        log.exception("commissions read failed")
-        raise HTTPException(status_code=502, detail=str(exc))
-    return overview.as_dict()
-
-
-@app.get("/api/commissions/analytics")
-async def commission_analytics_endpoint():
-    """Whole-ledger rollups by carrier and by line of business (#236).
-
-    The lens for "is the cockpit sufficient to replace the standalone tracker?"
-    Per-carrier and per-LOB expected/actual/delta plus a status breakdown, over
-    the entire ledger regardless of reconciliation status — a carrier with only
-    `pending` rows still appears with its expected money.
-    """
-    from hermes.commissions.surface import commission_analytics
-
-    try:
-        return commission_analytics(_get_supa()).as_dict()
-    except Exception as exc:
-        log.exception("commissions analytics read failed")
-        raise HTTPException(status_code=502, detail=str(exc))
-
-
-class CommissionOverrideRequest(BaseModel):
-    """A human correction to a commission row.
-
-    ``approved_by`` must be an active agency_crm_users identity — an override is
-    a named decision on money data, and the audit log records who made it.
-    """
-    field_name: str
-    value: Any
-    approved_by: str
-    reason: str | None = None
-
-
-@app.post("/api/commissions/{ledger_id}/override")
-async def override_commission_field(ledger_id: str, req: CommissionOverrideRequest):
-    """Correct a commission field in the portal.
-
-    The override outranks the synced value until the AMS reports the same thing,
-    at which point the nightly reconcile retires it automatically. Fix NowCerts
-    by hand separately — this does NOT write to the AMS.
-    """
-    from hermes.commissions.surface import ENTITY_TYPE, OVERRIDABLE_FIELDS
-    from hermes.overrides.store import set_override
-
-    supa = _get_supa()
-    _require_users(supa, [("approved_by", req.approved_by)])
-
-    field_name = (req.field_name or "").strip()
-    if field_name not in OVERRIDABLE_FIELDS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field_name!r} is not overridable; allowed: {sorted(OVERRIDABLE_FIELDS)}",
-        )
-
-    try:
-        rows = supa.select("commission_ledger", columns="*",
-                           params={"id": f"eq.{ledger_id}"}, limit=1)
-    except Exception:
-        rows = []          # malformed uuid -> not found
-    if not rows:
-        raise HTTPException(status_code=404, detail="commission row not found")
-    ledger = rows[0]
-
-    policy_number = str(ledger.get("policy_number") or "").strip()
-    if not policy_number:
-        raise HTTPException(
-            status_code=400,
-            detail="row has no policy_number; overrides are keyed by it so they "
-                   "survive a re-seed",
-        )
-
-    try:
-        row = set_override(
-            supa,
-            entity_type=ENTITY_TYPE,
-            entity_key=policy_number,
-            field_name=field_name,
-            override_value=req.value,
-            original_value=ledger.get(field_name),   # the SOURCE value, for reconcile
-            approved_by=req.approved_by,
-            reason=req.reason,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("commission override failed: %s %s", ledger_id, field_name)
-        raise HTTPException(status_code=502, detail=str(exc))
-
-    return {"ok": True, "override": row,
-            "note": "Portal value only — correct NowCerts separately. The override "
-                    "retires itself once the AMS reports the same value."}
-
-
-@app.delete("/api/commissions/overrides/{override_id}")
-async def withdraw_commission_override(override_id: str, approved_by: str):
-    """Withdraw an override — the correction was wrong or is no longer wanted."""
-    from hermes.overrides.store import withdraw
-
-    supa = _get_supa()
-    _require_users(supa, [("approved_by", approved_by)])
-    try:
-        row = withdraw(supa, override_id, actor=approved_by)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        log.exception("override withdraw failed: %s", override_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "override": row}
-
-
-@app.get("/api/commissions/overrides")
-async def list_commission_overrides(status: str = "active", limit: int = 500):
-    """Active corrections, plus anything the sync flagged as conflicted."""
-    from hermes.commissions.surface import ENTITY_TYPE
-
-    params: dict[str, str] = {"entity_type": f"eq.{ENTITY_TYPE}",
-                              "order": "approved_at.desc"}
-    if status and status.lower() != "all":
-        params["status"] = f"eq.{status}"
-    rows = _get_supa().select("portal_overrides", columns="*", params=params, limit=limit)
-    return {"overrides": rows, "count": len(rows)}
-
-
-# ── Commission statements — upload, review, approve ──────────────────────────
-@app.post("/api/commission-statements")
-async def upload_commission_statement(
-    file: UploadFile = File(...),
-    uploaded_by: str = Form(...),
-    carrier: str = Form(default=""),
-    stated_total_premium: str = Form(default=""),
-    stated_total_commission: str = Form(default=""),
-):
-    """Upload a carrier statement. Parses and STAGES it — writes no money.
-
-    Returns a review card: what parsed, whether it matches the carrier's own
-    stated totals, and where every line would land. Approve separately.
-
-    Supply the carrier's stated totals when the statement prints them; the
-    crosscheck is what stops a bad parse reaching the ledger.
-    """
-    from hermes.commissions.statements import stage_statement
-
-    supa = _get_supa()
-    _require_users(supa, [("uploaded_by", uploaded_by)])
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="empty file")
-
-    try:
-        staged = stage_statement(
-            supa,
-            content=content,
-            filename=file.filename or "statement.csv",
-            uploaded_by=uploaded_by,
-            carrier=carrier.strip() or None,
-            stated_premium=stated_total_premium.strip() or None,
-            stated_commission=stated_total_commission.strip() or None,
-        )
-    except Exception as exc:
-        log.exception("statement staging failed: %s", file.filename)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return staged.as_dict()
-
-
-@app.get("/api/commission-statements")
-async def list_commission_batches(status: str = "", limit: int = 50):
-    """Uploaded statement batches, newest first."""
-    from hermes.commissions.statements import BATCHES_TABLE
-
-    params: dict[str, str] = {"order": "created_at.desc"}
-    if status.strip():
-        params["ingest_status"] = f"eq.{status.strip()}"
-    rows = _get_supa().select(BATCHES_TABLE, columns="*", params=params, limit=limit)
-    return {"batches": rows, "count": len(rows)}
-
-
-@app.get("/api/commission-statements/{batch_id}")
-async def get_commission_batch(batch_id: str, lines: int = 100):
-    """One batch plus its staged lines — the review detail."""
-    from hermes.commissions.statements import BATCHES_TABLE, STAGING_TABLE
-
-    supa = _get_supa()
-    rows = supa.select(BATCHES_TABLE, columns="*", params={"id": f"eq.{batch_id}"}, limit=1)
-    if not rows:
-        raise HTTPException(status_code=404, detail="batch not found")
-    staged = supa.select(STAGING_TABLE, columns="*",
-                         params={"batch_id": f"eq.{batch_id}"}, limit=lines)
-    return {"batch": rows[0], "lines": staged, "line_count": len(staged)}
-
-
-class StatementDecision(BaseModel):
-    approved_by: str
-    reason: str | None = None
-
-
-@app.post("/api/commission-statements/{batch_id}/approve")
-async def approve_commission_statement(batch_id: str, req: StatementDecision):
-    """Commit a reviewed batch: statement + transactions + link + rollup.
-
-    This is the money gate. Refuses a batch that isn't pending review, parsed
-    nothing, or failed its crosscheck.
-    """
-    from hermes.commissions.statements import commit_statement
-
-    supa = _get_supa()
-    _require_users(supa, [("approved_by", req.approved_by)])
-    try:
-        result = commit_statement(supa, batch_id=batch_id, approved_by=req.approved_by)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("statement commit failed: %s", batch_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, **result.as_dict()}
-
-
-@app.post("/api/commission-statements/{batch_id}/reject")
-async def reject_commission_statement(batch_id: str, req: StatementDecision):
-    """Reject a staged batch. The staged lines stay for diagnosis."""
-    from hermes.commissions.statements import reject_statement
-
-    supa = _get_supa()
-    _require_users(supa, [("approved_by", req.approved_by)])
-    try:
-        row = reject_statement(supa, batch_id=batch_id,
-                               reviewed_by=req.approved_by, reason=req.reason)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        log.exception("statement reject failed: %s", batch_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "batch": row}
-
-
-@app.get("/api/carriers")
-async def list_carrier_appetite(
-    limit: int = 500,
-    carrier: str | None = None,
-    state: str | None = None,
-    lob: str | None = None,
-    naics: str | None = None,
-):
-    """Carrier appetite reference — which carriers RSG can place a risk with, by
-    line of business, state, and class code (read-only). Backs the Carrier Hub.
-    Filter by carrier (partial), state (2-letter), lob (partial), or naics/class
-    code.
-
-    `states_approved` and `class_codes` are text[] on the table, so state and code
-    filtering happens in Python — a row scoped ["ALL"] is a nationwide appointment
-    and must survive a state filter. Absence of a match here is not a declination:
-    the table is a reference, not the carrier's answer.
-    """
-    from hermes import carriers as CA
-
-    params: dict[str, str] = {"order": "carrier_name.asc", "active": "eq.true"}
-    if carrier:
-        params["carrier_name"] = f"ilike.*{carrier}*"
-    if lob:
-        params["lob"] = f"ilike.*{lob}*"
-    rows = _get_supa().select(
-        "carrier_appetite", columns=CA.APPETITE_COLUMNS, params=params, limit=limit,
-    )
-    rows = CA.filter_by_state(rows, state)
-    if naics:
-        rows = [r for r in rows if CA.matches_code(r, naics)]
-    return {"carriers": rows, "count": len(rows)}
-
-
-_RENEWAL_LOST = {"cancelled", "non-renewed", "non-renewal", "lapsed", "expired", "flat cancel", "rewritten"}
-
-
-def _renewal_outcome(r: dict) -> str:
-    """Won (retained) / Lost / Open, from the candidate's lineage + status."""
-    ns = str(r.get("normalized_status") or "").strip().lower()
-    if r.get("successor_policy_number") or ns == "renewed":
-        return "Won"
-    if ns in _RENEWAL_LOST:
-        return "Lost"
-    return "Open"
-
-
-# Personal-lines LOBs get a tight 30-day renewal window; everything else
-# (commercial) gets 120 days. Keyed off line_of_business because the `segment`
-# column mislabels every personal policy as commercial.
-_PERSONAL_LOB_RE = re.compile(
-    r"(personal auto|personalauto|personsl auto|homeowner|dwelling fire|"
-    r"motorcycle|personal umbrella|condo owners)",
-    re.I,
-)
-def _env_int(name: str, default: int) -> int:
-    """Read an int from env, falling back to default on unset/blank/garbage."""
-    try:
-        return int((os.getenv(name) or "").strip() or default)
-    except ValueError:
-        log.warning("invalid int for %s=%r; using %d", name, os.getenv(name), default)
-        return default
-
-
-# Forward-look windows, tunable via env (set in the box .env, then restart).
-_PERSONAL_WINDOW_DAYS = _env_int("RENEWAL_WINDOW_PERSONAL_DAYS", 30)
-_COMMERCIAL_WINDOW_DAYS = _env_int("RENEWAL_WINDOW_COMMERCIAL_DAYS", 120)
-
-
-def _renewal_window_days(lob: str | None) -> int:
-    """Forward-look window for a renewal, by line of business."""
-    return _PERSONAL_WINDOW_DAYS if _PERSONAL_LOB_RE.search(lob or "") else _COMMERCIAL_WINDOW_DAYS
-
-
-@app.get("/api/renewals")
-async def list_renewals_endpoint(limit: int = 1000):
-    """Upcoming renewal worklist from renewal_candidates.
-
-    Forward window only: personal lines +30 days, commercial +120 days. Rows on
-    expired/inactive policies and non-events (eligibility_state='excluded') are
-    dropped, so dead AMS deep-links and already-renewed future-dated rows never
-    appear. Carries the NowCerts insured GUID (AMS deep-link), the candidate id
-    and natural key (so a row can be corrected from the card) and a derived
-    Won/Lost/Open outcome per renewal.
-
-    Human corrections are overlaid before the filters run, so correcting an
-    expiration date moves the row into the window and dismissing a renewal drops
-    it out — both take effect on the next load, not at the next refresh."""
-    from hermes.renewals import corrections as corr
-
-    supa = _get_supa()
-    rows = supa.select(
-        "renewal_candidates",
-        columns="id,insured_id,policy_lineage_id,policy_number,client_name,line_of_business,"
-                "renewal_event_date,expiration_date,normalized_status,successor_policy_number,"
-                "risk_status,segment,in_working_queue,eligibility_state,premium_current,"
-                "premium_renewal,policy_active",
-        params={"order": "expiration_date.asc"}, limit=limit,
-    )
-    today = date.today()
-    out: list[dict[str, Any]] = []
-    for r in corr.apply(supa, rows, surface=corr.CANDIDATES):
-        if not r.get("policy_active"):
-            continue
-        if str(r.get("eligibility_state") or "").strip().lower() == "excluded":
-            continue
-        raw_exp = r.get("expiration_date")
-        if not raw_exp:
-            continue
-        try:
-            exp = date.fromisoformat(str(raw_exp)[:10])
-        except ValueError:
-            continue
-        if exp < today or exp > today + timedelta(days=_renewal_window_days(r.get("line_of_business"))):
-            continue
-        r["outcome"] = _renewal_outcome(r)
-        out.append(r)
-    return {"renewals": out, "count": len(out)}
-
-
-# ---------------------------------------------------------------------------
-# Correcting a renewal.
-#
-# The renewal desk works project_85_renewals, and that table is re-projected from
-# renewal_candidates every night. A fix typed onto the row is therefore gone by
-# morning — which is why a premium that came over wrong has always stayed wrong.
-#
-# Every correction is recorded as an override keyed on the policy number
-# (hermes/renewals/corrections.py) AND written onto the row, so the number is
-# right immediately and the refresh re-applies the correction instead of
-# reverting it. Removing a renewal is the same mechanism, on both tables: the
-# projection stops showing it and the event stops being projected.
-#
-# None of this writes to NowCerts. The AMS is fixed by hand, and each correction
-# retires itself once the two agree.
-# ---------------------------------------------------------------------------
-@app.get("/api/renewals/overrides")
-async def list_renewal_overrides(status: str = "active", limit: int = 500):
-    """Corrections on renewals — active, plus anything a refresh conflicted."""
-    from hermes.renewals.corrections import PROJECTION
-
-    params: dict[str, str] = {"entity_type": f"eq.{PROJECTION.entity_type}",
-                              "order": "approved_at.desc"}
-    if status and status.lower() != "all":
-        params["status"] = f"eq.{status}"
-    rows = _get_supa().select("portal_overrides", columns="*", params=params, limit=limit)
-    return {"overrides": rows, "count": len(rows)}
-
-
-def _renewal_row(supa, renewal_id: str) -> dict[str, Any]:
-    rows = supa.select("project_85_renewals", columns="*",
-                       params={"id": f"eq.{renewal_id}"}, limit=1)
-    if not rows:
-        raise HTTPException(status_code=404, detail="renewal not found")
-    return rows[0]
-
-
-def _write_through(supa, table: str, record_id: str, fields: dict[str, Any]) -> None:
-    """Put the corrected value on the row itself.
-
-    The override is what makes a correction durable; this is what makes it
-    visible. Everything reading Supabase directly — the retention scan, the
-    renewal desk, the skills — would otherwise see the wrong number until the
-    next refresh. Best-effort: the override is already recorded, so a failure
-    here costs a night, not the correction."""
-    try:
-        supa.update(table, record_id,
-                    {**fields, "updated_at": datetime.now(timezone.utc).isoformat()})
-    except Exception:  # noqa: BLE001
-        log.exception("renewal write-through failed: %s %s %s", table, record_id, list(fields))
-
-
-def _dismiss_candidates(supa, policy_number: str | None, actor: str, reason: str | None) -> int:
-    """Take the underlying renewal EVENTS off the list too.
-
-    Dismissing only the projection row would last until 2:30am: the refresh
-    re-projects from renewal_candidates, and the renewal would be back with the
-    morning list. Excluding the event is what makes a removal stick."""
-    from hermes.renewals import corrections as corr
-    from hermes.overrides.store import set_override
-
-    if not policy_number:
-        return 0
-    try:
-        rows = supa.select("renewal_candidates", columns="*",
-                           params={"policy_number": f"eq.{policy_number}"}, limit=50)
-    except Exception:  # noqa: BLE001
-        log.exception("candidate lookup failed for %s", policy_number)
-        return 0
-
-    dismissed = 0
-    for row in rows:
-        if corr.is_dismissed(corr.CANDIDATES, row):
-            continue
-        try:
-            set_override(
-                supa,
-                entity_type=corr.CANDIDATES.entity_type,
-                entity_key=corr.candidate_key(row),
-                field_name=corr.CANDIDATES.dismiss_field,
-                override_value=corr.CANDIDATES.dismiss_value,
-                original_value=row.get(corr.CANDIDATES.dismiss_field),
-                approved_by=actor,
-                reason=reason or "removed from the renewal worklist",
-            )
-        except Exception:  # noqa: BLE001 — the projection dismissal still stands
-            log.exception("candidate dismissal failed for %s", row.get("policy_number"))
-            continue
-        _write_through(supa, "renewal_candidates", row["id"], {
-            corr.CANDIDATES.dismiss_field: corr.CANDIDATES.dismiss_value,
-            "eligibility_reason": f"removed from the worklist by {actor}"
-                                  + (f": {reason}" if reason else ""),
-        })
-        dismissed += 1
-    return dismissed
-
-
-def _restore_candidates(supa, policy_number: str, actor: str) -> int:
-    """Undo the event-level exclusions a removal wrote, so the renewal returns.
-
-    Keyed through the candidates themselves rather than by parsing override keys:
-    the natural key carries the lineage root, which is not always this policy's
-    own number."""
-    from hermes.renewals import corrections as corr
-    from hermes.overrides.store import withdraw
-
-    if not policy_number:
-        return 0
-    try:
-        rows = supa.select("renewal_candidates", columns="*",
-                           params={"policy_number": f"eq.{policy_number}"}, limit=50)
-    except Exception:  # noqa: BLE001
-        log.exception("candidate lookup failed for %s", policy_number)
-        return 0
-
-    restored = 0
-    for row in rows:
-        try:
-            active = supa.select("portal_overrides", columns="*", params={
-                "entity_type": f"eq.{corr.CANDIDATES.entity_type}",
-                "entity_key": f"eq.{corr.candidate_key(row)}",
-                "field_name": f"eq.{corr.CANDIDATES.dismiss_field}",
-                "status": "eq.active",
-            }, limit=1)
-            if not active:
-                continue
-            undone = withdraw(supa, active[0]["id"], actor=actor)
-        except Exception:  # noqa: BLE001 — the projection half already stands
-            log.exception("candidate restore failed for %s", row.get("policy_number"))
-            continue
-        _write_through(supa, "renewal_candidates", row["id"], {
-            corr.CANDIDATES.dismiss_field: undone.get("original_value"),
-            "eligibility_reason": f"put back on the worklist by {actor}",
-        })
-        restored += 1
-    return restored
-
-
-class RenewalCorrectionRequest(BaseModel):
-    field_name: str
-    value: Any = None
-    approved_by: str
-    reason: str | None = None
-
-
-@app.post("/api/renewals/{renewal_id}/override")
-async def correct_renewal_field(renewal_id: str, req: RenewalCorrectionRequest):
-    """Correct one field on a renewal, durably.
-
-    The plain PATCH below writes the row and nothing else, so the nightly
-    projection overwrites it. This records the same change as a named, reversible
-    override first — that is what survives the rebuild."""
-    from hermes.renewals import corrections as corr
-    from hermes.overrides.store import set_override
-
-    supa = _get_supa()
-    _require_users(supa, [("approved_by", req.approved_by)])
-
-    row = _renewal_row(supa, renewal_id)
-    field_name = (req.field_name or "").strip()
-    try:
-        value = corr.coerce(corr.PROJECTION, field_name, req.value)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    policy_number = row.get("policy_number")
-    if not policy_number:
-        raise HTTPException(
-            status_code=409,
-            detail="this renewal has no policy number to key a correction on",
-        )
-
-    try:
-        override = set_override(
-            supa,
-            entity_type=corr.PROJECTION.entity_type,
-            entity_key=policy_number,
-            field_name=field_name,
-            override_value=value,
-            original_value=row.get(field_name),   # the SOURCE value, for reconcile
-            approved_by=req.approved_by,
-            reason=req.reason,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("renewal correction failed: %s %s", renewal_id, field_name)
-        raise HTTPException(status_code=502, detail=str(exc))
-
-    _write_through(supa, corr.PROJECTION.entity_type, renewal_id, {field_name: value})
-    return {"ok": True, "override": override,
-            "note": "Corrected in the CRM and held through the nightly refresh. "
-                    "NowCerts still needs the same fix by hand."}
-
-
-class RenewalDismissRequest(BaseModel):
-    deleted_by: str
-    reason: str | None = None
-
-
-@app.delete("/api/renewals/{renewal_id}")
-async def dismiss_renewal(renewal_id: str, req: RenewalDismissRequest):
-    """Take a renewal off the worklist.
-
-    Recorded as a removal, not a row DELETE. renewal_actions cascades off this
-    table, so deleting the row would erase the record of the work already done on
-    the renewal, and the nightly refresh would re-project it from the same policy
-    anyway. The event underneath is excluded too, which is what makes it stick.
-    Reversible: undo the correction and the renewal comes back."""
-    from hermes.renewals import corrections as corr
-    from hermes.overrides.store import set_override
-
-    supa = _get_supa()
-    _require_users(supa, [("deleted_by", req.deleted_by)])
-    row = _renewal_row(supa, renewal_id)
-    policy_number = row.get("policy_number")
-    if not policy_number:
-        raise HTTPException(
-            status_code=409,
-            detail="this renewal has no policy number to key a removal on",
-        )
-
-    try:
-        override = set_override(
-            supa,
-            entity_type=corr.PROJECTION.entity_type,
-            entity_key=policy_number,
-            field_name=corr.PROJECTION.dismiss_field,
-            override_value=corr.PROJECTION.dismiss_value,
-            original_value=None,      # not a column — the source never says this
-            approved_by=req.deleted_by,
-            reason=req.reason or "removed from the renewal worklist",
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("renewal removal failed: %s", renewal_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-
-    events = _dismiss_candidates(supa, policy_number, req.deleted_by, req.reason)
-    return {"ok": True, "override": override, "events_excluded": events,
-            "note": "Off the worklist. The renewal and its history are kept, "
-                    "marked removed — undo the correction to bring it back."}
-
-
-@app.delete("/api/renewals/overrides/{override_id}")
-async def withdraw_renewal_override(override_id: str, approved_by: str):
-    """Undo a correction — including a removal, which puts the renewal back.
-
-    Withdrawing restores what the source said on the row as well, so the list
-    stops showing a number nobody stands behind."""
-    from hermes.renewals import corrections as corr
-    from hermes.overrides.store import withdraw
-
-    supa = _get_supa()
-    _require_users(supa, [("approved_by", approved_by)])
-    try:
-        row = withdraw(supa, override_id, actor=approved_by)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        log.exception("renewal override withdraw failed: %s", override_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-
-    field_name = row.get("field_name")
-    if field_name == corr.PROJECTION.dismiss_field:
-        # Putting a renewal back means putting the EVENT back too. The removal
-        # excluded both; undoing only the projection half would leave the
-        # renewal visible today and gone again after the next refresh.
-        restored = _restore_candidates(supa, str(row.get("entity_key") or ""), approved_by)
-        return {"ok": True, "override": row, "events_restored": restored}
-
-    if field_name and field_name in corr.PROJECTION.editable:
-        try:
-            rows = supa.select("project_85_renewals", columns="id",
-                               params={"policy_number": f"eq.{row.get('entity_key')}"}, limit=1)
-        except Exception:  # noqa: BLE001 — the withdraw itself stands
-            log.exception("renewal restore lookup failed: %s", override_id)
-            rows = []
-        if rows:
-            _write_through(supa, corr.PROJECTION.entity_type, rows[0]["id"],
-                           {field_name: row.get("original_value")})
-    return {"ok": True, "override": row}
-
-
-class RenewalUpdateRequest(BaseModel):
-    """Editable renewal-desk fields on project_85_renewals.
-
-    Both premiums are here because both get worked: the expiring number is often
-    wrong in the mirror, and the renewal number only exists once a carrier quotes
-    it. ``increase_percentage`` is deliberately absent — it is a generated column
-    computed from the two, so writing it is both refused by Postgres and the
-    wrong idea. Fix the premiums and the change follows.
-    """
-    premium_current: float | None = None
-    premium_renewal: float | None = None
-    risk_status: str | None = None
-    ai_strategy_notes: str | None = None
-    last_contact_date: str | None = None
-
-
-@app.patch("/api/renewals/{renewal_id}")
-async def update_renewal_endpoint(renewal_id: str, req: RenewalUpdateRequest):
-    """Update a renewal's working detail. The cockpit was read-only, so a premium
-    that came over wrong stayed wrong and every downstream number inherited it."""
-    from hermes.operations.renewal_tracker import VALID_RISK_STATUSES
-
-    supa = _get_supa()
-    fields = req.model_dump(exclude_unset=True)
-    if not fields:
-        raise HTTPException(status_code=400, detail="no fields provided")
-
-    risk = fields.get("risk_status")
-    if risk is not None:
-        risk = str(risk).strip().upper()
-        if risk not in VALID_RISK_STATUSES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"unknown risk_status '{risk}'; must be one of {list(VALID_RISK_STATUSES)}",
-            )
-        fields["risk_status"] = risk
-
-    rows = supa.select("project_85_renewals", columns="*",
-                       params={"id": f"eq.{renewal_id}"}, limit=1)
-    if not rows:
-        raise HTTPException(status_code=404, detail="renewal not found")
-
-    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
-    try:
-        row = supa.update("project_85_renewals", renewal_id, fields)
-    except Exception as exc:
-        log.exception("update renewal failed: %s", renewal_id)
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "renewal": row}
-
-
-@app.get("/api/workspace-stats")
-async def workspace_stats_endpoint():
+@router.get("/api/workspace-stats")
+def workspace_stats_endpoint():
     """KPI tile counts for the Workspace home."""
     supa = _get_supa()
 
@@ -3858,8 +1956,8 @@ async def workspace_stats_endpoint():
     }
 
 
-@app.get("/api/hermes/sync-health")
-async def sync_health():
+@router.get("/api/hermes/sync-health")
+def sync_health():
     """Queue-centric health snapshot for dashboard SyncHealthCheck component.
 
     Defensive: a missing or renamed table degrades that section to 'unavailable'
@@ -3920,8 +2018,8 @@ async def sync_health():
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/hermes/book-sync")
-async def book_sync_health(request: Request, max_pages: int = 50):
+@router.get("/api/hermes/book-sync")
+def book_sync_health(request: Request, max_pages: int = 50):
     """Drift report: policy counts, tombstones, per-carrier premium, rate drift.
 
     Gated by HERMES_API_TOKEN bearer (skipped if env var unset).
@@ -3948,12 +2046,12 @@ async def book_sync_health(request: Request, max_pages: int = 50):
 # ---------------------------------------------------------------------------
 # AMS insured search — the search-before-insert gate used by the bridge's
 # `ams_search_insured` tool (GET /api/ams/search-insured?name=&email=&fein=).
-# Read-only proxy to NowCerts InsuredList. See sync/nowcerts_client.py.
+# Read-only proxy to NowCerts InsuredList. See integrations/nowcerts_client.py.
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/ams/search-insured")
-async def ams_search_insured(
+@router.get("/api/ams/search-insured")
+def ams_search_insured(
     request: Request,
     name: str | None = None,
     email: str | None = None,
@@ -3969,7 +2067,7 @@ async def ams_search_insured(
     if not any([name, email, fein]):
         raise HTTPException(status_code=400, detail="Provide at least one of: name, email, fein")
 
-    from hermes.sync.nowcerts_client import NowCertsClientError
+    from hermes_integrations.nowcerts_client import NowCertsClientError
 
     def _q(val: str) -> str:
         return val.replace("'", "''")  # OData single-quote escape
@@ -4032,8 +2130,8 @@ class DocumentSaveRequest(BaseModel):
     created_by: str | None = None
 
 
-@app.post("/api/documents/save")
-async def documents_save(req: DocumentSaveRequest):
+@router.post("/api/documents/save")
+def documents_save(req: DocumentSaveRequest):
     """Save a document to the library (Supermemory + Drive mirror + index).
 
     ``account_name`` => client folder; otherwise it lands in the internal
@@ -4061,16 +2159,16 @@ async def documents_save(req: DocumentSaveRequest):
     return row
 
 
-@app.get("/api/documents/folders")
-async def documents_folders():
+@router.get("/api/documents/folders")
+def documents_folders():
     """Folder tree for Agent OS: one entry per (space, name) with a count."""
     from hermes.documents.store import list_folders
 
     return {"folders": list_folders(_get_supa())}
 
 
-@app.get("/api/documents")
-async def documents_in_folder(space: str, name: str):
+@router.get("/api/documents")
+def documents_in_folder(space: str, name: str):
     """Documents in one folder. ``space`` is 'client' or 'internal';
     ``name`` is the account (client) or freeform folder (internal)."""
     from hermes.documents.store import list_documents
@@ -4080,8 +2178,8 @@ async def documents_in_folder(space: str, name: str):
     return {"documents": list_documents(space=space, name=name, supa=_get_supa())}
 
 
-@app.get("/api/documents/{doc_id}")
-async def document_detail(doc_id: str):
+@router.get("/api/documents/{doc_id}")
+def document_detail(doc_id: str):
     """One document index row (title, preview, supermemory_id, …)."""
     from hermes.documents.store import get_document
 
@@ -4151,10 +2249,10 @@ def _validated_nextcloud_path(raw: str) -> str:
     return path
 
 
-@app.get("/api/nextcloud/folders")
-async def nextcloud_list_folder(path: str = ""):
+@router.get("/api/nextcloud/folders")
+def nextcloud_list_folder(path: str = ""):
     """List one real Nextcloud WebDAV folder, not the document index."""
-    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+    from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError
 
     nc = NextcloudClient()
     if not nc.is_configured():
@@ -4170,10 +2268,10 @@ async def nextcloud_list_folder(path: str = ""):
     return {"path": clean, "exists": exists, "entries": entries}
 
 
-@app.post("/api/nextcloud/folders/ensure")
-async def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
+@router.post("/api/nextcloud/folders/ensure")
+def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
     """Preview or idempotently create exact Nextcloud folder paths."""
-    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+    from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError
 
     paths = list(dict.fromkeys(_validated_nextcloud_path(p) for p in req.paths))
     if not paths:
@@ -4209,10 +2307,10 @@ async def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
     return {"ok": True, "requires_confirmation": False, "results": results}
 
 
-@app.post("/api/nextcloud/upload")
-async def nextcloud_upload(req: NextcloudUploadRequest):
+@router.post("/api/nextcloud/upload")
+def nextcloud_upload(req: NextcloudUploadRequest):
     """Upload one approved PDF into the standardized RSG client tree."""
-    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+    from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError
 
     if not req.title.strip() or not req.title.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="title must be a non-empty .pdf filename")
@@ -4255,73 +2353,12 @@ async def nextcloud_upload(req: NextcloudUploadRequest):
     return {**result, "verified": True}
 
 
-@app.post("/agency-intake", response_model=AgencyIntakeResponse)
-async def agency_intake(req: AgencyIntakeRequest):
-    """Stage an agency intake draft. Returns draft_id + approval prompt.
-
-    Nothing is written to CRM yet — caller must POST /agency-intake/approve
-    with an approval token (APPROVE ALL, APPROVE CRM ONLY, etc.).
-    """
-    from hermes.commands.agency_intake import AgencyIntakeError, stage_draft
-
-    if not req.raw_text or not req.raw_text.strip():
-        raise HTTPException(status_code=400, detail="raw_text is required")
-    try:
-        draft = stage_draft(
-            _get_supa(),
-            raw_text=req.raw_text,
-            submitted_by=req.submitted_by,
-            source_type=req.source_type,
-            source_ref=req.source_ref,
-        )
-    except AgencyIntakeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("agency_intake staging failed")
-        raise HTTPException(status_code=500, detail=str(exc))
-    return AgencyIntakeResponse(
-        ok=True,
-        draft_id=draft.draft_id,
-        approval_prompt=draft.approval_prompt,
-        validation_warnings=draft.validation_warnings,
-        payload_preview=draft.payload,
-    )
 
 
-@app.post("/agency-intake/approve", response_model=AgencyIntakeApprovalResponse)
-async def agency_intake_approve(req: AgencyIntakeApprovalRequest):
-    """Apply an approval token to a staged agency intake draft.
-
-    Same shared logic the interactive approval button calls.
-    """
-    from hermes.operations.agency_intake_approval import ApprovalError, approve_draft
-
-    try:
-        result = approve_draft(
-            _get_supa(),
-            draft_id=req.draft_id,
-            token=req.token,
-            approver=req.approver,
-        )
-    except ApprovalError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        log.exception("agency_intake_approve failed for draft=%s", req.draft_id)
-        raise HTTPException(status_code=500, detail=str(exc))
-    return AgencyIntakeApprovalResponse(
-        ok=result.ok,
-        draft_id=result.draft_id,
-        token=result.token,
-        status=result.status,
-        summary=result.summary,
-        enqueued_queue_ids=result.enqueued_queue_ids,
-        retrieval_row_ids=result.retrieval_row_ids,
-        error=result.error,
-    )
 
 
-@app.post("/agency-fact", response_model=AgencyFactResponse)
-async def agency_fact(req: AgencyFactRequest):
+@router.post("/agency-fact", response_model=AgencyFactResponse)
+def agency_fact(req: AgencyFactRequest):
     """Answer a structured fact-retrieval question with citation + confidence.
 
     Two call shapes:
@@ -4375,124 +2412,13 @@ async def agency_fact(req: AgencyFactRequest):
     )
 
 
-def _require_intake_api_key(request: Request) -> None:
-    """Validate ``X-RSG-API-Key`` header against ``RSG_INTAKE_API_KEY`` env."""
-    expected = os.environ.get("RSG_INTAKE_API_KEY", "").strip()
-    if not expected:
-        # Misconfiguration: never silently accept; refuse with 503.
-        log.error("RSG_INTAKE_API_KEY is unset — refusing /api/intake")
-        raise HTTPException(status_code=503, detail="intake endpoint not configured")
-    provided = request.headers.get("x-rsg-api-key", "")
-    if not provided or not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=401, detail="invalid or missing X-RSG-API-Key")
 
 
-def _intake_status_url(request: Request, submission_id: str) -> str:
-    base = os.environ.get("HERMES_PUBLIC_BASE_URL", "").strip().rstrip("/")
-    if not base:
-        base = str(request.base_url).rstrip("/")
-    return f"{base}/api/intake/{submission_id}/status"
 
 
-@app.post("/api/intake")
-async def intake_submit(req: IntakeSubmissionRequest, request: Request):
-    """Accept an intake submission and insert one row in ``intake_submissions``.
-
-    On a fresh insert: returns 202 with ``submission_id``, ``status_url``, etc.
-    On idempotent replay (same ``idempotency_key``): returns 200 with the
-    existing row's state. The Phase 3 worker picks up ``status='received'``
-    rows asynchronously; this endpoint never blocks on downstream processing.
-    """
-    from hermes.integrations.intake_submissions import (
-        IntakeError,
-        insert_submission,
-    )
-    from hermes.integrations.supabase_client import SupabaseClientError
-
-    _require_intake_api_key(request)
-
-    payload = {
-        "transcript": req.transcript,
-        "documents": [_model_dict(d) for d in req.documents],
-        "coaching_snapshot": _model_dict(req.coaching_snapshot) if req.coaching_snapshot else None,
-        "notes": req.notes,
-    }
-    # Only carried when supplied — an absent key is what tells the worker to
-    # synthesize, and storing an explicit null would be indistinguishable from
-    # a caller who sent an empty one.
-    if req.synthesized_payload:
-        payload["synthesized_payload"] = req.synthesized_payload
-    # Likewise for the approval: absent means "wait for an approver".
-    if req.approved_by:
-        payload["approval"] = {
-            "approved_by": req.approved_by.strip(),
-            "token": (req.approval_token or "APPROVE ALL").strip().upper(),
-        }
-
-    try:
-        row, is_new = insert_submission(
-            _get_supa(),
-            idempotency_key=req.idempotency_key,
-            source=req.source,
-            agent=req.agent,
-            intake_kind=req.intake_kind,
-            client_identifier=req.client_identifier,
-            lob_code=req.lob_code,
-            captured_at=req.captured_at,
-            payload=payload,
-        )
-    except IntakeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except SupabaseClientError as exc:
-        log.exception("intake_submissions insert failed key=%s", req.idempotency_key)
-        raise HTTPException(status_code=502, detail=f"supabase write failed: {exc}")
-
-    submission_id = str(row.get("id"))
-    status = str(row.get("status", "received"))
-
-    # Commit inline when there is genuinely nothing left to wait for: the payload
-    # is already synthesized and a human already approved it. The asynchronous
-    # worker buys time for an LLM extraction, a Slack round trip and an approval
-    # wait — none of which apply here. Queueing anyway would leave the operator
-    # looking at "accepted" while the intake had not moved, and in this deployment
-    # it would never move: nothing runs the worker loop.
-    #
-    # Only on a fresh insert. A replay must not re-commit — the first submission
-    # already did, and the row is past 'received'.
-    commit: dict[str, Any] | None = None
-    if is_new and req.approved_by and req.synthesized_payload:
-        from hermes.operations.intake_worker import commit_submission_now
-
-        try:
-            commit = commit_submission_now(_get_supa(), submission_id)
-        except Exception as exc:  # noqa: BLE001 — the row's own state is the record
-            log.exception("synchronous intake commit failed id=%s", submission_id)
-            commit = {"ok": False, "status": "failed", "error": str(exc)}
-        status = str(commit.get("status") or status)
-
-    body = _model_dict(
-        IntakeSubmissionResponse(
-            submission_id=submission_id,
-            status=status,
-            status_url=_intake_status_url(request, submission_id),
-            created_at=str(row.get("created_at", "")),
-            idempotent_replay=not is_new,
-            commit=commit,
-        )
-    )
-    # 201 when it is actually in the CRM; 202 still means "accepted, not yet done".
-    if commit is not None:
-        if commit.get("ok"):
-            return JSONResponse(status_code=201, content=body)
-        # `detail` is where every other error on this API puts its reason, and it
-        # is what clients read. Without it a failed commit reads as a bare 502 and
-        # the actual cause — which the row already knows — is lost to the operator.
-        body["detail"] = str(commit.get("error") or "intake commit failed")
-        return JSONResponse(status_code=502, content=body)
-    return JSONResponse(status_code=202 if is_new else 200, content=body)
 
 
-@app.post("/command", response_model=DispatchResponse)
+@router.post("/command", response_model=DispatchResponse)
 async def command(req: DispatchRequest):
     """Compatibility alias for older clients."""
     return await dispatch(req)
@@ -4534,7 +2460,7 @@ async def _generate_tts_audio(text: str, voice: str) -> bytes | None:
 
     # Fallback: TTS via LiteLLM (use the voice_output model group).
     try:
-        from hermes.core.llm_client import get_client
+        from hermes_core.llm_client import get_client
 
         client = get_client()
         response = client.audio.speech.create(
@@ -4548,7 +2474,7 @@ async def _generate_tts_audio(text: str, voice: str) -> bytes | None:
         return None
 
 
-@app.post("/api/hermes/tts")
+@router.post("/api/hermes/tts")
 async def hermes_tts(req: TTSRequest, request: Request):
     """Generate a voice clip from text and return the audio.
 
@@ -4581,6 +2507,13 @@ async def hermes_tts(req: TTSRequest, request: Request):
 
 
 
+# Every hub route above is now defined; mount them. This goes last so the
+# relative order matches what it has always been — the domain routers were
+# included near the top of this file, and the hub's own routes were registered
+# after them as the module body ran.
+app.include_router(router)
+
+
 def main() -> int:
     load_dotenv()
     logging.basicConfig(level=os.environ.get("HERMES_API_LOG_LEVEL", "INFO"))
@@ -4593,9 +2526,30 @@ def main() -> int:
             "`docker compose up -d hermes-api` (restart does not reload env_file)."
         )
 
+    from hermes.services import ALL, SERVICES, create_app, current_service
+
     parser = argparse.ArgumentParser(description="Hermes private HTTP API")
     parser.add_argument("--host", default=os.environ.get("HERMES_API_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("HERMES_API_PORT", "8484")))
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument(
+        "--service",
+        default=current_service(),
+        choices=[ALL, *sorted(SERVICES)],
+        help="Which app this process serves. Defaults to HERMES_SERVICE, or "
+             "'all' — the whole API in one process, as it has always run. "
+             "Naming one app gives it its own event loop, threadpool and "
+             "restart, so it cannot be stalled or taken down by the others.",
+    )
     args = parser.parse_args()
-    uvicorn.run(app, host=args.host, port=args.port)
+
+    served = create_app(args.service)
+    # An explicit --port/HERMES_API_PORT wins; otherwise a named service uses
+    # its registered port, so two services cannot be started on the same one by
+    # forgetting a flag.
+    port = args.port or int(
+        os.environ.get("HERMES_API_PORT")
+        or (SERVICES[args.service].port if args.service != ALL else 8484)
+    )
+    log.info("serving %s on %s:%s", args.service, args.host, port)
+    uvicorn.run(served, host=args.host, port=port)
     return 0

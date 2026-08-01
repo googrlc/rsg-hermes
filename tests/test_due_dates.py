@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from hermes.core.due_dates import (
+from hermes_core.due_dates import (
     AGENCY_TZ,
     agency_today,
     due_in_days,

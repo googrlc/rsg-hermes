@@ -8,18 +8,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes.api import app
-from hermes.core.dispatcher import DispatchResult
+from hermes_core.dispatch import DispatchResult
 
 
 @pytest.fixture(autouse=True)
 def _reset_singletons():
     """Reset lazy singletons between tests."""
-    import hermes.api as api_mod
-    api_mod._dispatcher = None
-    api_mod._supa = None
+    from hermes_app import deps
+    deps.reset_clients()
     yield
-    api_mod._dispatcher = None
-    api_mod._supa = None
+    deps.reset_clients()
 
 
 @pytest.fixture
@@ -105,7 +103,7 @@ class TestDashboardDispatch:
         resp = client.post("/api/hermes/dispatch", json={})
         assert resp.status_code == 400
 
-    @patch("hermes.api._get_supa")
+    @patch("hermes_app.deps.get_supa")
     def test_sync_health_payload(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         mock_get_supa.return_value = supa
@@ -227,8 +225,8 @@ class TestIntakeSubmit:
         assert resp.status_code == 422
 
     def test_documents_only_is_accepted(self, client, intake_api_key) -> None:
-        with patch("hermes.api._get_supa") as mock_get_supa, patch(
-            "hermes.integrations.intake_submissions.insert_submission"
+        with patch("hermes_app.deps.get_supa") as mock_get_supa, patch(
+            "hermes.intake.submissions.insert_submission"
         ) as mock_insert:
             mock_get_supa.return_value = MagicMock()
             mock_insert.return_value = (
@@ -243,8 +241,8 @@ class TestIntakeSubmit:
             )
         assert resp.status_code == 202
 
-    @patch("hermes.integrations.intake_submissions.insert_submission")
-    @patch("hermes.api._get_supa")
+    @patch("hermes.intake.submissions.insert_submission")
+    @patch("hermes_app.deps.get_supa")
     def test_valid_payload_returns_202_with_submission_id(
         self, mock_get_supa, mock_insert, client, intake_api_key,
     ) -> None:
@@ -282,8 +280,8 @@ class TestIntakeSubmit:
         assert "transcript" in args["payload"]
         assert "documents" in args["payload"]
 
-    @patch("hermes.integrations.intake_submissions.insert_submission")
-    @patch("hermes.api._get_supa")
+    @patch("hermes.intake.submissions.insert_submission")
+    @patch("hermes_app.deps.get_supa")
     def test_idempotent_replay_returns_200(
         self, mock_get_supa, mock_insert, client, intake_api_key,
     ) -> None:
@@ -311,7 +309,7 @@ class TestIntakeSubmit:
 class TestIntakeSubmissionsHelper:
     def test_insert_returns_is_new_true_on_fresh_insert(self) -> None:
         from datetime import datetime, timezone
-        from hermes.integrations.intake_submissions import insert_submission
+        from hermes.intake.submissions import insert_submission
 
         supa = MagicMock()
         supa.insert.return_value = {"id": "row-1", "status": "received"}
@@ -336,8 +334,8 @@ class TestIntakeSubmissionsHelper:
 
     def test_insert_replay_on_unique_violation(self) -> None:
         from datetime import datetime, timezone
-        from hermes.integrations.intake_submissions import insert_submission
-        from hermes.integrations.supabase_client import SupabaseClientError
+        from hermes.intake.submissions import insert_submission
+        from hermes_integrations.supabase_client import SupabaseClientError
 
         supa = MagicMock()
         supa.insert.side_effect = SupabaseClientError(
@@ -362,7 +360,7 @@ class TestIntakeSubmissionsHelper:
 
     def test_naive_captured_at_raises(self) -> None:
         from datetime import datetime
-        from hermes.integrations.intake_submissions import IntakeError, insert_submission
+        from hermes.intake.submissions import IntakeError, insert_submission
 
         supa = MagicMock()
         with pytest.raises(IntakeError):
@@ -392,7 +390,7 @@ class TestTransitionHelper:
         return supa
 
     def test_happy_path_appends_status_history(self) -> None:
-        from hermes.integrations.intake_submissions import transition
+        from hermes.intake.submissions import transition
 
         existing = {
             "id": "sub-1",
@@ -414,7 +412,7 @@ class TestTransitionHelper:
         assert "error_log" not in sent  # no error on a happy path
 
     def test_complete_sets_completed_at(self) -> None:
-        from hermes.integrations.intake_submissions import transition
+        from hermes.intake.submissions import transition
 
         existing = {
             "id": "sub-1",
@@ -430,7 +428,7 @@ class TestTransitionHelper:
         assert sent["completed_at"].endswith("+00:00")
 
     def test_failed_appends_to_error_log(self) -> None:
-        from hermes.integrations.intake_submissions import transition
+        from hermes.intake.submissions import transition
 
         existing = {
             "id": "sub-1",
@@ -453,7 +451,7 @@ class TestTransitionHelper:
         assert last["status_at_failure"] == "writing"
 
     def test_failed_with_string_error_records_message(self) -> None:
-        from hermes.integrations.intake_submissions import transition
+        from hermes.intake.submissions import transition
 
         existing = {"id": "sub-1", "status": "synthesizing", "status_history": [], "error_log": []}
         supa = self._supa_with_row(existing)
@@ -463,7 +461,7 @@ class TestTransitionHelper:
         assert sent["error_log"][-1]["message"] == "openai timeout"
 
     def test_invalid_transition_raises(self) -> None:
-        from hermes.integrations.intake_submissions import IntakeError, transition
+        from hermes.intake.submissions import IntakeError, transition
 
         existing = {"id": "sub-1", "status": "received", "status_history": [], "error_log": []}
         supa = self._supa_with_row(existing)
@@ -472,7 +470,7 @@ class TestTransitionHelper:
         supa.update.assert_not_called()
 
     def test_failed_reachable_from_any_state(self) -> None:
-        from hermes.integrations.intake_submissions import transition
+        from hermes.intake.submissions import transition
 
         for src in ("received", "synthesizing", "drafting", "awaiting_approval", "writing", "written"):
             existing = {"id": "x", "status": src, "status_history": [], "error_log": []}
@@ -481,7 +479,7 @@ class TestTransitionHelper:
             assert supa.update.call_args.args[2]["status"] == "failed"
 
     def test_unknown_status_rejected(self) -> None:
-        from hermes.integrations.intake_submissions import IntakeError, transition
+        from hermes.intake.submissions import IntakeError, transition
 
         existing = {"id": "sub-1", "status": "received", "status_history": [], "error_log": []}
         supa = self._supa_with_row(existing)
@@ -489,7 +487,7 @@ class TestTransitionHelper:
             transition(supa, "sub-1", "thinking_real_hard")
 
     def test_no_op_when_already_in_target_status(self) -> None:
-        from hermes.integrations.intake_submissions import transition
+        from hermes.intake.submissions import transition
 
         existing = {"id": "sub-1", "status": "synthesizing", "status_history": [], "error_log": []}
         supa = self._supa_with_row(existing)
@@ -499,7 +497,7 @@ class TestTransitionHelper:
         assert result is existing
 
     def test_extra_fields_merge_atomically(self) -> None:
-        from hermes.integrations.intake_submissions import transition
+        from hermes.intake.submissions import transition
 
         existing = {"id": "sub-1", "status": "synthesizing", "status_history": [], "error_log": []}
         supa = self._supa_with_row(existing)
@@ -513,7 +511,7 @@ class TestTransitionHelper:
         assert sent["draft_summary"]["account"]["name"] == "X"
 
     def test_extra_fields_cannot_override_protected(self) -> None:
-        from hermes.integrations.intake_submissions import IntakeError, transition
+        from hermes.intake.submissions import IntakeError, transition
 
         existing = {"id": "sub-1", "status": "received", "status_history": [], "error_log": []}
         supa = self._supa_with_row(existing)
@@ -521,7 +519,7 @@ class TestTransitionHelper:
             transition(supa, "sub-1", "synthesizing", extra_fields={"payload": {"hacked": True}})
 
     def test_missing_row_raises(self) -> None:
-        from hermes.integrations.intake_submissions import IntakeError, transition
+        from hermes.intake.submissions import IntakeError, transition
 
         supa = MagicMock()
         supa.select.return_value = []
@@ -531,7 +529,7 @@ class TestTransitionHelper:
 
 class TestClaimNextReceived:
     def test_returns_none_when_queue_empty(self) -> None:
-        from hermes.integrations.intake_submissions import claim_next_received
+        from hermes.intake.submissions import claim_next_received
 
         supa = MagicMock()
         supa.select.return_value = []
@@ -539,7 +537,7 @@ class TestClaimNextReceived:
         supa.update_where.assert_not_called()
 
     def test_claims_oldest_received_row(self) -> None:
-        from hermes.integrations.intake_submissions import claim_next_received
+        from hermes.intake.submissions import claim_next_received
 
         supa = MagicMock()
         supa.select.return_value = [{"id": "sub-7", "status_history": []}]
@@ -564,7 +562,7 @@ class TestClaimNextReceived:
         assert upd_kwargs["filters"]["id"] == "eq.sub-7"
 
     def test_returns_none_when_race_lost(self) -> None:
-        from hermes.integrations.intake_submissions import claim_next_received
+        from hermes.intake.submissions import claim_next_received
 
         supa = MagicMock()
         supa.select.return_value = [{"id": "sub-7", "status_history": []}]
