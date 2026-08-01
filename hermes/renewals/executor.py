@@ -38,8 +38,8 @@ from hermes_core.queue import (
 from hermes_integrations.nowcerts_client import NowCertsClient, NowCertsClientError
 from hermes_integrations.slack_notifier import SlackNotifier, SlackNotifierError
 from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
-from hermes.operations import renewal_tracker
-from hermes.operations.guardrails import log_guardrail_event
+from hermes.renewals import tracker as renewal_tracker
+from hermes_core.guardrails import log_guardrail_event
 
 from . import config, eligibility
 from .momentum_mcp_client import MomentumMCPClient, MomentumMCPClientError

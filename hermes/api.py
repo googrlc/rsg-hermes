@@ -317,7 +317,7 @@ def command_center_renewals():
     person removed are dropped — so the buckets, the premium totals and the list
     all agree with what the desk actually decided.
     """
-    from hermes.operations.renewal_tracker import attach_policy_dates, summarize_renewals
+    from hermes.renewals.tracker import attach_policy_dates, summarize_renewals
     from hermes.renewals import corrections as corr
 
     supa = _get_supa()

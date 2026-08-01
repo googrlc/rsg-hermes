@@ -457,7 +457,7 @@ def create_task_endpoint(req: TaskCreateRequest):
     # Best-effort: ping the team chat (Nextcloud Talk) about the new task. Never
     # let a chat hiccup fail the task create — it's fire-and-forget.
     try:
-        from hermes.operations.task_notify import notify_task_created
+        from hermes.casework.notify import notify_task_created
 
         notify_task_created(created[0], kind="task")
     except Exception:  # noqa: BLE001
@@ -470,7 +470,7 @@ def post_task_digest():
     """Post the open-task digest to the team chat (Nextcloud Talk). Meant to be
     hit on a daily schedule (pg_cron / scheduler). No-op if NEXTCLOUD_TALK_TOKEN
     is unset."""
-    from hermes.operations.task_notify import daily_task_digest
+    from hermes.casework.notify import daily_task_digest
 
     return daily_task_digest(deps.get_supa())
 

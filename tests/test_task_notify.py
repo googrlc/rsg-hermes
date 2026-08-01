@@ -1,7 +1,7 @@
 """Task -> Nextcloud Talk notifications + digest."""
 from __future__ import annotations
 
-from hermes.operations import task_notify as T
+from hermes.casework import notify as T
 
 
 def _fake_nc(monkeypatch, sink):

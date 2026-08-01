@@ -883,7 +883,7 @@ def main() -> int:
 
     if args.renewal_classify or args.renewal_classify_dry_run:
         from hermes_integrations.supabase_client import SupabaseClient
-        from hermes.operations.renewal_classifier import refresh_renewals
+        from hermes.renewals.classifier import refresh_renewals
 
         summary = refresh_renewals(
             SupabaseClient(),
