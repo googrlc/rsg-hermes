@@ -422,7 +422,7 @@ class RenewalUpdateRequest(BaseModel):
 def update_renewal_endpoint(renewal_id: str, req: RenewalUpdateRequest):
     """Update a renewal's working detail. The cockpit was read-only, so a premium
     that came over wrong stayed wrong and every downstream number inherited it."""
-    from hermes.operations.renewal_tracker import VALID_RISK_STATUSES
+    from hermes.renewals.tracker import VALID_RISK_STATUSES
 
     supa = deps.get_supa()
     fields = req.model_dump(exclude_unset=True)

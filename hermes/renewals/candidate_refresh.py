@@ -20,7 +20,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
-from hermes.operations import renewal_classifier
+from hermes.renewals import classifier as renewal_classifier
 from hermes_integrations.nowcerts_client import NowCertsClient
 
 from . import corrections, eligibility as elig

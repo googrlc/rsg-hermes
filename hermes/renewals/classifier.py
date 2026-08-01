@@ -18,7 +18,7 @@ from datetime import date
 from typing import Any
 
 from hermes_integrations.supabase_client import SupabaseClient
-from hermes.operations.renewal_tracker import VALID_RISK_STATUSES
+from hermes.renewals.tracker import VALID_RISK_STATUSES
 
 log = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@ import re
 from datetime import date
 from typing import Any
 
-from hermes.operations.renewal_tracker import summarize_renewals
+from hermes.renewals.tracker import summarize_renewals
 from hermes.operations.save_list import parse_lob
 
 log = logging.getLogger(__name__)

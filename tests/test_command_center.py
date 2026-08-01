@@ -9,8 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes.api import app
-from hermes.operations.renewal_classifier import classify_risk, refresh_renewals
-from hermes.operations.renewal_tracker import summarize_renewals
+from hermes.renewals.classifier import classify_risk, refresh_renewals
+from hermes.renewals.tracker import summarize_renewals
 from hermes.operations.save_list import (
     build_outreach_draft,
     create_save_list,

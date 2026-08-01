@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any, Mapping
 
-from hermes.operations.renewal_tracker import VALID_RISK_STATUSES
+from hermes.renewals.tracker import VALID_RISK_STATUSES
 
 from . import eligibility as elig
 

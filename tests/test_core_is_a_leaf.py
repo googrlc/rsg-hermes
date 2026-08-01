@@ -71,8 +71,19 @@ def test_no_core_module_imports_an_app(path: pathlib.Path) -> None:
     )
 
 
-# Tables that belong to one app. A core module reading or writing one is domain
-# logic wearing a client's name.
+# Tables that belong to ONE app. A core module reading or writing one of these
+# is domain logic wearing a client's name.
+#
+# The test is who writes it, not what it is called. `agency_crm_cases` and
+# `agency_crm_tasks` were listed here and should not have been: cases, renewals,
+# the hub agent, the team queue and the casework sentinel all write them — they
+# are the shared agency CRM schema, which is what the module that owned them
+# said in its first line. Shared persistence over shared tables belongs in the
+# core, the same way `portal_overrides` does.
+#
+# `intake_submissions` is the contrast, and the reason this guard exists: only
+# the intake app touches it, so a core module reading it means intake's schema
+# has been shipped to five repos that do not want it.
 APP_OWNED_TABLES = {
     "intake_submissions": "intake",
     "renewal_candidates": "renewals",
@@ -81,14 +92,29 @@ APP_OWNED_TABLES = {
     "commission_ledger": "finance",
     "commission_transactions": "finance",
     "commission_rules": "finance",
-    "agency_crm_cases": "cases",
-    "agency_crm_tasks": "cases",
+}
+
+
+# The one place a core module may name an app's table, and why.
+#
+# casestore.delete_case must clear every child of a case before deleting it.
+# renewal_case_details is a 1:1 sidecar on agency_crm_cases, so leaving it
+# behind orphans a row pointing at a case that no longer exists — worse than the
+# impurity. It is not left to ON DELETE CASCADE because the constraint lives in
+# the shared agency_crm schema and is not ours to assume.
+#
+# This is an exception, written down, not a hole. When renewals becomes its own
+# repo the child list should take the sidecar as a parameter instead. Adding a
+# second entry here should feel harder than fixing the design.
+ALLOWED_APP_TABLE_REFERENCES = {
+    ("hermes_core/casestore.py", "renewal_case_details"),
 }
 
 
 @pytest.mark.parametrize("path", _core_files(), ids=lambda p: str(p))
 def test_no_core_module_owns_an_app_table(path: pathlib.Path) -> None:
     src = path.read_text(encoding="utf8")
+    rel = path.relative_to(CORE_ROOT).as_posix()
     # Ignore prose: a docstring or comment may legitimately name a table as an
     # example. Only string literals used as values count.
     literals = {
@@ -107,6 +133,7 @@ def test_no_core_module_owns_an_app_table(path: pathlib.Path) -> None:
         for literal in literals - docstrings
         for table, app in APP_OWNED_TABLES.items()
         if re.fullmatch(rf"{re.escape(table)}", literal.strip())
+        and (rel, table) not in ALLOWED_APP_TABLE_REFERENCES
     ]
     assert not offenders, (
         f"{path} reads or writes a table belonging to one app: "

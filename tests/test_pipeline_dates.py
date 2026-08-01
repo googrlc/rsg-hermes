@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from hermes import leads
 from hermes.intake import opportunities as opp
-from hermes.operations import renewal_tracker as rt
+from hermes.renewals import tracker as rt
 
 
 # --- Projected close on an opportunity ---------------------------------------

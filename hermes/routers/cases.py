@@ -60,7 +60,7 @@ def create_case_endpoint(req: CaseCreateRequest):
     """Create a general agency_crm_cases row (any case_type) for any cockpit.
     Owner/creator emails are validated against agency_crm_users (FK guard)."""
     from hermes_core.due_dates import normalize_due
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     supa = deps.get_supa()
     creator = req.created_by_email or C._service_email()
@@ -134,7 +134,7 @@ def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
     """
     from hermes.casework import templates as T
     from hermes_core.due_dates import due_in_days, normalize_due
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     tpl = T.get_template(req.template_key)
     if not tpl:
@@ -250,7 +250,7 @@ def close_case_endpoint(case_id: str, req: CaseCloseRequest):
     stays in the CRM, which is the system that needs it.
     """
     from hermes.casework import templates as T
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     supa = deps.get_supa()
     actor = req.resolved_by_email or C._service_email()
@@ -429,7 +429,7 @@ def create_task_endpoint(req: TaskCreateRequest):
     by last month's completed copy.
     """
     from hermes_core.due_dates import normalize_due
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     supa = deps.get_supa()
     creator = req.created_by_email or C._service_email()
@@ -457,7 +457,7 @@ def create_task_endpoint(req: TaskCreateRequest):
     # Best-effort: ping the team chat (Nextcloud Talk) about the new task. Never
     # let a chat hiccup fail the task create — it's fire-and-forget.
     try:
-        from hermes.operations.task_notify import notify_task_created
+        from hermes.casework.notify import notify_task_created
 
         notify_task_created(created[0], kind="task")
     except Exception:  # noqa: BLE001
@@ -470,7 +470,7 @@ def post_task_digest():
     """Post the open-task digest to the team chat (Nextcloud Talk). Meant to be
     hit on a daily schedule (pg_cron / scheduler). No-op if NEXTCLOUD_TALK_TOKEN
     is unset."""
-    from hermes.operations.task_notify import daily_task_digest
+    from hermes.casework.notify import daily_task_digest
 
     return daily_task_digest(deps.get_supa())
 
@@ -499,7 +499,7 @@ def list_tasks_endpoint(
     elif scope == "case":
         params["case_id"] = "not.is.null"
     if open_only:
-        from hermes.casework.store import TASK_STATUS_CLOSED
+        from hermes_core.casestore import TASK_STATUS_CLOSED
 
         params["status"] = f"not.in.({','.join(TASK_STATUS_CLOSED)})"
     rows = deps.get_supa().select("agency_crm_tasks", columns="*", params=params, limit=limit)
@@ -528,7 +528,7 @@ def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
     can act on.
     """
     from hermes_core.due_dates import normalize_due
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     supa = deps.get_supa()
     fields = req.model_dump(exclude_unset=True)
@@ -569,7 +569,7 @@ def _log_deletion(supa, *, entity_type: str, entity_key: str, actor: str,
 @router.delete("/api/tasks/{task_id}")
 def delete_task_endpoint(task_id: str, req: DeleteRequest):
     """Delete a task outright. Cancelling keeps it in the record; this removes it."""
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     supa = deps.get_supa()
     deps.require_users(supa, [("deleted_by", req.deleted_by)])
@@ -622,7 +622,7 @@ def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
     """Edit a case. Cases were create-and-close-only; a typo'd title or the wrong
     owner meant the case stayed wrong."""
     from hermes_core.due_dates import normalize_due
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     supa = deps.get_supa()
     fields = req.model_dump(exclude_unset=True)
@@ -652,7 +652,7 @@ def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
 def delete_case_endpoint(case_id: str, req: DeleteRequest):
     """Delete a case and everything filed against it — tasks, timeline, document
     links, renewal detail. The Nextcloud documents themselves are left alone."""
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     supa = deps.get_supa()
     deps.require_users(supa, [("deleted_by", req.deleted_by)])
@@ -795,7 +795,7 @@ async def upload_case_document(
     one instead of a parallel store.
     """
     from hermes_integrations.nextcloud_client import CLIENT_CATEGORIES, NextcloudClient
-    from hermes.casework import store as C
+    from hermes_core import casestore as C
 
     supa = deps.get_supa()
     rows = []

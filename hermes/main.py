@@ -883,7 +883,7 @@ def main() -> int:
 
     if args.renewal_classify or args.renewal_classify_dry_run:
         from hermes_integrations.supabase_client import SupabaseClient
-        from hermes.operations.renewal_classifier import refresh_renewals
+        from hermes.renewals.classifier import refresh_renewals
 
         summary = refresh_renewals(
             SupabaseClient(),
@@ -1013,7 +1013,7 @@ def main() -> int:
         return 0 if summary["failed"] == 0 else 1
 
     if args.proactive_cases or args.proactive_cases_commit:
-        from hermes.casework import sentinel
+        from hermes.jobs import casework_sentinel as sentinel
         from hermes.sync.supabase_client import SupabaseClient
 
         result = sentinel.scan(
