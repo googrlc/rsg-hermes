@@ -8,6 +8,11 @@ not also a rewrite of how it gets a database handle.
 The clients are process-wide singletons, built lazily on first use so importing
 a router never opens a connection or spends a NowCerts password grant.
 
+The natural-language Dispatcher is deliberately NOT here. It is the hub app's
+router, and a shared layer that constructs one would make every app repo depend
+on the hub — tests/test_core_is_a_leaf.py caught exactly that. It lives in
+hermes/api.py.
+
 `hermes.api` keeps thin delegators (`_get_supa` and friends) that call straight
 through to these, so its existing call sites — and the tests that patch them —
 are unaffected.
@@ -26,7 +31,6 @@ from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
-_dispatcher = None
 _supa = None
 _nowcerts = None
 
@@ -43,20 +47,6 @@ def model_dict(model: BaseModel) -> dict[str, Any]:
     if hasattr(model, "model_dump"):
         return model.model_dump()
     return model.dict()  # type: ignore[no-any-return]
-
-
-def get_dispatcher():
-    global _dispatcher
-    if _dispatcher is None:
-        with _init_lock:
-            if _dispatcher is None:
-                from hermes.agent.dispatcher import Dispatcher
-
-                use_openai = bool(
-                    os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY")
-                )
-                _dispatcher = Dispatcher(use_openai=use_openai)
-    return _dispatcher
 
 
 def get_supa():
@@ -89,8 +79,8 @@ def get_nowcerts():
 
 def reset_clients() -> None:
     """Drop the cached clients. For tests, which build fakes per case."""
-    global _dispatcher, _supa, _nowcerts
-    _dispatcher = _supa = _nowcerts = None
+    global _supa, _nowcerts
+    _supa = _nowcerts = None
 
 
 def require_hermes_token(request: Request) -> None:

@@ -16,7 +16,7 @@ import logging
 
 from fastapi import APIRouter
 
-from hermes.routers import deps
+from hermes_app import deps
 
 log = logging.getLogger(__name__)
 

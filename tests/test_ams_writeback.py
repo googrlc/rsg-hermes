@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from hermes import api
 from hermes.ams import writeback
-from hermes.routers import deps
+from hermes_app import deps
 
 GUID = "bfe42b77-b1a8-4729-aa10-af8494d05a9b"
 POLICY = "6f1c2d84-3b90-4f5e-9a21-0c7ad3e51b44"

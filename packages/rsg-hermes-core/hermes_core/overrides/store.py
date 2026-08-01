@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.overrides.core import (
+from hermes_core.overrides.core import (
     ACTION_CONFLICT,
     ACTION_RETIRE,
     STATUS_ACTIVE,

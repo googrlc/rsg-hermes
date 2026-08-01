@@ -181,7 +181,7 @@ def _audit(
     actor: str,
     note: str | None,
 ) -> None:
-    from hermes.overrides.store import write_log
+    from hermes_core.overrides.store import write_log
 
     write_log(
         supa,

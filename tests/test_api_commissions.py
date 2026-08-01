@@ -17,7 +17,7 @@ from hermes.api import app
 
 @pytest.fixture(autouse=True)
 def _reset_singletons():
-    from hermes.routers import deps
+    from hermes_app import deps
     deps.reset_clients()
     yield
     deps.reset_clients()
@@ -52,7 +52,7 @@ BOOK = [
 
 
 def _run(client, url, ledger=LEDGER, book=BOOK):
-    with patch("hermes.routers.deps.get_supa", return_value=FakeSupa(ledger)), \
+    with patch("hermes_app.deps.get_supa", return_value=FakeSupa(ledger)), \
          patch("hermes.ams.book.select_policies", return_value=book):
         return client.get(url)
 
@@ -96,7 +96,7 @@ def test_limit_applies_to_rows_not_to_the_counts(client):
 
 
 def test_book_failure_degrades_to_rows_without_coverage(client):
-    with patch("hermes.routers.deps.get_supa", return_value=FakeSupa(LEDGER)), \
+    with patch("hermes_app.deps.get_supa", return_value=FakeSupa(LEDGER)), \
          patch("hermes.ams.book.select_policies", side_effect=RuntimeError("AMS down")):
         body = client.get("/api/commissions?status=all").json()
     assert body["count"] == 3
@@ -108,7 +108,7 @@ def test_ledger_failure_is_a_502_not_a_silent_empty(client):
         def select(self, *a, **k):
             raise RuntimeError("supabase down")
 
-    with patch("hermes.routers.deps.get_supa", return_value=Boom()):
+    with patch("hermes_app.deps.get_supa", return_value=Boom()):
         r = client.get("/api/commissions")
     assert r.status_code == 502
 
@@ -161,7 +161,7 @@ LEDGER_ROW = [{"id": "L1", "policy_number": "P1", "gross_premium": 0,
 
 def test_override_sets_a_correction(client):
     supa = OverrideSupa(list(LEDGER_ROW))
-    with patch("hermes.routers.deps.get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/commissions/L1/override", json={
             "field_name": "gross_premium", "value": 12000,
             "approved_by": "lamar@risksolutionsgroup.net", "reason": "AMS blank",
@@ -176,7 +176,7 @@ def test_override_sets_a_correction(client):
 
 def test_override_rejects_a_non_overridable_field(client):
     supa = OverrideSupa(list(LEDGER_ROW))
-    with patch("hermes.routers.deps.get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/commissions/L1/override", json={
             "field_name": "reconciliation_status", "value": "reconciled",
             "approved_by": "lamar@risksolutionsgroup.net",
@@ -187,7 +187,7 @@ def test_override_rejects_a_non_overridable_field(client):
 
 def test_override_rejects_an_unknown_approver(client):
     supa = OverrideSupa(list(LEDGER_ROW))
-    with patch("hermes.routers.deps.get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/commissions/L1/override", json={
             "field_name": "gross_premium", "value": 1,
             "approved_by": "lamar@risk-solutionsgroup.com",   # .com
@@ -198,7 +198,7 @@ def test_override_rejects_an_unknown_approver(client):
 
 def test_override_on_a_missing_row_is_404(client):
     supa = OverrideSupa([])
-    with patch("hermes.routers.deps.get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/commissions/nope/override", json={
             "field_name": "gross_premium", "value": 1,
             "approved_by": "lamar@risksolutionsgroup.net",
@@ -208,7 +208,7 @@ def test_override_on_a_missing_row_is_404(client):
 
 def test_override_needs_a_policy_number_to_key_on(client):
     supa = OverrideSupa([{"id": "L1", "policy_number": None, "gross_premium": 0}])
-    with patch("hermes.routers.deps.get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         r = client.post("/api/commissions/L1/override", json={
             "field_name": "gross_premium", "value": 1,
             "approved_by": "lamar@risksolutionsgroup.net",
@@ -219,7 +219,7 @@ def test_override_needs_a_policy_number_to_key_on(client):
 
 def test_overridden_value_shows_on_the_read_with_its_original(client):
     supa = OverrideSupa(list(LEDGER_ROW))
-    with patch("hermes.routers.deps.get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         client.post("/api/commissions/L1/override", json={
             "field_name": "gross_premium", "value": 12000,
             "approved_by": "lamar@risksolutionsgroup.net",
@@ -234,7 +234,7 @@ def test_overridden_value_shows_on_the_read_with_its_original(client):
 
 def test_withdraw_requires_a_valid_approver(client):
     supa = OverrideSupa(list(LEDGER_ROW))
-    with patch("hermes.routers.deps.get_supa", return_value=supa):
+    with patch("hermes_app.deps.get_supa", return_value=supa):
         client.post("/api/commissions/L1/override", json={
             "field_name": "gross_premium", "value": 1,
             "approved_by": "lamar@risksolutionsgroup.net",
@@ -267,7 +267,7 @@ ANALYTICS_LEDGER = [
 
 
 def test_analytics_endpoint_returns_per_carrier_and_per_lob(client):
-    with patch("hermes.routers.deps.get_supa", return_value=FakeSupa(ANALYTICS_LEDGER)):
+    with patch("hermes_app.deps.get_supa", return_value=FakeSupa(ANALYTICS_LEDGER)):
         r = client.get("/api/commissions/analytics")
     assert r.status_code == 200
     body = r.json()
@@ -284,7 +284,7 @@ def test_analytics_endpoint_returns_per_carrier_and_per_lob(client):
 
 
 def test_analytics_endpoint_is_honest_on_empty_ledger(client):
-    with patch("hermes.routers.deps.get_supa", return_value=FakeSupa([])):
+    with patch("hermes_app.deps.get_supa", return_value=FakeSupa([])):
         r = client.get("/api/commissions/analytics")
     assert r.status_code == 200
     body = r.json()

@@ -15,7 +15,7 @@ import io
 
 import pytest
 from fastapi.testclient import TestClient
-from hermes.routers import deps
+from hermes_app import deps
 
 
 CASE = {

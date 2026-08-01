@@ -8,6 +8,7 @@ import binascii
 import logging
 import os
 import re
+import threading
 from datetime import date
 from typing import Any, Literal
 
@@ -20,7 +21,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from hermes.ams import book as ams_book
 from hermes_core import surfaces
-from hermes.routers import deps
+from hermes_app import deps
 
 log = logging.getLogger(__name__)
 
@@ -135,8 +136,28 @@ except Exception:  # pragma: no cover - surfaced in logs, never fatal
 # hermes/routers/deps.py so a route can move to a router module without leaving
 # its dependencies behind. These delegators keep every call site in this file —
 # and the tests that patch them — working unchanged.
+_dispatcher = None
+_dispatcher_lock = threading.Lock()
+
+
 def _get_dispatcher():
-    return deps.get_dispatcher()
+    """The natural-language Dispatcher — the hub's own, not shared plumbing.
+
+    It lives here rather than in hermes_app.deps because building one imports
+    hermes.agent, and a shared layer that reaches into an app would put the hub
+    inside every other app repo.
+    """
+    global _dispatcher
+    if _dispatcher is None:
+        with _dispatcher_lock:
+            if _dispatcher is None:
+                from hermes.agent.dispatcher import Dispatcher
+
+                use_openai = bool(
+                    os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY")
+                )
+                _dispatcher = Dispatcher(use_openai=use_openai)
+    return _dispatcher
 
 
 def _get_supa():
@@ -1441,7 +1462,7 @@ def override_client_field(insured_guid: str, req: ClientOverrideRequest):
     Keyed on the NowCerts insured GUID so the correction survives a re-seed of
     the mirror. Retires itself once NowCerts reports the same value.
     """
-    from hermes.overrides.store import set_override
+    from hermes_core.overrides.store import set_override
 
     supa = _get_supa()
     _require_users(supa, [("approved_by", req.approved_by)])
@@ -1482,8 +1503,8 @@ def override_client_field(insured_guid: str, req: ClientOverrideRequest):
 def _apply_client_overrides(supa, records: list[dict]) -> list[dict]:
     """Overlay active corrections onto client rows. Best-effort: a correction is
     an enrichment, and losing it must not take the client list down."""
-    from hermes.overrides.core import apply_overrides
-    from hermes.overrides.store import active_overrides
+    from hermes_core.overrides.core import apply_overrides
+    from hermes_core.overrides.store import active_overrides
 
     try:
         ovr = active_overrides(supa, CLIENT_ENTITY_TYPE)
@@ -1526,7 +1547,7 @@ class PolicyOverrideRequest(BaseModel):
 def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
     """Correct a policy field in the portal. Keyed on the NowCerts policy GUID,
     so the correction survives a re-seed of the mirror. Not an AMS write."""
-    from hermes.overrides.store import set_override
+    from hermes_core.overrides.store import set_override
 
     supa = _get_supa()
     _require_users(supa, [("approved_by", req.approved_by)])
@@ -1565,8 +1586,8 @@ def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
 
 def _apply_policy_overrides(supa, records: list[dict]) -> list[dict]:
     """Overlay active corrections onto policy rows. Best-effort, like clients."""
-    from hermes.overrides.core import apply_overrides
-    from hermes.overrides.store import active_overrides
+    from hermes_core.overrides.core import apply_overrides
+    from hermes_core.overrides.store import active_overrides
 
     try:
         ovr = active_overrides(supa, POLICY_ENTITY_TYPE)
@@ -1676,7 +1697,7 @@ def create_policy_endpoint(req: PolicyCreateRequest):
         log.exception("create policy failed: %s", req.policy_number)
         raise HTTPException(status_code=502, detail=f"NowCerts refused the policy: {exc}")
 
-    from hermes.overrides.store import write_log
+    from hermes_core.overrides.store import write_log
 
     write_log(supa, entity_type="nowcerts_policy", entity_key=req.policy_number,
               action="ams_create", actor=req.approved_by, before=None, after=payload,

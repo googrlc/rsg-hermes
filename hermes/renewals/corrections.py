@@ -211,8 +211,8 @@ def apply(
     Best-effort: a correction is an enrichment, and losing the overrides table
     must not take the renewal worklist down with it.
     """
-    from hermes.overrides.core import apply_overrides
-    from hermes.overrides.store import active_overrides
+    from hermes_core.overrides.core import apply_overrides
+    from hermes_core.overrides.store import active_overrides
 
     keyed = with_keys(rows) if surface is CANDIDATES else rows
     try:

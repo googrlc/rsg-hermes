@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from hermes.routers import deps
+from hermes_app import deps
 
 log = logging.getLogger(__name__)
 

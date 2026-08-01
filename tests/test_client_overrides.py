@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes import api
-from hermes.routers import deps
+from hermes_app import deps
 
 GUID = "bfe42b77-b1a8-4729-aa10-af8494d05a9b"
 CLIENT = {
@@ -55,7 +55,7 @@ def test_a_correction_records_the_source_value_it_replaced(client_and_supa):
     """original_value must be what the SOURCE reports, not the previous override —
     reconciliation compares against it to decide whether the AMS caught up."""
     c, _ = client_and_supa
-    with patch("hermes.overrides.store.set_override", return_value={"id": "o1"}) as so:
+    with patch("hermes_core.overrides.store.set_override", return_value={"id": "o1"}) as so:
         r = c.post(f"/api/clients/{GUID}/override",
                    json={"field_name": "email", "value": "new@example.com",
                          "approved_by": "lamar@risksolutionsgroup.net", "reason": "bounced"})
@@ -75,7 +75,7 @@ def test_an_override_needs_a_named_approver(client_and_supa):
 
 
 def test_corrections_are_applied_when_the_book_is_read(monkeypatch):
-    from hermes.overrides.core import Override
+    from hermes_core.overrides.core import Override
 
     supa = MagicMock()
     supa.select.return_value = [dict(CLIENT)]
@@ -83,7 +83,7 @@ def test_corrections_are_applied_when_the_book_is_read(monkeypatch):
     ov = Override(entity_type=api.CLIENT_ENTITY_TYPE, entity_key=GUID,
                   field_name="phone", override_value="404-555-0101",
                   original_value=None, status="active")
-    with patch("hermes.overrides.store.active_overrides",
+    with patch("hermes_core.overrides.store.active_overrides",
                return_value={(api.CLIENT_ENTITY_TYPE, GUID, "phone"): ov}):
         rows = api._apply_client_overrides(supa, [dict(CLIENT)])
     assert rows[0]["phone"] == "404-555-0101"
@@ -95,6 +95,6 @@ def test_corrections_are_applied_when_the_book_is_read(monkeypatch):
 def test_a_failed_override_lookup_still_serves_the_book(monkeypatch):
     """A correction is an enrichment; losing it must not take the client list down."""
     supa = MagicMock()
-    with patch("hermes.overrides.store.active_overrides", side_effect=RuntimeError("boom")):
+    with patch("hermes_core.overrides.store.active_overrides", side_effect=RuntimeError("boom")):
         rows = api._apply_client_overrides(supa, [dict(CLIENT)])
     assert rows == [CLIENT]

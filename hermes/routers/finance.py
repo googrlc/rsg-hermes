@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from hermes.routers import deps
+from hermes_app import deps
 
 log = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def override_commission_field(ledger_id: str, req: CommissionOverrideRequest):
     by hand separately — this does NOT write to the AMS.
     """
     from hermes.commissions.surface import ENTITY_TYPE, OVERRIDABLE_FIELDS
-    from hermes.overrides.store import set_override
+    from hermes_core.overrides.store import set_override
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", req.approved_by)])
@@ -183,7 +183,7 @@ def override_commission_field(ledger_id: str, req: CommissionOverrideRequest):
 @router.delete("/api/commissions/overrides/{override_id}")
 def withdraw_commission_override(override_id: str, approved_by: str):
     """Withdraw an override — the correction was wrong or is no longer wanted."""
-    from hermes.overrides.store import withdraw
+    from hermes_core.overrides.store import withdraw
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", approved_by)])

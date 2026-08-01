@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes import api
-from hermes.routers import deps
+from hermes_app import deps
 
 CASE_ID = "3f2b1a90-11c2-4d3e-9f0a-5b6c7d8e9f01"
 TASK_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"

@@ -28,7 +28,7 @@ import re
 import pytest
 
 CORE_ROOT = pathlib.Path("packages/rsg-hermes-core")
-CORE_PACKAGES = ("hermes_core", "hermes_integrations")
+CORE_PACKAGES = ("hermes_core", "hermes_app", "hermes_integrations")
 
 
 def _core_files() -> list[pathlib.Path]:

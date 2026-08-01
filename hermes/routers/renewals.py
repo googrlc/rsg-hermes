@@ -27,7 +27,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from hermes.routers import deps
+from hermes_app import deps
 
 log = logging.getLogger(__name__)
 
@@ -176,7 +176,7 @@ def _dismiss_candidates(supa, policy_number: str | None, actor: str, reason: str
     re-projects from renewal_candidates, and the renewal would be back with the
     morning list. Excluding the event is what makes a removal stick."""
     from hermes.renewals import corrections as corr
-    from hermes.overrides.store import set_override
+    from hermes_core.overrides.store import set_override
 
     if not policy_number:
         return 0
@@ -221,7 +221,7 @@ def _restore_candidates(supa, policy_number: str, actor: str) -> int:
     the natural key carries the lineage root, which is not always this policy's
     own number."""
     from hermes.renewals import corrections as corr
-    from hermes.overrides.store import withdraw
+    from hermes_core.overrides.store import withdraw
 
     if not policy_number:
         return 0
@@ -270,7 +270,7 @@ def correct_renewal_field(renewal_id: str, req: RenewalCorrectionRequest):
     projection overwrites it. This records the same change as a named, reversible
     override first — that is what survives the rebuild."""
     from hermes.renewals import corrections as corr
-    from hermes.overrides.store import set_override
+    from hermes_core.overrides.store import set_override
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", req.approved_by)])
@@ -327,7 +327,7 @@ def dismiss_renewal(renewal_id: str, req: RenewalDismissRequest):
     anyway. The event underneath is excluded too, which is what makes it stick.
     Reversible: undo the correction and the renewal comes back."""
     from hermes.renewals import corrections as corr
-    from hermes.overrides.store import set_override
+    from hermes_core.overrides.store import set_override
 
     supa = deps.get_supa()
     deps.require_users(supa, [("deleted_by", req.deleted_by)])
@@ -369,7 +369,7 @@ def withdraw_renewal_override(override_id: str, approved_by: str):
     Withdrawing restores what the source said on the row as well, so the list
     stops showing a number nobody stands behind."""
     from hermes.renewals import corrections as corr
-    from hermes.overrides.store import withdraw
+    from hermes_core.overrides.store import withdraw
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", approved_by)])

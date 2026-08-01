@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 
-from hermes.routers import deps
+from hermes_app import deps
 
 log = logging.getLogger(__name__)
 
@@ -560,7 +560,7 @@ class DeleteRequest(BaseModel):
 
 def _log_deletion(supa, *, entity_type: str, entity_key: str, actor: str,
                   before: dict, reason: str | None) -> None:
-    from hermes.overrides.store import write_log
+    from hermes_core.overrides.store import write_log
 
     write_log(supa, entity_type=entity_type, entity_key=entity_key,
               action="deleted", actor=actor, before=before, note=reason)

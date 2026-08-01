@@ -14,7 +14,7 @@ from hermes_core.dispatch import DispatchResult
 @pytest.fixture(autouse=True)
 def _reset_singletons():
     """Reset lazy singletons between tests."""
-    from hermes.routers import deps
+    from hermes_app import deps
     deps.reset_clients()
     yield
     deps.reset_clients()
@@ -53,7 +53,7 @@ class TestHealth:
 
 
 class TestDispatch:
-    @patch("hermes.routers.deps.get_dispatcher")
+    @patch("hermes.api._get_dispatcher")
     def test_ping(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             True, "Hermes is online and connected to CRM.",
@@ -64,7 +64,7 @@ class TestDispatch:
         assert data["ok"] is True
         assert "online" in data["message"]
 
-    @patch("hermes.routers.deps.get_dispatcher")
+    @patch("hermes.api._get_dispatcher")
     def test_sync_status(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             True, "No sync runs found yet.",
@@ -73,7 +73,7 @@ class TestDispatch:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    @patch("hermes.routers.deps.get_dispatcher")
+    @patch("hermes.api._get_dispatcher")
     def test_dispatch_error(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.return_value = DispatchResult(
             False, "No handler matched.",
@@ -91,7 +91,7 @@ class TestDispatch:
         # DispatchRequest allows optional fields; empty body is rejected as empty command.
         assert resp.status_code == 400
 
-    @patch("hermes.routers.deps.get_dispatcher")
+    @patch("hermes.api._get_dispatcher")
     def test_server_error(self, mock_dispatcher, client) -> None:
         mock_dispatcher.return_value.dispatch.side_effect = RuntimeError("boom")
         resp = client.post("/dispatch", json={"command": "ping"})
@@ -103,7 +103,7 @@ class TestDashboardDispatch:
         resp = client.post("/api/hermes/dispatch", json={})
         assert resp.status_code == 400
 
-    @patch("hermes.routers.deps.get_supa")
+    @patch("hermes_app.deps.get_supa")
     def test_sync_health_payload(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         mock_get_supa.return_value = supa
@@ -225,7 +225,7 @@ class TestIntakeSubmit:
         assert resp.status_code == 422
 
     def test_documents_only_is_accepted(self, client, intake_api_key) -> None:
-        with patch("hermes.routers.deps.get_supa") as mock_get_supa, patch(
+        with patch("hermes_app.deps.get_supa") as mock_get_supa, patch(
             "hermes.intake.submissions.insert_submission"
         ) as mock_insert:
             mock_get_supa.return_value = MagicMock()
@@ -242,7 +242,7 @@ class TestIntakeSubmit:
         assert resp.status_code == 202
 
     @patch("hermes.intake.submissions.insert_submission")
-    @patch("hermes.routers.deps.get_supa")
+    @patch("hermes_app.deps.get_supa")
     def test_valid_payload_returns_202_with_submission_id(
         self, mock_get_supa, mock_insert, client, intake_api_key,
     ) -> None:
@@ -281,7 +281,7 @@ class TestIntakeSubmit:
         assert "documents" in args["payload"]
 
     @patch("hermes.intake.submissions.insert_submission")
-    @patch("hermes.routers.deps.get_supa")
+    @patch("hermes_app.deps.get_supa")
     def test_idempotent_replay_returns_200(
         self, mock_get_supa, mock_insert, client, intake_api_key,
     ) -> None:
