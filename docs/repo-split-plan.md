@@ -122,22 +122,21 @@ Related repos that are not split targets: `rsg-infrastructure` (deploy/infra) an
 - **Two `/api/carriers`.** Hermes serves one off Supabase; carrierhub serves
   another on :3200/:8445 with a different shape. They are not interchangeable.
 
-#### The polyglot question (decide before extraction #1)
+#### Polyglot app repos — DECIDED (2026-08-01)
 
-`rsg-commission-tracker`, `rsg-carrierhub` and `rsg-agency-portal` are Node/TS
-front ends. The routers are Python/FastAPI. Moving a router into one of those
-repos makes it polyglot — two toolchains, two Dockerfiles, one repo. Only
-`rsg-cptintake` is already Python. Three ways to go:
+Each app repo holds its UI **and** its Python backend. `rsg-commission-tracker`,
+`rsg-carrierhub` and `rsg-agency-portal` are Node/TS today, so they become
+two-toolchain repos: two Dockerfiles, two dependency manifests, one app.
+`rsg-cptintake` is already Python.
 
-1. **Polyglot app repos.** Each app repo holds its UI *and* its Python backend.
-   Truly one repo per app; costs two toolchains per repo.
-2. **Backends stay in `rsg-hermes`.** App repos remain front-end only. Cheapest,
-   but "one repo per app" stays half-true — which is roughly today.
-3. **Split by runtime.** Extract Python backends only where the target is
-   already Python (intake → cptintake), leave the rest mounted in the hub.
+What that costs, so nobody is surprised by it later: every app repo needs a
+Python toolchain in CI, and a change to the shared layer means bumping a pin in
+up to six places. What it buys is the thing that was asked for — one repo per
+app, each with its own tests, its own CLAUDE.md, and no reason to open another.
 
-This is a real fork and it is not mine to pick. Nothing in Phase 2 depends on
-it — the routers are the same either way.
+The pin is per-repo and by sha, so a core change reaches each app only when that
+app chooses to take it. That is deliberate: six repos moving in lockstep on
+every core commit would be the monolith again, with more steps.
 
 ## Phases
 
@@ -230,9 +229,36 @@ it — the routers are the same either way.
   wearing a client's name). Neither failure looks wrong in the diff that
   introduces it — which is how the first thirteen cycles happened.
 
-  Remaining for this phase: `git subtree split` the directory into its own
-  repo and switch the dependency from a path to a commit pin. The layout and
-  the guard are what made that a mechanical step rather than a redesign.
+  **Published.** `github.com/googrlc/rsg-hermes-core` (private) is live and
+  verified: a fresh clone imports all three packages and builds a working
+  FastAPI service from `hermes_app.service`.
+
+  **This repo stays the source of truth**; the standalone repo is a mirror,
+  published by `scripts/publish-core.sh`. Never commit to it directly. Editing
+  the core in its own repo and vendoring it back would give two places to change
+  one file, which is the failure mode the whole split exists to remove. App
+  repos pin the mirror by sha, so publishing moves nobody until they choose to
+  move.
+
+  A third package joined the distribution once the app closures were measured.
+  `cases` and `renewals` each need three things that are neither core primitives
+  nor domain code — the request plumbing, the `portal_overrides` store, and the
+  service factory:
+
+  | was | is |
+  |---|---|
+  | `hermes/overrides/*` | `hermes_core.overrides` |
+  | `hermes/routers/deps.py` | `hermes_app.deps` |
+  | generic half of `hermes/services.py` | `hermes_app.service` |
+
+  `hermes_app` is separate from `hermes_core` so that reading a queue constant
+  does not pull in FastAPI. `hermes/services.py` keeps only the registry of
+  *which* services exist — the part an app repo declares for itself.
+
+  The leaf guard paid for itself here: `deps.get_dispatcher` built the
+  natural-language Dispatcher, importing `hermes.agent`. A shared layer that
+  constructs the hub's router would have put the hub inside every other app
+  repo. Nothing in the diff looked wrong; the test is what noticed.
 - **Phase 5 — repos.** Extract domains one at a time in the order above, with
   `git subtree split` to preserve history. Each gets its own `CLAUDE.md`, skills,
   and test suite.
