@@ -11,10 +11,10 @@ from hermes.api import app
 
 @pytest.fixture(autouse=True)
 def _reset_singletons():
-    import hermes.api as api_mod
-    api_mod._supa = None
+    from hermes.routers import deps
+    deps.reset_clients()
     yield
-    api_mod._supa = None
+    deps.reset_clients()
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ class FakeSupa:
 
 
 def _patch(supa):
-    return patch("hermes.api._get_supa", return_value=supa)
+    return patch("hermes.routers.deps.get_supa", return_value=supa)
 
 
 def test_list_clients(client):

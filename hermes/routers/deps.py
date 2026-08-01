@@ -1,0 +1,115 @@
+"""Shared request plumbing for the routers.
+
+These were module-level helpers in `hermes/api.py`, which meant a route could
+not leave that file without leaving its dependencies behind. They live here so
+every router reaches them the same way and moving a route between modules is
+not also a rewrite of how it gets a database handle.
+
+The clients are process-wide singletons, built lazily on first use so importing
+a router never opens a connection or spends a NowCerts password grant.
+
+`hermes.api` keeps thin delegators (`_get_supa` and friends) that call straight
+through to these, so its existing call sites — and the tests that patch them —
+are unaffected.
+"""
+
+from __future__ import annotations
+
+import hmac
+import logging
+import os
+from typing import Any
+
+from fastapi import HTTPException, Request
+from pydantic import BaseModel
+
+log = logging.getLogger(__name__)
+
+_dispatcher = None
+_supa = None
+_nowcerts = None
+
+
+def model_dict(model: BaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()  # type: ignore[no-any-return]
+
+
+def get_dispatcher():
+    global _dispatcher
+    if _dispatcher is None:
+        from hermes.agent.dispatcher import Dispatcher
+
+        use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
+        _dispatcher = Dispatcher(use_openai=use_openai)
+    return _dispatcher
+
+
+def get_supa():
+    global _supa
+    if _supa is None:
+        from hermes.integrations.supabase_client import SupabaseClient
+
+        _supa = SupabaseClient()
+    return _supa
+
+
+def get_nowcerts():
+    """The shared NowCertsClient. Reads NOWCERTS_USERNAME/PASSWORD from env.
+
+    Delegates to ``nowcerts_client.get_client()`` rather than keeping a second
+    singleton of its own: two singletons meant two tokens and two ~26s password
+    grants in one process, and the API and the book reads each paying their own.
+    """
+    global _nowcerts
+    if _nowcerts is None:
+        from hermes.integrations.nowcerts_client import get_client
+
+        _nowcerts = get_client()
+    return _nowcerts
+
+
+def reset_clients() -> None:
+    """Drop the cached clients. For tests, which build fakes per case."""
+    global _dispatcher, _supa, _nowcerts
+    _dispatcher = _supa = _nowcerts = None
+
+
+def require_hermes_token(request: Request) -> None:
+    """Bearer-token gate for mutating / privileged endpoints.
+
+    Reads HERMES_API_TOKEN from env. If unset, the gate is disabled (dev mode);
+    log a warning so it's visible.
+    """
+    expected = os.environ.get("HERMES_API_TOKEN")
+    if not expected:
+        log.warning("HERMES_API_TOKEN not set; bearer gate disabled")
+        return
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+
+
+def active_user_emails(supa) -> set[str]:
+    rows = supa.select(
+        "agency_crm_users", columns="email",
+        params={"active": "eq.true"}, limit=1000,
+    )
+    return {str(r.get("email")).lower() for r in rows if r.get("email")}
+
+
+def require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
+    """Reject any *_email that isn't an active agency_crm_users identity.
+
+    This is the API-level guard for the FK that made CRM task creation fail
+    silently — the cockpit picks emails from /api/agency-users, never free-typed.
+    """
+    valid = active_user_emails(supa)
+    for label, email in pairs:
+        if email and email.lower() not in valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label} '{email}' is not an active agency_crm_users identity",
+            )

@@ -21,11 +21,10 @@ from hermes.operations.save_list import (
 
 @pytest.fixture(autouse=True)
 def _reset_singletons():
-    import hermes.api as api_mod
-
-    api_mod._supa = None
+    from hermes.routers import deps
+    deps.reset_clients()
     yield
-    api_mod._supa = None
+    deps.reset_clients()
 
 
 @pytest.fixture
@@ -234,7 +233,7 @@ class TestSaveList:
 
 
 class TestPhase2Endpoints:
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_retention_endpoint(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         supa.select.return_value = [{"retention_rate": 54.92, "snapshot_date": "2026-03-31",
@@ -245,7 +244,7 @@ class TestPhase2Endpoints:
         data = resp.json()
         assert data["retention_rate"] == 54.92 and data["benchmark"] == 84.0
 
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_build_save_list_endpoint(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         supa.select.return_value = [
@@ -277,8 +276,8 @@ class TestAskHermes:
         assert resp.status_code == 400
 
     @patch("hermes.operations.command_center_qa._llm_answer", return_value=None)
-    @patch("hermes.api._get_supa")
-    @patch("hermes.api._get_dispatcher")
+    @patch("hermes.routers.deps.get_supa")
+    @patch("hermes.routers.deps.get_dispatcher")
     def test_ask_renewal_intent_answered_from_data(self, mock_disp, mock_get_supa, _no_llm, client) -> None:
         supa = MagicMock()
         supa.select.return_value = [
@@ -360,7 +359,7 @@ class TestFilesStore:
 
 
 class TestFilesEndpoints:
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_save_and_list(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         supa.insert.side_effect = lambda t, row: {**row, "id": "f1"}
@@ -374,7 +373,7 @@ class TestFilesEndpoints:
         r2 = client.get("/api/command-center/files")
         assert r2.status_code == 200 and r2.json()["files"][0]["title"] == "Note"
 
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_download_sets_attachment_header(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         supa.select.return_value = [{"id": "f1", "title": "At Risk", "content": "# body",
@@ -385,7 +384,7 @@ class TestFilesEndpoints:
         assert r.text == "# body"
         assert 'attachment; filename="At_Risk.md"' in r.headers["content-disposition"]
 
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_download_404(self, mock_get_supa, client) -> None:
         supa = MagicMock(); supa.select.return_value = []
         mock_get_supa.return_value = supa
@@ -468,7 +467,7 @@ class TestTeamQueue:
 
 
 class TestTeamQueueEndpoints:
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_tasks_endpoint(self, mock_get_supa, client) -> None:
         """Reads agency_crm_tasks, not EspoCRM — Espo was decommissioned
         2026-07-23, and a dead-host call on a polled endpoint hung the pool."""
@@ -486,7 +485,7 @@ class TestTeamQueueEndpoints:
         assert data["source"] == "agency_crm_tasks"
         assert supa.select.call_args.args[0] == "agency_crm_tasks"
 
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_tasks_endpoint_maps_unknown_assignee(self, mock_get_supa, client) -> None:
         supa = MagicMock()
         supa.select.return_value = [
@@ -497,7 +496,7 @@ class TestTeamQueueEndpoints:
         data = client.get("/api/command-center/tasks").json()
         assert set(data["by_assignee"]) == {"Dana", "Unassigned"}
 
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_complete_endpoint(self, mock_get_supa, client) -> None:
         supa = MagicMock(); supa.update.return_value = {"id": "t1", "status": "completed"}
         mock_get_supa.return_value = supa
@@ -505,7 +504,7 @@ class TestTeamQueueEndpoints:
         assert r.status_code == 200 and r.json()["ok"] is True
         supa.update.assert_called_once_with("agency_crm_tasks", "t1", {"status": "completed"})
 
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_complete_endpoint_404s_for_unknown_task(self, mock_get_supa, client) -> None:
         supa = MagicMock(); supa.update.return_value = None
         mock_get_supa.return_value = supa
@@ -530,7 +529,7 @@ class TestSkillsCatalog:
 
 
 class TestRenewalsEndpoint:
-    @patch("hermes.api._get_supa")
+    @patch("hermes.routers.deps.get_supa")
     def test_endpoint_returns_summary(self, mock_get_supa, client) -> None:
         today = date.today()
         mock_supa = MagicMock()
