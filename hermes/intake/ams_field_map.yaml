@@ -1,0 +1,158 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Intake → NowCerts field map  (P4 foundation — see docs/acord/intake-acord-flow-spec.md)
+#
+# The single decision that makes "goes into the AMS correctly" mean something:
+# for every field on the locked SubmissionObject, WHERE does it go, and HOW is it
+# normalized so the read-back verify can confirm it landed.
+#
+# home:
+#   ams_insured   → written on the NowCerts Insured (create_insured), read back + verified
+#   ams_policy    → belongs on a NowCerts Policy (only once bound; not at prospect intake)
+#   policy_note   → retained in the AMS as a note/attachment, not a structured field
+#   opportunity   → the Supabase opportunities row (pipeline), not the AMS
+#   acord_only    → lives on the ACORD/Supabase record; NO AMS home (correct + intended)
+#   unsupported   → surfaced in the plan as unmapped; never silently dropped
+#
+# verified:
+#   true   → the NowCerts field name is PROVEN (already written by map_to_insured /
+#            CLIENT_FIELD_MAP / POLICY_FIELD_MAP against the live API)
+#   false  → CANDIDATE: NowCerts likely has this field, but the exact connector key
+#            must be confirmed before we trust it. Until confirmed, treat as
+#            unsupported at write time (stage it, flag it, do not claim it landed).
+#
+# normalize: the transform applied before write; the read-back is compared in the
+# same normalized shape.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Insured (create_insured) — the client record ────────────────────────────
+insured:
+  - path: applicant.legal_name
+    home: ams_insured
+    nowcerts_field: CommercialName        # personal split → FirstName/LastName (not commercial)
+    verified: true
+    normalize: trim
+  - path: applicant.fein
+    home: ams_insured
+    nowcerts_field: FEIN
+    verified: true
+    normalize: fein            # confirm NowCerts wants 9 digits vs "12-3456789"
+  - path: applicant.mailing_address.street
+    home: ams_insured
+    nowcerts_field: AddressLine1
+    verified: true
+    normalize: trim
+  - path: applicant.mailing_address.city
+    home: ams_insured
+    nowcerts_field: City
+    verified: true
+    normalize: trim
+  - path: applicant.mailing_address.state
+    home: ams_insured
+    nowcerts_field: State
+    verified: true
+    normalize: state_2letter
+  - path: applicant.mailing_address.zip
+    home: ams_insured
+    nowcerts_field: Zip
+    verified: true
+    normalize: zip
+  - path: applicant.email
+    home: ams_insured
+    nowcerts_field: EMail
+    verified: true
+    normalize: trim
+  - path: applicant.phone
+    home: ams_insured
+    nowcerts_field: PhoneNumber
+    verified: true
+    normalize: phone
+  # derived write-time codes (already emitted by map_to_insured)
+  - path: "(commercial)"
+    home: ams_insured
+    nowcerts_field: insuredType
+    verified: true
+    normalize: insured_type_code     # commercial → "0"
+  - path: "(prospect)"
+    home: ams_insured
+    nowcerts_field: type
+    verified: true
+    normalize: prospect_type_code    # prospect → 1
+
+  # ── CANDIDATES — NowCerts almost certainly has a home; confirm the key first ──
+  - path: applicant.dbas
+    home: ams_insured
+    nowcerts_field: null       # DBA is a confirmed insured field (AMS UI); connector key not in sync — confirm
+    verified: false
+    normalize: join_comma
+  - path: applicant.entity_type
+    home: ams_insured
+    nowcerts_field: typeOfBusiness   # confirmed: insured read maps typeOfBusiness (canonical_book_sync)
+    verified: true                   # option set confirmed from the NowCerts "Type of Business" picklist
+    normalize: business_type         # EntityType → "LLC" / "Corporation" / "Subchapter Corp" / …
+  - path: applicant.naics
+    home: ams_insured
+    nowcerts_field: null       # NAICS — verify connector key
+    verified: false
+    normalize: digits
+  - path: applicant.sic
+    home: ams_insured
+    nowcerts_field: null       # SIC — verify connector key
+    verified: false
+    normalize: digits
+  - path: applicant.website
+    home: ams_insured
+    nowcerts_field: null       # website — verify key
+    verified: false
+    normalize: trim
+
+# ── Requested coverage — NOT the insured; pipeline + ACORD, not AMS structured ──
+coverage:
+  - path: target_effective_date
+    home: opportunity
+    nowcerts_field: null       # opportunities row / becomes policy EffectiveDate only at bind
+    verified: false
+    normalize: date
+  - path: general_liability.each_occurrence
+    home: acord_only           # requested limit → 126, not the insured record
+    nowcerts_field: null
+    verified: true             # decision is verified: it has no AMS-insured home
+    normalize: money
+  - path: general_liability.general_aggregate
+    home: acord_only
+    nowcerts_field: null
+    verified: true
+    normalize: money
+  - path: general_liability.classifications
+    home: acord_only
+    nowcerts_field: null
+    verified: true
+  - path: property_locations[]
+    home: acord_only           # 140 building schedule; a location record at bind, not prospect
+    nowcerts_field: null
+    verified: false            # confirm whether prospect locations should be written now
+  - path: prior_carriers[]
+    home: policy_note          # incumbent history → note; not a bound policy on this insured
+    nowcerts_field: null
+    verified: false
+
+# ── Opportunity (one per checked line of business) — pipeline, not the insured ──
+opportunity:
+  - path: "(per checked LOB)"
+    home: opportunity
+    nowcerts_field: null
+    verified: true             # feeds intake_crm → opportunities (map_opportunity_row)
+    normalize: line_of_business
+
+# ── ACORD Y/N answers — default home is the ACORD, not the AMS ────────────────
+# Most of the 208 checkbox questions are underwriting-submission data with no AMS
+# field. A short allowlist may be worth keeping in the AMS as a note.
+questions:
+  - class: agent_question
+    home: acord_only           # default for all Y/N answers
+    nowcerts_field: null
+    verified: true
+  - class: agent_question_retained
+    home: policy_note          # explicit allowlist only (e.g. "no prior losses" attestation)
+    nowcerts_field: null
+    verified: false
+    note: "opt-in per question; empty until a human decides a given answer earns an AMS note"
