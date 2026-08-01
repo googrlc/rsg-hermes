@@ -6,10 +6,12 @@ readme = "README.md"
 # Upper bound required so poetry can resolve deps that cap Python (e.g. reportlab <4).
 requires-python = ">=3.11,<4"
 dependencies = [
-  # The shared bottom layer (hermes_core + hermes_integrations), which every RSG
-  # app repo installs. Local path while it lives in this repo under packages/;
-  # becomes a git pin on its own repo when the app repos split out.
-  "rsg-hermes-core",
+  # NOTE: rsg-hermes-core is deliberately NOT listed here. It is a path package
+  # in packages/, not something resolvable from an index, and Poetry — which the
+  # Dockerfile uses for the dependency install — reads PEP 621 [project] but not
+  # [tool.uv.sources]. Listing it made `poetry lock` try PyPI and fail the image
+  # build with "doesn't match any versions". The Dockerfile installs it
+  # explicitly before installing this app; pytest gets it via pythonpath below.
   "requests>=2.28.0",
   "python-dotenv>=1.0.0",
   "slack-bolt>=1.18.0",
@@ -48,9 +50,6 @@ hermes-api = "hermes.api:main"
 # image it is pip-installed before the app; for a plain `pytest` in a checkout
 # this puts it on the path so the suite runs without an install step.
 pythonpath = ["packages/rsg-hermes-core"]
-
-[tool.uv.sources]
-rsg-hermes-core = { path = "packages/rsg-hermes-core", editable = true }
 
 [build-system]
 requires = ["setuptools>=61"]
