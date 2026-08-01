@@ -28,7 +28,7 @@ Hermes is the daily command center — not a chatbot, not a search box.
 ## What Hermes can do internally (Hermes agent tools)
 
 These are the real agent capabilities, as registered in
-`hermes/core/nl_agent.py`. Anything not on this list does not exist:
+`hermes/agent/nl_agent.py`. Anything not on this list does not exist:
 
 **Client (the CRM Desk hub)**
 - find_client — search the canonical book by name

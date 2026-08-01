@@ -169,6 +169,6 @@ retention risk model — that is `classify_risk` in `retention-risk-scout`
 
 ## References
 
-- `hermes/sync/nowcerts_client.py` — the client and every real endpoint
+- `hermes/integrations/nowcerts_client.py` — the client and every real endpoint
 - `hermes/ams/book.py` — canonical mirror reads
 - `renewal-desk` · `retention-risk-scout` · `hermes-crm-writer`
