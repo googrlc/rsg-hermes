@@ -6,7 +6,7 @@ close on a deal, an x-date on a lead, the policy period on a renewal.
 from __future__ import annotations
 
 from hermes import leads
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 from hermes.renewals import tracker as rt
 
 

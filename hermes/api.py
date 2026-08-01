@@ -586,7 +586,7 @@ def create_opportunity_endpoint(req: OpportunityCreateRequest, background_tasks:
     (client_identifier, line_of_business); the smart create logic (identifier,
     dedup, insured link) lives in one place so every cockpit writes correctly.
     """
-    from hermes.intake import opportunities as opp
+    from hermes_core import opportunities as opp
 
     if req.assigned_to_email:
         _require_users(_get_supa(), [("assigned_to_email", req.assigned_to_email)])
@@ -663,7 +663,7 @@ def list_opportunities_endpoint(stage: str | None = None, status: str | None = "
     it came from) so a board can be read as a forecast rather than a pile — see
     ``opportunities.projected_close``.
     """
-    from hermes.intake import opportunities as opp
+    from hermes_core import opportunities as opp
 
     try:
         rows = opp.list_opportunities(_get_supa(), stage=stage, status=status, limit=limit)
@@ -715,7 +715,7 @@ def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdateReque
     worked in the CRM and does not write back to the AMS until it's Bound/Won or
     Lost. Only the fields present in the request are changed; setting ``stage``
     also re-derives ``status``."""
-    from hermes.intake import opportunities as opp
+    from hermes_core import opportunities as opp
 
     supa = _get_supa()
     fields = {k: v for k, v in req.model_dump(exclude_unset=True).items() if k in _OPP_EDITABLE}
@@ -773,7 +773,7 @@ def list_opportunity_events_endpoint(opportunity_id: str, limit: int = 200):
     overwritten by each edit and stage moves were applied in place, so "who moved
     this to Lost, and when, and why" had no answer on the records where it matters
     most."""
-    from hermes.intake import opportunities as opp
+    from hermes_core import opportunities as opp
 
     try:
         return {"events": opp.list_events(_get_supa(), opportunity_id, limit=limit)}
@@ -791,7 +791,7 @@ class OpportunityNoteRequest(BaseModel):
 def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteRequest):
     """Write down what happened on a deal. Appended to the same timeline the stage
     moves land on, so one list answers "what happened here"."""
-    from hermes.intake import opportunities as opp
+    from hermes_core import opportunities as opp
 
     text = str(req.body or "").strip()
     if not text:
@@ -903,7 +903,7 @@ def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest):
     (won/lost). The move itself is Supabase-only; when it lands on a terminal stage
     (Bound/Won or Lost) it QUEUES an approval-gated writeback to NowCerts — nothing
     hits the AMS until the opportunity-writeback executor drains it."""
-    from hermes.intake import opportunities as opp
+    from hermes_core import opportunities as opp
 
     supa = _get_supa()
     stage = (req.stage or "").strip()
@@ -1773,7 +1773,7 @@ def list_clients_endpoint(limit: int = 500):
 def client_360_endpoint(insured_guid: str):
     """Client 360 — the insured's record plus their whole book: policies,
     opportunities, and cases, keyed on the NowCerts insured GUID."""
-    from hermes.intake import opportunities as opp
+    from hermes_core import opportunities as opp
 
     supa = _get_supa()
 

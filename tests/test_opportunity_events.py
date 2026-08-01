@@ -1,7 +1,7 @@
 """A deal's timeline — the pipeline's missing history."""
 from __future__ import annotations
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 
 
 class FakeSupa:

@@ -24,7 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 
 log = logging.getLogger(__name__)
 

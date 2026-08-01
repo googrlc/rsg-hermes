@@ -411,7 +411,7 @@ def pipeline_stages_endpoint():
     hardcoding the list in the browser is how the board drifts from what the
     backend will accept on a stage move. Same source both sides.
     """
-    from hermes.intake.opportunities import (
+    from hermes_core.opportunities import (
         LOST_STAGES,
         NEW_BUSINESS_STAGES,
         OPPORTUNITY_TYPES,

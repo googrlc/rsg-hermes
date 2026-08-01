@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hermes.intake.opportunities import INSURED_TYPES, PROSPECT_TYPES
+from hermes_core.opportunities import INSURED_TYPES, PROSPECT_TYPES
 
 DEFAULT_PROSPECT_TYPE = "Prospect"
 
