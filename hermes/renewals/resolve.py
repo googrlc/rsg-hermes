@@ -21,7 +21,7 @@ from hermes.renewals import eligibility
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes.integrations.nowcerts_client import NowCertsClient
 
 # Resolution outcomes (ResolvedPolicy.reason)
 RESOLVED = "resolved"

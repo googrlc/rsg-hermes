@@ -22,7 +22,7 @@ from hermes.renewals import cases, pdf, resolve
 if TYPE_CHECKING:
     from hermes.integrations.nextcloud_client import NextcloudClient
     from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes.integrations.nowcerts_client import NowCertsClient
 
 
 def generate_pdf_handle(

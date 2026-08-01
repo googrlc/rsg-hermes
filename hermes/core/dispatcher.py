@@ -272,7 +272,7 @@ class Dispatcher:
         if self._nowcerts is not None:
             return self._nowcerts
         try:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes.integrations.nowcerts_client import NowCertsClient
 
             self._nowcerts = NowCertsClient()
         except Exception:

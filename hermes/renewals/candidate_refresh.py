@@ -21,7 +21,7 @@ from typing import Any
 
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations import renewal_classifier
-from hermes.sync.nowcerts_client import NowCertsClient
+from hermes.integrations.nowcerts_client import NowCertsClient
 
 from . import corrections, eligibility as elig
 from .eligibility import LineageContext

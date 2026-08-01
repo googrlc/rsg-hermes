@@ -62,7 +62,7 @@ def test_no_success_log_after_failed_completion_transition():
 
 def test_shared_nowcerts_created_once_and_reused():
     d = Dispatcher(use_openai=False)
-    with patch("hermes.sync.nowcerts_client.NowCertsClient") as NC:
+    with patch("hermes.integrations.nowcerts_client.NowCertsClient") as NC:
         sentinel = object()
         NC.return_value = sentinel
         a = d._get_shared_nowcerts()
@@ -73,8 +73,8 @@ def test_shared_nowcerts_created_once_and_reused():
 
 def test_shared_nowcerts_failure_not_cached():
     d = Dispatcher(use_openai=False)
-    with patch("hermes.sync.nowcerts_client.NowCertsClient", side_effect=RuntimeError("no creds")):
+    with patch("hermes.integrations.nowcerts_client.NowCertsClient", side_effect=RuntimeError("no creds")):
         assert d._get_shared_nowcerts() is None
-    with patch("hermes.sync.nowcerts_client.NowCertsClient") as NC:
+    with patch("hermes.integrations.nowcerts_client.NowCertsClient") as NC:
         NC.return_value = object()
         assert d._get_shared_nowcerts() is not None  # retried, not stuck on None

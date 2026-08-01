@@ -301,7 +301,7 @@ class FakeNowCerts:
 
 
 def test_ams_client_snapshot_live(monkeypatch):
-    import hermes.sync.nowcerts_client as ncmod
+    import hermes.integrations.nowcerts_client as ncmod
     fake = FakeNowCerts(
         insureds=[{"databaseId": "g-123", "commercialName": "Acme Trucking", "active": True}],
         policies=[{"lineOfBusiness": "Commercial Auto", "carrierName": "Progressive",
@@ -319,7 +319,7 @@ def test_ams_client_snapshot_live(monkeypatch):
 
 
 def test_ams_client_snapshot_no_match(monkeypatch):
-    import hermes.sync.nowcerts_client as ncmod
+    import hermes.integrations.nowcerts_client as ncmod
     monkeypatch.setattr(ncmod, "NowCertsClient", lambda *a, **k: FakeNowCerts(insureds=[]))
     res = A._exec_ams_snapshot({"client": "nobody"})
     assert res.ok and "No AMS insured" in res.message

@@ -29,7 +29,7 @@ from hermes.core.queue import (
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes.integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ def run_intake_executor(
                 summary["crm"] += 1
             elif object_type == OBJECT_TYPE_AMS:
                 if nowcerts is None:
-                    from hermes.sync.nowcerts_client import NowCertsClient
+                    from hermes.integrations.nowcerts_client import NowCertsClient
 
                     nowcerts = NowCertsClient()
                 insured = (payload.get("ams") or {}).get("insured") or {}

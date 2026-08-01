@@ -25,7 +25,7 @@ from hermes.renewals import resolve
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes.integrations.nowcerts_client import NowCertsClient
 
 # CRITICAL first, then AT_RISK, then SAFE, then anything else.
 _RISK_ORDER = {"CRITICAL": 0, "AT_RISK": 1, "SAFE": 2}
@@ -41,7 +41,7 @@ def _get_nowcerts(nowcerts: "NowCertsClient | None") -> "NowCertsClient | None":
     if nowcerts is not None:
         return nowcerts
     try:
-        from hermes.sync.nowcerts_client import NowCertsClient
+        from hermes.integrations.nowcerts_client import NowCertsClient
 
         return NowCertsClient()
     except Exception:  # pragma: no cover - env/config dependent

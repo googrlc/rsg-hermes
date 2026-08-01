@@ -1044,7 +1044,7 @@ def _exec_ams_snapshot(args: dict[str, Any]) -> DispatchResult:
     if not who:
         return DispatchResult(False, "Tell me which client to pull from the AMS.")
     try:
-        from hermes.sync.nowcerts_client import NowCertsClient
+        from hermes.integrations.nowcerts_client import NowCertsClient
         nc = NowCertsClient()
     except Exception as exc:  # noqa: BLE001
         return DispatchResult(False, f"AMS (NowCerts) unavailable: {exc}")

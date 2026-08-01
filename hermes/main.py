@@ -508,7 +508,7 @@ def main() -> int:
     if args.sync_canonical_book or args.sync_canonical_book_dry_run:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.sync.canonical_book_sync import run_canonical_book_sync
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
 
         try:
             supa = SupabaseClient()
@@ -538,7 +538,7 @@ def main() -> int:
     # --- NowCerts quotes → Supabase opportunities pipeline sync ---
     if args.retire_closed_opportunities or args.retire_closed_opportunities_apply:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.sync.nowcerts_client import NowCertsClient
+        from hermes.integrations.nowcerts_client import NowCertsClient
         from hermes.sync.opportunity_dedupe import run_retirement
 
         try:
@@ -569,7 +569,7 @@ def main() -> int:
 
     if args.repair_quote_board or args.repair_quote_board_apply:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.sync.nowcerts_client import NowCertsClient
+        from hermes.integrations.nowcerts_client import NowCertsClient
         from hermes.sync.quote_board_repair import run_repair
 
         try:
@@ -632,7 +632,7 @@ def main() -> int:
 
     if args.sync_quotes or args.sync_quotes_dry_run:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
         from hermes.sync.quote_sync import run_quote_sync
 
         try:
@@ -663,7 +663,7 @@ def main() -> int:
     # --- NowCerts Opportunities → opportunities pipeline mirror ---
     if args.sync_opportunities or args.sync_opportunities_dry_run:
         from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
         from hermes.sync.opportunity_sync import run_opportunity_sync
 
         try:

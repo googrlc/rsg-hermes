@@ -22,7 +22,7 @@ from hermes.renewals import cases, resolve
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes.integrations.nowcerts_client import NowCertsClient
 
 _DEFAULT_ASSIGNEE_EMAIL = os.environ.get("HERMES_RENEWAL_ASSIGNEE_EMAIL", "gretchen@risksolutionsgroup.net")
 _WITH_TASKS_RE = re.compile(r"\b(and|with|\+)\s+tasks?\b", re.I)

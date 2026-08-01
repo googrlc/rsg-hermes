@@ -25,7 +25,7 @@ from hermes.intake import opportunities as opp
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes.integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def prime_new_opportunities(
     head = unlinked[0]
     try:
         if nc is None:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes.integrations.nowcerts_client import NowCertsClient
 
             nc = NowCertsClient()
         insured = nc.find_insured(

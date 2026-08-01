@@ -143,7 +143,7 @@ def _get_nowcerts():
     """
     global _nowcerts
     if _nowcerts is None:
-        from hermes.sync.nowcerts_client import get_client
+        from hermes.integrations.nowcerts_client import get_client
 
         _nowcerts = get_client()
     return _nowcerts
@@ -3948,7 +3948,7 @@ async def book_sync_health(request: Request, max_pages: int = 50):
 # ---------------------------------------------------------------------------
 # AMS insured search — the search-before-insert gate used by the bridge's
 # `ams_search_insured` tool (GET /api/ams/search-insured?name=&email=&fein=).
-# Read-only proxy to NowCerts InsuredList. See sync/nowcerts_client.py.
+# Read-only proxy to NowCerts InsuredList. See integrations/nowcerts_client.py.
 # ---------------------------------------------------------------------------
 
 
@@ -3969,7 +3969,7 @@ async def ams_search_insured(
     if not any([name, email, fein]):
         raise HTTPException(status_code=400, detail="Provide at least one of: name, email, fein")
 
-    from hermes.sync.nowcerts_client import NowCertsClientError
+    from hermes.integrations.nowcerts_client import NowCertsClientError
 
     def _q(val: str) -> str:
         return val.replace("'", "''")  # OData single-quote escape

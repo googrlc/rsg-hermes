@@ -30,7 +30,7 @@ from hermes.core.queue import (
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes.integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ def run_opportunity_writeback_executor(
             )
         dry_run = True
         if nowcerts is None:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes.integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
         # Resolve for both terminal stages so the session sees the live shape of
@@ -206,7 +206,7 @@ def run_opportunity_writeback_executor(
 
         if dry_run:
             if nowcerts is None:
-                from hermes.sync.nowcerts_client import NowCertsClient
+                from hermes.integrations.nowcerts_client import NowCertsClient
 
                 nowcerts = NowCertsClient()
             preview = _resolve_preview(nowcerts, ncid, target)
@@ -224,7 +224,7 @@ def run_opportunity_writeback_executor(
         summary["claimed"] += 1
 
         if nowcerts is None:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes.integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
 

@@ -252,7 +252,7 @@ def test_ams_failure_falls_back_to_the_mirror(live):
 def test_uses_the_shared_client_when_none_is_passed(live, sync_refresh):
     """No `nowcerts=` must reach get_client(), not a fresh NowCertsClient()."""
     nc = _nc()
-    with patch("hermes.sync.nowcerts_client.get_client", return_value=nc) as shared:
+    with patch("hermes.integrations.nowcerts_client.get_client", return_value=nc) as shared:
         book.select_policies(_supa())
     shared.assert_called_once()
     nc.fetch_policies.assert_called_once()

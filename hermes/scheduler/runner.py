@@ -19,8 +19,8 @@ import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.scheduler.locks import LOCKS_TABLE, SchedulerLock
 from hermes.core.queue import DESTINATION_NOWCERTS, QUEUE_TABLE
+from hermes.scheduler.locks import LOCKS_TABLE, SchedulerLock
 from hermes.scheduler.retry import reclaim_stalled, requeue_or_deadletter
 
 if TYPE_CHECKING:
@@ -100,7 +100,7 @@ def run_one_cycle(
         # raises when credentials are absent, and that must not cost us the
         # renewal/intake problem detection below.
         try:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes.integrations.nowcerts_client import NowCertsClient
 
             nc = NowCertsClient()
             metrics["quote"] = run_quote_executor(supa=supa, nowcerts=nc, limit=batch)

@@ -35,11 +35,11 @@ from hermes.core.queue import (
     extract_created_id,
     utcnow,
 )
+from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations import renewal_tracker
 from hermes.operations.guardrails import log_guardrail_event
-from hermes.sync.nowcerts_client import NowCertsClient, NowCertsClientError
 
 from . import config, eligibility
 from .momentum_mcp_client import MomentumMCPClient, MomentumMCPClientError

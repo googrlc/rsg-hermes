@@ -31,7 +31,7 @@ from hermes.renewals import resolve, worksheet
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.sync.nowcerts_client import NowCertsClient
+    from hermes.integrations.nowcerts_client import NowCertsClient
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ def handle(
 
     if nowcerts is None:
         try:
-            from hermes.sync.nowcerts_client import NowCertsClient
+            from hermes.integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
         except Exception as exc:  # pragma: no cover - env/config dependent
