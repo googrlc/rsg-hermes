@@ -54,3 +54,28 @@ state/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Sync-tool duplicates: "cases 2.py", "Dockerfile 2", "package 2.json".
+# Something in the file-sync path drops byte-identical copies next to the
+# originals — 49 appeared here in one afternoon. They are untracked but were not
+# ignored, so a single `git add -A` commits the lot. That has already happened to
+# rsg-carrierhub, which carries a committed "Dockerfile 2", "README 2.md" and
+# "package 2.json".
+#
+# Deliberately NOT a blanket "* [0-9].*": that would silently swallow a
+# legitimately named "Phase 2.md", which is a worse failure than the duplicates.
+# Only the types where a stray copy is a real trap — code someone might edit by
+# mistake, or config that changes what ships.
+* [0-9].py
+* [0-9].pyi
+* [0-9].yml
+* [0-9].yaml
+* [0-9].toml
+* [0-9].json
+* [0-9].sh
+* [0-9].ts
+* [0-9].js
+* [0-9].sql
+* [0-9].cfg
+* [0-9].ini
+Dockerfile [0-9]
