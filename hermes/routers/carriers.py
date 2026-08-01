@@ -24,7 +24,7 @@ router = APIRouter()
 
 
 @router.get("/api/carriers")
-async def list_carrier_appetite(
+def list_carrier_appetite(
     limit: int = 500,
     carrier: str | None = None,
     state: str | None = None,

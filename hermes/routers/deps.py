@@ -18,6 +18,7 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+import threading
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -29,6 +30,14 @@ _dispatcher = None
 _supa = None
 _nowcerts = None
 
+# Route handlers with synchronous bodies are declared `def`, so FastAPI runs
+# them in a threadpool and several can be in flight at once. That makes the
+# lazy `if _x is None: _x = ...` below a race: two threads can both see None and
+# both construct. For NowCerts that is not just a wasted object, it is a second
+# ~26s password grant. One lock for all three — they are built once at startup
+# and never contended after.
+_init_lock = threading.Lock()
+
 
 def model_dict(model: BaseModel) -> dict[str, Any]:
     if hasattr(model, "model_dump"):
@@ -39,19 +48,25 @@ def model_dict(model: BaseModel) -> dict[str, Any]:
 def get_dispatcher():
     global _dispatcher
     if _dispatcher is None:
-        from hermes.agent.dispatcher import Dispatcher
+        with _init_lock:
+            if _dispatcher is None:
+                from hermes.agent.dispatcher import Dispatcher
 
-        use_openai = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY"))
-        _dispatcher = Dispatcher(use_openai=use_openai)
+                use_openai = bool(
+                    os.environ.get("OPENAI_API_KEY") or os.environ.get("HERMES_OPENAI_API_KEY")
+                )
+                _dispatcher = Dispatcher(use_openai=use_openai)
     return _dispatcher
 
 
 def get_supa():
     global _supa
     if _supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        with _init_lock:
+            if _supa is None:
+                from hermes.integrations.supabase_client import SupabaseClient
 
-        _supa = SupabaseClient()
+                _supa = SupabaseClient()
     return _supa
 
 
@@ -64,9 +79,11 @@ def get_nowcerts():
     """
     global _nowcerts
     if _nowcerts is None:
-        from hermes.integrations.nowcerts_client import get_client
+        with _init_lock:
+            if _nowcerts is None:
+                from hermes.integrations.nowcerts_client import get_client
 
-        _nowcerts = get_client()
+                _nowcerts = get_client()
     return _nowcerts
 
 

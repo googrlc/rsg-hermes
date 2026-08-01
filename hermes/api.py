@@ -209,7 +209,7 @@ class AgencyFactResponse(BaseModel):
 
 
 @app.get("/")
-async def root():
+def root():
     """What this service is, and where the screen went.
 
     This process serves no UI any more. Someone landing here has followed an old
@@ -225,12 +225,12 @@ async def root():
 
 
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok", "service": "hermes"}
 
 
 @app.get("/hermes/ping", response_model=DispatchResponse)
-async def hermes_ping():
+def hermes_ping():
     """Compatibility ping endpoint for WebUI connectors that call /hermes/ping."""
     return DispatchResponse(
         ok=True,
@@ -241,7 +241,7 @@ async def hermes_ping():
 
 
 @app.post("/dispatch", response_model=DispatchResponse)
-async def dispatch(req: DispatchRequest):
+def dispatch(req: DispatchRequest):
     if not req.command or not req.command.strip():
         raise HTTPException(status_code=400, detail="Empty command.")
     if requires_confirmation(req.command) and not req.confirm:
@@ -280,7 +280,7 @@ async def dashboard_dispatch(req: DispatchRequest):
 
 
 @app.get("/api/command-center/renewals")
-async def command_center_renewals():
+def command_center_renewals():
     """Live Renewals Cockpit data (Command Center, Phase 1).
 
     Server-side, service-role read of ``project_85_renewals`` aggregated into
@@ -312,7 +312,7 @@ async def command_center_renewals():
 
 
 @app.get("/api/command-center/lapse-check")
-async def command_center_lapse_check():
+def command_center_lapse_check():
     """Past-due-but-still-active renewals, kept OFF the forward renewals pipeline.
 
     The renewals board only carries the forward window (June-1 floor → +120 days);
@@ -324,7 +324,7 @@ async def command_center_lapse_check():
 
 
 @app.get("/api/command-center/tasks")
-async def command_center_tasks():
+def command_center_tasks():
     """Open team tasks (Gretchen/Lamar) in plain English, most urgent first."""
     # EspoCRM decommissioned 2026-07-23. Team tasks now live in Supabase
     # (agency_crm_tasks); read open tasks there, grouped by assignee, most urgent
@@ -353,7 +353,7 @@ async def command_center_tasks():
 
 
 @app.post("/api/command-center/tasks/{task_id}/complete")
-async def command_center_complete_task(task_id: str):
+def command_center_complete_task(task_id: str):
     """Mark a team task done in agency_crm_tasks."""
     from hermes.operations.team_queue import complete_task
 
@@ -370,7 +370,7 @@ async def command_center_complete_task(task_id: str):
 
 
 @app.get("/api/command-center/skills")
-async def command_center_skills():
+def command_center_skills():
     """List Hermes's capabilities — live tools + domain playbooks."""
     from hermes.agent.skills_catalog import catalog
 
@@ -386,7 +386,7 @@ class FileSaveRequest(BaseModel):
 
 
 @app.post("/api/command-center/files")
-async def command_center_save_file(req: FileSaveRequest):
+def command_center_save_file(req: FileSaveRequest):
     """Save a file Hermes created (note/report/answer/save-list) for the Files panel."""
     from hermes.operations.files_store import save_file
 
@@ -407,7 +407,7 @@ async def command_center_save_file(req: FileSaveRequest):
 
 
 @app.get("/api/command-center/files")
-async def command_center_list_files():
+def command_center_list_files():
     """List files Hermes has created (newest first)."""
     from hermes.operations.files_store import list_files
 
@@ -415,7 +415,7 @@ async def command_center_list_files():
 
 
 @app.get("/api/command-center/files/{file_id}/download")
-async def command_center_download_file(file_id: str):
+def command_center_download_file(file_id: str):
     """Download a Hermes file as an attachment."""
     from hermes.operations.files_store import download_filename, get_file
 
@@ -436,7 +436,7 @@ class AskRequest(BaseModel):
 
 
 @app.post("/api/command-center/ask")
-async def command_center_ask(req: AskRequest):
+def command_center_ask(req: AskRequest):
     """Ask Hermes from the Command Center command bar (Phase 3).
 
     Routes the prompt through the real dispatcher. Read-only posture: write-intent
@@ -480,7 +480,7 @@ async def command_center_ask(req: AskRequest):
 
 
 @app.get("/api/command-center/retention")
-async def command_center_retention():
+def command_center_retention():
     """Latest retention snapshot for the loud Retention card (Phase 2)."""
     supa = _get_supa()
     snap = supa.select("agency_snapshots", params={"order": "snapshot_date.desc"}, limit=1)
@@ -501,7 +501,7 @@ class SaveListRequest(BaseModel):
 
 
 @app.post("/api/command-center/save-list")
-async def command_center_build_save_list(req: SaveListRequest):
+def command_center_build_save_list(req: SaveListRequest):
     """Build + stage a retention save-list (top at-risk renewals → DRAFT outreach).
 
     Writes DRAFT rows only; nothing is auto-sent. The sole write action in Phase 2.
@@ -512,7 +512,7 @@ async def command_center_build_save_list(req: SaveListRequest):
 
 
 @app.get("/api/command-center/save-list")
-async def command_center_list_save_list():
+def command_center_list_save_list():
     """Open (DRAFT) outreach awaiting human review/send."""
     from hermes.operations.save_list import list_open_drafts
 
@@ -553,7 +553,7 @@ class OpportunityCreateRequest(BaseModel):
 
 
 @app.post("/api/opportunities")
-async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_tasks: BackgroundTasks):
+def create_opportunity_endpoint(req: OpportunityCreateRequest, background_tasks: BackgroundTasks):
     """Create (or return existing) a pipeline opportunity for ANY client — new,
     inactive, or a cross-sell on a current client. Idempotent per
     (client_identifier, line_of_business); the smart create logic (identifier,
@@ -629,7 +629,7 @@ async def create_opportunity_endpoint(req: OpportunityCreateRequest, background_
 
 
 @app.get("/api/opportunities")
-async def list_opportunities_endpoint(stage: str | None = None, status: str | None = "open", limit: int = 100):
+def list_opportunities_endpoint(stage: str | None = None, status: str | None = "open", limit: int = 100):
     """List pipeline opportunities (default open), newest-updated first.
 
     Each row carries a derived ``projected_close_date`` (+ the ``projected_close_basis``
@@ -683,7 +683,7 @@ _OPP_EDITABLE = set(OpportunityUpdateRequest.model_fields.keys())
 
 
 @app.patch("/api/opportunities/{opportunity_id}")
-async def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdateRequest):
+def update_opportunity_endpoint(opportunity_id: str, req: OpportunityUpdateRequest):
     """Edit an opportunity's fields in the CRM. Supabase-only — an opportunity is
     worked in the CRM and does not write back to the AMS until it's Bound/Won or
     Lost. Only the fields present in the request are changed; setting ``stage``
@@ -739,7 +739,7 @@ def _duplicate_deal_detail(exc: Exception) -> str | None:
 
 
 @app.get("/api/opportunities/{opportunity_id}/events")
-async def list_opportunity_events_endpoint(opportunity_id: str, limit: int = 200):
+def list_opportunity_events_endpoint(opportunity_id: str, limit: int = 200):
     """A deal's timeline — notes, stage moves, creation, AMS filings, newest first.
 
     The pipeline was the one working surface with no history: `description` was
@@ -761,7 +761,7 @@ class OpportunityNoteRequest(BaseModel):
 
 
 @app.post("/api/opportunities/{opportunity_id}/notes")
-async def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteRequest):
+def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNoteRequest):
     """Write down what happened on a deal. Appended to the same timeline the stage
     moves land on, so one list answers "what happened here"."""
     from hermes.intake import opportunities as opp
@@ -785,7 +785,7 @@ async def add_opportunity_note_endpoint(opportunity_id: str, req: OpportunityNot
 
 
 @app.delete("/api/opportunities/{opportunity_id}")
-async def delete_opportunity_endpoint(opportunity_id: str):
+def delete_opportunity_endpoint(opportunity_id: str):
     """Delete an opportunity from the CRM. Supabase-only — opportunities never write
     to the AMS, so there's nothing to unwind in NowCerts. Any attached quotes are
     removed automatically (opportunity_quotes FK is ON DELETE CASCADE)."""
@@ -818,7 +818,7 @@ async def delete_opportunity_endpoint(opportunity_id: str):
 
 
 @app.get("/api/cross-sell")
-async def cross_sell_search_endpoint(q: str = "", limit: int = 25):
+def cross_sell_search_endpoint(q: str = "", limit: int = 25):
     """Search active clients (canonical mirror) to pull one into the pipeline as a
     cross-sell. Returns each client's current LOBs + premium; opening the cross-sell
     is a POST /api/opportunities with opportunity_type='Cross-selling'."""
@@ -836,7 +836,7 @@ class SendQuoteRequest(BaseModel):
 
 
 @app.post("/api/opportunities/{opportunity_id}/send-to-nowcerts")
-async def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
+def send_opportunity_quote(opportunity_id: str, req: SendQuoteRequest):
     """Approved push: enqueue this opportunity to NowCerts as a quote (Policy · IsQuote).
     Writes nothing synchronously — the quote executor completes it and stamps the
     quote id/number back onto the opportunity. approved_by must be a real user."""
@@ -871,7 +871,7 @@ class StageUpdateRequest(BaseModel):
 
 
 @app.post("/api/opportunities/{opportunity_id}/stage")
-async def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest):
+def update_opportunity_stage(opportunity_id: str, req: StageUpdateRequest):
     """Move an opportunity to a new pipeline stage (Kanban drag). Syncs status
     (won/lost). The move itself is Supabase-only; when it lands on a terminal stage
     (Bound/Won or Lost) it QUEUES an approval-gated writeback to NowCerts — nothing
@@ -1012,7 +1012,7 @@ async def create_quote_endpoint(
 
 
 @app.get("/api/opportunities/{opportunity_id}/quotes")
-async def list_opportunity_quotes_endpoint(opportunity_id: str):
+def list_opportunity_quotes_endpoint(opportunity_id: str):
     """Quotes attached to one opportunity (newest first)."""
     from hermes.quotes import store as quote_store
 
@@ -1021,7 +1021,7 @@ async def list_opportunity_quotes_endpoint(opportunity_id: str):
 
 
 @app.get("/api/quotes")
-async def list_quotes_endpoint(insured_id: str | None = None, limit: int = 500):
+def list_quotes_endpoint(insured_id: str | None = None, limit: int = 500):
     """All carrier quotes — the Quotes module (grouped by opportunity). Pass
     insured_id to get one client's quotes across their opportunities."""
     from hermes.quotes import store as quote_store
@@ -1050,7 +1050,7 @@ async def attach_quote_document_endpoint(quote_id: str, file: UploadFile = File(
 
 
 @app.post("/api/quotes/{quote_id}/send-to-nowcerts")
-async def send_quote_to_nowcerts(quote_id: str, req: SendQuoteRequest):
+def send_quote_to_nowcerts(quote_id: str, req: SendQuoteRequest):
     """Approved push: enqueue this carrier quote to NowCerts (Policy · IsQuote).
     Writes nothing synchronously — the quote executor completes it and stamps the
     quote number/guid back onto the quote row. approved_by must be a real user."""
@@ -1103,7 +1103,7 @@ class ProposalStatusRequest(BaseModel):
 
 
 @app.post("/api/proposals")
-async def create_proposal_endpoint(req: ProposalCreateRequest):
+def create_proposal_endpoint(req: ProposalCreateRequest):
     """Create a proposal from selected carrier quotes, render it (LOB-grouped),
     and file it into the client's Nextcloud Proposals/ folder. fmt: html|pdf|both."""
     from hermes.proposals import documents as prop_docs
@@ -1127,7 +1127,7 @@ async def create_proposal_endpoint(req: ProposalCreateRequest):
 
 
 @app.get("/api/proposals")
-async def list_proposals_endpoint(insured_id: str | None = None, limit: int = 500):
+def list_proposals_endpoint(insured_id: str | None = None, limit: int = 500):
     """All proposals (newest first), or one client's when insured_id is given."""
     from hermes.proposals import store as prop_store
 
@@ -1140,7 +1140,7 @@ async def list_proposals_endpoint(insured_id: str | None = None, limit: int = 50
 
 
 @app.get("/api/proposals/{proposal_id}")
-async def get_proposal_endpoint(proposal_id: str):
+def get_proposal_endpoint(proposal_id: str):
     from hermes.proposals import store as prop_store
 
     row = prop_store.get_proposal(_get_supa(), proposal_id)
@@ -1150,7 +1150,7 @@ async def get_proposal_endpoint(proposal_id: str):
 
 
 @app.get("/api/proposals/{proposal_id}/view", response_class=HTMLResponse)
-async def view_proposal_endpoint(proposal_id: str):
+def view_proposal_endpoint(proposal_id: str):
     """The rendered proposal HTML — open in a tab or print to PDF from the browser."""
     from hermes.proposals import store as prop_store
 
@@ -1161,7 +1161,7 @@ async def view_proposal_endpoint(proposal_id: str):
 
 
 @app.post("/api/proposals/{proposal_id}/regenerate")
-async def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerateRequest):
+def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerateRequest):
     """Re-render a proposal (picks up edited quotes/notes). fmt: html|pdf|both."""
     from hermes.proposals import documents as prop_docs
     from hermes.proposals import store as prop_store
@@ -1179,7 +1179,7 @@ async def regenerate_proposal_endpoint(proposal_id: str, req: ProposalRegenerate
 
 
 @app.post("/api/proposals/{proposal_id}/status")
-async def set_proposal_status_endpoint(proposal_id: str, req: ProposalStatusRequest):
+def set_proposal_status_endpoint(proposal_id: str, req: ProposalStatusRequest):
     from hermes.proposals import store as prop_store
 
     row = prop_store.set_status(_get_supa(), proposal_id, req.status)
@@ -1187,7 +1187,7 @@ async def set_proposal_status_endpoint(proposal_id: str, req: ProposalStatusRequ
 
 
 @app.get("/api/clients/search")
-async def search_clients_endpoint(q: str, limit: int = 20):
+def search_clients_endpoint(q: str, limit: int = 20):
     """Search the canonical book by insured name — powers the New-Opportunity client
     picker (active OR inactive clients). Returns the NowCerts guid + display fields.
     """
@@ -1232,7 +1232,7 @@ def _deck():
 
 
 @app.get("/api/deck/boards")
-async def deck_boards_endpoint():
+def deck_boards_endpoint():
     """Boards, and the stacks (lists) on each — what a caller needs to address a card."""
     from hermes.integrations.nextcloud_deck import DeckError
 
@@ -1264,7 +1264,7 @@ class DeckCardRequest(BaseModel):
 
 
 @app.post("/api/deck/cards")
-async def deck_create_card_endpoint(req: DeckCardRequest):
+def deck_create_card_endpoint(req: DeckCardRequest):
     """Add a card. Idempotent by title within the list, so a job that runs twice
     doesn't leave two identical cards."""
     from hermes.integrations.nextcloud_deck import DeckError
@@ -1288,7 +1288,7 @@ async def deck_create_card_endpoint(req: DeckCardRequest):
 
 
 @app.get("/api/agency-users")
-async def list_agency_users_endpoint(assignable: bool = False):
+def list_agency_users_endpoint(assignable: bool = False):
     """Active CRM users — powers owner/assignee pickers (valid FK targets).
 
     ``assignable=true`` excludes service accounts. lc-rsg@ is the machine identity
@@ -1429,7 +1429,7 @@ class ClientOverrideRequest(BaseModel):
 
 
 @app.post("/api/clients/{insured_guid}/override")
-async def override_client_field(insured_guid: str, req: ClientOverrideRequest):
+def override_client_field(insured_guid: str, req: ClientOverrideRequest):
     """Correct a client field in the portal.
 
     Keyed on the NowCerts insured GUID so the correction survives a re-seed of
@@ -1517,7 +1517,7 @@ class PolicyOverrideRequest(BaseModel):
 
 
 @app.post("/api/policies/{policy_guid}/override")
-async def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
+def override_policy_field(policy_guid: str, req: PolicyOverrideRequest):
     """Correct a policy field in the portal. Keyed on the NowCerts policy GUID,
     so the correction survives a re-seed of the mirror. Not an AMS write."""
     from hermes.overrides.store import set_override
@@ -1627,7 +1627,7 @@ class PolicyCreateRequest(BaseModel):
 
 
 @app.post("/api/policies")
-async def create_policy_endpoint(req: PolicyCreateRequest):
+def create_policy_endpoint(req: PolicyCreateRequest):
     """Add a policy to a client, in NowCerts.
 
     Deliberately NOT a write to canonical_policies: that table is a mirror under a
@@ -1679,7 +1679,7 @@ async def create_policy_endpoint(req: PolicyCreateRequest):
 
 
 @app.get("/api/ams/failed-pushes")
-async def list_failed_pushes(limit: int = 50):
+def list_failed_pushes(limit: int = 50):
     """Corrections that never reached NowCerts.
 
     Worth surfacing rather than leaving in a table: the CRM shows the corrected
@@ -1701,7 +1701,7 @@ class AmsRetryRequest(BaseModel):
 
 
 @app.post("/api/ams/failed-pushes/{queue_id}/retry")
-async def retry_failed_push(queue_id: str, req: AmsRetryRequest):
+def retry_failed_push(queue_id: str, req: AmsRetryRequest):
     """Re-drive one failed push from its own queue row. Safe to repeat — both AMS
     endpoints upsert on DatabaseId."""
     from hermes.ams import writeback
@@ -1715,7 +1715,7 @@ async def retry_failed_push(queue_id: str, req: AmsRetryRequest):
 
 
 @app.post("/api/clients/{insured_guid}/push-to-ams")
-async def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
+def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
     """Write a client's corrected fields to NowCerts, keyed on the insured GUID."""
     from hermes.ams.writeback import OBJECT_TYPE_CLIENT
 
@@ -1723,7 +1723,7 @@ async def push_client_to_ams(insured_guid: str, req: AmsPushRequest):
 
 
 @app.post("/api/policies/{policy_guid}/push-to-ams")
-async def push_policy_to_ams(policy_guid: str, req: AmsPushRequest):
+def push_policy_to_ams(policy_guid: str, req: AmsPushRequest):
     """Write a policy's corrected fields to NowCerts, keyed on the policy GUID."""
     from hermes.ams.writeback import OBJECT_TYPE_POLICY
 
@@ -1731,7 +1731,7 @@ async def push_policy_to_ams(policy_guid: str, req: AmsPushRequest):
 
 
 @app.get("/api/clients")
-async def list_clients_endpoint(limit: int = 500):
+def list_clients_endpoint(limit: int = 500):
     """Full canonical client book, with any portal corrections applied."""
     supa = _get_supa()
     rows = supa.select(
@@ -1743,7 +1743,7 @@ async def list_clients_endpoint(limit: int = 500):
 
 
 @app.get("/api/clients/{insured_guid}")
-async def client_360_endpoint(insured_guid: str):
+def client_360_endpoint(insured_guid: str):
     """Client 360 — the insured's record plus their whole book: policies,
     opportunities, and cases, keyed on the NowCerts insured GUID."""
     from hermes.intake import opportunities as opp
@@ -1850,7 +1850,7 @@ def _collapse_to_current_terms(policies: list[dict[str, Any]]) -> tuple[list[dic
 
 
 @app.get("/api/policies")
-async def list_policies_endpoint(limit: int = 1000, include_history: bool = False):
+def list_policies_endpoint(limit: int = 1000, include_history: bool = False):
     """Canonical policy book (read-only mirror), soonest-expiring first.
 
     By default, renewal-overlap pairs and duplicate imports are collapsed to one
@@ -1898,7 +1898,7 @@ async def list_policies_endpoint(limit: int = 1000, include_history: bool = Fals
 # (docs/repo-split-plan.md, Phase 2). Mounted at app creation.
 
 @app.get("/api/workspace-stats")
-async def workspace_stats_endpoint():
+def workspace_stats_endpoint():
     """KPI tile counts for the Workspace home."""
     supa = _get_supa()
 
@@ -1930,7 +1930,7 @@ async def workspace_stats_endpoint():
 
 
 @app.get("/api/hermes/sync-health")
-async def sync_health():
+def sync_health():
     """Queue-centric health snapshot for dashboard SyncHealthCheck component.
 
     Defensive: a missing or renamed table degrades that section to 'unavailable'
@@ -1992,7 +1992,7 @@ async def sync_health():
 
 
 @app.get("/api/hermes/book-sync")
-async def book_sync_health(request: Request, max_pages: int = 50):
+def book_sync_health(request: Request, max_pages: int = 50):
     """Drift report: policy counts, tombstones, per-carrier premium, rate drift.
 
     Gated by HERMES_API_TOKEN bearer (skipped if env var unset).
@@ -2024,7 +2024,7 @@ async def book_sync_health(request: Request, max_pages: int = 50):
 
 
 @app.get("/api/ams/search-insured")
-async def ams_search_insured(
+def ams_search_insured(
     request: Request,
     name: str | None = None,
     email: str | None = None,
@@ -2104,7 +2104,7 @@ class DocumentSaveRequest(BaseModel):
 
 
 @app.post("/api/documents/save")
-async def documents_save(req: DocumentSaveRequest):
+def documents_save(req: DocumentSaveRequest):
     """Save a document to the library (Supermemory + Drive mirror + index).
 
     ``account_name`` => client folder; otherwise it lands in the internal
@@ -2133,7 +2133,7 @@ async def documents_save(req: DocumentSaveRequest):
 
 
 @app.get("/api/documents/folders")
-async def documents_folders():
+def documents_folders():
     """Folder tree for Agent OS: one entry per (space, name) with a count."""
     from hermes.documents.store import list_folders
 
@@ -2141,7 +2141,7 @@ async def documents_folders():
 
 
 @app.get("/api/documents")
-async def documents_in_folder(space: str, name: str):
+def documents_in_folder(space: str, name: str):
     """Documents in one folder. ``space`` is 'client' or 'internal';
     ``name`` is the account (client) or freeform folder (internal)."""
     from hermes.documents.store import list_documents
@@ -2152,7 +2152,7 @@ async def documents_in_folder(space: str, name: str):
 
 
 @app.get("/api/documents/{doc_id}")
-async def document_detail(doc_id: str):
+def document_detail(doc_id: str):
     """One document index row (title, preview, supermemory_id, …)."""
     from hermes.documents.store import get_document
 
@@ -2223,7 +2223,7 @@ def _validated_nextcloud_path(raw: str) -> str:
 
 
 @app.get("/api/nextcloud/folders")
-async def nextcloud_list_folder(path: str = ""):
+def nextcloud_list_folder(path: str = ""):
     """List one real Nextcloud WebDAV folder, not the document index."""
     from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
 
@@ -2242,7 +2242,7 @@ async def nextcloud_list_folder(path: str = ""):
 
 
 @app.post("/api/nextcloud/folders/ensure")
-async def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
+def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
     """Preview or idempotently create exact Nextcloud folder paths."""
     from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
 
@@ -2281,7 +2281,7 @@ async def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
 
 
 @app.post("/api/nextcloud/upload")
-async def nextcloud_upload(req: NextcloudUploadRequest):
+def nextcloud_upload(req: NextcloudUploadRequest):
     """Upload one approved PDF into the standardized RSG client tree."""
     from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
 
@@ -2331,7 +2331,7 @@ async def nextcloud_upload(req: NextcloudUploadRequest):
 
 
 @app.post("/agency-fact", response_model=AgencyFactResponse)
-async def agency_fact(req: AgencyFactRequest):
+def agency_fact(req: AgencyFactRequest):
     """Answer a structured fact-retrieval question with citation + confidence.
 
     Two call shapes:

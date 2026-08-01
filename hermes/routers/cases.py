@@ -56,7 +56,7 @@ class CaseCreateRequest(BaseModel):
 
 
 @router.post("/api/cases")
-async def create_case_endpoint(req: CaseCreateRequest):
+def create_case_endpoint(req: CaseCreateRequest):
     """Create a general agency_crm_cases row (any case_type) for any cockpit.
     Owner/creator emails are validated against agency_crm_users (FK guard)."""
     from hermes.core.due_dates import normalize_due
@@ -97,7 +97,7 @@ async def create_case_endpoint(req: CaseCreateRequest):
 
 
 @router.get("/api/case-templates")
-async def list_case_templates_endpoint():
+def list_case_templates_endpoint():
     """The case-template menu (onboarding, off-boarding, endorsement, COI, ...).
 
     Static definitions, not a table — a checklist is code the agency reviews in a
@@ -124,7 +124,7 @@ class CaseFromTemplateRequest(BaseModel):
 
 
 @router.post("/api/cases/from-template")
-async def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
+def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
     """Create a case AND its checklist in one call.
 
     This is the whole point of templates: an onboarding that exists as a case
@@ -220,7 +220,7 @@ async def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
 
 
 @router.get("/api/cases/{case_id}/progress")
-async def case_progress_endpoint(case_id: str):
+def case_progress_endpoint(case_id: str):
     """Checklist progress plus whether every required task is satisfied."""
     rows = deps.get_supa().select(
         "v_case_progress", columns="*", params={"case_id": f"eq.{case_id}"}, limit=1
@@ -238,7 +238,7 @@ class CaseCloseRequest(BaseModel):
 
 
 @router.post("/api/cases/{case_id}/close")
-async def close_case_endpoint(case_id: str, req: CaseCloseRequest):
+def close_case_endpoint(case_id: str, req: CaseCloseRequest):
     """Close a case, refusing while required tasks are open.
 
     The database enforces the same rule (trigger, migration 20260727000000) so
@@ -322,7 +322,7 @@ async def close_case_endpoint(case_id: str, req: CaseCloseRequest):
 
 
 @router.get("/api/cases")
-async def list_cases_endpoint(
+def list_cases_endpoint(
     status: str | None = None,
     case_type: str | None = None,
     limit: int = 100,
@@ -368,7 +368,7 @@ async def list_cases_endpoint(
 
 
 @router.get("/api/cases/blocked")
-async def list_blocked_cases_endpoint(limit: int = 100):
+def list_blocked_cases_endpoint(limit: int = 100):
     """Open cases that cannot close yet, and the specific tasks blocking each.
 
     The morning-brief question: "what is stopping these from being finished?"
@@ -420,7 +420,7 @@ class TaskCreateRequest(BaseModel):
 
 
 @router.post("/api/tasks")
-async def create_task_endpoint(req: TaskCreateRequest):
+def create_task_endpoint(req: TaskCreateRequest):
     """Create a task. assigned_to/created_by validated vs agency_crm_users.
 
     ``case_id`` is optional — omit it for internal work. Idempotent per title
@@ -466,7 +466,7 @@ async def create_task_endpoint(req: TaskCreateRequest):
 
 
 @router.post("/api/tasks/digest")
-async def post_task_digest():
+def post_task_digest():
     """Post the open-task digest to the team chat (Nextcloud Talk). Meant to be
     hit on a daily schedule (pg_cron / scheduler). No-op if NEXTCLOUD_TALK_TOKEN
     is unset."""
@@ -476,7 +476,7 @@ async def post_task_digest():
 
 
 @router.get("/api/tasks")
-async def list_tasks_endpoint(
+def list_tasks_endpoint(
     case_id: str | None = None,
     insured_id: str | None = None,
     scope: str | None = None,
@@ -519,7 +519,7 @@ class TaskUpdateRequest(BaseModel):
 
 
 @router.patch("/api/tasks/{task_id}")
-async def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
+def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
     """Update a task (issue #195 — tasks were create-only and view-only).
 
     ``completed_at`` is derived from ``status``, never accepted from the caller.
@@ -567,7 +567,7 @@ def _log_deletion(supa, *, entity_type: str, entity_key: str, actor: str,
 
 
 @router.delete("/api/tasks/{task_id}")
-async def delete_task_endpoint(task_id: str, req: DeleteRequest):
+def delete_task_endpoint(task_id: str, req: DeleteRequest):
     """Delete a task outright. Cancelling keeps it in the record; this removes it."""
     from hermes.renewals import cases as C
 
@@ -618,7 +618,7 @@ class CaseUpdateRequest(BaseModel):
 
 
 @router.patch("/api/cases/{case_id}")
-async def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
+def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
     """Edit a case. Cases were create-and-close-only; a typo'd title or the wrong
     owner meant the case stayed wrong."""
     from hermes.core.due_dates import normalize_due
@@ -649,7 +649,7 @@ async def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
 
 
 @router.delete("/api/cases/{case_id}")
-async def delete_case_endpoint(case_id: str, req: DeleteRequest):
+def delete_case_endpoint(case_id: str, req: DeleteRequest):
     """Delete a case and everything filed against it — tasks, timeline, document
     links, renewal detail. The Nextcloud documents themselves are left alone."""
     from hermes.renewals import cases as C
@@ -680,7 +680,7 @@ class QueueRetryRequest(BaseModel):
 
 
 @router.post("/api/cases/{case_id}/push-to-ams")
-async def push_case_to_ams(case_id: str, req: PushToAmsRequest):
+def push_case_to_ams(case_id: str, req: PushToAmsRequest):
     """Approved push: log this case in the NowCerts task ledger. approved_by must be a user."""
     from hermes.casework.executor import stage_case_job
 
@@ -704,7 +704,7 @@ async def push_case_to_ams(case_id: str, req: PushToAmsRequest):
 
 
 @router.post("/api/tasks/{task_id}/push-to-ams")
-async def push_task_to_ams(task_id: str, req: PushToAmsRequest):
+def push_task_to_ams(task_id: str, req: PushToAmsRequest):
     """Approved push: log this task in the NowCerts task ledger (uses its case's insured)."""
     from hermes.casework.executor import stage_task_job
 
@@ -740,7 +740,7 @@ async def push_task_to_ams(task_id: str, req: PushToAmsRequest):
 
 
 @router.get("/api/queue/failed")
-async def list_failed_ams_writebacks(limit: int = 100):
+def list_failed_ams_writebacks(limit: int = 100):
     """Service-request/client-task write-backs that failed or exhausted retries —
     the retry queue surfaced in the cockpit."""
     rows = deps.get_supa().select(
@@ -752,7 +752,7 @@ async def list_failed_ams_writebacks(limit: int = 100):
 
 
 @router.post("/api/queue/{queue_id}/retry")
-async def retry_ams_writeback(queue_id: str, req: QueueRetryRequest):
+def retry_ams_writeback(queue_id: str, req: QueueRetryRequest):
     """Retriable on command: re-open a failed/dead case or task write-back and
     (by default) run the executor now so it relays to NowCerts immediately."""
     from hermes.casework.executor import requeue_job, run_casework_executor
@@ -771,7 +771,7 @@ async def retry_ams_writeback(queue_id: str, req: QueueRetryRequest):
 
 
 @router.post("/api/casework/run")
-async def run_casework_writebacks(req: deps.ExecutorRunRequest):
+def run_casework_writebacks(req: deps.ExecutorRunRequest):
     """Run the case/task → NowCerts write-back executor on command (opt-in, no cron).
     ``dry_run`` previews without writing."""
     from hermes.casework.executor import run_casework_executor
@@ -878,7 +878,7 @@ async def upload_case_document(
 
 
 @router.get("/api/cases/{case_id}/documents")
-async def case_documents_endpoint(case_id: str):
+def case_documents_endpoint(case_id: str):
     """Nextcloud document links filed against a case (agency_crm_document_links)."""
     rows = deps.get_supa().select(
         "agency_crm_document_links", columns="*",

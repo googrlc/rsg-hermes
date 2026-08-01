@@ -37,7 +37,7 @@ class CommissionRuleRequest(BaseModel):
 
 
 @router.get("/api/commission-rules")
-async def list_commission_rules(limit: int = 500):
+def list_commission_rules(limit: int = 500):
     """Commission terms — carrier/LOB → new-business % and renewal %."""
     rows = deps.get_supa().select(
         "commission_rules",
@@ -48,7 +48,7 @@ async def list_commission_rules(limit: int = 500):
 
 
 @router.post("/api/commission-rules")
-async def upsert_commission_rule(req: CommissionRuleRequest):
+def upsert_commission_rule(req: CommissionRuleRequest):
     """Add or update a commission term (carrier + LOB rate). Feeds expected
     commission when NowCerts doesn't carry an agency commission amount."""
     supa = deps.get_supa()
@@ -71,7 +71,7 @@ async def upsert_commission_rule(req: CommissionRuleRequest):
 
 
 @router.get("/api/commissions")
-async def list_commissions_endpoint(limit: int = 1000, status: str = "reconciled"):
+def list_commissions_endpoint(limit: int = 1000, status: str = "reconciled"):
     """Commission ledger, plus the context that keeps an empty result honest.
 
     Always returns ``counts_by_status`` (over the whole ledger) and ``coverage``
@@ -91,7 +91,7 @@ async def list_commissions_endpoint(limit: int = 1000, status: str = "reconciled
 
 
 @router.get("/api/commissions/analytics")
-async def commission_analytics_endpoint():
+def commission_analytics_endpoint():
     """Whole-ledger rollups by carrier and by line of business (#236).
 
     The lens for "is the cockpit sufficient to replace the standalone tracker?"
@@ -121,7 +121,7 @@ class CommissionOverrideRequest(BaseModel):
 
 
 @router.post("/api/commissions/{ledger_id}/override")
-async def override_commission_field(ledger_id: str, req: CommissionOverrideRequest):
+def override_commission_field(ledger_id: str, req: CommissionOverrideRequest):
     """Correct a commission field in the portal.
 
     The override outranks the synced value until the AMS reports the same thing,
@@ -181,7 +181,7 @@ async def override_commission_field(ledger_id: str, req: CommissionOverrideReque
 
 
 @router.delete("/api/commissions/overrides/{override_id}")
-async def withdraw_commission_override(override_id: str, approved_by: str):
+def withdraw_commission_override(override_id: str, approved_by: str):
     """Withdraw an override — the correction was wrong or is no longer wanted."""
     from hermes.overrides.store import withdraw
 
@@ -198,7 +198,7 @@ async def withdraw_commission_override(override_id: str, approved_by: str):
 
 
 @router.get("/api/commissions/overrides")
-async def list_commission_overrides(status: str = "active", limit: int = 500):
+def list_commission_overrides(status: str = "active", limit: int = 500):
     """Active corrections, plus anything the sync flagged as conflicted."""
     from hermes.commissions.surface import ENTITY_TYPE
 
@@ -253,7 +253,7 @@ async def upload_commission_statement(
 
 
 @router.get("/api/commission-statements")
-async def list_commission_batches(status: str = "", limit: int = 50):
+def list_commission_batches(status: str = "", limit: int = 50):
     """Uploaded statement batches, newest first."""
     from hermes.commissions.statements import BATCHES_TABLE
 
@@ -265,7 +265,7 @@ async def list_commission_batches(status: str = "", limit: int = 50):
 
 
 @router.get("/api/commission-statements/{batch_id}")
-async def get_commission_batch(batch_id: str, lines: int = 100):
+def get_commission_batch(batch_id: str, lines: int = 100):
     """One batch plus its staged lines — the review detail."""
     from hermes.commissions.statements import BATCHES_TABLE, STAGING_TABLE
 
@@ -284,7 +284,7 @@ class StatementDecision(BaseModel):
 
 
 @router.post("/api/commission-statements/{batch_id}/approve")
-async def approve_commission_statement(batch_id: str, req: StatementDecision):
+def approve_commission_statement(batch_id: str, req: StatementDecision):
     """Commit a reviewed batch: statement + transactions + link + rollup.
 
     This is the money gate. Refuses a batch that isn't pending review, parsed
@@ -305,7 +305,7 @@ async def approve_commission_statement(batch_id: str, req: StatementDecision):
 
 
 @router.post("/api/commission-statements/{batch_id}/reject")
-async def reject_commission_statement(batch_id: str, req: StatementDecision):
+def reject_commission_statement(batch_id: str, req: StatementDecision):
     """Reject a staged batch. The staged lines stay for diagnosis."""
     from hermes.commissions.statements import reject_statement
 

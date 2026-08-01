@@ -72,7 +72,7 @@ def _renewal_window_days(lob: str | None) -> int:
 
 
 @router.get("/api/renewals")
-async def list_renewals_endpoint(limit: int = 1000):
+def list_renewals_endpoint(limit: int = 1000):
     """Upcoming renewal worklist from renewal_candidates.
 
     Forward window only: personal lines +30 days, commercial +120 days. Rows on
@@ -134,7 +134,7 @@ async def list_renewals_endpoint(limit: int = 1000):
 # retires itself once the two agree.
 # ---------------------------------------------------------------------------
 @router.get("/api/renewals/overrides")
-async def list_renewal_overrides(status: str = "active", limit: int = 500):
+def list_renewal_overrides(status: str = "active", limit: int = 500):
     """Corrections on renewals — active, plus anything a refresh conflicted."""
     from hermes.renewals.corrections import PROJECTION
 
@@ -263,7 +263,7 @@ class RenewalCorrectionRequest(BaseModel):
 
 
 @router.post("/api/renewals/{renewal_id}/override")
-async def correct_renewal_field(renewal_id: str, req: RenewalCorrectionRequest):
+def correct_renewal_field(renewal_id: str, req: RenewalCorrectionRequest):
     """Correct one field on a renewal, durably.
 
     The plain PATCH below writes the row and nothing else, so the nightly
@@ -318,7 +318,7 @@ class RenewalDismissRequest(BaseModel):
 
 
 @router.delete("/api/renewals/{renewal_id}")
-async def dismiss_renewal(renewal_id: str, req: RenewalDismissRequest):
+def dismiss_renewal(renewal_id: str, req: RenewalDismissRequest):
     """Take a renewal off the worklist.
 
     Recorded as a removal, not a row DELETE. renewal_actions cascades off this
@@ -363,7 +363,7 @@ async def dismiss_renewal(renewal_id: str, req: RenewalDismissRequest):
 
 
 @router.delete("/api/renewals/overrides/{override_id}")
-async def withdraw_renewal_override(override_id: str, approved_by: str):
+def withdraw_renewal_override(override_id: str, approved_by: str):
     """Undo a correction — including a removal, which puts the renewal back.
 
     Withdrawing restores what the source said on the row as well, so the list
@@ -419,7 +419,7 @@ class RenewalUpdateRequest(BaseModel):
 
 
 @router.patch("/api/renewals/{renewal_id}")
-async def update_renewal_endpoint(renewal_id: str, req: RenewalUpdateRequest):
+def update_renewal_endpoint(renewal_id: str, req: RenewalUpdateRequest):
     """Update a renewal's working detail. The cockpit was read-only, so a premium
     that came over wrong stayed wrong and every downstream number inherited it."""
     from hermes.operations.renewal_tracker import VALID_RISK_STATUSES

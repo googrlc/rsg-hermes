@@ -174,7 +174,7 @@ class AgencyIntakeApprovalResponse(BaseModel):
 
 
 @router.get("/api/leads")
-async def list_leads_endpoint(limit: int = 200, status: str | None = None, include_ams: bool = True):
+def list_leads_endpoint(limit: int = 200, status: str | None = None, include_ams: bool = True):
     """The lead station — the agency's own leads, plus live NowCerts prospects.
 
     A lead lives in the CRM (``crm_leads``) and never goes to the AMS; it reaches
@@ -223,7 +223,7 @@ class LeadWriteRequest(BaseModel):
 
 
 @router.post("/api/leads")
-async def create_lead_endpoint(req: LeadWriteRequest):
+def create_lead_endpoint(req: LeadWriteRequest):
     """Add a lead. Written to the CRM only — nothing reaches NowCerts here."""
     from hermes import leads as L
 
@@ -243,7 +243,7 @@ async def create_lead_endpoint(req: LeadWriteRequest):
 
 
 @router.get("/api/leads/{lead_id}")
-async def get_lead_endpoint(lead_id: str):
+def get_lead_endpoint(lead_id: str):
     """One lead and everything said to them so far."""
     from hermes import leads as L
 
@@ -263,7 +263,7 @@ async def get_lead_endpoint(lead_id: str):
 
 
 @router.patch("/api/leads/{lead_id}")
-async def update_lead_endpoint(lead_id: str, req: LeadWriteRequest):
+def update_lead_endpoint(lead_id: str, req: LeadWriteRequest):
     """Work a lead: status, owner, next action, the x-date you just found out."""
     from hermes import leads as L
 
@@ -283,7 +283,7 @@ async def update_lead_endpoint(lead_id: str, req: LeadWriteRequest):
 
 
 @router.delete("/api/leads/{lead_id}")
-async def delete_lead_endpoint(lead_id: str):
+def delete_lead_endpoint(lead_id: str):
     """Delete a lead. Its notes go with it (FK cascade). Prefer status='lost',
     which keeps the x-date — a lead that went elsewhere this year is a call to
     make next year."""
@@ -303,7 +303,7 @@ class LeadNoteRequest(BaseModel):
 
 
 @router.post("/api/leads/{lead_id}/notes")
-async def add_lead_note_endpoint(lead_id: str, req: LeadNoteRequest):
+def add_lead_note_endpoint(lead_id: str, req: LeadNoteRequest):
     """Write down what was said. Append-only — the history is why the next call
     is not the same call again."""
     from hermes import leads as L
@@ -330,7 +330,7 @@ class LeadConvertRequest(BaseModel):
 
 
 @router.post("/api/leads/{lead_id}/convert")
-async def convert_lead_endpoint(lead_id: str, req: LeadConvertRequest):
+def convert_lead_endpoint(lead_id: str, req: LeadConvertRequest):
     """Turn a lead into a pipeline opportunity.
 
     Still nothing written to NowCerts: the deal is worked in the CRM and reaches
@@ -358,7 +358,7 @@ async def convert_lead_endpoint(lead_id: str, req: LeadConvertRequest):
 
 
 @router.get("/api/intake/queue")
-async def intake_queue_endpoint(limit: int = 50):
+def intake_queue_endpoint(limit: int = 50):
     """Intake submissions waiting on a human, oldest first.
 
     Oldest first on purpose: the useful signal is what has been sitting, not what
@@ -394,7 +394,7 @@ async def intake_queue_endpoint(limit: int = 50):
 
 
 @router.post("/api/intake/run")
-async def run_intake_writebacks(req: deps.ExecutorRunRequest):
+def run_intake_writebacks(req: deps.ExecutorRunRequest):
     """Drain approved intake routing intents to CRM (opportunities) + NowCerts (insured)
     on command (opt-in, no cron). ``dry_run`` previews without writing."""
     from hermes.command_center.intake_executor import run_intake_executor
@@ -404,7 +404,7 @@ async def run_intake_writebacks(req: deps.ExecutorRunRequest):
 
 
 @router.get("/api/pipeline/stages")
-async def pipeline_stages_endpoint():
+def pipeline_stages_endpoint():
     """The stage vocabulary, in order, per pipeline.
 
     A kanban has to know its columns and their order before it can draw them, and
@@ -436,7 +436,7 @@ async def pipeline_stages_endpoint():
 
 
 @router.post("/agency-intake", response_model=AgencyIntakeResponse)
-async def agency_intake(req: AgencyIntakeRequest):
+def agency_intake(req: AgencyIntakeRequest):
     """Stage an agency intake draft. Returns draft_id + approval prompt.
 
     Nothing is written to CRM yet — caller must POST /agency-intake/approve
@@ -469,7 +469,7 @@ async def agency_intake(req: AgencyIntakeRequest):
 
 
 @router.post("/agency-intake/approve", response_model=AgencyIntakeApprovalResponse)
-async def agency_intake_approve(req: AgencyIntakeApprovalRequest):
+def agency_intake_approve(req: AgencyIntakeApprovalRequest):
     """Apply an approval token to a staged agency intake draft.
 
     Same shared logic the interactive approval button calls.
@@ -520,7 +520,7 @@ def _intake_status_url(request: Request, submission_id: str) -> str:
 
 
 @router.post("/api/intake")
-async def intake_submit(req: IntakeSubmissionRequest, request: Request):
+def intake_submit(req: IntakeSubmissionRequest, request: Request):
     """Accept an intake submission and insert one row in ``intake_submissions``.
 
     On a fresh insert: returns 202 with ``submission_id``, ``status_url``, etc.

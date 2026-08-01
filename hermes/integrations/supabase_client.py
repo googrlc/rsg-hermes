@@ -25,7 +25,12 @@ class SupabaseClient:
         key: str | None = None,
         timeout: float = 30.0,
         pool_connections: int = 10,
-        pool_maxsize: int = 20,
+        # Sized to FastAPI's threadpool (anyio's default is 40 workers). Route
+        # handlers with synchronous bodies are declared `def`, so up to 40 can be
+        # calling this client at once; at pool_maxsize=20 the other half opened a
+        # connection per request and threw it away, logging "Connection pool is
+        # full, discarding connection" under exactly the load it matters in.
+        pool_maxsize: int = 40,
         max_retries: int = 3,
     ) -> None:
         self.url = (url or os.environ.get("SUPABASE_URL", "")).rstrip("/")
