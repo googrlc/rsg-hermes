@@ -72,7 +72,7 @@ def test_list_commissions(client):
     supa = FakeSupa({"commission_ledger": [
         {"policy_number": "P1", "expected_commission": 150},
     ]})
-    with _patch(supa), patch("hermes.ams.book.select_policies", return_value=[]):
+    with _patch(supa), patch("hermes_core.book.select_policies", return_value=[]):
         r = client.get("/api/commissions")
     assert r.status_code == 200
     body = r.json()
@@ -80,7 +80,7 @@ def test_list_commissions(client):
     assert body["total_ledger_rows"] == 1        # but the ledger is not empty
     assert body["counts_by_status"] == {"unknown": 1}
 
-    with _patch(supa), patch("hermes.ams.book.select_policies", return_value=[]):
+    with _patch(supa), patch("hermes_core.book.select_policies", return_value=[]):
         r = client.get("/api/commissions?status=all")
     assert r.json()["count"] == 1
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from hermes.ams import book as ams_book
+from hermes_core import book as ams_book
 
 
 def _num(v: Any) -> float:

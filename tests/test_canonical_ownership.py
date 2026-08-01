@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from hermes.ams import book as B
+from hermes_core import book as B
 
 
 # --- the guard ---------------------------------------------------------------

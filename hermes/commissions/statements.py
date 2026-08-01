@@ -494,7 +494,7 @@ def _match_preview(supa: "SupabaseClient", lines: list[dict[str, Any]]) -> dict[
     unmatched policy numbers up front is the difference between a considered
     approval and a rubber stamp.
     """
-    from hermes.ams import book as ams_book
+    from hermes_core import book as ams_book
     from hermes.commissions.matching import (
         MATCH_CREATED, MATCH_EXACT, MATCH_NORMALIZED, MATCH_UNMATCHED,
         _index_book, _index_ledger, match_line,

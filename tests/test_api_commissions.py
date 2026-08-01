@@ -53,7 +53,7 @@ BOOK = [
 
 def _run(client, url, ledger=LEDGER, book=BOOK):
     with patch("hermes_app.deps.get_supa", return_value=FakeSupa(ledger)), \
-         patch("hermes.ams.book.select_policies", return_value=book):
+         patch("hermes_core.book.select_policies", return_value=book):
         return client.get(url)
 
 
@@ -97,7 +97,7 @@ def test_limit_applies_to_rows_not_to_the_counts(client):
 
 def test_book_failure_degrades_to_rows_without_coverage(client):
     with patch("hermes_app.deps.get_supa", return_value=FakeSupa(LEDGER)), \
-         patch("hermes.ams.book.select_policies", side_effect=RuntimeError("AMS down")):
+         patch("hermes_core.book.select_policies", side_effect=RuntimeError("AMS down")):
         body = client.get("/api/commissions?status=all").json()
     assert body["count"] == 3
     assert body["coverage"]["active_policies"] == 0
@@ -224,7 +224,7 @@ def test_overridden_value_shows_on_the_read_with_its_original(client):
             "field_name": "gross_premium", "value": 12000,
             "approved_by": "lamar@risksolutionsgroup.net",
         })
-        with patch("hermes.ams.book.select_policies", return_value=[]):
+        with patch("hermes_core.book.select_policies", return_value=[]):
             body = client.get("/api/commissions?status=all").json()
     row = body["commissions"][0]
     assert row["gross_premium"] == 12000

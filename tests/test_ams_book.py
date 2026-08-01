@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hermes.ams import book
+from hermes_core import book
 
 
 @pytest.fixture(autouse=True)

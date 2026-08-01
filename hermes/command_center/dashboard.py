@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hermes.ams import book as ams_book
+from hermes_core import book as ams_book
 
 RETENTION_GOAL = 75.0   # RSG standing target
 

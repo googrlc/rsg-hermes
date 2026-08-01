@@ -200,7 +200,7 @@ def test_overview_reports_counts_even_when_the_filter_matches_nothing(monkeypatc
     """The exact bug: filter matches zero rows, but 108 rows exist."""
     ledger = [led(policy_number=f"P{i}", reconciliation_status="pending") for i in range(5)]
     monkeypatch.setattr(
-        "hermes.ams.book.select_policies",
+        "hermes_core.book.select_policies",
         lambda *a, **k: [pol(policy_number="P0")],
     )
     ov = surface.commission_overview(FakeSupa(ledger), status="reconciled")
@@ -212,7 +212,7 @@ def test_overview_reports_counts_even_when_the_filter_matches_nothing(monkeypatc
 
 def test_overview_status_all_returns_everything(monkeypatch):
     ledger = [led(reconciliation_status="pending"), led(reconciliation_status="overpaid")]
-    monkeypatch.setattr("hermes.ams.book.select_policies", lambda *a, **k: [])
+    monkeypatch.setattr("hermes_core.book.select_policies", lambda *a, **k: [])
     assert len(surface.commission_overview(FakeSupa(ledger), status="all").rows) == 2
 
 
@@ -220,7 +220,7 @@ def test_overview_survives_a_book_read_failure(monkeypatch):
     """Coverage is context — losing it must not blank the commissions view."""
     def boom(*a, **k):
         raise RuntimeError("AMS down")
-    monkeypatch.setattr("hermes.ams.book.select_policies", boom)
+    monkeypatch.setattr("hermes_core.book.select_policies", boom)
     ov = surface.commission_overview(FakeSupa([led()]), status="all")
     assert len(ov.rows) == 1
     assert ov.coverage.active_policies == 0

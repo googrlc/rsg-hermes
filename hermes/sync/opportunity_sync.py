@@ -29,7 +29,7 @@ from typing import Any
 from hermes.intake import opportunities as opp
 from hermes_core.field_utils import strip_date
 
-from hermes.ams import book as ams_book
+from hermes_core import book as ams_book
 
 log = logging.getLogger(__name__)
 

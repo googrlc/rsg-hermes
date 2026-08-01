@@ -185,7 +185,7 @@ class FakeSupa:
 
 def _run(monkeypatch, txns, ledger, book, **kw):
     supa = FakeSupa(txns, ledger)
-    monkeypatch.setattr("hermes.ams.book.select_policies", lambda *a, **k: book)
+    monkeypatch.setattr("hermes_core.book.select_policies", lambda *a, **k: book)
     return supa, ing.relink_unmatched(supa, **kw)
 
 
@@ -254,7 +254,7 @@ def test_a_book_read_failure_disables_creation_without_losing_exact_matches(monk
     def boom(*a, **k):
         raise RuntimeError("AMS down")
 
-    monkeypatch.setattr("hermes.ams.book.select_policies", boom)
+    monkeypatch.setattr("hermes_core.book.select_policies", boom)
     out = ing.relink_unmatched(supa)
     assert out.exact == 1                 # still linked
     assert out.unmatched == 1             # creation unavailable

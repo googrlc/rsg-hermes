@@ -26,7 +26,7 @@ from hermes_integrations.nowcerts_client import NowCertsClient
 from . import corrections, eligibility as elig
 from .eligibility import LineageContext
 
-from hermes.ams import book as ams_book
+from hermes_core import book as ams_book
 
 log = logging.getLogger(__name__)
 

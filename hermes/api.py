@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
 
-from hermes.ams import book as ams_book
+from hermes_core import book as ams_book
 from hermes_core import surfaces
 from hermes_app import deps
 

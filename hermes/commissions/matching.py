@@ -221,7 +221,7 @@ def relink_unmatched(
     policy needing a ledger row gets exactly one no matter how many of its lines
     are orphaned.
     """
-    from hermes.ams import book as ams_book
+    from hermes_core import book as ams_book
 
     result = LinkRun(dry_run=dry_run)
 

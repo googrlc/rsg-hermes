@@ -29,6 +29,15 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
+from hermes_core.canonical import (
+    CURRENT_STATUSES,
+    EXCLUDE_STATUSES,
+    STAGED_STATUSES,
+    SUPERSEDED_STATUSES,
+    _STATUS_NORMALIZE,
+    normalize_status,
+)
+
 from . import cadence
 
 # --- states / branches --------------------------------------------------------
@@ -42,26 +51,6 @@ BRANCH_MEDICARE_ANNUAL = "medicare_annual"
 
 DISCOVERY_WINDOW_DAYS = 120
 
-# --- normalized lifecycle status (docs/integrations/nowcerts-import-mapping.md §2) ---
-_STATUS_NORMALIZE = {
-    "active": "Active", "in force": "Active", "inforce": "Active", "bound": "Active",
-    "up for renewal": "Up for Renewal", "renewal pending": "Up for Renewal",
-    "renewing": "Renewing", "in renewal": "Renewing", "renewal": "Renewing",
-    "renewed": "Renewed", "rewritten": "Rewritten",
-    "expired": "Expired",
-    "cancelled": "Cancelled", "canceled": "Cancelled",
-    "flat cancel": "Flat Cancel", "flat-cancel": "Flat Cancel", "flat cancelled": "Flat Cancel",
-    "pending cancel": "Pending Cancel", "pending cancellation": "Pending Cancel", "cxl pending": "Pending Cancel",
-    "non-renewed": "Non-Renewed", "non renewed": "Non-Renewed", "nonrenewed": "Non-Renewed",
-    "lapsed": "Lapsed",
-}
-
-CURRENT_STATUSES = frozenset({"Active"})              # active / in force / bound
-STAGED_STATUSES = frozenset({"Up for Renewal", "Renewing"})
-# The spec's always-exclude set (Pending Cancel is deliberately NOT here — it is
-# ambiguous and routes to needs_verification via the catch-all).
-EXCLUDE_STATUSES = frozenset({"Expired", "Cancelled", "Flat Cancel", "Non-Renewed", "Lapsed"})
-SUPERSEDED_STATUSES = frozenset({"Renewed", "Rewritten"})
 
 # --- workflow-entry thresholds (Site pool = 120d; entry is per segment) --------
 WORKFLOW_ENTRY_DAYS = {
@@ -75,9 +64,6 @@ SEGMENT_MEDICARE = "medicare"
 DEFAULT_WORKFLOW_ENTRY_DAYS = 30
 
 
-def normalize_status(raw: Any) -> str:
-    """Map any AMS status spelling to the canonical enum, or '' if unknown."""
-    return _STATUS_NORMALIZE.get(str(raw or "").strip().lower(), "")
 
 
 def _parse_date(value: Any) -> date | None:

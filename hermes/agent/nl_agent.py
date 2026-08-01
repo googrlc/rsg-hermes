@@ -16,7 +16,7 @@ from typing import Any
 from hermes_core.dispatch import DispatchResult
 
 from hermes import carriers as _carriers
-from hermes.ams import book as ams_book
+from hermes_core import book as ams_book
 
 log = logging.getLogger(__name__)
 
