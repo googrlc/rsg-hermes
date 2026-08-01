@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 import time
 from typing import TYPE_CHECKING, Any
 
-from hermes.sync.canonical_book_sync import (
+from hermes_core.canonical import (
     CLIENTS_TABLE,
     POLICIES_TABLE,
     POLICY_KEY,

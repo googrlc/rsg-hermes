@@ -186,7 +186,7 @@ class FakeSupa:
 
 @pytest.fixture
 def supa(monkeypatch):
-    monkeypatch.setattr("hermes.ams.book.select_policies", lambda *a, **k: [])
+    monkeypatch.setattr("hermes_core.book.select_policies", lambda *a, **k: [])
     return FakeSupa()
 
 

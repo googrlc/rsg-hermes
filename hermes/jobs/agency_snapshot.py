@@ -5,7 +5,7 @@ dated 2026-03-31 (retention 54.92%). Nothing ever wrote a second one, so every
 "how's the book?" answer quoted a stale manual number and no trend existed. This
 job computes the snapshot instead of typing it.
 
-Reads go through ``hermes.ams.book.select_policies``, so with
+Reads go through ``hermes_core.book.select_policies``, so with
 ``HERMES_AMS_LIVE_READS`` set the numbers come from NowCerts directly rather than
 the ``canonical_policies`` mirror. That matters: the mirror is wrong in both
 directions (see ``notes`` below), and the AMS is the system of record.
@@ -48,10 +48,10 @@ OPPORTUNITIES_TABLE = "opportunities"
 RETENTION_WINDOW_DAYS = 365
 SUCCESSOR_GRACE_DAYS = 45
 
-# Single home: hermes.ams.book owns the tombstone vocabulary. Two independent
+# Single home: hermes_core.book owns the tombstone vocabulary. Two independent
 # copies of this string existed, so a consumer that forgot the check counted
 # phantom rows as real book.
-from hermes.ams.book import TOMBSTONE_PREFIX  # noqa: F401  (re-exported)
+from hermes_core.book import TOMBSTONE_PREFIX  # noqa: F401  (re-exported)
 
 STATUS_RENEWED = "renewed"
 
@@ -106,7 +106,7 @@ def policy_premium(policy: dict[str, Any]) -> float:
 
 def is_tombstoned(policy: dict[str, Any]) -> bool:
     """True for the phantom 'not in NowCerts' rows the disabled importer wrote."""
-    from hermes.ams.book import is_tombstoned as _shared
+    from hermes_core.book import is_tombstoned as _shared
 
     return _shared(policy)
 
@@ -416,7 +416,7 @@ def run_snapshot(
     Idempotent per day: re-running replaces the row for ``today`` rather than
     stacking duplicates, so a retry or a manual re-run never corrupts the trend.
     """
-    from hermes.ams import book as ams_book
+    from hermes_core import book as ams_book
 
     if supa is None:
         from hermes_integrations.supabase_client import SupabaseClient

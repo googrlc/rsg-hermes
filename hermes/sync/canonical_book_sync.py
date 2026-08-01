@@ -37,18 +37,31 @@ from typing import Any
 
 from hermes.renewals import eligibility as elig
 from hermes_core.field_utils import strip_date
+from hermes_core.canonical import (
+    CLIENT_KEY,
+    CLIENTS_TABLE,
+    POLICIES_TABLE,
+    POLICY_KEY,
+    _CLIENT_COLS,
+    _POLICY_COLS,
+    _insured_guid,
+    _insured_name,
+    _map_policy_volatile,
+    _num,
+    _policy_active,
+    _policy_guid,
+    _policy_lob,
+    _policy_number,
+    _policy_premium,
+)
 
 log = logging.getLogger(__name__)
 
-CLIENTS_TABLE = "canonical_clients"
-POLICIES_TABLE = "canonical_policies"
 
-# Defined here rather than imported from hermes.ams.book: that module imports from
+# Defined here rather than imported from hermes_core.book: that module imports from
 # this one, so the dependency only runs one way.
 OWNER_BOOK_SYNC = "book_sync"
 
-CLIENT_KEY = "nowcerts_insured_guid"
-POLICY_KEY = "policy_guid"
 
 # Audit trail. The canonical book sync writes one sync_audit_log row per
 # mirrored object so "what did the last sync do to this insured/policy?" is
@@ -64,16 +77,6 @@ AUDIT_OBJECT_POLICY = "canonical_policy"
 
 # Fallback column sets, used only when a table is empty (no sample row to
 # introspect). Superset of the live CSV schema; writes intersect with these.
-_CLIENT_COLS = {
-    "nowcerts_insured_guid", "insured_name", "insured_name_normalized",
-    "first_name", "last_name", "client_type", "business_type",
-    "phone", "cell_phone", "email", "address_line1", "city", "state", "zip", "updated_at",
-}
-_POLICY_COLS = {
-    "policy_guid", "nowcerts_insured_guid", "policy_number", "lines_of_business",
-    "business_type", "carrier", "status", "active", "effective_date", "expiration_date",
-    "current_term_amount", "premium_amount", "annualized_premium", "renewed_policy", "state",
-}
 
 
 def _utcnow_iso() -> str:
@@ -114,64 +117,23 @@ def _audit(
         log.warning("sync_audit_log insert failed for %s %s", object_type, source_object_id)
 
 
-def _num(value: Any) -> float | None:
-    try:
-        return float(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
 
 
 # ---------------------------------------------------------------------------
 # NowCerts field extraction
 # ---------------------------------------------------------------------------
-def _insured_guid(record: dict[str, Any]) -> str:
-    return str(
-        record.get("id") or record.get("databaseId") or record.get("insuredDatabaseId") or ""
-    ).strip()
 
 
-def _insured_name(ins: dict[str, Any]) -> str:
-    commercial = ins.get("commercialName") or ins.get("insuredCommercialName")
-    if commercial:
-        return str(commercial).strip()
-    parts = [str(ins.get("firstName") or "").strip(), str(ins.get("lastName") or "").strip()]
-    return " ".join(p for p in parts if p).strip()
 
 
-def _policy_number(p: dict[str, Any]) -> str:
-    return str(p.get("number") or p.get("policyNumber") or p.get("Number") or "").strip()
 
 
-def _policy_guid(p: dict[str, Any]) -> str:
-    return str(p.get("databaseId") or p.get("DatabaseId") or p.get("id") or "").strip()
 
 
-def _policy_lob(p: dict[str, Any]) -> str | None:
-    lob_list = p.get("lineOfBusinesses")
-    if isinstance(lob_list, list) and lob_list and isinstance(lob_list[0], dict):
-        name = lob_list[0].get("lineOfBusinessName")
-        if name:
-            return str(name)
-    for key in ("lineOfBusinessName", "lineOfBusiness", "LineOfBusinessName"):
-        if p.get(key):
-            return str(p[key])
-    return None
 
 
-def _policy_premium(p: dict[str, Any]) -> float | None:
-    for key in ("totalPremium", "premium", "Premium", "annualizedPremium"):
-        val = _num(p.get(key))
-        if val is not None:
-            return val
-    return None
 
 
-def _policy_active(p: dict[str, Any], status: Any) -> bool:
-    for key in ("active", "isActive", "Active"):
-        val = p.get(key)
-        if isinstance(val, bool):
-            return val
-    return elig.normalize_status(status) in elig.CURRENT_STATUSES
 
 
 def _map_client(ins: dict[str, Any], *, now_iso: str) -> dict[str, Any] | None:
@@ -198,25 +160,6 @@ def _map_client(ins: dict[str, Any], *, now_iso: str) -> dict[str, Any] | None:
     }
 
 
-def _map_policy_volatile(p: dict[str, Any]) -> dict[str, Any]:
-    """Fields a refresh always overwrites from live NowCerts (excludes lineage)."""
-    status = p.get("status") or p.get("Status")
-    premium = _policy_premium(p)
-    return {
-        "nowcerts_insured_guid": str(p.get("insuredDatabaseId") or p.get("insuredId") or "").strip() or None,
-        "policy_number": _policy_number(p) or None,
-        "lines_of_business": _policy_lob(p),
-        "business_type": p.get("businessType") or p.get("BusinessType") or None,
-        "carrier": p.get("carrierName") or p.get("CarrierName") or p.get("carrier") or None,
-        "status": status,
-        "active": _policy_active(p, status),
-        "effective_date": strip_date(p.get("effectiveDate") or p.get("EffectiveDate")),
-        "expiration_date": strip_date(p.get("expirationDate") or p.get("ExpirationDate")),
-        "current_term_amount": premium,
-        "premium_amount": premium,
-        "annualized_premium": premium,
-        "state": p.get("state") or p.get("State") or None,
-    }
 
 
 # ---------------------------------------------------------------------------

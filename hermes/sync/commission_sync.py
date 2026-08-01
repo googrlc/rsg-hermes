@@ -33,7 +33,7 @@ from hermes.jobs.commission_ingest import (
 )
 from hermes.renewals import eligibility as elig
 
-from hermes.ams import book as ams_book
+from hermes_core import book as ams_book
 
 log = logging.getLogger(__name__)
 

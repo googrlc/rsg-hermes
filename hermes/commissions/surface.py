@@ -51,10 +51,10 @@ OVERRIDABLE_FIELDS = frozenset({
 # commission_sync: only won, in-force business ledgers a commission.
 COMMISSIONABLE_STATUSES = frozenset({"active", "renewed"})
 
-# Single home: hermes.ams.book owns the tombstone vocabulary. Two independent
+# Single home: hermes_core.book owns the tombstone vocabulary. Two independent
 # copies of this string existed, so a consumer that forgot the check counted
 # phantom rows as real book.
-from hermes.ams.book import TOMBSTONE_PREFIX  # noqa: F401  (re-exported)
+from hermes_core.book import TOMBSTONE_PREFIX  # noqa: F401  (re-exported)
 
 _PREMIUM_FIELDS = ("annualized_premium", "current_term_amount", "premium_amount")
 
@@ -78,7 +78,7 @@ def _premium(policy: dict[str, Any]) -> float:
 
 
 def _is_tombstoned(policy: dict[str, Any]) -> bool:
-    from hermes.ams.book import is_tombstoned as _shared
+    from hermes_core.book import is_tombstoned as _shared
 
     return _shared(policy)
 
@@ -231,7 +231,7 @@ def commission_overview(
     computed over the WHOLE ledger and book regardless of the filter — that is
     the entire point.
     """
-    from hermes.ams import book as ams_book
+    from hermes_core import book as ams_book
 
     all_rows = supa.select(
         LEDGER_TABLE,
