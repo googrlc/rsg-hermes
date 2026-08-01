@@ -17,13 +17,15 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from hermes.intake import opportunities as opp
-from hermes.renewals.executor import (
+from hermes.core.queue import (
     DESTINATION_NOWCERTS,
+    OBJECT_TYPE_OPPORTUNITY_WRITEBACK as OBJECT_TYPE,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
     QUEUE_PROCESSING,
     QUEUE_QUEUED,
     QUEUE_TABLE,
+    utcnow as _utcnow,
 )
 
 if TYPE_CHECKING:
@@ -32,7 +34,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-OBJECT_TYPE = "opportunity_writeback"
 
 STAGE_BOUND_WON = "Bound / Won"
 STAGE_LOST = "Lost"
@@ -142,7 +143,7 @@ def _resolve_preview(nowcerts: "NowCertsClient", ncid: str, target: str | None) 
 
 def _eligible(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
     # Local import: retry.py imports OBJECT_TYPE from here (circular otherwise).
-    from hermes.scheduler.retry import due_filter
+    from hermes.core.queue import due_filter
 
     return supa.select(
         QUEUE_TABLE,

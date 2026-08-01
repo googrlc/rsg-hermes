@@ -19,13 +19,15 @@ from typing import TYPE_CHECKING, Any
 
 from hermes.intake import opportunities as opp
 from hermes.quotes import store as quote_store
-from hermes.renewals.executor import (
+from hermes.core.queue import (
     DESTINATION_NOWCERTS,
+    OBJECT_TYPE_QUOTE,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
     QUEUE_PROCESSING,
     QUEUE_QUEUED,
     QUEUE_TABLE,
+    utcnow as _utcnow,
 )
 
 if TYPE_CHECKING:
@@ -34,7 +36,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-OBJECT_TYPE_QUOTE = "quote"
 QUOTE_ACTION = "insert_quote"
 
 
@@ -192,7 +193,7 @@ def _extract_quote_ref(resp: Any) -> tuple[str | None, str | None]:
 def _eligible_jobs(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
     # Local import: retry.py imports OBJECT_TYPE_QUOTE from here, so a module-level
     # import would be circular.
-    from hermes.scheduler.retry import due_filter
+    from hermes.core.queue import due_filter
 
     return supa.select(
         QUEUE_TABLE, columns="*",

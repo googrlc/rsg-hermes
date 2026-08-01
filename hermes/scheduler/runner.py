@@ -20,12 +20,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from hermes.scheduler.locks import LOCKS_TABLE, SchedulerLock
-from hermes.scheduler.retry import (
-    DESTINATION_NOWCERTS,
-    QUEUE_TABLE,
-    reclaim_stalled,
-    requeue_or_deadletter,
-)
+from hermes.core.queue import DESTINATION_NOWCERTS, QUEUE_TABLE
+from hermes.scheduler.retry import reclaim_stalled, requeue_or_deadletter
 
 if TYPE_CHECKING:
     from hermes.integrations.supabase_client import SupabaseClient

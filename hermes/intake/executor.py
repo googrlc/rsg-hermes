@@ -14,14 +14,14 @@ from typing import TYPE_CHECKING, Any
 
 from hermes.intake import opportunities as opp
 from hermes.intake.commit import OBJECT_TYPE_INTAKE
-from hermes.renewals.executor import (
+from hermes.core.queue import (
     DESTINATION_NOWCERTS,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
     QUEUE_PROCESSING,
     QUEUE_QUEUED,
     QUEUE_TABLE,
-    _utcnow,
+    utcnow as _utcnow,
 )
 
 if TYPE_CHECKING:

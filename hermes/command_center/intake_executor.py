@@ -17,13 +17,14 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from hermes.command_center.router import OBJECT_TYPE_AMS, OBJECT_TYPE_CRM
-from hermes.renewals.executor import (
+from hermes.core.queue import (
     QUEUE_COMPLETED,
     QUEUE_FAILED,
     QUEUE_PROCESSING,
     QUEUE_QUEUED,
     QUEUE_TABLE,
-    _extract_created_id,
+    extract_created_id as _extract_created_id,
+    utcnow as _utcnow,
 )
 
 if TYPE_CHECKING:
@@ -73,7 +74,7 @@ def map_insured_payload(insured: dict[str, Any]) -> dict[str, Any]:
 def _eligible_jobs(supa, limit):
     # Local import: retry.py imports OBJECT_TYPE_CRM/AMS from router, and this
     # module imports those too — keep the dependency one-directional.
-    from hermes.scheduler.retry import due_filter
+    from hermes.core.queue import due_filter
 
     return supa.select(
         QUEUE_TABLE, columns="*",

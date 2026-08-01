@@ -31,7 +31,12 @@ from typing import TYPE_CHECKING, Any
 
 from hermes.intake import nowcerts_map
 from hermes.intake import opportunities as opp
-from hermes.renewals.executor import DESTINATION_NOWCERTS, QUEUE_QUEUED, QUEUE_TABLE
+from hermes.core.queue import (
+    DESTINATION_NOWCERTS,
+    OBJECT_TYPE_INTAKE,
+    QUEUE_QUEUED,
+    QUEUE_TABLE,
+)
 
 if TYPE_CHECKING:
     from hermes.integrations.nextcloud_client import NextcloudClient
@@ -39,7 +44,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-OBJECT_TYPE_INTAKE = "intake"
 INTAKE_ACTION_CREATE_INSURED = "create_insured"
 DEFAULT_ASSIGNEE = "gretchen"
 

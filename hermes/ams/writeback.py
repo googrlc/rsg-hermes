@@ -28,7 +28,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.renewals.executor import (
+from hermes.core.queue import (
     DESTINATION_NOWCERTS,
     QUEUE_COMPLETED,
     QUEUE_FAILED,

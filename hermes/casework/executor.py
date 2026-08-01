@@ -16,14 +16,17 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.renewals.executor import (
+from hermes.core.queue import (
     DESTINATION_NOWCERTS,
+    OBJECT_TYPE_CASE,
+    OBJECT_TYPE_TASK,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
     QUEUE_PROCESSING,
     QUEUE_QUEUED,
     QUEUE_TABLE,
-    _extract_created_id,
+    extract_created_id as _extract_created_id,
+    utcnow as _utcnow,
 )
 
 if TYPE_CHECKING:
@@ -32,8 +35,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-OBJECT_TYPE_CASE = "case"
-OBJECT_TYPE_TASK = "task"
 CASES_TABLE = "agency_crm_cases"
 TASKS_TABLE = "agency_crm_tasks"
 
@@ -153,7 +154,7 @@ def stage_task_job(supa: "SupabaseClient", *, task: dict[str, Any], insured_data
 
 def _eligible_jobs(supa, limit):
     # Local import: retry.py imports OBJECT_TYPE_CASE/TASK from here.
-    from hermes.scheduler.retry import due_filter
+    from hermes.core.queue import due_filter
 
     return supa.select(
         QUEUE_TABLE, columns="*",

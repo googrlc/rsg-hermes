@@ -23,6 +23,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from hermes.core.queue import (
+    DESTINATION_CRM,
+    DESTINATION_NOWCERTS,
+    OBJECT_TYPE_RENEWAL,
+    QUEUE_COMPLETED,
+    QUEUE_FAILED,
+    QUEUE_PROCESSING,
+    QUEUE_QUEUED,
+    QUEUE_TABLE,
+    extract_created_id,
+    utcnow,
+)
 from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
 from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations import renewal_tracker
@@ -35,16 +47,12 @@ from .momentum_mcp_client import MomentumMCPClient, MomentumMCPClientError
 log = logging.getLogger(__name__)
 
 # --- Authorized-input constants ------------------------------------------------
-QUEUE_TABLE = "outbound_sync_queue"
+# The queue contract (table, statuses, destinations, object types) is shared by
+# every domain executor and lives in hermes.core.queue. It used to be defined
+# here, which made six unrelated domains import the *renewal* executor to learn
+# how to talk to the queue. The names are re-exported above for callers that
+# still reach for this module as its historical home.
 RECEIPTS_TABLE = "renewal_execution_receipts"
-OBJECT_TYPE_RENEWAL = "renewal"
-DESTINATION_NOWCERTS = "nowcerts"
-DESTINATION_CRM = "crm"
-
-QUEUE_QUEUED = "queued"
-QUEUE_PROCESSING = "processing"
-QUEUE_COMPLETED = "completed"
-QUEUE_FAILED = "failed"
 
 ACTION_REQUEST_TERMS = "request_terms"
 ACTION_PREPARE_OPTIONS = "prepare_options"
@@ -71,8 +79,7 @@ ACTOR_ROLE = "HermesRenewalExecutor"
 HIGH_IMPACT_ACTIONS = frozenset({ACTION_UPDATE_AMS})
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+_utcnow = utcnow
 
 
 # ------------------------------------------------------------------------------
@@ -457,22 +464,7 @@ def _is_noop(before: dict[str, Any], fields: dict[str, Any]) -> bool:
     return all(_values_equal(_current_value(before, k), v) for k, v in fields.items())
 
 
-def _extract_created_id(result: Any) -> str | None:
-    """Pull the created task/note id from a NowCerts insert response.
-
-    NowCerts' Zapier InsertTask nests the record under ``data`` (e.g.
-    ``result["data"]["database_id"]``), so check BOTH the top level and the
-    nested ``data`` object — otherwise a successfully-created task reads as
-    "no id" and fails read-after-write verification.
-    """
-    if not isinstance(result, dict):
-        return None
-    for obj in (result, result.get("data") if isinstance(result.get("data"), dict) else {}):
-        for key in ("database_id", "databaseId", "noteId", "note_id", "id"):
-            val = obj.get(key)
-            if val:
-                return str(val)
-    return None
+_extract_created_id = extract_created_id
 
 
 def _execute(

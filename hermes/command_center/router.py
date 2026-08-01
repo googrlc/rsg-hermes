@@ -20,13 +20,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hermes.command_center.submission import SubmissionObject
-from hermes.renewals.executor import DESTINATION_CRM, DESTINATION_NOWCERTS
+from hermes.core.queue import (
+    DESTINATION_CRM,
+    DESTINATION_NOWCERTS,
+    OBJECT_TYPE_INTAKE_AMS as OBJECT_TYPE_AMS,
+    OBJECT_TYPE_INTAKE_CRM as OBJECT_TYPE_CRM,
+    QUEUE_TABLE,
+)
 
 log = logging.getLogger(__name__)
 
-QUEUE_TABLE = "outbound_sync_queue"
-OBJECT_TYPE_CRM = "intake_crm"
-OBJECT_TYPE_AMS = "intake_ams"
+
 
 
 def _clean(d: dict[str, Any]) -> dict[str, Any]:
