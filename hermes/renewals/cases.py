@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from hermes.casework.store import (
+from hermes_core.casestore import (
     CASE_CHILD_TABLES,
     CASE_NUMBER_PREFIX_LEN,
     CASE_STATUS_OPEN,
