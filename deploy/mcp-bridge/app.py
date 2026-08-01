@@ -302,7 +302,7 @@ def _mcp_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "carrier_appetite",
-            "description": "Carrier appetite reference — which carriers RSG can place a risk with, by line of business, state, and class code (read-only) via GET /api/carriers. Use for 'who writes this?', 'carrier fit for X', 'what carriers do we have for GL in TX'. A carrier absent from the results is NOT a declination — the table is a reference, so confirm with the underwriter before telling anyone a risk can't be placed.",
+            "description": "Carrier appetite reference — which carriers RSG can place a risk with, by line of business, state, and class code (read-only) via GET /api/carrier-appetite. Use for 'who writes this?', 'carrier fit for X', 'what carriers do we have for GL in TX'. A carrier absent from the results is NOT a declination — the table is a reference, so confirm with the underwriter before telling anyone a risk can't be placed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -487,7 +487,7 @@ def _run_carrier_appetite(args: dict[str, Any]) -> str:
         "naics": args.get("naics"),
         "limit": args.get("limit"),
     }
-    return _text(_api("GET", "/api/carriers", params=params))
+    return _text(_api("GET", "/api/carrier-appetite", params=params))
 
 
 def _run_ams_search_insured(args: dict[str, Any]) -> str:

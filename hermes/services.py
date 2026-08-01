@@ -92,7 +92,7 @@ SERVICES: dict[str, ServiceSpec] = {
         name="carriers",
         description="Carrier appetite read (see rsg-carrierhub for the other one)",
         router_modules=("hermes.routers.carriers",),
-        path_prefixes=("/api/carriers",),
+        path_prefixes=("/api/carrier-appetite", "/api/carriers"),
         port=8805,
     ),
     "hub": ServiceSpec(
