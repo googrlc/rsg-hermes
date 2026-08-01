@@ -10,7 +10,7 @@ from hermes.agent.nl_agent import (
     _exec_report,
     ask,
 )
-from hermes.core.dispatch import DispatchResult
+from hermes_core.dispatch import DispatchResult
 
 
 class AskTests(unittest.TestCase):

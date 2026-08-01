@@ -77,7 +77,7 @@ def test_build_worksheet_content_uses_nested_worksheet_fields():
 
 from hermes.commands import renewal_worksheet as rw_mod  # noqa: E402
 from hermes.agent.dispatcher import Dispatcher
-from hermes.core.dispatch import DispatchResult  # noqa: E402
+from hermes_core.dispatch import DispatchResult  # noqa: E402
 
 
 def _make_dispatcher():
@@ -161,7 +161,7 @@ def test_normalise_collapses_internal_spaces():
 def test_worksheet_route_precedes_renewal_sentinel():
     """'prepare a renewal worksheet for ...' must NOT route to revenue.handle."""
     from unittest.mock import MagicMock, patch
-    from hermes.core.dispatch import DispatchResult
+    from hermes_core.dispatch import DispatchResult
 
     d = _make_dispatcher()
     mock_client = MagicMock()
@@ -182,7 +182,7 @@ def test_worksheet_route_precedes_renewal_sentinel():
 def test_renewal_audit_still_routes_to_revenue():
     """Existing 'renewal audit' command must not be intercepted by the worksheet route."""
     from unittest.mock import MagicMock, patch
-    from hermes.core.dispatch import DispatchResult
+    from hermes_core.dispatch import DispatchResult
 
     d = _make_dispatcher()
     mock_client = MagicMock()

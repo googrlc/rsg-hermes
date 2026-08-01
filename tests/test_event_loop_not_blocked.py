@@ -88,7 +88,7 @@ def test_the_supabase_pool_is_at_least_as_wide_as_the_threadpool() -> None:
     Supabase connection at once. A narrower pool silently churns connections."""
     import inspect
 
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     default = inspect.signature(SupabaseClient.__init__).parameters["pool_maxsize"].default
     assert default >= 40, (

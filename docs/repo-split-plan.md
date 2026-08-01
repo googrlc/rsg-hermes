@@ -195,8 +195,44 @@ it — the routers are the same either way.
   in the registry is for reaching another app's HTTP surface, which is what
   separate images or repos will need. The ports are already there, so that day
   is a config change rather than a redesign.
-- **Phase 4 — `rsg-hermes-core`.** Extract the bottom layer as an installable
-  package, pinned by commit in each consumer.
+- **Phase 4 — `rsg-hermes-core`. DONE (in-repo).** The bottom layer is now a
+  real distribution at `packages/rsg-hermes-core`, providing two top-level
+  packages so the import rewrite was a pure prefix swap and no name is shared
+  between distributions:
+
+  | was | is |
+  |---|---|
+  | `hermes.core.*` | `hermes_core.*` |
+  | `hermes.integrations.*` | `hermes_integrations.*` |
+
+  Namespace-packaging `hermes` across two distributions was the alternative and
+  would have avoided the rewrite, but two independently-versioned repos writing
+  into one top-level name is a known way to get import failures that depend on
+  install order. With six repos installing this, distinct roots are worth the
+  churn.
+
+  Three things moved to make it genuinely standalone:
+
+  - **`intake_submissions.py` left the core** for `hermes/intake/submissions.py`.
+    It sat in `integrations/` on the strength of the word "integration" while
+    reading and writing the `intake_submissions` table and running that
+    pipeline's state machine. Shipping it in the shared core would have put
+    intake's schema inside the finance and carriers repos.
+  - **`personas/` and `data/`** moved *inside* `hermes_core`, next to the
+    `identity.py` and `schema_registry.py` that load them — at the distribution
+    root they would not have shipped in the wheel.
+  - The Dockerfile installs the core **before** the app, since the app imports
+    it at module scope.
+
+  `tests/test_core_is_a_leaf.py` enforces both halves of the rule: no core
+  module may import `hermes.*` (an app import here drags that app into all six
+  repos), and no core module may read or write an app-owned table (domain logic
+  wearing a client's name). Neither failure looks wrong in the diff that
+  introduces it — which is how the first thirteen cycles happened.
+
+  Remaining for this phase: `git subtree split` the directory into its own
+  repo and switch the dependency from a path to a commit pin. The layout and
+  the guard are what made that a mechanical step rather than a redesign.
 - **Phase 5 — repos.** Extract domains one at a time in the order above, with
   `git subtree split` to preserve history. Each gets its own `CLAUDE.md`, skills,
   and test suite.

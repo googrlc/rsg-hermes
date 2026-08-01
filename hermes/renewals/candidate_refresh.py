@@ -19,9 +19,9 @@ import os
 from datetime import date, datetime, timezone
 from typing import Any
 
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations import renewal_classifier
-from hermes.integrations.nowcerts_client import NowCertsClient
+from hermes_integrations.nowcerts_client import NowCertsClient
 
 from . import corrections, eligibility as elig
 from .eligibility import LineageContext

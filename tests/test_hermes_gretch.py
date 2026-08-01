@@ -3,9 +3,9 @@ import uuid
 
 import pytest
 
-from hermes.core import identity
+from hermes_core import identity
 from hermes.command_center import store
-from hermes.integrations import supermemory_client
+from hermes_integrations import supermemory_client
 from hermes.deliverables import acord25
 
 
@@ -110,7 +110,7 @@ def test_supermemory_unscoped_unchanged(monkeypatch):
 
 # ── Medicare-lane PHI guard (rule 3c) ────────────────────────────────────────
 def test_redact_phi_strips_mbi_ssn_and_eligibility():
-    from hermes.core import phi
+    from hermes_core import phi
 
     assert phi.contains_phi("MBI 1EG4-TE5-MK73 on file")
     out = phi.redact_phi("client 1EG4-TE5-MK73, SSN 123-45-6789, diagnosed with ESRD")
@@ -120,7 +120,7 @@ def test_redact_phi_strips_mbi_ssn_and_eligibility():
 
 
 def test_build_medicare_memory_is_allowlist_only():
-    from hermes.core import phi
+    from hermes_core import phi
 
     mem = phi.build_medicare_memory(
         client_name="Mary Smith",
@@ -135,7 +135,7 @@ def test_build_medicare_memory_is_allowlist_only():
 
 
 def test_is_medicare_context():
-    from hermes.core import phi
+    from hermes_core import phi
 
     assert phi.is_medicare_context(["gretchen-memory", "lane:gretchen-medicare"])
     assert phi.is_medicare_context(["type:medicare"])

@@ -33,7 +33,7 @@ _supa = None
 def _get_supa():
     global _supa
     if _supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
         _supa = SupabaseClient()
     return _supa
 

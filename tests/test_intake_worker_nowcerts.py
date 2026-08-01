@@ -19,7 +19,7 @@ def test_process_one_approved_commits_to_nowcerts():
     }
     with patch.object(w, "_claim_next_approved", return_value=claimed), \
          patch("hermes.intake.commit.commit_draft") as commit_draft, \
-         patch("hermes.integrations.intake_submissions.transition") as transition, \
+         patch("hermes.intake.submissions.transition") as transition, \
          patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                return_value={"client_entities": ["e1"]}) as retrieval, \
          patch.object(w, "_post_alert"):
@@ -43,7 +43,7 @@ def test_retrieval_rows_land_in_records_created():
     }
     with patch.object(w, "_claim_next_approved", return_value=claimed), \
          patch("hermes.intake.commit.commit_draft") as commit_draft, \
-         patch("hermes.integrations.intake_submissions.transition") as transition, \
+         patch("hermes.intake.submissions.transition") as transition, \
          patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                return_value={"client_entities": ["e1"], "client_facts": ["f1", "f2"]}), \
          patch.object(w, "_post_alert"):
@@ -69,7 +69,7 @@ def test_retrieval_failure_transitions_to_failed():
     }
     with patch.object(w, "_claim_next_approved", return_value=claimed), \
          patch("hermes.intake.commit.commit_draft") as commit_draft, \
-         patch("hermes.integrations.intake_submissions.transition"), \
+         patch("hermes.intake.submissions.transition"), \
          patch("hermes.operations.agency_intake_approval._insert_retrieval_rows",
                side_effect=RuntimeError("supabase down")), \
          patch.object(w, "_safe_transition_to_failed") as stf, \

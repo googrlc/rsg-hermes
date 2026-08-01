@@ -262,7 +262,7 @@ class TestPhase2Endpoints:
 class TestAskHermes:
     @patch("hermes.agent.nl_agent.ask")
     def test_ask_non_renewal_routes_to_agent(self, mock_ask, client) -> None:
-        from hermes.core.dispatch import DispatchResult
+        from hermes_core.dispatch import DispatchResult
         mock_ask.return_value = DispatchResult(True, "We have 554 accounts.")
         resp = client.post("/api/command-center/ask", json={"prompt": "How many accounts do we have?"})
         assert resp.status_code == 200
@@ -400,7 +400,7 @@ class TestNlAgentTools:
 
     def test_renewals_tool_executes(self):
         from hermes.agent.nl_agent import _EXECUTORS
-        with patch("hermes.integrations.supabase_client.SupabaseClient") as cls:
+        with patch("hermes_integrations.supabase_client.SupabaseClient") as cls:
             inst = MagicMock()
             inst.select.return_value = [
                 {"id": "1", "policy_number": "Acme | GL | 9", "client_name": "Acme",

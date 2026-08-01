@@ -22,11 +22,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from hermes.commands.renewal_worksheet import escape_ilike
-from hermes.core.dispatch import DispatchResult
-from hermes.integrations import retrieval_client
+from hermes_core.dispatch import DispatchResult
+from hermes_integrations import retrieval_client
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 

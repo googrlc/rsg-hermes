@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from hermes.commands import renewal_desk as rd
 from hermes.agent.dispatcher import Dispatcher
-from hermes.core.dispatch import DispatchResult
+from hermes_core.dispatch import DispatchResult
 
 
 def _make_dispatcher() -> Dispatcher:

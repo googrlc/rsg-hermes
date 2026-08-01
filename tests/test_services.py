@@ -138,7 +138,7 @@ def test_every_queue_object_type_is_owned_by_exactly_one_service() -> None:
     """A worker per service means each object_type needs exactly one drainer.
     Two services draining the same type race for the same rows; zero means the
     queue silently fills."""
-    from hermes.core.queue import BACKED_OFF_OBJECT_TYPES
+    from hermes_core.queue import BACKED_OFF_OBJECT_TYPES
 
     owner: dict[str, str] = {}
     for name, spec in SERVICES.items():

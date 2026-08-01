@@ -46,7 +46,7 @@ from hermes.operations.renewal_tracker import VALID_RISK_STATUSES
 from . import eligibility as elig
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 

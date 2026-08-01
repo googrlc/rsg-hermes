@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hermes.core.llm_client import get_client, resolve_model, LLMConfigError
+from hermes_core.llm_client import get_client, resolve_model, LLMConfigError
 
 
 def command_from_intent(text: str) -> str | None:

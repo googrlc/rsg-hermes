@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from hermes.integrations.supabase_client import SupabaseClientError
+from hermes_integrations.supabase_client import SupabaseClientError
 from hermes.operations import ops_doctor as OD
 
 # The real key columns, as they exist in Supabase. canonical_* are keyed by the

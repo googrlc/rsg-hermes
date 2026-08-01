@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hermes.command_center.submission import SubmissionObject
-from hermes.core.queue import (
+from hermes_core.queue import (
     DESTINATION_CRM,
     DESTINATION_NOWCERTS,
     OBJECT_TYPE_INTAKE_AMS as OBJECT_TYPE_AMS,

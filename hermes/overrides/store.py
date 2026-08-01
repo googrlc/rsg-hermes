@@ -23,7 +23,7 @@ from hermes.overrides.core import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 

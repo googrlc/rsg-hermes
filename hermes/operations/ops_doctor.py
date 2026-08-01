@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 log = logging.getLogger(__name__)
 
@@ -110,14 +110,14 @@ def _classify_llm_error(exc: Exception) -> str:
 def check_llm_gateway() -> LLMCheckResult:
     """Verify the LLM gateway accepts our key with a cheap authenticated call.
 
-    Every Hermes LLM path routes through ``hermes.core.llm_client``, so a
+    Every Hermes LLM path routes through ``hermes_core.llm_client``, so a
     rejected key takes down all AI features (Ask Hermes, intake synthesis, OCR)
     at once. This probe surfaces that here instead of only at agent runtime. It
     resolves the endpoint/key through ``llm_client`` (the one source of truth for
     resolution order) and lists models — an authenticated call that costs no
     tokens — rather than running a completion.
     """
-    from hermes.core import llm_client
+    from hermes_core import llm_client
 
     base = llm_client._resolve_base_url()
     endpoint = base or "OpenAI public API (no LITELLM_BASE_URL)"

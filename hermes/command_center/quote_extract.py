@@ -83,7 +83,7 @@ def _clean(data: Any) -> dict[str, Any]:
 
 
 def _model():
-    from hermes.core.llm_client import get_client, resolve_model
+    from hermes_core.llm_client import get_client, resolve_model
     from hermes.command_center.synthesis import synthesis_model
 
     return get_client(), resolve_model(synthesis_model())
@@ -97,7 +97,7 @@ def extract_quote(*, text: str | None = None, images: list[bytes] | None = None,
     try:
         oai, chosen = _model()
         if model:
-            from hermes.core.llm_client import resolve_model
+            from hermes_core.llm_client import resolve_model
             chosen = resolve_model(model)
     except Exception:  # noqa: BLE001
         log.info("quote extraction skipped — LLM client unavailable")

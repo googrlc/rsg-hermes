@@ -28,7 +28,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.queue import (
+from hermes_core.queue import (
     DESTINATION_NOWCERTS,
     QUEUE_COMPLETED,
     QUEUE_FAILED,
@@ -37,8 +37,8 @@ from hermes.core.queue import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 

@@ -64,7 +64,7 @@ def get_supa():
     if _supa is None:
         with _init_lock:
             if _supa is None:
-                from hermes.integrations.supabase_client import SupabaseClient
+                from hermes_integrations.supabase_client import SupabaseClient
 
                 _supa = SupabaseClient()
     return _supa
@@ -81,7 +81,7 @@ def get_nowcerts():
     if _nowcerts is None:
         with _init_lock:
             if _nowcerts is None:
-                from hermes.integrations.nowcerts_client import get_client
+                from hermes_integrations.nowcerts_client import get_client
 
                 _nowcerts = get_client()
     return _nowcerts

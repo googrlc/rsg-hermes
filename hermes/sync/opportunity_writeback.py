@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from hermes.intake import opportunities as opp
-from hermes.core.queue import (
+from hermes_core.queue import (
     DESTINATION_NOWCERTS,
     OBJECT_TYPE_OPPORTUNITY_WRITEBACK as OBJECT_TYPE,
     QUEUE_COMPLETED,
@@ -29,8 +29,8 @@ from hermes.core.queue import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +143,7 @@ def _resolve_preview(nowcerts: "NowCertsClient", ncid: str, target: str | None) 
 
 def _eligible(supa: "SupabaseClient", limit: int) -> list[dict[str, Any]]:
     # Local import: retry.py imports OBJECT_TYPE from here (circular otherwise).
-    from hermes.core.queue import due_filter
+    from hermes_core.queue import due_filter
 
     return supa.select(
         QUEUE_TABLE,
@@ -176,7 +176,7 @@ def run_opportunity_writeback_executor(
     It forces dry-run — it bypasses the approval queue, so it must never write.
     """
     if supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
     summary: dict[str, Any] = {"claimed": 0, "completed": 0, "failed": 0, "previews": []}
@@ -190,7 +190,7 @@ def run_opportunity_writeback_executor(
             )
         dry_run = True
         if nowcerts is None:
-            from hermes.integrations.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
         # Resolve for both terminal stages so the session sees the live shape of
@@ -206,7 +206,7 @@ def run_opportunity_writeback_executor(
 
         if dry_run:
             if nowcerts is None:
-                from hermes.integrations.nowcerts_client import NowCertsClient
+                from hermes_integrations.nowcerts_client import NowCertsClient
 
                 nowcerts = NowCertsClient()
             preview = _resolve_preview(nowcerts, ncid, target)
@@ -224,7 +224,7 @@ def run_opportunity_writeback_executor(
         summary["claimed"] += 1
 
         if nowcerts is None:
-            from hermes.integrations.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
 

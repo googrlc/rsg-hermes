@@ -514,9 +514,9 @@ def main() -> int:
 
     # --- NowCerts → Supabase canonical book sync (feeds --renewal-refresh) ---
     if args.sync_canonical_book or args.sync_canonical_book_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.sync.canonical_book_sync import run_canonical_book_sync
-        from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes_integrations.nowcerts_client import NowCertsClient, NowCertsClientError
 
         try:
             supa = SupabaseClient()
@@ -545,8 +545,8 @@ def main() -> int:
 
     # --- NowCerts quotes → Supabase opportunities pipeline sync ---
     if args.retire_closed_opportunities or args.retire_closed_opportunities_apply:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.integrations.nowcerts_client import NowCertsClient
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.nowcerts_client import NowCertsClient
         from hermes.sync.opportunity_dedupe import run_retirement
 
         try:
@@ -576,8 +576,8 @@ def main() -> int:
         return 0 if not res.errors else 1
 
     if args.repair_quote_board or args.repair_quote_board_apply:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.integrations.nowcerts_client import NowCertsClient
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.nowcerts_client import NowCertsClient
         from hermes.sync.quote_board_repair import run_repair
 
         try:
@@ -617,7 +617,7 @@ def main() -> int:
         return 0 if not res.errors else 1
 
     if args.dedupe_opportunities or args.dedupe_opportunities_apply:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.sync.opportunity_dedupe import run_dedupe
 
         try:
@@ -639,8 +639,8 @@ def main() -> int:
         return 0 if not res.errors else 1
 
     if args.sync_quotes or args.sync_quotes_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.nowcerts_client import NowCertsClient, NowCertsClientError
         from hermes.sync.quote_sync import run_quote_sync
 
         try:
@@ -670,8 +670,8 @@ def main() -> int:
 
     # --- NowCerts Opportunities → opportunities pipeline mirror ---
     if args.sync_opportunities or args.sync_opportunities_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
-        from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.nowcerts_client import NowCertsClient, NowCertsClientError
         from hermes.sync.opportunity_sync import run_opportunity_sync
 
         try:
@@ -701,7 +701,7 @@ def main() -> int:
 
     # --- Canonical book → commission_ledger expected-value seeding ---
     if args.sync_commissions or args.sync_commissions_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.sync.commission_sync import run_commission_sync
 
         try:
@@ -762,7 +762,7 @@ def main() -> int:
 
     # --- Supabase-only commands ---
     if args.ops_doctor:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.operations.ops_doctor import run_ops_doctor
 
         try:
@@ -782,7 +782,7 @@ def main() -> int:
         return 0 if report.ok else 1
 
     if args.snapshot_kpis:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.operations.kpi_writer import (
             snapshot_finance,
             snapshot_renewals,
@@ -815,7 +815,7 @@ def main() -> int:
         return 0
 
     if args.kpi:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 
         try:
             supa = SupabaseClient()
@@ -869,7 +869,7 @@ def main() -> int:
         return 0
 
     if args.agency_snapshot or args.agency_snapshot_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.jobs.agency_snapshot import format_summary, run_snapshot
 
         try:
@@ -882,7 +882,7 @@ def main() -> int:
         return 0
 
     if args.renewal_classify or args.renewal_classify_dry_run:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
         from hermes.operations.renewal_classifier import refresh_renewals
 
         summary = refresh_renewals(
@@ -1026,7 +1026,7 @@ def main() -> int:
         return 0 if not result["failed"] else 1
 
     if args.scheduler_health:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
         from hermes.scheduler.runner import scheduler_health
 
         import json as _json
@@ -1088,7 +1088,7 @@ def main() -> int:
         return 0 if result.ok else 1
 
     if args.run_intake_worker:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.operations.intake_worker import run_intake_worker_loop
 
         try:
@@ -1101,7 +1101,7 @@ def main() -> int:
         return 0
 
     if args.commission_reconcile_file:
-        from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
         from hermes.jobs import commission_reconciliation
 
         try:

@@ -19,8 +19,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hermes.integrations.supabase_client import SupabaseClient
-from hermes.integrations.supermemory_client import (
+from hermes_integrations.supabase_client import SupabaseClient
+from hermes_integrations.supermemory_client import (
     SupermemoryClient,
     client_tags,
     internal_tags,

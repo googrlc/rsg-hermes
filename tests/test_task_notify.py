@@ -5,7 +5,7 @@ from hermes.operations import task_notify as T
 
 
 def _fake_nc(monkeypatch, sink):
-    import hermes.integrations.nextcloud_client as nc
+    import hermes_integrations.nextcloud_client as nc
 
     class Fake:
         def post_talk_message(self, token, message):
@@ -33,7 +33,7 @@ def test_posts_formatted_line(monkeypatch):
 
 def test_swallows_errors(monkeypatch):
     monkeypatch.setenv("NEXTCLOUD_TALK_TOKEN", "tok1")
-    import hermes.integrations.nextcloud_client as nc
+    import hermes_integrations.nextcloud_client as nc
 
     class Boom:
         def post_talk_message(self, *a, **k):

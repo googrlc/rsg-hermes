@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 log = logging.getLogger(__name__)
 

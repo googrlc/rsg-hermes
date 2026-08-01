@@ -19,12 +19,12 @@ import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.queue import DESTINATION_NOWCERTS, QUEUE_TABLE
+from hermes_core.queue import DESTINATION_NOWCERTS, QUEUE_TABLE
 from hermes.scheduler.locks import LOCKS_TABLE, SchedulerLock
 from hermes.scheduler.retry import reclaim_stalled, requeue_or_deadletter
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def _systems_check_channel() -> str:
 def _alert(text: str) -> None:
     """Best-effort alert to #systems-check. Never raises into the cycle."""
     try:
-        from hermes.integrations.slack_notifier import SlackNotifier
+        from hermes_integrations.slack_notifier import SlackNotifier
 
         SlackNotifier(channel=_systems_check_channel()).post_message(text=text)
     except Exception:
@@ -165,7 +165,7 @@ def _run_executor(name: str, *, supa: "SupabaseClient", batch: int) -> dict[str,
 
         return run_intake_executor(supa=supa, limit=batch)
 
-    from hermes.integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
     nc = NowCertsClient()
     if name == "quote":
@@ -224,7 +224,7 @@ def run_one_cycle(
         # raises when credentials are absent, and that must not cost us the
         # renewal/intake problem detection below.
         try:
-            from hermes.integrations.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             nc = NowCertsClient()
             metrics["quote"] = run_quote_executor(supa=supa, nowcerts=nc, limit=batch)
@@ -283,7 +283,7 @@ def run_scheduler_loop(
     same rows.
     """
     if supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
 

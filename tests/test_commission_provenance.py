@@ -36,7 +36,7 @@ LEDGER = [
 
 
 def _patch(monkeypatch, rows=LEDGER):
-    import hermes.integrations.supabase_client as sc
+    import hermes_integrations.supabase_client as sc
     fake = FakeSupa(rows)
     monkeypatch.setattr(sc, "SupabaseClient", lambda *a, **k: fake)
     return fake

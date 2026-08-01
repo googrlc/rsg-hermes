@@ -73,7 +73,7 @@ def client(monkeypatch):
     FakeNextcloud.instances.clear()
     supa = FakeSupa()
     import hermes.api as api_mod
-    import hermes.integrations.nextcloud_client as nc_mod
+    import hermes_integrations.nextcloud_client as nc_mod
 
     monkeypatch.setattr(deps, "get_supa", lambda: supa)
     monkeypatch.setattr(nc_mod, "NextcloudClient", FakeNextcloud)

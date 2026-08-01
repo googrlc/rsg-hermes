@@ -68,7 +68,7 @@ def _no_network(monkeypatch):
     """Nextcloud + AMS priming are best-effort side trips; keep them offline."""
     monkeypatch.setattr("hermes.intake.opportunity_priming.prime_new_opportunities",
                         lambda *a, **k: {})
-    import hermes.integrations.nextcloud_client as nc
+    import hermes_integrations.nextcloud_client as nc
     monkeypatch.setattr(nc.NextcloudClient, "is_configured", lambda self: False)
     monkeypatch.setattr(W, "render_blocks", lambda payload: "rendered")
     yield

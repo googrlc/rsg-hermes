@@ -59,7 +59,7 @@ class CaseCreateRequest(BaseModel):
 def create_case_endpoint(req: CaseCreateRequest):
     """Create a general agency_crm_cases row (any case_type) for any cockpit.
     Owner/creator emails are validated against agency_crm_users (FK guard)."""
-    from hermes.core.due_dates import normalize_due
+    from hermes_core.due_dates import normalize_due
     from hermes.renewals import cases as C
 
     supa = deps.get_supa()
@@ -133,7 +133,7 @@ def create_case_from_template_endpoint(req: CaseFromTemplateRequest):
     bare case it believes is a full checklist.
     """
     from hermes.casework import templates as T
-    from hermes.core.due_dates import due_in_days, normalize_due
+    from hermes_core.due_dates import due_in_days, normalize_due
     from hermes.renewals import cases as C
 
     tpl = T.get_template(req.template_key)
@@ -428,7 +428,7 @@ def create_task_endpoint(req: TaskCreateRequest):
     bucket), counting only OPEN tasks so a recurring chore isn't blocked forever
     by last month's completed copy.
     """
-    from hermes.core.due_dates import normalize_due
+    from hermes_core.due_dates import normalize_due
     from hermes.renewals import cases as C
 
     supa = deps.get_supa()
@@ -527,7 +527,7 @@ def update_task_endpoint(task_id: str, req: TaskUpdateRequest):
     real FK, so an unknown address fails at the database with a message nobody
     can act on.
     """
-    from hermes.core.due_dates import normalize_due
+    from hermes_core.due_dates import normalize_due
     from hermes.renewals import cases as C
 
     supa = deps.get_supa()
@@ -621,7 +621,7 @@ class CaseUpdateRequest(BaseModel):
 def update_case_endpoint(case_id: str, req: CaseUpdateRequest):
     """Edit a case. Cases were create-and-close-only; a typo'd title or the wrong
     owner meant the case stayed wrong."""
-    from hermes.core.due_dates import normalize_due
+    from hermes_core.due_dates import normalize_due
     from hermes.renewals import cases as C
 
     supa = deps.get_supa()
@@ -794,7 +794,7 @@ async def upload_case_document(
     so a hand-attached document lands in the same client folder tree as a generated
     one instead of a parallel store.
     """
-    from hermes.integrations.nextcloud_client import CLIENT_CATEGORIES, NextcloudClient
+    from hermes_integrations.nextcloud_client import CLIENT_CATEGORIES, NextcloudClient
     from hermes.renewals import cases as C
 
     supa = deps.get_supa()

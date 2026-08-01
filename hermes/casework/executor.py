@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.queue import (
+from hermes_core.queue import (
     DESTINATION_NOWCERTS,
     OBJECT_TYPE_CASE,
     OBJECT_TYPE_TASK,
@@ -30,8 +30,8 @@ from hermes.core.queue import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ def stage_task_job(supa: "SupabaseClient", *, task: dict[str, Any], insured_data
 
 def _eligible_jobs(supa, limit):
     # Local import: retry.py imports OBJECT_TYPE_CASE/TASK from here.
-    from hermes.core.queue import due_filter
+    from hermes_core.queue import due_filter
 
     return supa.select(
         QUEUE_TABLE, columns="*",
@@ -178,7 +178,7 @@ def run_casework_executor(
 ) -> dict[str, Any]:
     """Process up to ``limit`` approved case/task jobs. ``dry_run`` is side-effect-free."""
     if supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
     summary: dict[str, Any] = {"claimed": 0, "completed": 0, "failed": 0, "previews": []}
@@ -204,7 +204,7 @@ def run_casework_executor(
         summary["claimed"] += 1
 
         if nowcerts is None:
-            from hermes.integrations.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
 

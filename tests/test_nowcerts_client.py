@@ -1,4 +1,4 @@
-"""Tests for hermes.integrations.nowcerts_client — NowCerts API auth and pagination."""
+"""Tests for hermes_integrations.nowcerts_client — NowCerts API auth and pagination."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
+from hermes_integrations.nowcerts_client import NowCertsClient, NowCertsClientError
 
 
 class FakeResponse:
@@ -40,7 +40,7 @@ class NowCertsClientConstructorTests(unittest.TestCase):
 
 
 class NowCertsAuthTests(unittest.TestCase):
-    @patch("hermes.integrations.nowcerts_client.requests.post")
+    @patch("hermes_integrations.nowcerts_client.requests.post")
     def test_authenticate_stores_token(self, mock_post: MagicMock) -> None:
         mock_post.return_value = FakeResponse(200, {"access_token": "tok123"})
         client = NowCertsClient(
@@ -50,7 +50,7 @@ class NowCertsAuthTests(unittest.TestCase):
         self.assertEqual(token, "tok123")
         self.assertEqual(client._token, "tok123")
 
-    @patch("hermes.integrations.nowcerts_client.requests.post")
+    @patch("hermes_integrations.nowcerts_client.requests.post")
     def test_authenticate_raises_on_failure(self, mock_post: MagicMock) -> None:
         mock_post.return_value = FakeResponse(401, text="bad creds")
         client = NowCertsClient(
@@ -61,8 +61,8 @@ class NowCertsAuthTests(unittest.TestCase):
 
 
 class NowCertsPaginationTests(unittest.TestCase):
-    @patch("hermes.integrations.nowcerts_client.requests.get")
-    @patch("hermes.integrations.nowcerts_client.requests.post")
+    @patch("hermes_integrations.nowcerts_client.requests.get")
+    @patch("hermes_integrations.nowcerts_client.requests.post")
     def test_fetches_all_pages(self, mock_post: MagicMock, mock_get: MagicMock) -> None:
         mock_post.return_value = FakeResponse(200, {"access_token": "tok"})
 
@@ -81,8 +81,8 @@ class NowCertsPaginationTests(unittest.TestCase):
         self.assertEqual(len(results), 75)
         self.assertEqual(mock_get.call_count, 2)
 
-    @patch("hermes.integrations.nowcerts_client.requests.get")
-    @patch("hermes.integrations.nowcerts_client.requests.post")
+    @patch("hermes_integrations.nowcerts_client.requests.get")
+    @patch("hermes_integrations.nowcerts_client.requests.post")
     def test_retries_on_401(self, mock_post: MagicMock, mock_get: MagicMock) -> None:
         mock_post.return_value = FakeResponse(200, {"access_token": "tok"})
 
@@ -107,7 +107,7 @@ class NowCertsWriteMethodTests(unittest.TestCase):
             username="user", password="pass", base_url="https://api.test.com",
         )
 
-    @patch("hermes.integrations.nowcerts_client.requests.post")
+    @patch("hermes_integrations.nowcerts_client.requests.post")
     def test_insert_task_posts_to_zapier_endpoint(self, mock_post: MagicMock) -> None:
         mock_post.side_effect = [
             FakeResponse(200, {"access_token": "tok"}),   # auth
@@ -127,7 +127,7 @@ class NowCertsWriteMethodTests(unittest.TestCase):
         self.assertEqual(write_call.args[0], "https://api.test.com/api/Zapier/InsertTask")
         self.assertEqual(write_call.kwargs["json"], payload)
 
-    @patch("hermes.integrations.nowcerts_client.requests.post")
+    @patch("hermes_integrations.nowcerts_client.requests.post")
     def test_update_task_posts_to_update_endpoint(self, mock_post: MagicMock) -> None:
         mock_post.side_effect = [
             FakeResponse(200, {"access_token": "tok"}),
@@ -139,7 +139,7 @@ class NowCertsWriteMethodTests(unittest.TestCase):
             "https://api.test.com/api/Zapier/UpdateTask",
         )
 
-    @patch("hermes.integrations.nowcerts_client.requests.post")
+    @patch("hermes_integrations.nowcerts_client.requests.post")
     def test_insert_insured_no_override_endpoint(self, mock_post: MagicMock) -> None:
         mock_post.side_effect = [
             FakeResponse(200, {"access_token": "tok"}),
@@ -152,7 +152,7 @@ class NowCertsWriteMethodTests(unittest.TestCase):
             "https://api.test.com/api/Insured/InsertNoOverride",
         )
 
-    @patch("hermes.integrations.nowcerts_client.requests.post")
+    @patch("hermes_integrations.nowcerts_client.requests.post")
     def test_insert_task_retries_on_401(self, mock_post: MagicMock) -> None:
         mock_post.side_effect = [
             FakeResponse(200, {"access_token": "tok"}),    # initial auth
@@ -182,7 +182,7 @@ class SharedClientAndTokenReuseTests(unittest.TestCase):
     ENV = {"NOWCERTS_USERNAME": "u@risksolutionsgroup.net", "NOWCERTS_PASSWORD": "p"}
 
     def setUp(self) -> None:
-        import hermes.integrations.nowcerts_client as mod
+        import hermes_integrations.nowcerts_client as mod
         self.mod = mod
         mod._shared = None            # a shared singleton must not leak between tests
         self.addCleanup(setattr, mod, "_shared", None)

@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, model_validator
 
 from hermes.ams import book as ams_book
-from hermes.core import surfaces
+from hermes_core import surfaces
 from hermes.routers import deps
 
 log = logging.getLogger(__name__)
@@ -1232,7 +1232,7 @@ def _require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
 # this process and is not copied into a second container.
 # ---------------------------------------------------------------------------
 def _deck():
-    from hermes.integrations.nextcloud_deck import DeckClient
+    from hermes_integrations.nextcloud_deck import DeckClient
 
     return DeckClient()
 
@@ -1240,7 +1240,7 @@ def _deck():
 @router.get("/api/deck/boards")
 def deck_boards_endpoint():
     """Boards, and the stacks (lists) on each — what a caller needs to address a card."""
-    from hermes.integrations.nextcloud_deck import DeckError
+    from hermes_integrations.nextcloud_deck import DeckError
 
     try:
         client = _deck()
@@ -1273,7 +1273,7 @@ class DeckCardRequest(BaseModel):
 def deck_create_card_endpoint(req: DeckCardRequest):
     """Add a card. Idempotent by title within the list, so a job that runs twice
     doesn't leave two identical cards."""
-    from hermes.integrations.nextcloud_deck import DeckError
+    from hermes_integrations.nextcloud_deck import DeckError
 
     try:
         return _deck().create_card(
@@ -2046,7 +2046,7 @@ def ams_search_insured(
     if not any([name, email, fein]):
         raise HTTPException(status_code=400, detail="Provide at least one of: name, email, fein")
 
-    from hermes.integrations.nowcerts_client import NowCertsClientError
+    from hermes_integrations.nowcerts_client import NowCertsClientError
 
     def _q(val: str) -> str:
         return val.replace("'", "''")  # OData single-quote escape
@@ -2231,7 +2231,7 @@ def _validated_nextcloud_path(raw: str) -> str:
 @router.get("/api/nextcloud/folders")
 def nextcloud_list_folder(path: str = ""):
     """List one real Nextcloud WebDAV folder, not the document index."""
-    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+    from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError
 
     nc = NextcloudClient()
     if not nc.is_configured():
@@ -2250,7 +2250,7 @@ def nextcloud_list_folder(path: str = ""):
 @router.post("/api/nextcloud/folders/ensure")
 def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
     """Preview or idempotently create exact Nextcloud folder paths."""
-    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+    from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError
 
     paths = list(dict.fromkeys(_validated_nextcloud_path(p) for p in req.paths))
     if not paths:
@@ -2289,7 +2289,7 @@ def nextcloud_ensure_folders(req: NextcloudEnsureFoldersRequest):
 @router.post("/api/nextcloud/upload")
 def nextcloud_upload(req: NextcloudUploadRequest):
     """Upload one approved PDF into the standardized RSG client tree."""
-    from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+    from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError
 
     if not req.title.strip() or not req.title.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="title must be a non-empty .pdf filename")
@@ -2439,7 +2439,7 @@ async def _generate_tts_audio(text: str, voice: str) -> bytes | None:
 
     # Fallback: TTS via LiteLLM (use the voice_output model group).
     try:
-        from hermes.core.llm_client import get_client
+        from hermes_core.llm_client import get_client
 
         client = get_client()
         response = client.audio.speech.create(

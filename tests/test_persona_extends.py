@@ -8,7 +8,7 @@ parent is emitted first so the child's rules win where they disagree.
 
 import pytest
 
-from hermes.core import identity
+from hermes_core import identity
 
 
 @pytest.fixture(autouse=True)

@@ -26,12 +26,12 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.dispatch import DispatchResult
+from hermes_core.dispatch import DispatchResult
 from hermes.renewals import resolve, worksheet
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ def handle(
 
     if nowcerts is None:
         try:
-            from hermes.integrations.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             nowcerts = NowCertsClient()
         except Exception as exc:  # pragma: no cover - env/config dependent

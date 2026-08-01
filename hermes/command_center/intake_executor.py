@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from hermes.command_center.router import OBJECT_TYPE_AMS, OBJECT_TYPE_CRM
-from hermes.core.queue import (
+from hermes_core.queue import (
     QUEUE_COMPLETED,
     QUEUE_FAILED,
     QUEUE_PROCESSING,
@@ -28,8 +28,8 @@ from hermes.core.queue import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def map_insured_payload(insured: dict[str, Any]) -> dict[str, Any]:
 def _eligible_jobs(supa, limit):
     # Local import: retry.py imports OBJECT_TYPE_CRM/AMS from router, and this
     # module imports those too — keep the dependency one-directional.
-    from hermes.core.queue import due_filter
+    from hermes_core.queue import due_filter
 
     return supa.select(
         QUEUE_TABLE, columns="*",
@@ -97,7 +97,7 @@ def run_intake_executor(
 ) -> dict[str, Any]:
     """Drain up to ``limit`` approved intake intents. ``dry_run`` is side-effect-free."""
     if supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
     summary: dict[str, Any] = {"claimed": 0, "crm": 0, "ams": 0, "failed": 0, "previews": []}
@@ -127,7 +127,7 @@ def run_intake_executor(
                 summary["crm"] += 1
             elif object_type == OBJECT_TYPE_AMS:
                 if nowcerts is None:
-                    from hermes.integrations.nowcerts_client import NowCertsClient
+                    from hermes_integrations.nowcerts_client import NowCertsClient
 
                     nowcerts = NowCertsClient()
                 insured = (payload.get("ams") or {}).get("insured") or {}

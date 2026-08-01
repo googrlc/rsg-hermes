@@ -20,12 +20,12 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from hermes.commands.renewal_worksheet import _candidates_by_name, parse_request
-from hermes.core.dispatch import DispatchResult
+from hermes_core.dispatch import DispatchResult
 from hermes.renewals import resolve
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 # CRITICAL first, then AT_RISK, then SAFE, then anything else.
 _RISK_ORDER = {"CRITICAL": 0, "AT_RISK": 1, "SAFE": 2}
@@ -41,7 +41,7 @@ def _get_nowcerts(nowcerts: "NowCertsClient | None") -> "NowCertsClient | None":
     if nowcerts is not None:
         return nowcerts
     try:
-        from hermes.integrations.nowcerts_client import NowCertsClient
+        from hermes_integrations.nowcerts_client import NowCertsClient
 
         return NowCertsClient()
     except Exception:  # pragma: no cover - env/config dependent

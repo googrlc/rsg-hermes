@@ -14,7 +14,7 @@ import logging
 import os
 from typing import Any
 
-from hermes.core import surfaces
+from hermes_core import surfaces
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def _post(message: str) -> bool:
     if not token:
         return False
     try:
-        from hermes.integrations.nextcloud_client import NextcloudClient
+        from hermes_integrations.nextcloud_client import NextcloudClient
 
         NextcloudClient().post_talk_message(token, message)
         return True
@@ -89,7 +89,7 @@ def notify_task_created(task: dict[str, Any], *, kind: str = "task") -> bool:
 def daily_task_digest(supa: Any = None) -> dict[str, Any]:
     """Post a digest of open tasks to the team chat. Returns a summary dict."""
     if supa is None:
-        from hermes.integrations.supabase_client import SupabaseClient
+        from hermes_integrations.supabase_client import SupabaseClient
 
         supa = SupabaseClient()
     try:

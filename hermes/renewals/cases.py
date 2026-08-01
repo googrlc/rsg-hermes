@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 CASES_TABLE = "agency_crm_cases"
 TASKS_TABLE = "agency_crm_tasks"
@@ -142,7 +142,7 @@ def case_number(
     """
     import uuid
 
-    from hermes.core.due_dates import agency_today
+    from hermes_core.due_dates import agency_today
 
     prefix = _slug(case_type)[:CASE_NUMBER_PREFIX_LEN] or "CAS"
     day = str(on or "")[:10].replace("-", "") or agency_today(now).strftime("%Y%m%d")

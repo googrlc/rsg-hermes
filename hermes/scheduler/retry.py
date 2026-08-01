@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.queue import (
+from hermes_core.queue import (
     BACKED_OFF_DESTINATIONS,
     BACKED_OFF_OBJECT_TYPES,
     QUEUE_DEAD,
@@ -31,7 +31,7 @@ from hermes.core.queue import (
 )
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ BACKOFF_FACTOR = 2
 STALLED_PROCESSING_SECONDS = 900  # 15 min stuck in 'processing' => crashed executor
 
 # The object types that back off, the destinations whose rows this pass manages,
-# and `due_filter` are all defined in hermes.core.queue alongside the rest of the
+# and `due_filter` are all defined in hermes_core.queue alongside the rest of the
 # queue contract. They used to be assembled here by importing six domain
 # executors purely for their OBJECT_TYPE constants, which made the scheduler a
 # dependent of every domain it schedules.

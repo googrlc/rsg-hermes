@@ -1,7 +1,7 @@
 """Read-side WebDAV helpers on NextcloudClient (list_dir / read_file)."""
 from __future__ import annotations
 
-from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError
 
 # A realistic PROPFIND multistatus for Clients/Acme Trucking with Depth: 1 —
 # the folder itself (dropped) plus one subfolder and one file. Note the space in

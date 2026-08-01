@@ -17,12 +17,12 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from hermes.commands.renewal_desk import _get_nowcerts, _parse_identity
-from hermes.core.dispatch import DispatchResult
+from hermes_core.dispatch import DispatchResult
 from hermes.renewals import cases, resolve
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
-    from hermes.integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+    from hermes_integrations.nowcerts_client import NowCertsClient
 
 _DEFAULT_ASSIGNEE_EMAIL = os.environ.get("HERMES_RENEWAL_ASSIGNEE_EMAIL", "gretchen@risksolutionsgroup.net")
 _WITH_TASKS_RE = re.compile(r"\b(and|with|\+)\s+tasks?\b", re.I)

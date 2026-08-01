@@ -14,7 +14,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_DATA_DIR = Path(__file__).resolve().parent / "data"
 _CSV_PATH = _DATA_DIR / "custom-fields-camelcase-audit.csv"
 
 

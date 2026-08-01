@@ -165,7 +165,7 @@ def test_deleting_an_unknown_case_is_a_404(c_supa):
 
 def test_delete_where_refuses_an_empty_filter():
     """The one way delete_where could empty a table is the one thing it refuses."""
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
     supa = SupabaseClient.__new__(SupabaseClient)
     with pytest.raises(ValueError):

@@ -33,14 +33,14 @@ import os
 import time
 from typing import Any
 
-from hermes.integrations.intake_submissions import (
+from hermes.intake.submissions import (
     IntakeError,
     TABLE,
     claim_next_received,
     transition,
 )
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 
 log = logging.getLogger(__name__)
 
@@ -372,7 +372,7 @@ def process_one_approved(supa: SupabaseClient) -> bool:
     A missing/NULL token (old rows, or any path that did not set it) defaults to
     APPROVE ALL so the worker keeps doing what it always did.
     """
-    from hermes.integrations.intake_submissions import transition
+    from hermes.intake.submissions import transition
     from hermes.intake.commit import commit_draft
     from hermes.operations.agency_intake_approval import _insert_retrieval_rows
     from hermes.operations.write_gate import APPROVE_ALL, parse_approval_token
@@ -510,7 +510,7 @@ def commit_submission_now(supa: SupabaseClient, submission_id: str) -> dict[str,
     return value with the row transitioned to ``failed``, because the caller is a
     person looking at a screen who needs to be told.
     """
-    from hermes.integrations.intake_submissions import fetch_by_id, transition
+    from hermes.intake.submissions import fetch_by_id, transition
     from hermes.intake.commit import commit_draft
     from hermes.operations.agency_intake_approval import _insert_retrieval_rows
     from hermes.operations.write_gate import APPROVE_ALL, parse_approval_token

@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hermes.integrations.nextcloud_deck import DeckClient, DeckError
+from hermes_integrations.nextcloud_deck import DeckClient, DeckError
 
 ENV = {
     "NEXTCLOUD_URL": "https://nc.example",

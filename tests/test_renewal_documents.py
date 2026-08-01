@@ -12,8 +12,8 @@ import pytest
 
 from hermes.commands import renewal_documents as rd
 from hermes.agent.dispatcher import Dispatcher
-from hermes.core.dispatch import DispatchResult
-from hermes.integrations.nextcloud_client import NextcloudClient, NextcloudError
+from hermes_core.dispatch import DispatchResult
+from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError
 from hermes.renewals import pdf
 
 

@@ -36,7 +36,7 @@ def _sub(**o):
 
 # --- synthesize_fields ---
 def test_synthesize_filters_to_known_confident_fields(monkeypatch):
-    import hermes.core.llm_client as llm
+    import hermes_core.llm_client as llm
     payload = json.dumps({
         "insured_name": "Acme LLC", "current_premium": "1200", "xdate": "2027-01-15",
         "email": "", "bogus_field": "x",
@@ -56,7 +56,7 @@ def test_synthesize_empty_text_no_call():
 
 
 def test_synthesize_no_llm_returns_empty(monkeypatch):
-    import hermes.core.llm_client as llm
+    import hermes_core.llm_client as llm
 
     def boom():
         raise RuntimeError("no key configured")
@@ -66,7 +66,7 @@ def test_synthesize_no_llm_returns_empty(monkeypatch):
 
 
 def test_synthesize_bad_json_returns_empty(monkeypatch):
-    import hermes.core.llm_client as llm
+    import hermes_core.llm_client as llm
     monkeypatch.setattr(llm, "get_client", lambda: FakeOAI("this is not json"))
     monkeypatch.setattr(llm, "resolve_model", lambda m: "top")
     assert S.synthesize_fields("text") == {}

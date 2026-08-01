@@ -6,6 +6,10 @@ readme = "README.md"
 # Upper bound required so poetry can resolve deps that cap Python (e.g. reportlab <4).
 requires-python = ">=3.11,<4"
 dependencies = [
+  # The shared bottom layer (hermes_core + hermes_integrations), which every RSG
+  # app repo installs. Local path while it lives in this repo under packages/;
+  # becomes a git pin on its own repo when the app repos split out.
+  "rsg-hermes-core",
   "requests>=2.28.0",
   "python-dotenv>=1.0.0",
   "slack-bolt>=1.18.0",
@@ -39,6 +43,15 @@ gmail = ["google-auth>=2.20"]
 hermes = "hermes.main:main"
 hermes-api = "hermes.api:main"
 
+[tool.pytest.ini_options]
+# The shared bottom layer is a separate distribution under packages/. In an
+# image it is pip-installed before the app; for a plain `pytest` in a checkout
+# this puts it on the path so the suite runs without an install step.
+pythonpath = ["packages/rsg-hermes-core"]
+
+[tool.uv.sources]
+rsg-hermes-core = { path = "packages/rsg-hermes-core", editable = true }
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
@@ -48,7 +61,6 @@ where = ["."]
 include = ["hermes*"]
 
 [tool.setuptools.package-data]
-"hermes.data" = ["*.csv"]
 "hermes.renewals" = ["templates/*.j2"]
 # ACORD form catalog + question catalog are loaded at runtime — must ship in the wheel/image.
 "hermes.deliverables" = ["*.yaml", "*.json"]

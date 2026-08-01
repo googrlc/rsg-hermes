@@ -1,6 +1,6 @@
 """LLM-gateway probe for ``hermes --ops-doctor``.
 
-Every Hermes LLM path routes through ``hermes.core.llm_client``, so a rejected
+Every Hermes LLM path routes through ``hermes_core.llm_client``, so a rejected
 key (a rotated/expired LiteLLM virtual key → 401 ``token_not_found_in_db``)
 takes down all AI features at once. The probe added here surfaces that in the
 health check instead of only at agent runtime.
@@ -8,7 +8,7 @@ health check instead of only at agent runtime.
 
 from __future__ import annotations
 
-from hermes.core import llm_client
+from hermes_core import llm_client
 from hermes.operations import ops_doctor as OD
 
 

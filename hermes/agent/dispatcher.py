@@ -8,11 +8,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hermes.core.dispatch import DispatchResult, Handler
+from hermes_core.dispatch import DispatchResult, Handler
 from hermes.operations.write_gate import parse_approval_token
 
 if TYPE_CHECKING:
-    from hermes.integrations.supabase_client import SupabaseClient
+    from hermes_integrations.supabase_client import SupabaseClient
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ def _should_retry_with_intent(text: str, result: DispatchResult) -> bool:
 
 
 # DispatchResult and Handler are the dispatch *contract*, defined in
-# hermes.core.dispatch so the eight command modules that return one do not have
+# hermes_core.dispatch so the eight command modules that return one do not have
 # to import the engine that routes to them. Re-exported here for callers that
 # reach for this module as their historical home.
 
@@ -253,7 +253,7 @@ class Dispatcher:
 
     def _init_supabase(self) -> None:
         try:
-            from hermes.integrations.supabase_client import SupabaseClient
+            from hermes_integrations.supabase_client import SupabaseClient
             self.supa = SupabaseClient()
         except Exception:
             log.info("Supabase not configured -- dual-write disabled")
@@ -269,7 +269,7 @@ class Dispatcher:
         if self._nowcerts is not None:
             return self._nowcerts
         try:
-            from hermes.integrations.nowcerts_client import NowCertsClient
+            from hermes_integrations.nowcerts_client import NowCertsClient
 
             self._nowcerts = NowCertsClient()
         except Exception:
@@ -396,7 +396,7 @@ class Dispatcher:
         )
 
     def _dispatch_from_intent(self, text: str) -> DispatchResult | None:
-        from hermes.core.intent_openai import command_from_intent
+        from hermes_core.intent_openai import command_from_intent
 
         command = command_from_intent(text)
         if not command:

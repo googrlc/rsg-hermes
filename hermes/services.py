@@ -55,7 +55,7 @@ class ServiceSpec:
     # so "/api/intakes" vs "/api/intake" must both be listed where they differ.
     path_prefixes: tuple[str, ...]
     port: int
-    # Queue object_types this service's worker drains (hermes.core.queue).
+    # Queue object_types this service's worker drains (hermes_core.queue).
     # Empty means the service has no background work of its own.
     queue_object_types: tuple[str, ...] = field(default_factory=tuple)
 

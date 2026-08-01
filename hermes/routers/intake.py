@@ -528,11 +528,11 @@ def intake_submit(req: IntakeSubmissionRequest, request: Request):
     existing row's state. The Phase 3 worker picks up ``status='received'``
     rows asynchronously; this endpoint never blocks on downstream processing.
     """
-    from hermes.integrations.intake_submissions import (
+    from hermes.intake.submissions import (
         IntakeError,
         insert_submission,
     )
-    from hermes.integrations.supabase_client import SupabaseClientError
+    from hermes_integrations.supabase_client import SupabaseClientError
 
     _require_intake_api_key(request)
 

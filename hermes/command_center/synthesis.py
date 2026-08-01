@@ -72,7 +72,7 @@ _SYNTH_SYSTEM = (
 
 def synthesis_model() -> str:
     """The top-tier model group for synthesis (falls back to the default group)."""
-    from hermes.core.llm_client import default_model
+    from hermes_core.llm_client import default_model
 
     return os.environ.get("HERMES_SYNTHESIS_MODEL", "").strip() or default_model()
 
@@ -83,7 +83,7 @@ def synthesize_fields(text: str, *, doc_type: str = "dec_page", model: str | Non
     if not text:
         return {}
     try:
-        from hermes.core.llm_client import get_client, resolve_model
+        from hermes_core.llm_client import get_client, resolve_model
 
         oai = get_client()
     except Exception:  # noqa: BLE001  (LLMConfigError / ImportError / missing key)
@@ -187,7 +187,7 @@ def enrich_submission(sub: SubmissionObject, text: str, *, doc_type: str = "dec_
 
 def resolve_model_label(model: str | None) -> str:
     try:
-        from hermes.core.llm_client import resolve_model
+        from hermes_core.llm_client import resolve_model
 
         return resolve_model(model or synthesis_model())
     except Exception:  # noqa: BLE001

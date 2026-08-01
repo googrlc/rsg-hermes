@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from hermes.core.queue import (
+from hermes_core.queue import (
     DESTINATION_CRM,
     DESTINATION_NOWCERTS,
     OBJECT_TYPE_RENEWAL,
@@ -35,9 +35,9 @@ from hermes.core.queue import (
     extract_created_id,
     utcnow,
 )
-from hermes.integrations.nowcerts_client import NowCertsClient, NowCertsClientError
-from hermes.integrations.slack_notifier import SlackNotifier, SlackNotifierError
-from hermes.integrations.supabase_client import SupabaseClient, SupabaseClientError
+from hermes_integrations.nowcerts_client import NowCertsClient, NowCertsClientError
+from hermes_integrations.slack_notifier import SlackNotifier, SlackNotifierError
+from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
 from hermes.operations import renewal_tracker
 from hermes.operations.guardrails import log_guardrail_event
 
@@ -48,7 +48,7 @@ log = logging.getLogger(__name__)
 
 # --- Authorized-input constants ------------------------------------------------
 # The queue contract (table, statuses, destinations, object types) is shared by
-# every domain executor and lives in hermes.core.queue. It used to be defined
+# every domain executor and lives in hermes_core.queue. It used to be defined
 # here, which made six unrelated domains import the *renewal* executor to learn
 # how to talk to the queue. The names are re-exported above for callers that
 # still reach for this module as its historical home.
