@@ -1,4 +1,4 @@
-"""Tests for the opportunities pipeline library (hermes/intake/opportunities.py).
+"""Tests for the opportunities pipeline library (hermes_core/opportunities.py).
 
 Supabase mocked. Synthetic identifiers only.
 """
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 
 
 def _supa(existing=None, inserted_id="opp-1"):

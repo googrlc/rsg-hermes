@@ -166,7 +166,7 @@ def test_converting_opens_a_deal_and_marks_the_lead(monkeypatch):
         made.update(kw)
         return {"id": "opp-1", **kw}, True
 
-    monkeypatch.setattr("hermes.intake.opportunities.create_opportunity", fake_create)
+    monkeypatch.setattr("hermes_core.opportunities.create_opportunity", fake_create)
     lead, opp = L.convert_to_opportunity(supa, "lead-1", line_of_business="General Liability")
 
     assert opp["id"] == "opp-1"
@@ -182,7 +182,7 @@ def test_converting_opens_a_deal_and_marks_the_lead(monkeypatch):
 def test_converting_never_writes_to_the_ams(monkeypatch):
     """A converted lead is still only a deal. NowCerts hears about it when it is won."""
     supa = FakeSupa({"crm_leads": [_lead()]})
-    monkeypatch.setattr("hermes.intake.opportunities.create_opportunity",
+    monkeypatch.setattr("hermes_core.opportunities.create_opportunity",
                         lambda _s, **kw: ({"id": "opp-1"}, True))
     L.convert_to_opportunity(supa, "lead-1", line_of_business="BOP")
     assert supa.inserted == []          # nothing staged, nothing queued
@@ -192,7 +192,7 @@ def test_converting_keeps_the_lead_for_the_upsell(monkeypatch):
     """The lead row is never moved or deleted — next year's cross-sell is worked
     off its history."""
     supa = FakeSupa({"crm_leads": [_lead()]})
-    monkeypatch.setattr("hermes.intake.opportunities.create_opportunity",
+    monkeypatch.setattr("hermes_core.opportunities.create_opportunity",
                         lambda _s, **kw: ({"id": "opp-1"}, True))
     L.convert_to_opportunity(supa, "lead-1", line_of_business="BOP")
     assert supa.deleted == []

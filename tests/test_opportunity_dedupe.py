@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 from hermes.sync import opportunity_dedupe as dd
 
 

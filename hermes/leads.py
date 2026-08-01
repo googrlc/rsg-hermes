@@ -270,7 +270,7 @@ def convert_to_opportunity(
     Idempotent through ``create_opportunity`` — converting twice returns the same
     deal rather than opening a second one.
     """
-    from hermes.intake import opportunities as opp
+    from hermes_core import opportunities as opp
 
     lead = get_lead(supa, lead_id)
     if not lead:

@@ -21,7 +21,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 
 if TYPE_CHECKING:
     from hermes_integrations.supabase_client import SupabaseClient

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 from hermes.intake.commit import OBJECT_TYPE_INTAKE
 from hermes_core.queue import (
     DESTINATION_NOWCERTS,

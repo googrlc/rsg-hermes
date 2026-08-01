@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 from hermes.sync import opportunity_won as W
 
 

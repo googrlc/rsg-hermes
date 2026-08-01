@@ -2,7 +2,7 @@
 
 In NowCerts a quote is a Policy row with ``isQuote=true`` (it carries a
 ``quote_number`` and its ``databaseId`` is the ``nowcerts_quote_guid``); see
-``hermes/intake/opportunities.py``. This job pulls those quote rows from the AMS
+``hermes_core/opportunities.py``. This job pulls those quote rows from the AMS
 and upserts them into the ``opportunities`` pipeline via the idempotent
 ``create_opportunity`` API, so AMS-sourced quotes surface in the pipeline
 alongside the intake-created prospects — **with their live terms** (premium,
@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 from hermes_core.field_utils import strip_date
 
 log = logging.getLogger(__name__)

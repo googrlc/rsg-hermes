@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 from hermes_core.field_utils import strip_date
 
 from hermes_core import book as ams_book

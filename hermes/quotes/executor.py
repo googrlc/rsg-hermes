@@ -1,7 +1,7 @@
 """Quote write-back executor — approved opportunity → NowCerts quote (opt-in).
 
 A quote in NowCerts is a Policy with ``IsQuote=true`` (see
-``hermes/intake/opportunities.py``). The cockpit enqueues an approval-gated
+``hermes_core/opportunities.py``). The cockpit enqueues an approval-gated
 ``outbound_sync_queue`` row (``object_type='quote'``); this executor claims it,
 calls NowCerts ``Policy/Insert``, and stamps the quote number + guid back onto the
 opportunity. Mirrors the intake/renewal executors exactly:
@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes.intake import opportunities as opp
+from hermes_core import opportunities as opp
 from hermes.quotes import store as quote_store
 from hermes_core.queue import (
     DESTINATION_NOWCERTS,
