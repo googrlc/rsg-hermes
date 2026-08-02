@@ -112,8 +112,13 @@ except Exception:  # pragma: no cover - surfaced in logs, never fatal
 # models and helpers; this file is the shell that mounts them. Not wrapped in
 # try/except like the two below — a finance router that fails to import is a
 # broken deploy, not a degraded one, and must not start serving 404s quietly.
+#
+# `cases` is absent because it left: /api/cases, /api/case-templates,
+# /api/casework, /api/tasks and /api/queue are served by googrlc/rsg-hermes-cases
+# on 8802, and the MCP bridge routes them there (HERMES_CASES_URL). Mounting a
+# second copy here would give those paths two implementations against one set of
+# tables, drifting apart from the day it was added.
 from hermes.routers import carriers as _carriers_router
-from hermes.routers import cases as _cases_router
 from hermes.routers import finance as _finance_router
 from hermes.routers import intake as _intake_router
 from hermes.routers import renewals as _renewals_router
@@ -121,7 +126,6 @@ from hermes.routers import renewals as _renewals_router
 app.include_router(_finance_router.router)
 app.include_router(_carriers_router.router)
 app.include_router(_renewals_router.router)
-app.include_router(_cases_router.router)
 app.include_router(_intake_router.router)
 
 # General document extractor (OCR-aware quote-field extraction) — POST /api/extract.

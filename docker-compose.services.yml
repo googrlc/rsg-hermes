@@ -28,7 +28,7 @@
 # contract; the hub is the default backend for everything unclaimed.
 #
 #   /api/commissions,/api/commission-rules,/api/commission-statements -> 8801
-#   /api/cases,/api/case-templates,/api/casework,/api/tasks,/api/queue -> 8802
+#   /api/cases,/api/case-templates,/api/casework,/api/tasks,/api/queue -> 8802  (googrlc/rsg-hermes-cases)
 #   /api/intake,/api/leads,/api/pipeline,/agency-intake,/api/extract   -> 8803
 #   /api/renewals                                                      -> 8804
 #   /api/carriers                                                      -> 8805
@@ -65,15 +65,6 @@ services:
     ports:
       - "8801:8801"
     command: ["hermes-api", "--host", "0.0.0.0", "--service", "finance"]
-
-  hermes-cases:
-    <<: *hermes-service
-    container_name: rsg-hermes-cases
-    environment:
-      HERMES_SERVICE: cases
-    ports:
-      - "8802:8802"
-    command: ["hermes-api", "--host", "0.0.0.0", "--service", "cases"]
 
   hermes-intake:
     <<: *hermes-service
@@ -124,14 +115,6 @@ services:
     profiles: ["workers"]
     stop_grace_period: 60s
     command: ["hermes", "--run-scheduler", "--scheduler-service", "intake",
-              "--scheduler-interval", "300", "--scheduler-batch", "10"]
-
-  hermes-cases-worker:
-    <<: *hermes-service
-    container_name: rsg-hermes-cases-worker
-    profiles: ["workers"]
-    stop_grace_period: 60s
-    command: ["hermes", "--run-scheduler", "--scheduler-service", "cases",
               "--scheduler-interval", "300", "--scheduler-batch", "10"]
 
   hermes-hub-worker:

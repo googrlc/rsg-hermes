@@ -30,7 +30,6 @@ EXECUTOR_MODULES = (
     "hermes.quotes.executor",
     "hermes.renewals.executor",
     "hermes.intake.executor",
-    "hermes.casework.executor",
     "hermes.command_center.intake_executor",
     "hermes.sync.opportunity_writeback",
 )
@@ -84,11 +83,47 @@ def _claimed_object_types() -> set[str]:
 
 def test_every_backed_off_object_type_is_claimed_by_some_executor():
     """A type in _OBJECT_TYPES with no executor is a job that fails, backs off, and
-    is then never retried by anyone."""
+    is then never retried by anyone.
+
+    Departed types are exempt from *this* codebase having an executor, but not
+    from the rule — their executor lives in the app repo that took them, and
+    `test_a_departed_type_is_not_retried_here` checks this scheduler has
+    correspondingly stopped retrying them. The two together are the same
+    guarantee the single assertion used to make.
+    """
+    from hermes.scheduler.runner import DEPARTED_OBJECT_TYPES
+
     claimed = _claimed_object_types()
     for object_type in R._OBJECT_TYPES:
+        if object_type in DEPARTED_OBJECT_TYPES:
+            continue
         assert object_type in claimed, (
             f"object_type {object_type!r} is backed off but no executor claims it"
+        )
+
+
+def test_a_departed_type_is_not_retried_here():
+    """Retrying is as much ownership as draining.
+
+    A scheduler that dead-letters a `case` row has decided another service's job
+    is finished; one that re-queues a row mid-write hands it back while the owner
+    still holds it. So a type whose executor left must also leave the unsplit
+    cycle's retry scope — the two must move together, and this is what fails if
+    only one of them does.
+    """
+    from hermes.scheduler.runner import DEPARTED_OBJECT_TYPES, HUB_OBJECT_TYPES
+
+    assert DEPARTED_OBJECT_TYPES, "nothing has departed; this test is vacuous"
+    for object_type in DEPARTED_OBJECT_TYPES:
+        assert object_type in R._OBJECT_TYPES, (
+            f"{object_type!r} left the queue contract entirely — the app that took "
+            "it still needs its backoff honoured"
+        )
+        assert object_type not in HUB_OBJECT_TYPES, (
+            f"the unsplit scheduler still retries {object_type!r} after its executor left"
+        )
+        assert object_type not in _claimed_object_types(), (
+            f"{object_type!r} is declared departed but an executor here still claims it"
         )
 
 

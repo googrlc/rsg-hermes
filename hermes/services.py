@@ -32,6 +32,22 @@ tests/test_services.py, along with the guarantee that the union of the split
 services serves exactly the routes the single app serves. A route that belongs
 to no service would 404 in a split deployment while working fine in the
 monolith, which is the kind of difference that only shows up in production.
+
+Apps that have left
+-------------------
+A service disappears from this registry when it stops being a process of this
+codebase and becomes its own repo. Two have:
+
+| app | repo | port |
+|---|---|---|
+| renewals | `googrlc/rsg-hermes-renewals` | 8804 |
+| cases | `googrlc/rsg-hermes-cases` | 8802 |
+
+Their ports stay reserved and the MCP bridge points at them
+(`HERMES_RENEWALS_URL`, `HERMES_CASES_URL`). What must NOT happen is a copy of
+their routes staying mounted here as a fallback: two implementations over one
+set of tables drift from the day the second one is added, and the failure is
+silent — whichever backend the caller reached decides which behaviour they got.
 """
 
 from __future__ import annotations
@@ -56,16 +72,8 @@ SERVICES: dict[str, ServiceSpec] = {
         path_prefixes=("/api/commissions", "/api/commission-rules", "/api/commission-statements"),
         port=8801,
     ),
-    "cases": ServiceSpec(
-        name="cases",
-        description="Cases, the tasks under them, case documents, and the AMS push queue",
-        router_modules=("hermes.routers.cases",),
-        path_prefixes=(
-            "/api/cases", "/api/case-templates", "/api/casework", "/api/tasks", "/api/queue",
-        ),
-        port=8802,
-        queue_object_types=("case", "task"),
-    ),
+    # "cases" is deliberately absent. It became its own repo — see the note at
+    # the bottom of this file. Port 8802 stays reserved for it.
     "intake": ServiceSpec(
         name="intake",
         description="Lead capture, the intake desk and queue, agency-intake drafting",

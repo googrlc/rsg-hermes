@@ -97,7 +97,8 @@ def _nowcerts_group(**overrides):
     clean = {"claimed": 0, "completed": 0, "failed": 0, "previews": []}
     targets = {
         "quote": "hermes.quotes.executor.run_quote_executor",
-        "casework": "hermes.casework.executor.run_casework_executor",
+        # No "casework": the cases service left, and with it the executor this
+        # cycle used to run. googrlc/rsg-hermes-cases drains `case`/`task` now.
         "opportunity_writeback": "hermes.sync.opportunity_writeback.run_opportunity_writeback_executor",
     }
     with ExitStack() as stack:
