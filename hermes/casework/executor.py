@@ -49,6 +49,34 @@ def _priority(v: Any) -> str:
     return _PRIORITY.get(str(v or "medium").strip().lower(), "Normal")
 
 
+class MissingDueDate(ValueError):
+    """A task cannot reach the AMS without a due date.
+
+    NowCerts requires ``due_date`` on InsertTask, and so does the AMS MCP's
+    insert_task_tool. We were never sending one — which is consistent with the
+    fact that no task has ever come back with a nowcerts_task_id.
+
+    Raised at STAGE time, not in the executor, so the gap surfaces to whoever is
+    pushing the task while they can still fix it, instead of becoming a failed
+    queue row discovered later. Deliberately not defaulted: a made-up due date on
+    a real client task is a date somebody will work to.
+    """
+
+
+def _due_date(row: dict[str, Any], *, what: str) -> str:
+    """The AMS-bound due date for a case/task row. Required, never invented."""
+    from hermes_core.due_dates import normalize_due
+
+    raw = row.get("due_at") or row.get("due_date")
+    due = normalize_due(raw) if raw else None
+    if not due:
+        raise MissingDueDate(
+            f"{what} has no due date, and NowCerts requires one on every task. "
+            "Set a due date on it and push again."
+        )
+    return due
+
+
 def map_case_to_task(case: dict[str, Any]) -> dict[str, Any]:
     """NowCerts InsertTask body (snake_case) from an agency_crm_cases row."""
     return {
@@ -59,6 +87,7 @@ def map_case_to_task(case: dict[str, Any]) -> dict[str, Any]:
         "insured_database_id": case.get("insured_database_id"),
         "policy_number": case.get("policy_number"),
         "category_name": str(case.get("case_type") or "Service").title(),
+        "due_date": _due_date(case, what=f"case {case.get('case_number') or case.get('id')}"),
     }
 
 
@@ -72,6 +101,7 @@ def map_task_to_task(task: dict[str, Any], *, insured_database_id: str, policy_n
         "insured_database_id": insured_database_id,
         "policy_number": policy_number,
         "category_name": "Task",
+        "due_date": _due_date(task, what=f"task {task.get('title') or task.get('id')}"),
     }
 
 
