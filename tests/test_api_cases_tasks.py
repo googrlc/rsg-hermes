@@ -35,6 +35,7 @@ class FakeSupa:
     def __init__(self, tables=None):
         self.tables = dict(tables or {})
         self.tables.setdefault("agency_crm_users", list(USERS))
+        self.updates: list[tuple] = []
         self._n = 0
 
     def select(self, table, *, columns="*", params=None, limit=100):
@@ -52,6 +53,14 @@ class FakeSupa:
         row = {"id": f"{table[:3]}-{self._n}", **payload}
         self.tables.setdefault(table, []).append(row)
         return dict(row)
+
+    def update(self, table, record_id, payload):
+        self.updates.append((table, record_id, dict(payload)))
+        for r in self.tables.get(table, []):
+            if str(r.get("id")) == str(record_id):
+                r.update(payload)
+                return dict(r)
+        return {"id": record_id, **payload}
 
 
 def _patch(supa):
@@ -86,6 +95,7 @@ def test_create_case_ok(client):
             "owner_email": "gretchen@risksolutionsgroup.net",
             "created_by_email": "lamar@risksolutionsgroup.net",
             "insured_name": "Acme LLC",
+            "insured_database_id": "11111111-2222-3333-4444-555555555555",
         })
     assert r.status_code == 200
     case = r.json()["case"]
@@ -101,6 +111,7 @@ def test_create_case_rejects_unknown_owner(client):
     with _patch(supa):
         r = client.post("/api/cases", json={
             "title": "x", "owner_email": "lamar@risk-solutionsgroup.com",  # .com — not in users
+            "insured_database_id": "11111111-2222-3333-4444-555555555555",
         })
     assert r.status_code == 400
     assert "agency_crm_users" in r.json()["detail"]
@@ -160,3 +171,48 @@ def test_list_tasks_scoped_to_case(client):
     with _patch(supa):
         r = client.get("/api/tasks", params={"case_id": "case-1"})
     assert r.status_code == 200 and r.json()["count"] == 1
+
+
+# --- the insured a case cannot reach the AMS without --------------------------
+# 12 of 13 cases on this system had no insured_database_id, so no task on them
+# could ever be pushed: NowCerts attaches a task to a client. Optional-and-absent
+# made that invisible until push time, long after whoever opened the case had
+# moved on.
+
+def test_a_case_cannot_be_opened_without_its_insured(client):
+    supa = FakeSupa()
+    with _patch(supa):
+        r = client.post("/api/cases", json={
+            "title": "COI request", "case_type": "service",
+            "owner_email": "gretchen@risksolutionsgroup.net",
+        })
+    assert r.status_code == 422, r.text
+    assert "insured_database_id" in r.text
+
+
+def test_nothing_is_written_when_the_insured_is_missing(client):
+    """A refused create must not leave a half-made case or a stray event."""
+    supa = FakeSupa()
+    with _patch(supa):
+        client.post("/api/cases", json={
+            "title": "COI request", "owner_email": "gretchen@risksolutionsgroup.net",
+        })
+    assert supa.tables.get("agency_crm_cases", []) == []
+    assert supa.tables.get("agency_crm_case_events", []) == []
+
+
+def test_an_existing_case_can_be_linked_to_its_insured_afterwards(client):
+    """The cases that predate the rule need a route to becoming pushable, and a
+    case opened before the client was known needs one too."""
+    supa = FakeSupa({"agency_crm_cases": [
+        {"id": "c1", "title": "A", "status": "open", "case_type": "service"},
+    ]})
+    with _patch(supa):
+        r = client.patch("/api/cases/c1", json={
+            "insured_database_id": "11111111-2222-3333-4444-555555555555",
+        })
+    assert r.status_code == 200, r.text
+    assert any(
+        u[2].get("insured_database_id") == "11111111-2222-3333-4444-555555555555"
+        for u in supa.updates
+    ), supa.updates

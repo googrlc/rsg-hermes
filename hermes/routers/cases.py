@@ -43,6 +43,22 @@ _CASE_DOC_MAX_BYTES = 25 * 1024 * 1024
 
 
 class CaseCreateRequest(BaseModel):
+    """A new case. The insured is required, and that is the point.
+
+    A case with no ``insured_database_id`` can never reach the AMS: NowCerts
+    attaches a task to a client, so ``stage_task_job`` refuses one without it.
+    Twelve of the thirteen cases on this system had none, which is why no task
+    has ever carried a nowcerts_task_id — not the missing due date, this.
+
+    Optional-and-usually-absent made the failure invisible until push time, long
+    after whoever opened the case had moved on. Required here, it is a question
+    asked while the answer is still at hand.
+
+    A case genuinely opened before the client is known can be linked afterwards
+    with PATCH /api/cases/{id} — the alternative to asking now is a case that
+    silently cannot do the one thing it exists for.
+    """
+
     title: str
     case_type: str = "service"          # renewal|service|claims|marketing|endorsement|...
     description: str | None = None
@@ -50,7 +66,7 @@ class CaseCreateRequest(BaseModel):
     owner_email: str
     created_by_email: str | None = None
     insured_name: str | None = None
-    insured_database_id: str | None = None   # NowCerts insured guid
+    insured_database_id: str                 # NowCerts insured guid — required
     policy_number: str | None = None
     due_at: str | None = None
 
@@ -614,6 +630,10 @@ class CaseUpdateRequest(BaseModel):
     due_at: str | None = None
     case_type: str | None = None
     insured_name: str | None = None
+    # Linking a case to its AMS client after the fact. Required at creation, but
+    # the cases that predate that rule need a way to become pushable, and a case
+    # opened before the client was known needs one too.
+    insured_database_id: str | None = None
     policy_number: str | None = None
 
 
