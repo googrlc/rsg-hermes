@@ -172,11 +172,22 @@ class InboxReport:
     errors: list[str] = field(default_factory=list)
     dry_run: bool = False
     configured: bool = True
+    # The drop folder does not exist. Distinct from "exists and is empty":
+    # WebDAV answers 404 with an empty listing, so without this check a folder
+    # nobody ever created reports "0 files" every night, forever, and looks
+    # exactly like a quiet month. That is the silent-exclusion failure this
+    # codebase has already paid for twice.
+    folder_missing: bool = False
 
     @property
     def message(self) -> str:
         if not self.configured:
             return "commission inbox: Nextcloud is not configured — nothing polled"
+        if self.folder_missing:
+            return (
+                f"commission inbox: the drop folder {self.folder!r} does not exist — "
+                "no statement can ever arrive until it is created"
+            )
         return (
             f"commission inbox ({'dry-run' if self.dry_run else 'live'}) {self.folder}: "
             f"seen={self.seen} staged={self.staged} duplicate={self.duplicates} "
@@ -189,7 +200,8 @@ class InboxReport:
             "duplicates": self.duplicates, "failed": self.failed,
             "ignored": self.ignored, "batches": self.batches,
             "errors": self.errors, "dry_run": self.dry_run,
-            "configured": self.configured, "message": self.message,
+            "configured": self.configured,
+            "folder_missing": self.folder_missing, "message": self.message,
         }
 
 
@@ -230,9 +242,21 @@ def poll_inbox(
         log.info("%s", report.message)
         return report
 
+    # Ask whether the folder is there before asking what is in it: WebDAV answers
+    # a missing folder with the same empty listing as an empty one.
+    try:
+        if not nextcloud.path_exists(report.folder):
+            report.folder_missing = True
+            log.warning("%s", report.message)
+            return report
+    except Exception as exc:  # noqa: BLE001 — an unreachable share is not a crash
+        log.exception("commission inbox: could not reach %s", report.folder)
+        report.errors.append(f"reach {report.folder}: {exc}")
+        return report
+
     try:
         entries = nextcloud.list_dir(report.folder)
-    except Exception as exc:  # noqa: BLE001 — an unreachable share is not a crash
+    except Exception as exc:  # noqa: BLE001
         log.exception("commission inbox: could not list %s", report.folder)
         report.errors.append(f"list {report.folder}: {exc}")
         return report

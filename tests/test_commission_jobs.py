@@ -50,13 +50,18 @@ class FakeSupa:
 
 
 class FakeNextcloud:
-    def __init__(self, files: dict[str, bytes], *, configured: bool = True):
+    def __init__(self, files: dict[str, bytes], *, configured: bool = True,
+                 folder_exists: bool = True):
         self.files = files
         self._configured = configured
+        self._folder_exists = folder_exists
         self.reads: list[str] = []
 
     def is_configured(self):
         return self._configured
+
+    def path_exists(self, path):
+        return self._folder_exists
 
     def list_dir(self, path):
         return [
@@ -162,6 +167,29 @@ def test_an_unconfigured_share_says_so_rather_than_reporting_zero():
 
     assert report.configured is False
     assert "not configured" in report.message
+
+
+def test_a_missing_drop_folder_is_not_an_empty_one():
+    """Caught on the first live run: the folder had never been created.
+
+    WebDAV answers a missing folder with the same empty listing as an empty one,
+    so without this check the poller reports "0 files" every night forever and
+    reads exactly like a quiet month. Nobody would learn that no statement could
+    ever arrive.
+    """
+    report = jobs.poll_inbox(FakeSupa(), nextcloud=FakeNextcloud({}, folder_exists=False))
+
+    assert report.folder_missing is True
+    assert report.seen == 0
+    assert "does not exist" in report.message
+    assert "no statement can ever arrive" in report.message
+
+
+def test_an_empty_folder_that_exists_reports_plainly():
+    report = jobs.poll_inbox(FakeSupa(), nextcloud=FakeNextcloud({}))
+
+    assert report.folder_missing is False
+    assert "seen=0" in report.message
 
 
 def test_a_dry_run_reads_nothing():
