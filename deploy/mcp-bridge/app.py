@@ -31,6 +31,54 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 # Backend rsg-hermes FastAPI. Default assumes this bridge joins the external
 # `hermes-shared` docker network and reaches the api container by name.
 HERMES_API_URL = os.environ.get("HERMES_API_URL", "http://rsg-hermes-api:8787").rstrip("/")
+
+# --- per-app backends ---------------------------------------------------------
+# The hermes backend is split into one process per app on the box (finance
+# :8801, cases :8802, intake :8803, renewals :8804, carriers :8805) so a slow
+# call in one cannot stall the others. Each tool below should reach the app that
+# owns its route.
+#
+# OFF BY DEFAULT: every path falls back to HERMES_API_URL unless the app's env
+# var is set, so this bridge behaves exactly as it does today until someone
+# opts an app in. One variable moves one app; unsetting moves it back.
+#
+#   HERMES_FINANCE_URL   HERMES_CASES_URL   HERMES_INTAKE_URL
+#   HERMES_RENEWALS_URL  HERMES_CARRIERS_URL
+#
+# CAREFUL: /api/command-center/* are HUB routes despite their names.
+# command-center/renewals is the cockpit's renewal list, served by the hub, NOT
+# by the renewals service — routing it on the word "renewals" would 404 the
+# tool. That is why this table matches on full path prefixes and the
+# command-center ones are simply absent.
+_APP_BACKENDS: list[tuple[str, str | None]] = [
+    ("/api/commission-statements", os.environ.get("HERMES_FINANCE_URL")),
+    ("/api/commission-rules", os.environ.get("HERMES_FINANCE_URL")),
+    ("/api/commissions", os.environ.get("HERMES_FINANCE_URL")),
+    ("/api/case-templates", os.environ.get("HERMES_CASES_URL")),
+    ("/api/casework", os.environ.get("HERMES_CASES_URL")),
+    ("/api/cases", os.environ.get("HERMES_CASES_URL")),
+    ("/api/tasks", os.environ.get("HERMES_CASES_URL")),
+    ("/api/queue", os.environ.get("HERMES_CASES_URL")),
+    ("/api/pipeline", os.environ.get("HERMES_INTAKE_URL")),
+    ("/api/leads", os.environ.get("HERMES_INTAKE_URL")),
+    ("/api/intake", os.environ.get("HERMES_INTAKE_URL")),
+    ("/api/renewals", os.environ.get("HERMES_RENEWALS_URL")),
+    ("/api/carrier-appetite", os.environ.get("HERMES_CARRIERS_URL")),
+]
+# Longest prefix first, so /api/commission-statements is not swallowed by
+# /api/commissions.
+_APP_ROUTES: list[tuple[str, str]] = sorted(
+    ((prefix, base.rstrip("/")) for prefix, base in _APP_BACKENDS if base),
+    key=lambda pair: -len(pair[0]),
+)
+
+
+def _backend_for(path: str) -> str:
+    """Which service serves this path. HERMES_API_URL unless an app opted in."""
+    for prefix, base in _APP_ROUTES:
+        if path == prefix or path.startswith(prefix + "/") or path.startswith(prefix + "?"):
+            return base
+    return HERMES_API_URL
 # Optional bearer the bridge presents to hermes-api (only if hermes-api enforces one).
 # Absent => run anonymously (fine; most hermes-api routes are unauthenticated).
 # Present but EMPTY => a misconfiguration, refused at import.
@@ -75,7 +123,7 @@ def _check_auth(request: Request) -> bool:
 
 # --- backend call helper ----------------------------------------------------
 def _api(method: str, path: str, body: dict | None = None, params: dict | None = None) -> Any:
-    url = HERMES_API_URL + path
+    url = _backend_for(path) + path
     if params:
         clean = {k: v for k, v in params.items() if v is not None}
         if clean:
@@ -363,7 +411,9 @@ def _mcp_tools() -> list[dict[str, Any]]:
 
 # --- tool handlers ----------------------------------------------------------
 def _run_ping(args: dict[str, Any]) -> str:
-    return f"rsg-hermes bridge reachable. backend={HERMES_API_URL}. echo={args.get('message', 'pong')}"
+    routed = ", ".join(f"{p}->{b}" for p, b in _APP_ROUTES) or "none (all on the hub)"
+    return (f"rsg-hermes bridge reachable. backend={HERMES_API_URL}. "
+            f"per-app routes: {routed}. echo={args.get('message', 'pong')}")
 
 
 def _run_hermes_dispatch(args: dict[str, Any]) -> str:
