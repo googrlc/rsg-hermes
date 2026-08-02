@@ -72,10 +72,21 @@ def test_month_key_falls_back_to_the_transaction_date():
 
 @pytest.mark.parametrize("code,kind", [
     ("New Business", "new"), ("Renewal", "renewal"),
-    ("Credit Endorsement", "adjustment"), ("Chargeback", "adjustment"),
-    ("Cancellation", "adjustment"), ("Something Else", "other"), ("", "other"),
+    # A credit endorsement is a premium credit, not a policy endorsement — the
+    # more specific rule has to win over the bare "endorsement" one.
+    ("Credit Endorsement", "adjustment"), ("Endorsement", "endorsement"),
+    ("Chargeback", "chargeback"), ("Cancellation", "cancel"),
+    ("Cancel Pro Rate", "cancel"), ("Reinstatement", "reinstatement"),
+    # "new" is a substring of "renewal"; the renewal rule must be reached first.
+    ("Renewal Business", "renewal"), ("New", "new"),
+    ("Something Else", "other"), ("", "other"),
 ])
 def test_transaction_type_normalization(code, kind):
+    """The vocabulary matches what commission_transactions already holds.
+
+    This path is the only writer now, so a value it invents here would show up
+    beside 182 rows that name the same event differently.
+    """
     assert st.normalize_transaction_type(code) == kind
 
 
@@ -479,8 +490,20 @@ def test_excluded_totals_rows_are_named_so_a_human_can_check():
     assert any("55.00" in w for w in warnings)
 
 
-def test_legacy_xls_and_pdf_are_refused_with_a_route_forward():
+def test_legacy_xls_is_refused_with_a_route_forward():
     _, xls = st.parse_statement(b"x", "s.xls")
     assert any("re-save as .xlsx" in w for w in xls)
-    _, pdf = st.parse_statement(b"x", "s.pdf")
-    assert any("/api/extract" in w for w in pdf)
+
+
+def test_an_unopenable_pdf_says_so_rather_than_blaming_the_build():
+    """A corrupt file and a missing library are different problems.
+
+    One is re-exported by whoever holds the statement; the other is fixed on the
+    box. Reporting either as the other sends them to the wrong place.
+    """
+    lines, warnings, method = st.parse_upload(b"not a pdf at all", "s.pdf")
+    assert lines == []
+    assert method == st.METHOD_PDF_TEXT
+    assert any("could not be opened as a PDF" in w for w in warnings)
+    assert not any("PyMuPDF is not installed" in w for w in warnings)
+    assert any("export it as CSV" in w for w in warnings)

@@ -460,6 +460,33 @@ def main() -> int:
         help="Earliest policy effective_date to ledger (YYYY-MM-DD; default 2026-01-01). "
              "Excludes future-effective + older-than-since business.",
     )
+    # --- The commission runner: what keeps the surface true after the seed ---
+    parser.add_argument(
+        "--commission-reconcile",
+        action="store_true",
+        help="Link orphaned statement lines to ledger rows, then re-derive actual/status "
+             "for every affected row. Idempotent. Run nightly AFTER --sync-commissions: a "
+             "row whose term just ended changes status with no new money arriving.",
+    )
+    parser.add_argument(
+        "--commission-inbox",
+        action="store_true",
+        help="Stage new carrier statements from the Nextcloud drop folder "
+             "(HERMES_COMMISSION_INBOX). STAGES ONLY — never commits money; each file "
+             "lands as a pending_review batch for a named human to approve.",
+    )
+    parser.add_argument(
+        "--commission-watchdog",
+        action="store_true",
+        help="Check the commission pipeline actually ran (ledger freshness), that coverage "
+             "still balances, and what work is piling up. Alerts Slack only on a problem; "
+             "exits non-zero when it finds one.",
+    )
+    parser.add_argument(
+        "--commission-runner-dry-run",
+        action="store_true",
+        help="Preview any of the three commission runner jobs with zero writes",
+    )
     # --- Hermes Operations Center commands ---
     # --- Document library (Supermemory + index; freeform internal refs) ---
     parser.add_argument(
@@ -722,6 +749,49 @@ def main() -> int:
             for err in comm_result.errors[:50]:
                 print(f"- {err}")
         return 0 if comm_result.ok else 1
+
+    # --- The commission runner ---
+    # Three jobs behind one Supabase connection so a nightly line can chain them
+    # (`--commission-inbox --commission-reconcile`) without paying for two runs.
+    if args.commission_inbox or args.commission_reconcile or args.commission_watchdog:
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes.commissions import jobs as commission_jobs
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+
+        dry_run = args.commission_runner_dry_run
+        exit_code = 0
+
+        # Order is deliberate: a statement staged this run is not committed by
+        # it, but linking before the rollup means anything approved since the
+        # last run is counted on this pass rather than the next.
+        if args.commission_inbox:
+            inbox = commission_jobs.poll_inbox(supa, dry_run=dry_run)
+            print(inbox.message)
+            for err in inbox.errors[:20]:
+                print(f"- {err}")
+
+        if args.commission_reconcile:
+            recon = commission_jobs.nightly_reconcile(supa, dry_run=dry_run)
+            print(recon.message)
+            for err in recon.errors[:20]:
+                print(f"- {err}")
+
+        if args.commission_watchdog:
+            health = commission_jobs.watchdog(supa)
+            print(health.message)
+            for problem in health.problems:
+                print(f"- {problem.kind}: {problem.detail}")
+            if not dry_run:
+                commission_jobs.alert(health)
+            if not health.ok:
+                exit_code = 1
+
+        return exit_code
 
     # --- Syncback: enrich one NowCerts insured from an ACTIVE account ---
     # --- Email triage (requires the provider client + Supabase) ---
