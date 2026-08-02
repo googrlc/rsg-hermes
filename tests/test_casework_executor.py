@@ -241,3 +241,81 @@ def test_a_due_date_is_never_invented():
     assert "agency_today" not in src and "due_in_days" not in src, (
         "_due_date must not manufacture a date when the row has none"
     )
+
+
+# --- who a pushed task is assigned to -----------------------------------------
+# insert_task_tool takes assigned_to as NowCerts agent UUIDs. We store the id on
+# agency_crm_users and read it; we never resolve a person by name at write time.
+# A near-miss on a name puts a client's task on the wrong person's list, where it
+# looks handled. Unassigned is visible; misassigned is not.
+
+class _UsersSupa:
+    def __init__(self, rows): self.rows = rows; self.queries = []
+    def select(self, table, *, columns="*", params=None, limit=100):
+        self.queries.append((table, dict(params or {})))
+        if table != "agency_crm_users":
+            return []
+        want = (params or {}).get("email", "").replace("eq.", "")
+        return [r for r in self.rows if r.get("email") == want]
+
+
+def test_a_known_user_resolves_to_their_stored_agent_id():
+    supa = _UsersSupa([{"email": "g@rsg.net", "nowcerts_agent_id": "agent-uuid-1"}])
+    assert cw.nowcerts_agent_id(supa, "g@rsg.net") == "agent-uuid-1"
+
+
+def test_a_user_without_an_agent_id_resolves_to_none_not_a_guess():
+    supa = _UsersSupa([{"email": "g@rsg.net", "nowcerts_agent_id": None}])
+    assert cw.nowcerts_agent_id(supa, "g@rsg.net") is None
+
+
+def test_an_unknown_user_resolves_to_none():
+    assert cw.nowcerts_agent_id(_UsersSupa([]), "nobody@rsg.net") is None
+
+
+def test_no_email_does_not_hit_the_database():
+    supa = _UsersSupa([])
+    assert cw.nowcerts_agent_id(supa, None) is None
+    assert supa.queries == []
+
+
+def test_a_lookup_failure_leaves_the_task_unassigned_rather_than_failing_the_push():
+    class Boom:
+        def select(self, *a, **k): raise RuntimeError("postgrest down")
+    assert cw.nowcerts_agent_id(Boom(), "g@rsg.net") is None
+
+
+def test_assigned_to_is_attached_only_when_the_agent_is_known():
+    base = {"title": "Call client"}
+    assert cw.with_assignee(base, "agent-uuid-1") == {"title": "Call client",
+                                                      "assigned_to": ["agent-uuid-1"]}
+    # Unknown => the key is absent entirely, not present-and-empty. An empty list
+    # could read as "explicitly assigned to nobody" and clear an existing owner.
+    assert cw.with_assignee(base, None) == {"title": "Call client"}
+    assert "assigned_to" not in cw.with_assignee(base, None)
+
+
+def test_with_assignee_does_not_mutate_the_payload_it_is_given():
+    base = {"title": "Call client"}
+    cw.with_assignee(base, "agent-uuid-1")
+    assert base == {"title": "Call client"}
+
+
+def test_the_assignee_is_looked_up_only_by_email_never_by_name():
+    """get_agent_id_by_name_tool would match a person by display name, and a
+    near-miss there is a silently misassigned client task.
+
+    Asserted on what the function actually queries rather than on its source
+    text — the docstring names the tool it avoids, so grepping the source fails
+    on its own explanation.
+    """
+    supa = _UsersSupa([{"email": "g@rsg.net", "nowcerts_agent_id": "agent-uuid-1"}])
+    cw.nowcerts_agent_id(supa, "g@rsg.net")
+
+    assert len(supa.queries) == 1, "one lookup, not a name-resolution round trip"
+    table, params = supa.queries[0]
+    assert table == "agency_crm_users"
+    assert params.get("email") == "eq.g@rsg.net"
+    assert not any("name" in k for k in params), (
+        f"resolved using {sorted(params)} — assignment must key on the stored id"
+    )

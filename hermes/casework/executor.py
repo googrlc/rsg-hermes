@@ -53,13 +53,14 @@ class MissingDueDate(ValueError):
     """A task cannot reach the AMS without a due date.
 
     NowCerts requires ``due_date`` on InsertTask, and so does the AMS MCP's
-    insert_task_tool. We were never sending one — which is consistent with the
-    fact that no task has ever come back with a nowcerts_task_id.
+    insert_task_tool. We were never sending one — consistent with the live data:
+    18 tasks, not one carrying a nowcerts_task_id, and no failed queue rows
+    either. The push has never worked.
 
-    Raised at STAGE time, not in the executor, so the gap surfaces to whoever is
-    pushing the task while they can still fix it, instead of becoming a failed
-    queue row discovered later. Deliberately not defaulted: a made-up due date on
-    a real client task is a date somebody will work to.
+    Raised at STAGE time, not in the executor, so the gap reaches whoever is
+    pushing the task while they can still fix it, rather than becoming a failed
+    queue row found later. Deliberately not defaulted: a made-up due date on a
+    real client task is a date somebody works to.
     """
 
 
@@ -75,6 +76,37 @@ def _due_date(row: dict[str, Any], *, what: str) -> str:
             "Set a due date on it and push again."
         )
     return due
+
+
+def nowcerts_agent_id(supa, email: str | None) -> str | None:
+    """The NowCerts agent UUID for a CRM user, or None.
+
+    Read from agency_crm_users.nowcerts_agent_id — stored once, exactly. There is
+    deliberately no name-matching fallback: get_agent_id_by_name_tool would
+    resolve a person by display name, and a near-miss there assigns a client's
+    task to the wrong agent silently. An unassigned task is visible and gets
+    picked up; a misassigned one looks done to everybody except the client.
+
+    None means push the task unassigned, which insert_task_tool allows.
+    """
+    if not email:
+        return None
+    try:
+        rows = supa.select(
+            "agency_crm_users", columns="email,nowcerts_agent_id",
+            params={"email": f"eq.{email}"}, limit=1,
+        )
+    except Exception:  # noqa: BLE001 — an unresolvable assignee must not fail the push
+        log.exception("could not read the NowCerts agent id for %s", email)
+        return None
+    return (rows[0].get("nowcerts_agent_id") if rows else None) or None
+
+
+def with_assignee(payload: dict[str, Any], agent_id: str | None) -> dict[str, Any]:
+    """Attach assigned_to only when the agent is known exactly."""
+    if agent_id:
+        payload = {**payload, "assigned_to": [agent_id]}
+    return payload
 
 
 def map_case_to_task(case: dict[str, Any]) -> dict[str, Any]:
