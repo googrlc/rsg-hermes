@@ -136,3 +136,41 @@ def test_push_tools_stage_rather_than_claiming_to_write() -> None:
     for name in ("ams_push_task", "ams_push_case"):
         desc = (next(t for t in TOOLS if t["name"] == name).get("description") or "").lower()
         assert "stage" in desc or "queue" in desc, f"{name} does not say it only stages"
+
+
+def test_the_bridge_still_carries_the_tools_production_was_running() -> None:
+    """The repo's copy of this file drifted BEHIND the box for a long time.
+
+    The deployed bridge had seven tools that had been added straight onto the box
+    and never committed — add_deck_card, case_progress, list_cases,
+    list_deck_boards, list_intake_queue, list_nextcloud_folder,
+    ensure_nextcloud_folders — plus the SSE plumbing. Three merged PRs edited
+    this file while it was not the artifact that runs, so none of them reached
+    production, and deploying the repo over the box would have deleted seven
+    working tools.
+
+    This list is what production was serving when the two were reconciled. It is
+    not a wish list: dropping any of these is a capability the agent loses.
+    """
+    names = {t["name"] for t in TOOLS}
+    was_live = {
+        "add_deck_card", "ams_create_insured", "ams_search_insured",
+        "ams_upsert_policy", "carrier_appetite", "case_progress",
+        "commission_rules", "complete_task", "create_case", "create_client",
+        "create_task", "draft_intake", "ensure_nextcloud_folders",
+        "file_to_nextcloud", "hermes_dispatch", "list_cases", "list_commissions",
+        "list_deck_boards", "list_documents", "list_intake_queue",
+        "list_nextcloud_folder", "list_renewals", "list_tasks", "ping",
+        "retention_scan", "save_document", "sync_health",
+    }
+    missing = was_live - names
+    assert not missing, (
+        f"these were live on the box and are gone from the repo: {sorted(missing)}"
+    )
+
+
+def test_the_sse_plumbing_survives() -> None:
+    """The deployed bridge answers streamable-HTTP clients. The repo copy had no
+    such handling, so replacing the box with it would have broken every caller
+    that negotiates text/event-stream."""
+    assert "_wants_sse" in SRC, "SSE negotiation is missing from the bridge"
