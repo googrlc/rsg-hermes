@@ -30,9 +30,14 @@
 #   /api/commissions,/api/commission-rules,/api/commission-statements -> 8801
 #   /api/cases,/api/case-templates,/api/casework,/api/tasks,/api/queue -> 8802
 #   /api/intake,/api/leads,/api/pipeline,/agency-intake,/api/extract   -> 8803
-#   /api/renewals                                                      -> 8804
+#   /api/renewals, /renewal-center                                     -> 8804  (see below)
 #   /api/carriers                                                      -> 8805
 #   everything else                                                    -> 8787
+#
+# 8804 is still the renewals backend, but nothing in THIS repo serves it any
+# more — googrlc/rsg-hermes-renewals owns that port and brings its own
+# container. The line stays because the routing contract is unchanged from the
+# proxy's point of view; only the image behind it moved.
 
 x-hermes-service: &hermes-service
   build:
@@ -84,14 +89,10 @@ services:
       - "8803:8803"
     command: ["hermes-api", "--host", "0.0.0.0", "--service", "intake"]
 
-  hermes-renewals:
-    <<: *hermes-service
-    container_name: rsg-hermes-renewals
-    environment:
-      HERMES_SERVICE: renewals
-    ports:
-      - "8804:8804"
-    command: ["hermes-api", "--host", "0.0.0.0", "--service", "renewals"]
+  # renewals moved out to googrlc/rsg-hermes-renewals, which now owns
+  # /api/renewals on 8804 and drains the `renewal` queue. Do not re-add a
+  # service here: two containers cannot hold the name or the port, and two
+  # workers on one object_type race for the same jobs.
 
   hermes-carriers:
     <<: *hermes-service
@@ -110,13 +111,9 @@ services:
   #
   # Disabled two ways, exactly like the unsplit scheduler: the "workers" profile
   # AND SCHEDULER_ENABLED. Starting the split API does not start the workers.
-  hermes-renewals-worker:
-    <<: *hermes-service
-    container_name: rsg-hermes-renewals-worker
-    profiles: ["workers"]
-    stop_grace_period: 60s
-    command: ["hermes", "--run-scheduler", "--scheduler-service", "renewals",
-              "--scheduler-interval", "300", "--scheduler-batch", "10"]
+  # The renewal executor left with the rest of renewals. Its replacement is the
+  # `renewals-worker` service in googrlc/rsg-hermes-renewals, and only one of
+  # the two may ever exist — see the note above hermes-carriers.
 
   hermes-intake-worker-svc:
     <<: *hermes-service

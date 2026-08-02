@@ -80,14 +80,6 @@ SERVICES: dict[str, ServiceSpec] = {
         port=8803,
         queue_object_types=("intake", "intake_ams", "intake_crm"),
     ),
-    "renewals": ServiceSpec(
-        name="renewals",
-        description="The renewal worklist and the corrections applied on top of it",
-        router_modules=("hermes.routers.renewals",),
-        path_prefixes=("/api/renewals",),
-        port=8804,
-        queue_object_types=("renewal",),
-    ),
     "carriers": ServiceSpec(
         name="carriers",
         description="Carrier appetite read (see rsg-carrierhub for the other one)",

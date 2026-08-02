@@ -1,9 +1,13 @@
-"""Editing, completing and deleting the work surfaces: tasks, cases, renewals.
+"""Editing, completing and deleting the work surfaces: tasks and cases.
 
 Tasks could be created and patched; cases could only be created and closed —
 and closing was broken. Nothing could be deleted, so a case opened by mistake
-stayed on the board forever. Renewals were read-only, which meant a premium that
-came over wrong stayed wrong and every number derived from it inherited that.
+stayed on the board forever.
+
+The renewal half of this file went with the renewals surface to
+googrlc/rsg-hermes-renewals (`tests/test_renewal_edits.py`). It covered
+PATCH /api/renewals/{id} — both premiums editable, increase_percentage never
+written, the risk_status enum — and that route is no longer served here.
 """
 
 from __future__ import annotations
@@ -18,7 +22,6 @@ from hermes_app import deps
 
 CASE_ID = "3f2b1a90-11c2-4d3e-9f0a-5b6c7d8e9f01"
 TASK_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
-REN_ID = "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f"
 LAMAR = "lamar@risksolutionsgroup.net"
 
 CASE = {"id": CASE_ID, "case_number": "REN-CPP4471902-20270301", "title": "Renewal — 1Asfg LLC",
@@ -171,44 +174,3 @@ def test_delete_where_refuses_an_empty_filter():
     with pytest.raises(ValueError):
         SupabaseClient.delete_where(supa, "agency_crm_tasks", filters={})
 
-
-# ── Renewals ─────────────────────────────────────────────────────────────────
-
-def test_both_premiums_are_editable(c_supa):
-    c, supa = c_supa
-    supa.select.return_value = [{"id": REN_ID, "premium_current": 4200}]
-    supa.update.return_value = {"id": REN_ID, "premium_current": 4500, "premium_renewal": 5100}
-    r = c.patch(f"/api/renewals/{REN_ID}",
-                json={"premium_current": 4500, "premium_renewal": 5100})
-    assert r.status_code == 200
-    table, rec_id, payload = supa.update.call_args.args
-    assert (table, rec_id) == ("project_85_renewals", REN_ID)
-    assert payload["premium_current"] == 4500 and payload["premium_renewal"] == 5100
-
-
-def test_the_change_percentage_is_never_written(c_supa):
-    """increase_percentage is a generated column — it follows the premiums."""
-    c, supa = c_supa
-    supa.select.return_value = [{"id": REN_ID}]
-    supa.update.return_value = {"id": REN_ID}
-    c.patch(f"/api/renewals/{REN_ID}", json={"premium_renewal": 5100, "increase_percentage": 2})
-    assert "increase_percentage" not in supa.update.call_args.args[2]
-
-
-def test_risk_status_is_checked_against_the_enum(c_supa):
-    c, supa = c_supa
-    supa.select.return_value = [{"id": REN_ID}]
-    r = c.patch(f"/api/renewals/{REN_ID}", json={"risk_status": "SPICY"})
-    assert r.status_code == 400
-    assert "CRITICAL" in r.json()["detail"]
-
-
-def test_risk_status_is_normalised_before_it_reaches_the_enum(c_supa):
-    """The column is a Postgres enum in caps; a dropdown value should not have to
-    be typed in caps to be accepted."""
-    c, supa = c_supa
-    supa.select.return_value = [{"id": REN_ID}]
-    supa.update.return_value = {"id": REN_ID}
-    r = c.patch(f"/api/renewals/{REN_ID}", json={"risk_status": "at_risk"})
-    assert r.status_code == 200
-    assert supa.update.call_args.args[2]["risk_status"] == "AT_RISK"

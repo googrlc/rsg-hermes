@@ -17,6 +17,14 @@ from hermes.services import ALL, SERVICES, create_app
 
 FASTAPI_BUILTINS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
+#: Queue object_types drained by a service that no longer lives in this repo.
+#: `renewal` left with googrlc/rsg-hermes-renewals, which declares it in that
+#: repo's own ServiceSpec. Listed explicitly rather than dropped from
+#: hermes_core.queue.BACKED_OFF_OBJECT_TYPES, because the retry/backoff policy is
+#: still shared and both repos read it — and because "nothing here drains this"
+#: should be a stated fact somebody had to write down, not an absence.
+DRAINED_ELSEWHERE = {"renewal"}
+
 
 def _routes(app) -> set[tuple[str, str]]:
     return {
@@ -148,10 +156,19 @@ def test_every_queue_object_type_is_owned_by_exactly_one_service() -> None:
             )
             owner[object_type] = name
 
-    unowned = set(BACKED_OFF_OBJECT_TYPES) - set(owner)
+    unowned = set(BACKED_OFF_OBJECT_TYPES) - set(owner) - DRAINED_ELSEWHERE
     assert not unowned, (
         f"no service drains {sorted(unowned)} — those jobs would queue forever "
         "once the scheduler is split per service"
+    )
+
+    # A type cannot be claimed here AND out of repo: that is the two-drainer race
+    # this test exists to prevent, just spread across two codebases where neither
+    # side can see it.
+    double_claimed = DRAINED_ELSEWHERE & set(owner)
+    assert not double_claimed, (
+        f"{sorted(double_claimed)} is drained by a service here AND by an external "
+        "repo — two workers on one object_type race for the same rows"
     )
 
 

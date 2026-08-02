@@ -116,11 +116,9 @@ from hermes.routers import carriers as _carriers_router
 from hermes.routers import cases as _cases_router
 from hermes.routers import finance as _finance_router
 from hermes.routers import intake as _intake_router
-from hermes.routers import renewals as _renewals_router
 
 app.include_router(_finance_router.router)
 app.include_router(_carriers_router.router)
-app.include_router(_renewals_router.router)
 app.include_router(_cases_router.router)
 app.include_router(_intake_router.router)
 
