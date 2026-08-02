@@ -341,3 +341,54 @@ release, which is the whole point.
 The agent and dispatcher, the cron/scheduler, the shared jobs, and the CRM hub
 routes it already serves. It stays the runner — and, with `packages/rsg-hermes-core`,
 the place the shared bottom layer is authored and published from.
+
+### Correction: what the AMS MCP actually exposes (2026-08-01)
+
+An earlier note here — and PR #312's description — said NowCerts has an MCP with
+**95 tools including `insert_task_tool`**, and proposed migrating each app onto
+its module's tools. That was read off
+`rsg-cptintake/nowcerts-read-connector/momentum-tool-contracts.json`, which is a
+**catalogue of the Momentum API**, not a description of a running server.
+
+Calling the live doors with the real bearer says otherwise:
+
+| door | tools | what it is |
+|---|---|---|
+| `rsg-nowcerts-read` :8791 / :8082 | 7 | `ping`, `list_insureds`, `list_policies`, `get_insured`, `get_policy`, `search_insureds`, `nowcerts_get` — **read only**, as the container name says |
+| `rsg-intake-gate` :8790 | 6 | the intake workspace, plus an **approval-gated** write flow: `prepare_nowcerts_write` → `get_nowcerts_proposal` → `approve_nowcerts_write` |
+
+**There is no deployed `insert_task_tool`.** Task, policy and insured writes go
+through the REST `NowCertsClient` as they always have. The only MCP write path
+is intake's proposal/approval flow, which is intake-shaped rather than a general
+writer.
+
+So "each app reaches its NowCerts module through an MCP tool" is a direction,
+not something available to switch to today. What it needs first is write tools
+on the AMS door — which, per the standing architecture, means *adding tools to
+the bridge* rather than giving each app its own AMS connection.
+
+What survives the correction unchanged, because none of it depended on the tool
+list:
+
+- the **due date** (PR #313) — NowCerts' REST InsertTask requires it too, and we
+  were never sending one; the live data shows 0 of 18 tasks with an AMS id
+- the **stored agent id** (PR #314) — assignment needs an exact id whichever
+  path does the writing, and name matching is unreliable either way
+- `AmsClient` itself, which is the right client for the read door now and the
+  write door later
+
+Probing the real doors also found two bugs in `AmsClient` that no amount of
+unit testing against imagined responses would have:
+
+1. **A json-only `Accept` is refused outright** by a streamable-HTTP server:
+   "Not Acceptable: Client must accept both application/json and
+   text/event-stream". Every call to the intake gate failed before reaching a
+   tool.
+2. **A tool can fail with no JSON-RPC error at all** — the envelope succeeds and
+   the result carries `isError: true` with the reason in its content. That is
+   what an unknown tool name returns. A caller checking the status code *and*
+   the error object still saw success and read the failure text as data.
+
+Both are fixed and pinned by tests. The second is precisely the failure mode
+this client exists to prevent, and it survived the first round because the
+tests only knew the two shapes I had imagined.

@@ -120,3 +120,48 @@ def test_an_empty_tool_name_is_refused_before_any_call() -> None:
     with patch("urllib.request.urlopen", side_effect=AssertionError("should not call")):
         with pytest.raises(ValueError):
             _client().call("")
+
+
+# --- the two shapes only calling the real doors revealed ----------------------
+
+def test_a_tool_failure_reported_inside_the_result_still_raises() -> None:
+    """The third failure shape, and the sneakiest.
+
+    A tool can fail with no JSON-RPC error at all: the envelope succeeds and the
+    result carries isError=true with the reason in its content. Asking the live
+    door for a tool it does not have returns exactly this. A caller checking the
+    status code AND the error object still sees success — and reads the failure
+    text as data.
+    """
+    body = {"jsonrpc": "2.0", "id": 1, "result": {
+        "content": [{"type": "text", "text": "Unknown tool: get_agent_list_tool"}],
+        "isError": True,
+    }}
+    with patch("urllib.request.urlopen", return_value=_Resp(body)):
+        with pytest.raises(AmsError) as exc:
+            _client().call("get_agent_list_tool")
+    assert "Unknown tool" in str(exc.value), "the tool's own reason must survive"
+
+
+def test_a_result_without_iserror_is_returned_normally() -> None:
+    """isError absent or false is a real answer; only true is a failure."""
+    body = {"jsonrpc": "2.0", "id": 1,
+            "result": {"content": [{"type": "text", "text": "ok"}], "isError": False}}
+    with patch("urllib.request.urlopen", return_value=_Resp(body)):
+        assert _client().call("list_insureds")["content"][0]["text"] == "ok"
+
+
+def test_both_content_types_are_accepted_or_streamable_servers_refuse() -> None:
+    """The intake gate answers a json-only Accept with
+    'Not Acceptable: Client must accept both application/json and
+    text/event-stream' — every call failed before reaching a tool."""
+    seen = {}
+
+    def _capture(req, timeout=None):
+        seen["accept"] = req.get_header("Accept")
+        return _Resp({"jsonrpc": "2.0", "id": 1, "result": {}})
+
+    with patch("urllib.request.urlopen", side_effect=_capture):
+        _client().call("list_policies")
+    assert "application/json" in seen["accept"]
+    assert "text/event-stream" in seen["accept"], seen["accept"]

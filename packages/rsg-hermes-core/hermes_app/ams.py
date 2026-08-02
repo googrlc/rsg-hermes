@@ -39,6 +39,16 @@ from typing import Any
 DEFAULT_TIMEOUT = 60.0  # a NowCerts password grant alone can take ~26s
 
 
+def _text_of(result: dict[str, Any]) -> str:
+    """The human-readable part of an MCP result, for error messages."""
+    parts = [
+        c.get("text", "")
+        for c in (result.get("content") or [])
+        if isinstance(c, dict) and c.get("text")
+    ]
+    return " ".join(parts).strip() or str(result)[:200]
+
+
 class AmsError(RuntimeError):
     """A NowCerts MCP call failed, or was refused."""
 
@@ -75,7 +85,14 @@ class AmsClient:
         payload = {"jsonrpc": "2.0", "id": self._id, "method": method}
         if params is not None:
             payload["params"] = params
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        # Both types, or a streamable-HTTP MCP server refuses the request outright:
+        # "Not Acceptable: Client must accept both application/json and
+        # text/event-stream". The intake gate does exactly this. Sending only JSON
+        # made every call to it fail before it reached a tool.
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         req = urllib.request.Request(
@@ -107,7 +124,19 @@ class AmsClient:
                     "missing or wrong — this is NOT an empty result."
                 )
             raise AmsError(f"{method}: AMS door returned error {code}: {msg}")
-        return body.get("result") if isinstance(body, dict) else body
+
+        result = body.get("result") if isinstance(body, dict) else body
+
+        # The THIRD failure shape, and the sneakiest. A tool can fail without any
+        # JSON-RPC error at all: the envelope succeeds and the result carries
+        # isError=true with the reason in its content. Asking the live door for a
+        # tool it does not have returns exactly this —
+        #   {"result": {"content": [{"text": "Unknown tool: x"}], "isError": true}}
+        # so a caller that only checks the status code AND the error object still
+        # sees success, and reads the failure text as data.
+        if isinstance(result, dict) and result.get("isError"):
+            raise AmsError(f"{method}: tool reported failure: {_text_of(result)}")
+        return result
 
     def list_tools(self) -> list[dict[str, Any]]:
         """Every tool the AMS door exposes. Useful for checking a tool name
