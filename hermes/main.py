@@ -219,22 +219,6 @@ def main() -> int:
              "regardless of queue state. Forces dry-run — never writes.",
     )
     parser.add_argument(
-        "--casework-executor",
-        action="store_true",
-        help="Process approved case/task jobs (agency_crm case/task → NowCerts task) from outbound_sync_queue",
-    )
-    parser.add_argument(
-        "--casework-executor-limit",
-        type=int,
-        default=1,
-        help="Max approved case/task jobs to process this run",
-    )
-    parser.add_argument(
-        "--casework-executor-dry-run",
-        action="store_true",
-        help="Preview case/task NowCerts task payloads without claiming or writing",
-    )
-    parser.add_argument(
         "--proactive-cases",
         action="store_true",
         help="Find slipped work (renewals with no case, stalled cases, overdue tasks). "
@@ -277,10 +261,11 @@ def main() -> int:
     parser.add_argument(
         "--scheduler-service",
         default=os.environ.get("HERMES_SERVICE") or None,
-        help="Run the worker for ONE service (renewals, intake, cases, hub): its "
-             "own lock, only its object types, only its executors. Omit for the "
+        help="Run the worker for ONE service (renewals, intake, hub): its own "
+             "lock, only its object types, only its executors. Omit for the "
              "single scheduler that drives everything. Run one or the other "
-             "against a queue, never both.",
+             "against a queue, never both. 'cases' is not here — that service "
+             "left; googrlc/rsg-hermes-cases runs its own drainer.",
     )
     parser.add_argument(
         "--scheduler-health",
@@ -1062,24 +1047,6 @@ def main() -> int:
                 f"insuredDatabaseId_present={pv.get('insured_database_id_present')}"
             )
             print(f"    resolved payload: {pv.get('resolved_payload')}")
-        return 0 if summary["failed"] == 0 else 1
-
-    if args.casework_executor or args.casework_executor_dry_run:
-        from hermes.casework.executor import run_casework_executor
-
-        summary = run_casework_executor(
-            limit=args.casework_executor_limit,
-            dry_run=args.casework_executor_dry_run,
-        )
-        mode = "dry-run" if args.casework_executor_dry_run else "live"
-        print(
-            f"Casework executor ({mode}): claimed={summary['claimed']} "
-            f"completed={summary['completed']} failed={summary['failed']}"
-        )
-        for pv in summary.get("previews", []):
-            t = pv.get("task", {})
-            print(f"  PREVIEW {pv.get('object_type')} {pv.get('target')} title={t.get('title')!r} "
-                  f"insured={t.get('insured_database_id')} category={t.get('category_name')}")
         return 0 if summary["failed"] == 0 else 1
 
     if args.proactive_cases or args.proactive_cases_commit:

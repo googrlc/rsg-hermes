@@ -2,7 +2,7 @@
 
 Every ``interval`` seconds, ONE lease holder runs a cycle:
   reclaim stalled → requeue/dead-letter failed (backoff) → renewal executor →
-  intake executor → quote / casework / opportunity-writeback executors →
+  intake executor → quote / opportunity-writeback executors →
   emit structured metrics → alert #systems-check on problems.
 
 Graceful shutdown: SIGTERM/SIGINT stop the loop AFTER the current cycle finishes,
@@ -19,7 +19,13 @@ import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from hermes_core.queue import DESTINATION_NOWCERTS, QUEUE_TABLE
+from hermes_core.queue import (
+    BACKED_OFF_OBJECT_TYPES,
+    DESTINATION_NOWCERTS,
+    OBJECT_TYPE_CASE,
+    OBJECT_TYPE_TASK,
+    QUEUE_TABLE,
+)
 from hermes.scheduler.locks import LOCKS_TABLE, SchedulerLock
 from hermes.scheduler.retry import reclaim_stalled, requeue_or_deadletter
 
@@ -31,6 +37,21 @@ log = logging.getLogger(__name__)
 LOCK_NAME = "executor_scheduler"
 DEFAULT_INTERVAL_SECONDS = 300
 DEFAULT_BATCH = 10
+
+# What the unsplit cycle still owns: every backed-off type minus the ones whose
+# service left this codebase.
+#
+# `BACKED_OFF_OBJECT_TYPES` is the *queue contract* — which types get a backoff
+# at all — and `case`/`task` still belong in it, because the cases repo's worker
+# sets and honours `scheduled_for` exactly as before. What changed is who
+# applies it. Derived by subtraction rather than by listing what is left, so a
+# type added to the contract is covered here on the day it is added: the
+# alternative is a hand-kept list that silently stops backing off a new type,
+# which is the failure this module already suffered once.
+DEPARTED_OBJECT_TYPES = (OBJECT_TYPE_CASE, OBJECT_TYPE_TASK)
+HUB_OBJECT_TYPES = tuple(
+    t for t in BACKED_OFF_OBJECT_TYPES if t not in DEPARTED_OBJECT_TYPES
+)
 
 _stop = threading.Event()
 
@@ -75,7 +96,8 @@ def service_executors(service: str) -> tuple[str, ...]:
     return {
         "renewals": ("renewal",),
         "intake": ("intake",),
-        "cases": ("casework",),
+        # "cases" is gone: googrlc/rsg-hermes-cases runs its own drainer
+        # (`hermes-cases-worker`) over `case` and `task` rows.
         "hub": ("quote", "opportunity_writeback"),
     }.get(service, ())
 
@@ -172,10 +194,6 @@ def _run_executor(name: str, *, supa: "SupabaseClient", batch: int) -> dict[str,
         from hermes.quotes.executor import run_quote_executor
 
         return run_quote_executor(supa=supa, nowcerts=nc, limit=batch)
-    if name == "casework":
-        from hermes.casework.executor import run_casework_executor
-
-        return run_casework_executor(supa=supa, nowcerts=nc, limit=batch)
     if name == "opportunity_writeback":
         from hermes.sync.opportunity_writeback import run_opportunity_writeback_executor
 
@@ -195,7 +213,6 @@ def run_one_cycle(
     runs `run_service_cycle` per service instead — do not run both against the
     same queue.
     """
-    from hermes.casework.executor import run_casework_executor
     from hermes.intake.executor import run_intake_executor
     from hermes.quotes.executor import run_quote_executor
     from hermes.renewals.executor import run_executor
@@ -209,8 +226,15 @@ def run_one_cycle(
     metrics: dict[str, Any] = {"acquired": True, "started_at": started.isoformat(), "owner": lock.owner}
     problems: list[str] = []
     try:
-        metrics["stalled"] = reclaim_stalled(supa, now=started)
-        metrics["retry"] = requeue_or_deadletter(supa, now=started)
+        # Scoped to the types this cycle still executes. `case` and `task` left
+        # with the cases repo, and retrying is as much ownership as draining is:
+        # a scheduler that dead-letters a `case` row has decided another
+        # service's job is finished, and one that re-queues a row mid-write
+        # hands it back while the owner is still holding it. Defaulting to every
+        # backed-off type would have kept doing both, invisibly, with the
+        # executor gone.
+        metrics["stalled"] = reclaim_stalled(supa, now=started, object_types=HUB_OBJECT_TYPES)
+        metrics["retry"] = requeue_or_deadletter(supa, now=started, object_types=HUB_OBJECT_TYPES)
         lock.renew()
 
         metrics["renewal"] = run_executor(supa=supa, limit=batch)
@@ -218,7 +242,7 @@ def run_one_cycle(
         metrics["intake"] = run_intake_executor(supa=supa, limit=batch)
         lock.renew()
 
-        # NowCerts-bound executors — the ONLY thing that moves quote / casework /
+        # NowCerts-bound executors — the ONLY thing that moves quote and
         # opportunity-writeback jobs to the AMS. One shared client so
         # a cycle authenticates to NowCerts once. Guarded as a group: NowCertsClient()
         # raises when credentials are absent, and that must not cost us the
@@ -228,8 +252,6 @@ def run_one_cycle(
 
             nc = NowCertsClient()
             metrics["quote"] = run_quote_executor(supa=supa, nowcerts=nc, limit=batch)
-            lock.renew()
-            metrics["casework"] = run_casework_executor(supa=supa, nowcerts=nc, limit=batch)
             lock.renew()
             metrics["opportunity_writeback"] = run_opportunity_writeback_executor(
                 supa=supa, nowcerts=nc, limit=batch
@@ -247,7 +269,7 @@ def run_one_cycle(
             problems.append(f"renewal executor: {metrics['renewal']['failed']} failed this pass")
         if metrics["intake"].get("failed"):
             problems.append(f"intake executor: {metrics['intake']['failed']} failed this pass")
-        for name in ("quote", "casework", "opportunity_writeback"):
+        for name in ("quote", "opportunity_writeback"):
             if metrics.get(name, {}).get("failed"):
                 problems.append(f"{name} executor: {metrics[name]['failed']} failed this pass")
     except Exception as exc:  # noqa: BLE001 — a bad cycle must not kill the loop

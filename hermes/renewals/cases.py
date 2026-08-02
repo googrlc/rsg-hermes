@@ -5,9 +5,15 @@ event date), the idempotency that identity buys — a repeated Hermes command
 returns the same case rather than opening a second one — and the 90/60/30 task
 set the desk works through.
 
-Everything generic about cases and tasks lives in ``hermes/casework/store.py``
-and is re-exported below, because callers on this side have always reached for
-them here and the split should not be their problem.
+Everything generic about cases and tasks lives in ``hermes_core.casestore`` and
+is re-exported below, because callers on this side have always reached for them
+here and the split should not be their problem.
+
+That store is in the shared core rather than in either app for a reason:
+``agency_crm_cases`` and ``agency_crm_tasks`` are written by renewals, by the
+hub agent, by the team queue and by the cases service — which now lives in
+googrlc/rsg-hermes-cases. A store owned by any one of them would have shipped
+that app's schema into all the others.
 """
 
 from __future__ import annotations

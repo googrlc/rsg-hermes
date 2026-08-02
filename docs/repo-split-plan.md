@@ -103,7 +103,7 @@ routers built in Phase 2.
 |---|---|---|---|---|---|
 | 1 | `routers/finance.py` | **`rsg-commission-tracker`** (exists) | `commissions/*`, `jobs/commission_*`, `sync/commission_sync` | 12 | Outbound only (`ams`, `core`, `overrides`); 1 inbound. Nearly free. |
 | 2 | `routers/carriers.py` | **`rsg-carrierhub`** (exists) | `carriers.py` (68 lines) | 1 | carrierhub already serves its own `/api/carriers`. Mostly a deletion — see the collision note below. |
-| 3 | `routers/cases.py` | **new** — no existing repo | `casework/*` + the generic half of `renewals/cases.py` | 21 | Blocked on the `renewals/cases.py` split below. |
+| 3 | `routers/cases.py` | **`rsg-hermes-cases`** — ✅ **DONE 2026-08-02** | `casework/*` + the generic half of `renewals/cases.py` | 21 | Extracted, deployed, and deleted from here. |
 | 4 | `routers/intake.py` | **`rsg-cptintake`** (exists) | `intake/*`, `command_center/{extract,ocr,quote_extract,synthesis,intake_executor,submission,validators,review,router}`, `operations/intake_worker` | 13 | `sync.opportunity_*` imports `intake.opportunities` 6× — CRM pipeline code misfiled under intake; move it to the hub first. |
 | 5 | `routers/renewals.py` | **new** — no existing repo | `renewals/*`, `operations/renewal_tracker` | 6 | Most central. Extract last. |
 | — | `api.py` (stays) | `rsg-hermes` + **`rsg-agency-portal`** for the UI | the hub: app shell, clients/opportunities/quotes/policies/documents/deck, `ams`, `sync`, `book_sync`, `scheduler`, `agent`, `commands`, `proposals` | 65 | The remainder, not an extraction. |
@@ -265,9 +265,10 @@ every core commit would be the monolith again, with more steps.
 
 ## Open questions to settle before Phase 5
 
-- **`/api/tasks` ownership.** It touches both `casework` and `renewals`
-  (renewal tasks vs case tasks). Either cases owns tasks and renewals calls it,
-  or tasks become their own service. Needs a decision before cases is cut.
+- ~~**`/api/tasks` ownership.**~~ **Settled 2026-08-02: cases owns tasks.** A
+  task hangs off a case and both delete paths share `_log_deletion`, so the data
+  model had already decided it; a third service would have owned one table and
+  half a foreign key. Renewals reaches tasks through the cases service.
 - **The shared Supabase schema.** All domains read and write the same tables
   (`canonical_policies`, `agency_crm_*`, `outbound_sync_queue`,
   `renewal_candidates`). Separate repos do **not** separate the database.
@@ -300,6 +301,30 @@ production yet.** Every container on the box — `rsg-hermes-cases`,
 `rsg-hermes-renewals`, and the rest — is built from `rsg-hermes`. The app repos
 exist, are green, and are not on the box at all. So today's split is
 *process-level*: one codebase in six processes.
+
+> **Closed for two of six (2026-08-02).** `rsg-hermes-renewals` and
+> `rsg-hermes-cases` now run from their own images on the box
+> (`rsg-hermes-renewals:local`, `rsg-hermes-cases:local`), and the bridge routes
+> to both (`HERMES_RENEWALS_URL`, `HERMES_CASES_URL`). Finance, intake, carriers
+> and the hub are still hub-image processes.
+>
+> What the cases cutover added to the recipe, beyond the renewals one:
+>
+> - **Prove the image before destroying what it replaces.** Run the new image
+>   under a different name on a loopback port against the real `.env` first. A
+>   container that boots but cannot read Supabase is indistinguishable from a
+>   healthy one on `/health`, and the verify step comes *after* the old one is
+>   gone.
+> - **The box's GitHub access is per-repo.** `ssh -T git@github.com` says
+>   `Permission denied`, yet `/opt/rsg-hermes` pulls — via a repo-local
+>   `core.sshCommand` pointing at a **deploy key scoped to that one repo**.
+>   Aimed at another repo it authenticates and then says `Repository not found`.
+>   One fine-grained PAT beats a keypair per repo.
+> - **Two `deploy/` directories are one compose project.** Compose derives the
+>   project name from the directory basename, so `/opt/rsg-hermes-cases/deploy`
+>   and `/opt/rsg-hermes-renewals/deploy` were both project `deploy` — each
+>   seeing the other's container as an orphan, with compose itself suggesting
+>   `--remove-orphans`. Every app repo's compose needs an explicit `name:`.
 
 That makes the sequence this document implied — flip traffic, then delete from
 the hub — wrong. `hermes/routers/cases.py` is not the hub's spare copy; it is

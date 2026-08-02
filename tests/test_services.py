@@ -137,7 +137,14 @@ def test_compose_publishes_the_ports_the_registry_declares() -> None:
 def test_every_queue_object_type_is_owned_by_exactly_one_service() -> None:
     """A worker per service means each object_type needs exactly one drainer.
     Two services draining the same type race for the same rows; zero means the
-    queue silently fills."""
+    queue silently fills.
+
+    "Exactly one" now spans repos: a departed app's types are drained by the
+    repo that took them, so they are owned, just not here. The accounting still
+    has to balance — every backed-off type is either claimed by a service in
+    this registry or declared departed, and never both.
+    """
+    from hermes.scheduler.runner import DEPARTED_OBJECT_TYPES
     from hermes_core.queue import BACKED_OFF_OBJECT_TYPES
 
     owner: dict[str, str] = {}
@@ -148,7 +155,16 @@ def test_every_queue_object_type_is_owned_by_exactly_one_service() -> None:
             )
             owner[object_type] = name
 
-    unowned = set(BACKED_OFF_OBJECT_TYPES) - set(owner)
+    # A departed type reappearing here is a service being re-added to the hub
+    # while another repo still drains it — two drainers, in different
+    # codebases, which is the one arrangement nothing at runtime can detect.
+    both = set(DEPARTED_OBJECT_TYPES) & set(owner)
+    assert not both, (
+        f"{sorted(both)} is claimed by {sorted(owner[t] for t in both)} here AND "
+        "declared departed — the app repo that took it is still draining it"
+    )
+
+    unowned = set(BACKED_OFF_OBJECT_TYPES) - set(owner) - set(DEPARTED_OBJECT_TYPES)
     assert not unowned, (
         f"no service drains {sorted(unowned)} — those jobs would queue forever "
         "once the scheduler is split per service"
