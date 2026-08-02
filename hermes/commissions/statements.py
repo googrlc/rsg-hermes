@@ -67,6 +67,23 @@ METHOD_PDF_OCR = "pdf_ocr"
 # checked the numbers against the document.
 CONFIRM_REQUIRED_METHODS = frozenset({METHOD_PDF_TEXT, METHOD_PDF_OCR})
 
+
+def requires_source_confirmation(method: Any, *, is_ocr: Any = False) -> bool:
+    """Does a batch read this way need an explicit human attestation to commit?
+
+    Matched on the ``pdf`` PREFIX rather than against the exact set, because the
+    set is not the whole truth about what is in the table: the Slack-drop poller
+    that predates this code wrote ``extraction_method='pdf'``, and two such rows
+    are on file right now. An exact-match gate would wave those straight through
+    the one check they most need — the whole point is that nobody can read a
+    column off a PDF and be sure, whatever the row calls the method.
+
+    ``is_ocr`` is honoured independently: a batch flagged as machine-read needs
+    confirming even if its method string says something else entirely.
+    """
+    text = str(method or "").strip().lower()
+    return text.startswith("pdf") or bool(is_ocr)
+
 # Columns Postgres computes. Sending any of them raises 428C9 "cannot insert a
 # non-DEFAULT value". Listed per table so a new one is a one-line change rather
 # than another live failure — this codebase has now been bitten twice, by
@@ -579,7 +596,8 @@ class StagedBatch:
         True for anything read out of a PDF. Not a judgement about this
         particular parse — it is a property of the format.
         """
-        return self.extraction_method in CONFIRM_REQUIRED_METHODS
+        return requires_source_confirmation(self.extraction_method,
+                                            is_ocr=self.is_ocr)
 
     @property
     def approvable(self) -> bool:
@@ -721,7 +739,7 @@ def stage_statement(
             "the parse is wrong; do not approve"
         )
 
-    needs_confirmation = method in CONFIRM_REQUIRED_METHODS
+    needs_confirmation = requires_source_confirmation(method)
     if needs_confirmation and lines:
         warnings.append(
             "read from a PDF — the column mapping is inferred, so every amount "
@@ -822,7 +840,7 @@ def commit_statement(
         )
 
     method = str(batch.get("extraction_method") or "")
-    if method in CONFIRM_REQUIRED_METHODS and not confirmed_source:
+    if requires_source_confirmation(method, is_ocr=batch.get("is_ocr")) and not confirmed_source:
         raise ValueError(
             f"this batch was read from a PDF ({method}) — its columns are inferred, "
             "so it cannot be committed until the approver confirms the parsed "

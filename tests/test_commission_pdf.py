@@ -169,3 +169,33 @@ class _Link:
 
 class _Roll:
     message = "rollup: examined=0"
+
+
+def test_a_legacy_pdf_batch_still_needs_confirmation():
+    """Found live: the Slack-drop poller that predates this code wrote
+    extraction_method='pdf', and two such rows are on file. An exact-match gate
+    would wave them through the one check they most need.
+    """
+    supa = FakeSupa({**_batch(st.METHOD_PDF_TEXT), "extraction_method": "pdf"})
+
+    with pytest.raises(ValueError, match="confirmed_source"):
+        st.commit_statement(supa, batch_id="b1", approved_by="lamar@example.com")
+
+
+def test_an_ocr_flagged_batch_needs_confirmation_whatever_it_calls_its_method():
+    """is_ocr is honoured on its own: a machine-read batch is a machine-read
+    batch even if the method string says csv."""
+    supa = FakeSupa({**_batch(st.METHOD_CSV), "is_ocr": True})
+
+    with pytest.raises(ValueError, match="confirmed_source"):
+        st.commit_statement(supa, batch_id="b1", approved_by="lamar@example.com")
+
+
+@pytest.mark.parametrize("method,is_ocr,expected", [
+    ("csv", False, False), ("xlsx", False, False),
+    ("pdf", False, True), ("pdf_text", False, True), ("pdf_ocr", False, True),
+    ("PDF", False, True), (" pdf_text ", False, True),
+    ("csv", True, True), (None, False, False), ("", False, False),
+])
+def test_which_methods_require_confirmation(method, is_ocr, expected):
+    assert st.requires_source_confirmation(method, is_ocr=is_ocr) is expected
