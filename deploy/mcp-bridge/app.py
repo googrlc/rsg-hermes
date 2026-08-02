@@ -13,6 +13,7 @@ any write, so the human-approval gate is preserved end to end.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -21,8 +22,10 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+import asyncio
+
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 log = logging.getLogger("rsg-hermes-mcp")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -105,6 +108,39 @@ RSG_INTAKE_API_KEY = os.environ.get("RSG_INTAKE_API_KEY", "").strip()
 AUTH_TOKEN = os.environ.get("API_SERVER_KEY", "").strip()
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
+# Versions we can actually speak. Ordered newest-first; on initialize we echo the
+# client's version when it is one of these, instead of always answering
+# 2024-11-05. Strict clients (ChatGPT's connector) refuse a server that answers a
+# negotiation with a version they did not offer.
+# Where this server appears to be, from the client's point of view. Derived from
+# the request rather than hardcoded: the same bridge is reachable on :443 and on
+# :18446, and a challenge that points at the port the client did NOT use sends it
+# to an address its network may not even allow out. MCP_PUBLIC_BASE_URL pins it if
+# a deployment ever needs that.
+_PUBLIC_BASE_OVERRIDE = (os.environ.get("MCP_PUBLIC_BASE_URL") or "").rstrip("/")
+
+
+def _base_url(request: "Request | None" = None) -> str:
+    if _PUBLIC_BASE_OVERRIDE:
+        return _PUBLIC_BASE_OVERRIDE
+    if request is not None:
+        host = (request.headers.get("host") or "").strip()
+        if host:
+            proto = (request.headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
+            return f"{proto}://{host}"
+    return "https://hermes-gretch-u69864.vm.elestio.app"
+
+SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+
+# Bearer-gated, so a wildcard origin grants nothing on its own — and the connector
+# UIs preflight from a browser origin, which fails closed without these.
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID",
+    "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version",
+    "Access-Control-Max-Age": "86400",
+}
 SERVER_NAME = "rsg-hermes-mcp-bridge"
 SERVER_VERSION = "1.0.0"
 HTTP_TIMEOUT = 45
@@ -113,12 +149,36 @@ app = FastAPI(title="rsg-hermes MCP Bridge", docs_url=None, redoc_url=None)
 
 
 def _check_auth(request: Request) -> bool:
+    """Accept the same secret however the client chooses to present it.
+
+    Previously only `Authorization: Bearer <key>` was honoured. Clients configured
+    with an "API key" auth scheme rather than a bearer one send `X-API-Key`, or a
+    bare `Authorization: <key>` with no scheme — both were rejected, and the
+    failure is indistinguishable from a wrong key, which sends you hunting for a
+    credential problem that does not exist.
+
+    This widens the accepted envelope, not the secret: it is the same single token
+    either way. Compared with compare_digest so a wrong key cannot be recovered a
+    character at a time from response timing.
+    """
     if not AUTH_TOKEN:
         return True
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip() == AUTH_TOKEN
-    return False
+
+    candidates: list[str] = []
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth:
+        # "Bearer xxx" / "Token xxx" / bare "xxx"
+        parts = auth.split(None, 1)
+        if len(parts) == 2 and parts[0].lower() in ("bearer", "token"):
+            candidates.append(parts[1].strip())
+        else:
+            candidates.append(auth)
+    for header in ("x-api-key", "x-api-token", "api-key", "x-auth-token"):
+        value = (request.headers.get(header) or "").strip()
+        if value:
+            candidates.append(value)
+
+    return any(hmac.compare_digest(c, AUTH_TOKEN) for c in candidates)
 
 
 # --- backend call helper ----------------------------------------------------
@@ -219,6 +279,38 @@ def _mcp_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "list_deck_boards",
+            "description": (
+                "List Nextcloud Deck boards and their lists (stacks), with a card count per "
+                "list. Use this before add_deck_card when you are unsure of the exact board or "
+                "list name — names are matched case-insensitively but must otherwise be right "
+                "(the default board's list is 'To Do')."
+            ),
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+        {
+            "name": "add_deck_card",
+            "description": (
+                "Add a card to a Nextcloud Deck board via POST /api/deck/cards. Use for shared "
+                "team work that belongs on a board rather than in the CRM task queue — "
+                "create_task is for CRM/case work with an assignee and a daily list; this is for "
+                "the kanban boards. Board and list are given by NAME. Idempotent on title within "
+                "the list: re-adding the same title is a no-op (created=false)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "board": {"type": "string", "description": "Board name, e.g. 'Welcome to Nextcloud Deck!'. Case-insensitive."},
+                    "stack": {"type": "string", "description": "List/column name on that board, e.g. 'To Do'. Case-insensitive. Defaults to 'To Do'."},
+                    "title": {"type": "string", "description": "Card title (deduped within the list)."},
+                    "description": {"type": "string", "description": "Optional card body."},
+                    "duedate": {"type": "string", "description": "Optional ISO-8601 due date, e.g. '2026-07-28T17:00:00+00:00'."},
+                },
+                "required": ["board", "title"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "create_task",
             "description": (
                 "Create/assign a task under a case via POST /api/tasks. Use to give Gretchen "
@@ -240,6 +332,52 @@ def _mcp_tools() -> list[dict[str, Any]]:
                     "due_at": {"type": "string", "description": "Optional ISO due date/time, e.g. '2026-07-24' or '2026-07-24T09:00:00Z'."},
                 },
                 "required": ["case_id", "title"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "list_cases",
+            "description": (
+                "Open cases with checklist progress — how far through each is, whether every "
+                "required task is done (can_close), and how many are still blocking. Read-only."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Filter by status (default 'open')."},
+                    "case_type": {"type": "string", "description": "Filter by type, e.g. renewal, onboarding, service."},
+                    "limit": {"type": "integer", "description": "Max cases (default 50)."},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "case_progress",
+            "description": (
+                "One case's checklist state: tasks done vs total, required tasks outstanding, and "
+                "whether it can be closed. Omit case_id to get every open case that is BLOCKED, "
+                "with the specific task titles stopping each one. Read-only."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "Case uuid. Omit for all blocked cases."},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "list_intake_queue",
+            "description": (
+                "Intake submissions waiting on a human, oldest first, plus how many days the "
+                "oldest has been sitting and any recent failures. Read-only."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "description": "Max rows (default 50)."}},
+                "required": [],
                 "additionalProperties": False,
             },
         },
@@ -282,11 +420,48 @@ def _mcp_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "list_documents",
-            "description": "List filed documents (Nextcloud-backed) via GET /api/documents (read-only).",
+            "description": "List searchable document-index rows for one client or internal folder (read-only).",
             "inputSchema": {
                 "type": "object",
-                "properties": {"folder": {"type": "string", "description": "Optional folder filter."}},
+                "properties": {
+                    "space": {"type": "string", "enum": ["client", "internal"]},
+                    "name": {"type": "string", "description": "Client account name or internal folder name."},
+                },
+                "required": ["space", "name"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "list_nextcloud_folder",
+            "description": "List a real Nextcloud WebDAV folder with existence read-back (read-only).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative folder path; empty means archive root."},
+                },
                 "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "ensure_nextcloud_folders",
+            "description": (
+                "Preview or idempotently create exact Nextcloud folder paths. "
+                "confirm=false returns requires_confirmation=true; set confirm=true only "
+                "after the human approves the exact paths. Returns per-path read-back."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "maxItems": 100,
+                    },
+                    "confirm": {"type": "boolean", "description": "Only true after exact human approval."},
+                },
+                "required": ["paths"],
                 "additionalProperties": False,
             },
         },
@@ -305,7 +480,16 @@ def _mcp_tools() -> list[dict[str, Any]]:
             "description": "Upload a binary file (PDF) to the client's Nextcloud folder via POST /api/nextcloud/upload.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"payload": {"type": "object", "description": "Upload fields: title, account_name, content_base64, content_type (default application/pdf)."}},
+                "properties": {
+                    "payload": {
+                        "type": "object",
+                        "description": (
+                            "Upload fields: title, account_name, line_type "
+                            "(commercial|personal), category, content_base64, "
+                            "content_type (application/pdf)."
+                        ),
+                    }
+                },
                 "required": ["payload"],
                 "additionalProperties": False,
             },
@@ -350,14 +534,14 @@ def _mcp_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "carrier_appetite",
-            "description": "Carrier appetite reference — which carriers RSG can place a risk with, by line of business, state, and class code (read-only) via GET /api/carrier-appetite. Use for 'who writes this?', 'carrier fit for X', 'what carriers do we have for GL in TX'. A carrier absent from the results is NOT a declination — the table is a reference, so confirm with the underwriter before telling anyone a risk can't be placed.",
+            "description": "Carrier appetite reference — which carriers RSG can place a risk with, by line of business, state, and class code (read-only) via GET /api/carrier-appetite. Use for 'who writes this?', 'carrier fit for X', 'what carriers do we have for GL in TX'.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "carrier": {"type": "string", "description": "Partial carrier name filter."},
-                    "state": {"type": "string", "description": "2-letter state filter, e.g. 'TX'. Nationwide ('ALL') appointments always match."},
+                    "state": {"type": "string", "description": "2-letter state filter, e.g. 'TX'."},
                     "lob": {"type": "string", "description": "Line of business filter (partial), e.g. 'General Liability'."},
-                    "naics": {"type": "string", "description": "NAICS/class code filter, matched against the row's class_codes."},
+                    "naics": {"type": "string", "description": "Exact NAICS code filter."},
                     "limit": {"type": "integer", "description": "Max rows to return (optional)."},
                 },
                 "required": [],
@@ -473,9 +657,7 @@ def _mcp_tools() -> list[dict[str, Any]]:
 
 # --- tool handlers ----------------------------------------------------------
 def _run_ping(args: dict[str, Any]) -> str:
-    routed = ", ".join(f"{p}->{b}" for p, b in _APP_ROUTES) or "none (all on the hub)"
-    return (f"rsg-hermes bridge reachable. backend={HERMES_API_URL}. "
-            f"per-app routes: {routed}. echo={args.get('message', 'pong')}")
+    return f"rsg-hermes bridge reachable. backend={HERMES_API_URL}. echo={args.get('message', 'pong')}"
 
 
 def _run_hermes_dispatch(args: dict[str, Any]) -> str:
@@ -505,6 +687,27 @@ def _run_complete_task(args: dict[str, Any]) -> str:
     return _text(_api("POST", f"/api/command-center/tasks/{urllib.parse.quote(task_id)}/complete"))
 
 
+def _run_list_deck_boards(_: dict[str, Any]) -> str:
+    return _text(_api("GET", "/api/deck/boards"))
+
+
+def _run_add_deck_card(args: dict[str, Any]) -> str:
+    board = (args.get("board") or "").strip()
+    title = (args.get("title") or "").strip()
+    if not board:
+        return "Error: 'board' is required. Call list_deck_boards to see the board names."
+    if not title:
+        return "Error: 'title' is required."
+    body = {
+        "board": board,
+        "stack": (args.get("stack") or "To Do").strip(),
+        "title": title,
+        "description": args.get("description"),
+        "duedate": args.get("duedate"),
+    }
+    return _text(_api("POST", "/api/deck/cards", body=body))
+
+
 def _run_create_task(args: dict[str, Any]) -> str:
     case_id = (args.get("case_id") or "").strip()
     title = (args.get("title") or "").strip()
@@ -522,6 +725,32 @@ def _run_create_task(args: dict[str, Any]) -> str:
         "due_at": args.get("due_at"),
     }
     return _text(_api("POST", "/api/tasks", body=body))
+
+
+def _run_list_cases(args: dict[str, Any]) -> str:
+    q = {
+        "status": (args.get("status") or "open").strip(),
+        "limit": str(args.get("limit") or 50),
+        "include_progress": "true",
+    }
+    case_type = (args.get("case_type") or "").strip()
+    if case_type:
+        q["case_type"] = case_type
+    return _text(_api("GET", "/api/cases?" + urllib.parse.urlencode(q)))
+
+
+def _run_case_progress(args: dict[str, Any]) -> str:
+    case_id = (args.get("case_id") or "").strip()
+    # No id means "what is stuck?" — the more useful default for a briefing than
+    # an error telling the caller to go find an id first.
+    if not case_id:
+        return _text(_api("GET", "/api/cases/blocked"))
+    return _text(_api("GET", f"/api/cases/{urllib.parse.quote(case_id)}/progress"))
+
+
+def _run_list_intake_queue(args: dict[str, Any]) -> str:
+    limit = str(args.get("limit") or 50)
+    return _text(_api("GET", "/api/intake/queue?" + urllib.parse.urlencode({"limit": limit})))
 
 
 def _run_create_case(args: dict[str, Any]) -> str:
@@ -554,7 +783,25 @@ def _run_draft_intake(args: dict[str, Any]) -> str:
 
 
 def _run_list_documents(args: dict[str, Any]) -> str:
-    return _text(_api("GET", "/api/documents", params={"folder": args.get("folder")}))
+    space = (args.get("space") or "").strip()
+    name = (args.get("name") or "").strip()
+    if space not in ("client", "internal"):
+        return "Error: 'space' must be 'client' or 'internal'."
+    if not name:
+        return "Error: 'name' is required."
+    return _text(_api("GET", "/api/documents", params={"space": space, "name": name}))
+
+
+def _run_list_nextcloud_folder(args: dict[str, Any]) -> str:
+    return _text(_api("GET", "/api/nextcloud/folders", params={"path": args.get("path", "")}))
+
+
+def _run_ensure_nextcloud_folders(args: dict[str, Any]) -> str:
+    paths = args.get("paths")
+    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
+        return "Error: non-empty string array 'paths' is required."
+    body = {"paths": paths, "confirm": bool(args.get("confirm", False))}
+    return _text(_api("POST", "/api/nextcloud/folders/ensure", body=body))
 
 
 def _run_save_document(args: dict[str, Any]) -> str:
@@ -662,9 +909,16 @@ _HANDLERS = {
     "list_tasks": _run_list_tasks,
     "complete_task": _run_complete_task,
     "create_task": _run_create_task,
+    "list_deck_boards": _run_list_deck_boards,
+    "add_deck_card": _run_add_deck_card,
     "create_case": _run_create_case,
+    "list_cases": _run_list_cases,
+    "case_progress": _run_case_progress,
+    "list_intake_queue": _run_list_intake_queue,
     "draft_intake": _run_draft_intake,
     "list_documents": _run_list_documents,
+    "list_nextcloud_folder": _run_list_nextcloud_folder,
+    "ensure_nextcloud_folders": _run_ensure_nextcloud_folders,
     "save_document": _run_save_document,
     "file_to_nextcloud": _run_file_to_nextcloud,
     "create_client": _run_create_client,
@@ -683,14 +937,90 @@ _HANDLERS = {
 
 # --- JSON-RPC plumbing (MCP 2024-11-05) -------------------------------------
 def _sse(obj: dict) -> Response:
-    return Response(content=f"event: message\r\ndata: {json.dumps(obj)}\r\n\r\n", media_type="text/event-stream")
+    return Response(
+        content=f"event: message\r\ndata: {json.dumps(obj)}\r\n\r\n",
+        media_type="text/event-stream",
+        headers=_CORS_HEADERS,
+    )
 
-def _result(rid: Any, result: dict[str, Any]) -> Response:
-    return _sse({"jsonrpc": "2.0", "id": rid, "result": result})
+
+def _unauthorized(request: "Request | None" = None) -> Response:
+    """Refuse with a real 401 and a WWW-Authenticate challenge.
+
+    This bridge used to answer every auth failure with HTTP 200 and a JSON-RPC
+    -32001 in the body. That is invisible to a client doing standards-based
+    discovery: it probes unauthenticated, expects 401 + WWW-Authenticate to learn
+    HOW to authenticate, gets a 200, and concludes this is not a protected MCP
+    endpoint. "Failed to add connector" with no further detail is what that looks
+    like from the outside.
+
+    The JSON-RPC error stays in the body for clients that read it, so nothing that
+    worked before stops working — a caller sending valid credentials never reaches
+    this path at all.
+    """
+    body = {"jsonrpc": "2.0", "id": None,
+            "error": {"code": -32001, "message": "Unauthorized"}}
+    headers = {
+        **_CORS_HEADERS,
+        "WWW-Authenticate": (
+            'Bearer realm="rsg-hermes-mcp", '
+            f'resource_metadata="{_base_url(request)}/.well-known/oauth-protected-resource"'
+        ),
+    }
+    return JSONResponse(content=body, status_code=401, headers=headers)
 
 
-def _error(rid: Any, code: int, message: str) -> Response:
-    return _sse({"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}})
+def _json(obj: dict) -> Response:
+    return JSONResponse(content=obj, headers=_CORS_HEADERS)
+
+
+def _wants_sse(request: "Request | None") -> bool:
+    """Honour the client's Accept header instead of always answering SSE.
+
+    Streamable HTTP lets the server reply with either application/json or
+    text/event-stream, but it has to be one the client asked for. This bridge used
+    to answer text/event-stream unconditionally, so a client sending
+    `Accept: application/json` got a body it had every right to reject — which is
+    exactly how "failed to add connector" presents.
+    """
+    if request is None:
+        return True
+    accept = (request.headers.get("accept") or "").lower()
+    if "text/event-stream" in accept:
+        return True
+    if "application/json" in accept:
+        return False
+    return True  # unspecified: keep the historical behaviour
+
+
+def _respond(rid: Any, payload: dict[str, Any], request: "Request | None" = None) -> Response:
+    body = {"jsonrpc": "2.0", "id": rid, **payload}
+    return _sse(body) if _wants_sse(request) else _json(body)
+
+
+def _result(rid: Any, result: dict[str, Any], request: "Request | None" = None) -> Response:
+    return _respond(rid, {"result": result}, request)
+
+
+def _error(rid: Any, code: int, message: str, request: "Request | None" = None) -> Response:
+    return _respond(rid, {"error": {"code": code, "message": message}}, request)
+
+
+@app.get("/.well-known/oauth-protected-resource")
+@app.get("/.well-known/oauth-protected-resource/mcp")
+async def oauth_protected_resource(request: Request) -> Response:
+    """RFC 9728 protected-resource metadata, pointed at by WWW-Authenticate.
+
+    Advertises that this resource takes a bearer token in the Authorization
+    header. It does not turn the bridge into an OAuth server — there is no
+    authorization server here, and a client that insists on a full OAuth flow will
+    still need one.
+    """
+    return JSONResponse(content={
+        "resource": f"{_base_url(request)}/mcp/hermes",
+        "bearer_methods_supported": ["header"],
+        "resource_name": SERVER_NAME,
+    }, headers=_CORS_HEADERS)
 
 
 @app.get("/healthz")
@@ -702,39 +1032,92 @@ def healthz() -> dict[str, str]:
 @app.post("/api/mcp")
 async def mcp(request: Request) -> JSONResponse:
     if not _check_auth(request):
-        return _error(None, -32001, "Unauthorized")
+        return _unauthorized(request)
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
-        return _error(None, -32700, "Parse error")
+        return _error(None, -32700, "Parse error", request)
 
     method = body.get("method")
     rid = body.get("id")
     params = body.get("params") or {}
 
     if method == "initialize":
+        # Echo the client's protocol version when we support it. Answering a
+        # negotiation with a version the client never offered is grounds for it to
+        # abort the connection.
+        asked = (params.get("protocolVersion") or "").strip()
+        agreed = asked if asked in SUPPORTED_PROTOCOL_VERSIONS else MCP_PROTOCOL_VERSION
         return _result(rid, {
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "capabilities": {"tools": {}},
+            "protocolVersion": agreed,
+            "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-        })
+        }, request)
     if method in ("notifications/initialized", "initialized"):
-        return Response(status_code=202)
+        return Response(status_code=202, headers=_CORS_HEADERS)
     if method == "ping":
-        return _result(rid, {})
+        return _result(rid, {}, request)
     if method == "tools/list":
-        return _result(rid, {"tools": _mcp_tools()})
+        return _result(rid, {"tools": _mcp_tools()}, request)
     if method == "tools/call":
         name = params.get("name")
         args = params.get("arguments") or {}
         handler = _HANDLERS.get(name)
         if handler is None:
-            return _result(rid, {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True})
+            return _result(rid, {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}, request)
         try:
             text = handler(args)
         except Exception as exc:  # noqa: BLE001
             log.exception("tool %s failed", name)
-            return _result(rid, {"content": [{"type": "text", "text": f"Error: {exc}"}], "isError": True})
-        return _result(rid, {"content": [{"type": "text", "text": text}]})
+            return _result(rid, {"content": [{"type": "text", "text": f"Error: {exc}"}], "isError": True}, request)
+        return _result(rid, {"content": [{"type": "text", "text": text}]}, request)
 
-    return _error(rid, -32601, f"Method not found: {method}")
+    return _error(rid, -32601, f"Method not found: {method}", request)
+
+
+# Streamable HTTP expects more than POST. Without these a connector's preflight or
+# stream-open fails before a single JSON-RPC message is exchanged, which surfaces
+# only as "failed to add connector" with no detail.
+@app.options("/mcp")
+@app.options("/api/mcp")
+async def mcp_options() -> Response:
+    return Response(status_code=204, headers=_CORS_HEADERS)
+
+
+@app.get("/mcp")
+@app.get("/api/mcp")
+async def mcp_stream(request: Request) -> Response:
+    """Server-to-client SSE stream.
+
+    This bridge is stateless and never initiates anything, so the stream carries
+    only keepalive comments. It exists because clients that open it treat a 405 as
+    a failed connection, and holding an idle SSE connection is cheap.
+    """
+    if not _check_auth(request):
+        return _unauthorized(request)
+
+    async def _keepalive():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                yield b": keepalive\r\n\r\n"
+                await asyncio.sleep(15)
+        except asyncio.CancelledError:  # client went away; nothing to clean up
+            return
+
+    return StreamingResponse(
+        _keepalive(),
+        media_type="text/event-stream",
+        headers={**_CORS_HEADERS, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.delete("/mcp")
+@app.delete("/api/mcp")
+async def mcp_delete(request: Request) -> Response:
+    """Session termination. Stateless here, so there is nothing to tear down —
+    but a 405 makes a well-behaved client think the teardown failed."""
+    if not _check_auth(request):
+        return _unauthorized(request)
+    return Response(status_code=204, headers=_CORS_HEADERS)
