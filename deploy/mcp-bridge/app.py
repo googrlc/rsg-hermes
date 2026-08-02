@@ -406,6 +406,68 @@ def _mcp_tools() -> list[dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+        {
+            "name": "ams_push_task",
+            "description": (
+                "Push a CRM task to the Momentum AMS task ledger via POST "
+                "/api/tasks/{task_id}/push-to-ams. The task is STAGED on the approved "
+                "queue, not written on the spot — ams_drain_casework performs the write. "
+                "approved_by must be an active agency_crm_users identity: an AMS write is "
+                "a named decision and the audit trail records who made it. "
+                "A task with no due date is refused with a 400 that says so — NowCerts "
+                "requires one on every task, so set a due date and push again rather than "
+                "inventing one. If the task's assignee has no NowCerts agent id on file it "
+                "is pushed UNASSIGNED, which is deliberate: a task on the wrong person's "
+                "list looks handled, an unassigned one gets picked up."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "agency_crm_tasks.id"},
+                    "approved_by": {"type": "string", "description": "Active agency_crm_users email approving the AMS write."},
+                },
+                "required": ["task_id", "approved_by"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "ams_push_case",
+            "description": (
+                "Push a CRM case to the Momentum AMS as a task via POST "
+                "/api/cases/{case_id}/push-to-ams. Staged on the approved queue; "
+                "ams_drain_casework performs the write. Same rules as ams_push_task: "
+                "approved_by must be a real agency_crm_users identity, and a case with no "
+                "due date is refused rather than given a made-up one."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "agency_crm_cases.id"},
+                    "approved_by": {"type": "string", "description": "Active agency_crm_users email approving the AMS write."},
+                },
+                "required": ["case_id", "approved_by"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "ams_drain_casework",
+            "description": (
+                "Run the casework executor: drain approved case/task jobs off "
+                "outbound_sync_queue into NowCerts, via POST /api/casework/run. This is "
+                "what actually writes. dry_run=true (the DEFAULT) previews what would be "
+                "written without touching the AMS — run it first and relay the preview. "
+                "Only pass dry_run=false after a human has seen that preview and said go."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max jobs this pass. Default 5."},
+                    "dry_run": {"type": "boolean", "description": "Preview only. Default TRUE — set false only on explicit human approval."},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
     ]
 
 
@@ -561,6 +623,37 @@ def _run_ams_upsert_policy(args: dict[str, Any]) -> str:
     return _text(_api("POST", "/api/ams/policy", body=body))
 
 
+def _run_ams_push_task(args: dict[str, Any]) -> str:
+    task_id = str(args.get("task_id") or "").strip()
+    approved_by = str(args.get("approved_by") or "").strip()
+    if not task_id:
+        return "Error: 'task_id' is required."
+    if not approved_by:
+        return "Error: 'approved_by' is required — an AMS write is a named decision."
+    return _text(_api(
+        "POST", f"/api/tasks/{urllib.parse.quote(task_id)}/push-to-ams",
+        body={"approved_by": approved_by},
+    ))
+
+
+def _run_ams_push_case(args: dict[str, Any]) -> str:
+    case_id = str(args.get("case_id") or "").strip()
+    approved_by = str(args.get("approved_by") or "").strip()
+    if not case_id:
+        return "Error: 'case_id' is required."
+    if not approved_by:
+        return "Error: 'approved_by' is required — an AMS write is a named decision."
+    return _text(_api(
+        "POST", f"/api/cases/{urllib.parse.quote(case_id)}/push-to-ams",
+        body={"approved_by": approved_by},
+    ))
+
+
+def _run_ams_drain_casework(args: dict[str, Any]) -> str:
+    body = {"limit": int(args.get("limit", 5)), "dry_run": bool(args.get("dry_run", True))}
+    return _text(_api("POST", "/api/casework/run", body=body))
+
+
 _HANDLERS = {
     "ping": _run_ping,
     "hermes_dispatch": _run_hermes_dispatch,
@@ -582,6 +675,9 @@ _HANDLERS = {
     "ams_search_insured": _run_ams_search_insured,
     "ams_create_insured": _run_ams_create_insured,
     "ams_upsert_policy": _run_ams_upsert_policy,
+    "ams_push_task": _run_ams_push_task,
+    "ams_push_case": _run_ams_push_case,
+    "ams_drain_casework": _run_ams_drain_casework,
 }
 
 
