@@ -165,3 +165,40 @@ def test_both_content_types_are_accepted_or_streamable_servers_refuse() -> None:
         _client().call("list_policies")
     assert "application/json" in seen["accept"]
     assert "text/event-stream" in seen["accept"], seen["accept"]
+
+
+# --- the shape the Hermes bridge actually replies in --------------------------
+
+SSE = ("event: message\n"
+       'data: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"ping"}]}}\n\n')
+
+
+def test_an_sse_framed_response_is_parsed() -> None:
+    """The bridge answers in SSE frames, not raw JSON. A client that only speaks
+    JSON cannot talk to it — which is how a door serving 30 tools read as zero."""
+    with patch("urllib.request.urlopen", return_value=_Resp(SSE)):
+        assert _client().call("ping") == {"tools": [{"name": "ping"}]}
+
+
+def test_an_error_inside_an_sse_frame_still_raises() -> None:
+    frame = ("event: message\n"
+             'data: {"jsonrpc":"2.0","id":1,'
+             '"error":{"code":-32001,"message":"Unauthorized"}}\n\n')
+    with patch("urllib.request.urlopen", return_value=_Resp(frame)):
+        with pytest.raises(AmsError):
+            _client().call("ping")
+
+
+def test_the_last_data_frame_wins_over_earlier_progress_frames() -> None:
+    """A server may stream notifications before the result."""
+    frames = ('data: {"jsonrpc":"2.0","method":"notifications/progress"}\n\n'
+              'data: {"jsonrpc":"2.0","id":1,"result":{"done":true}}\n\n')
+    with patch("urllib.request.urlopen", return_value=_Resp(frames)):
+        assert _client().call("ping") == {"done": True}
+
+
+def test_genuinely_unparseable_output_still_raises() -> None:
+    with patch("urllib.request.urlopen", return_value=_Resp("event: ping\n\n")):
+        with pytest.raises(AmsError) as exc:
+            _client().call("ping")
+    assert "non-JSON" in str(exc.value)
