@@ -275,3 +275,69 @@ every core commit would be the monolith again, with more steps.
   ownership is assigned per domain — that is a bigger decision than this split.
 - **`intake.opportunities`** (482 lines) is the CRM pipeline model, not intake.
   It moves to the hub in Phase 2 or intake cannot cleanly leave.
+
+
+## The target, stated (2026-08-01)
+
+**Each app runs on its own and is improved on its own. Hermes is the runner** —
+it dispatches, holds the agent, and runs the cron jobs that update the apps when
+something needs updating. It is not where the apps live.
+
+The reason this has to be real and not just tidy: **each app talks to a
+different module within NowCerts.** Cases works tasks, renewals works policies,
+intake works insureds and opportunities, finance works commissions. Those
+surfaces will grow apart, at different speeds, driven by different needs. An app
+that cannot change its AMS integration without a shared release is not
+independent, whatever the repo layout says.
+
+### Two gaps between here and that
+
+Both were found by deploying, and both invalidate part of what this document
+said earlier.
+
+**1. The services run from the hub image, so the repo split is not real in
+production yet.** Every container on the box — `rsg-hermes-cases`,
+`rsg-hermes-renewals`, and the rest — is built from `rsg-hermes`. The app repos
+exist, are green, and are not on the box at all. So today's split is
+*process-level*: one codebase in six processes.
+
+That makes the sequence this document implied — flip traffic, then delete from
+the hub — wrong. `hermes/routers/cases.py` is not the hub's spare copy; it is
+the file the cases service is serving. Deleting it takes down the service you
+just flipped to. The real order is:
+
+```
+flip traffic → verify → deploy the service from ITS OWN repo → verify → delete from the hub
+```
+
+Deploying from the app repo needs a deploy key per repo (the box already does
+this for the portal and carrierhub) and a way to install the private
+`rsg-hermes-core` pin inside the image — an SSH deploy key with BuildKit's
+`--ssh`, or building with core vendored into the context.
+
+**2. `NowCertsClient` bundles every module.** It is one 740-line class in the
+shared core carrying insureds (`fetch_insureds`, `search_insureds`,
+`create_insured`, `find_insured`, `is_insured_active`), policies
+(`fetch_policies`, `insert_policy`, `update_policy`, `find_policy_by_number`),
+opportunities (`fetch_opportunities`, `insert_opportunity`) and tasks
+(`insert_task`, `update_task`). Every app installs all four.
+
+That is the same shape as every other misfiling this migration has corrected —
+a contract living inside an engine — and it is the one that most directly blocks
+the goal. The split that matches the architecture:
+
+| | |
+|---|---|
+| **core** | the transport: auth, the token cache, `_get`/`_post`/`_patch`, retry and timeout. The ~26s password grant is expensive and must stay a shared singleton. |
+| **cases** | tasks (`insert_task`, `update_task`) |
+| **renewals** | policies (`insert_policy`, `update_policy`, `find_policy_by_number`) |
+| **intake** | insureds and opportunities |
+
+Then an app can change how it talks to its NowCerts module without a core
+release, which is the whole point.
+
+### What Hermes keeps
+
+The agent and dispatcher, the cron/scheduler, the shared jobs, and the CRM hub
+routes it already serves. It stays the runner — and, with `packages/rsg-hermes-core`,
+the place the shared bottom layer is authored and published from.
