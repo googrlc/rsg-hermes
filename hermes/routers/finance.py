@@ -281,6 +281,9 @@ def get_commission_batch(batch_id: str, lines: int = 100):
 class StatementDecision(BaseModel):
     approved_by: str
     reason: str | None = None
+    # PDF batches only: the approver states they compared the parsed lines
+    # against the document. Ignored for CSV/XLSX, which name their own columns.
+    confirmed_source: bool = False
 
 
 @router.post("/api/commission-statements/{batch_id}/approve")
@@ -288,14 +291,16 @@ def approve_commission_statement(batch_id: str, req: StatementDecision):
     """Commit a reviewed batch: statement + transactions + link + rollup.
 
     This is the money gate. Refuses a batch that isn't pending review, parsed
-    nothing, or failed its crosscheck.
+    nothing, or failed its crosscheck — and refuses a PDF batch outright unless
+    ``confirmed_source`` says a human checked it against the document.
     """
     from hermes.commissions.statements import commit_statement
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", req.approved_by)])
     try:
-        result = commit_statement(supa, batch_id=batch_id, approved_by=req.approved_by)
+        result = commit_statement(supa, batch_id=batch_id, approved_by=req.approved_by,
+                                  confirmed_source=req.confirmed_source)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

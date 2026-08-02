@@ -54,6 +54,36 @@ STATUS_COMMITTED = "committed"
 STATUS_NEEDS_MAPPING = "needs_mapping"
 STATUS_ERROR = "error"
 
+# How a file was read. Mirrors commission_ingest_batches.extraction_method.
+METHOD_CSV = "csv"
+METHOD_XLSX = "xlsx"
+METHOD_PDF_TEXT = "pdf_text"
+METHOD_PDF_OCR = "pdf_ocr"
+
+# Reading methods that carry column-alignment risk a human has to rule out.
+# A CSV names its own columns; a PDF's columns are inferred from geometry (text
+# tier) or from a picture (OCR tier), and a column read one position off looks
+# exactly like a clean parse. So a PDF batch always needs someone to say they
+# checked the numbers against the document.
+CONFIRM_REQUIRED_METHODS = frozenset({METHOD_PDF_TEXT, METHOD_PDF_OCR})
+
+
+def requires_source_confirmation(method: Any, *, is_ocr: Any = False) -> bool:
+    """Does a batch read this way need an explicit human attestation to commit?
+
+    Matched on the ``pdf`` PREFIX rather than against the exact set, because the
+    set is not the whole truth about what is in the table: the Slack-drop poller
+    that predates this code wrote ``extraction_method='pdf'``, and two such rows
+    are on file right now. An exact-match gate would wave those straight through
+    the one check they most need — the whole point is that nobody can read a
+    column off a PDF and be sure, whatever the row calls the method.
+
+    ``is_ocr`` is honoured independently: a batch flagged as machine-read needs
+    confirming even if its method string says something else entirely.
+    """
+    text = str(method or "").strip().lower()
+    return text.startswith("pdf") or bool(is_ocr)
+
 # Columns Postgres computes. Sending any of them raises 428C9 "cannot insert a
 # non-DEFAULT value". Listed per table so a new one is a one-line change rather
 # than another live failure — this codebase has now been bitten twice, by
@@ -96,16 +126,33 @@ _ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 # transaction_code -> the normalized type the ledger reasons about.
+#
+# This vocabulary is not a fresh choice — it is the one already in the data. The
+# 182 rows on file distinguish renewal (57), endorsement (43), adjustment (29),
+# cancel (18), new (17), fee (13) and reinstatement (5), written by the
+# browser-side parsers. Collapsing endorsement/cancel/reinstatement into
+# "adjustment" here, while this path becomes the only writer, would erase a
+# distinction the history carries and leave the same event named two ways
+# depending on which year it was loaded.
+#
+# Matched as substrings, first rule wins, so the order is load-bearing:
+#   * "credit endorsement" is a premium credit, NOT a policy endorsement, and
+#     must be tested before the bare "endorsement" rule.
+#   * "new" must come last — it is a substring of "renewal".
 _TYPE_RULES: tuple[tuple[str, str], ...] = (
     ("new business", "new"),
     ("newbusiness", "new"),
     ("renewal", "renewal"),
-    ("endorsement", "adjustment"),
+    ("reinstate", "reinstatement"),
+    ("chargeback", "chargeback"),
+    ("credit endorsement", "adjustment"),
+    ("endorsement", "endorsement"),
+    ("cancel", "cancel"),
     ("credit", "adjustment"),
-    ("cancel", "adjustment"),
-    ("reinstate", "adjustment"),
     ("audit", "adjustment"),
-    ("chargeback", "adjustment"),
+    ("adjust", "adjustment"),
+    ("fee", "fee"),
+    ("new", "new"),
 )
 
 
@@ -362,23 +409,106 @@ def parse_xlsx(content: bytes) -> tuple[list[dict[str, Any]], list[str]]:
     return lines, warnings
 
 
+def parse_pdf(content: bytes) -> tuple[list[dict[str, Any]], list[str], str]:
+    """Parse a statement PDF. Returns (lines, warnings, extraction_method).
+
+    The reading itself lives in ``pdf.py`` — text layer first, vision OCR only
+    when there is no text layer to read. What comes back is raw header->cell
+    dicts, so the rows land in ``parse_row`` exactly like a CSV's would and the
+    subtotal-line exclusion applies unchanged.
+    """
+    from hermes.commissions.pdf import read_pdf
+
+    extraction = read_pdf(content)
+    warnings = list(extraction.warnings)
+
+    lines: list[dict[str, Any]] = []
+    skipped = 0
+    policyless: list[str] = []
+    for index, raw in enumerate(extraction.rows, start=1):
+        parsed = parse_row(raw)
+        if parsed is None:
+            skipped += 1
+            continue
+        if not parsed["policy_number"]:
+            policyless.append(f"row {index} ({parsed['commission_amount']})")
+            continue
+        lines.append(parsed)
+    if skipped:
+        warnings.append(f"{skipped} row(s) skipped as blank or non-data")
+    warnings.extend(_policyless_warning(policyless))
+    return lines, warnings, extraction.method
+
+
+@dataclass
+class ParsedFile:
+    """A statement file read into lines, and everything the file told us.
+
+    ``carrier`` and the stated totals are populated only by a carrier-specific
+    parser, which knows where its statement prints them. The generic reader
+    leaves them None and the uploader supplies them.
+    """
+
+    lines: list[dict[str, Any]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    method: str = METHOD_CSV
+    parser_key: str = "generic_v1"
+    carrier: str | None = None
+    stated_premium: Decimal | None = None
+    stated_commission: Decimal | None = None
+
+
 def parse_statement(content: bytes, filename: str) -> tuple[list[dict[str, Any]], list[str]]:
-    """Dispatch on extension."""
+    """Dispatch on extension. See ``parse_file`` for everything else the file says."""
+    parsed = parse_file(content, filename)
+    return parsed.lines, parsed.warnings
+
+
+def parse_upload(
+    content: bytes, filename: str,
+) -> tuple[list[dict[str, Any]], list[str], str]:
+    """Lines, warnings and HOW the file was read."""
+    parsed = parse_file(content, filename)
+    return parsed.lines, parsed.warnings, parsed.method
+
+
+def parse_file(content: bytes, filename: str) -> ParsedFile:
+    """Read a statement: carrier-specific parser first, generic reader second.
+
+    A carrier parser is preferred wherever one recognises the file, because it
+    carries knowledge the alias table cannot express — which column is the
+    incremental one, which line is a fee rather than a commission, and where the
+    carrier prints its own totals. The generic reader handles everyone else.
+
+    The extraction *method* is about the container (csv/xlsx/pdf); the *parser
+    key* is about who wrote the file. Both land on the batch.
+    """
+    from hermes.commissions.carriers import parse_carrier
+
     suffix = (filename.rsplit(".", 1)[-1] if "." in filename else "").lower()
-    if suffix in {"csv", "tsv", "txt"}:
-        return parse_csv(content)
-    if suffix in {"xlsx", "xlsm"}:
-        return parse_xlsx(content)
+
+    if suffix in {"csv", "tsv", "txt", "xlsx", "xlsm"}:
+        method = METHOD_XLSX if suffix in {"xlsx", "xlsm"} else METHOD_CSV
+        carrier_parse = parse_carrier(content, filename)
+        if carrier_parse is not None and carrier_parse.lines:
+            return ParsedFile(
+                lines=carrier_parse.lines, warnings=carrier_parse.warnings,
+                method=method, parser_key=carrier_parse.parser_key,
+                carrier=carrier_parse.carrier,
+                stated_premium=carrier_parse.stated_premium,
+                stated_commission=carrier_parse.stated_commission,
+            )
+        lines, warnings = parse_csv(content) if method == METHOD_CSV else parse_xlsx(content)
+        return ParsedFile(lines=lines, warnings=warnings, method=method,
+                          parser_key=f"{method}_generic_v1")
+
     if suffix == "xls":
-        return [], ["legacy .xls is not supported — re-save as .xlsx or CSV"]
+        return ParsedFile(warnings=["legacy .xls is not supported — re-save as .xlsx or CSV"])
     if suffix == "pdf":
-        # Deliberately not attempted. Table extraction from a statement PDF is
-        # unreliable, and a mis-read column on money data is worse than a refusal
-        # — it looks like a successful parse. Route PDFs through the existing
-        # OCR/extract path (POST /api/extract) and upload the reviewed CSV.
-        return [], ["PDF statements are not parsed here — run it through "
-                    "POST /api/extract, check the output, then upload as CSV"]
-    return [], [f"unsupported statement format: .{suffix or 'unknown'}"]
+        lines, warnings, method = parse_pdf(content)
+        return ParsedFile(lines=lines, warnings=warnings, method=method,
+                          parser_key=f"{method}_generic_v1")
+    return ParsedFile(warnings=[f"unsupported statement format: .{suffix or 'unknown'}"])
 
 
 @dataclass
@@ -453,11 +583,30 @@ class StagedBatch:
     warnings: list[str] = field(default_factory=list)
     duplicate_of: str | None = None
     preview: dict[str, Any] = field(default_factory=dict)
+    extraction_method: str = METHOD_CSV
+
+    @property
+    def is_ocr(self) -> bool:
+        return self.extraction_method == METHOD_PDF_OCR
+
+    @property
+    def requires_confirmation(self) -> bool:
+        """Does approving this batch need someone to say they checked the file?
+
+        True for anything read out of a PDF. Not a judgement about this
+        particular parse — it is a property of the format.
+        """
+        return requires_source_confirmation(self.extraction_method,
+                                            is_ocr=self.is_ocr)
 
     @property
     def approvable(self) -> bool:
         """A batch may only be approved if it parsed, isn't a duplicate, and
-        either matches the carrier's own totals or has none to match."""
+        either matches the carrier's own totals or has none to match.
+
+        A PDF batch is still *approvable* — it just cannot be approved silently.
+        ``requires_confirmation`` is the extra thing the approver must supply.
+        """
         return (
             self.status == STATUS_PENDING_REVIEW
             and self.line_count > 0
@@ -473,6 +622,9 @@ class StagedBatch:
             "carrier": self.carrier,
             "line_count": self.line_count,
             "approvable": self.approvable,
+            "requires_confirmation": self.requires_confirmation,
+            "extraction_method": self.extraction_method,
+            "is_ocr": self.is_ocr,
             "duplicate_of": self.duplicate_of,
             "warnings": self.warnings,
             "crosscheck": {
@@ -561,7 +713,19 @@ def stage_statement(
                       f"(status {prior.get('ingest_status')})"],
         )
 
-    lines, warnings = parse_statement(content, filename)
+    parsed = parse_file(content, filename)
+    lines, warnings, method = parsed.lines, parsed.warnings, parsed.method
+
+    # A carrier parser reads the carrier's own totals off the statement. What the
+    # uploader typed still wins — they are looking at the document — but when
+    # they supply nothing, a crosscheck read from the file beats no crosscheck at
+    # all, which is the case a bad parse walks straight through.
+    if stated_premium in (None, "") and parsed.stated_premium is not None:
+        stated_premium = parsed.stated_premium
+    if stated_commission in (None, "") and parsed.stated_commission is not None:
+        stated_commission = parsed.stated_commission
+    carrier = carrier or parsed.carrier
+
     check = crosscheck(lines, stated_premium=stated_premium, stated_commission=stated_commission)
 
     status = STATUS_PENDING_REVIEW
@@ -575,18 +739,25 @@ def stage_statement(
             "the parse is wrong; do not approve"
         )
 
+    needs_confirmation = requires_source_confirmation(method)
+    if needs_confirmation and lines:
+        warnings.append(
+            "read from a PDF — the column mapping is inferred, so every amount "
+            "must be checked against the document before approval"
+        )
+
     batch = supa.insert(BATCHES_TABLE, {
         "content_hash": digest,
         "source_file": filename,
         "carrier_name": carrier,
         "kind": "statement",
-        "parser_key": "csv_generic_v1",
-        "extraction_method": "csv",
-        "is_ocr": False,
+        "parser_key": parsed.parser_key,
+        "extraction_method": method,
+        "is_ocr": method == METHOD_PDF_OCR,
         "row_count": len(lines),
         "ingest_status": status,
         "uploaded_by": uploaded_by,
-        "flags": {"warnings": warnings},
+        "flags": {"warnings": warnings, "requires_confirmation": needs_confirmation},
         **check.as_dict(),
     })
     batch_id = str(batch.get("id"))
@@ -607,6 +778,7 @@ def stage_statement(
     staged = StagedBatch(
         batch_id=batch_id, status=status, filename=filename,
         carrier=carrier, line_count=len(lines), crosscheck=check, warnings=warnings,
+        extraction_method=method,
     )
     if lines:
         staged.preview = _match_preview(supa, lines)
@@ -637,11 +809,18 @@ class CommitResult:
 
 def commit_statement(
     supa: "SupabaseClient", *, batch_id: str, approved_by: str,
+    confirmed_source: bool = False,
 ) -> CommitResult:
     """Promote a reviewed batch into the ledger. The approval gate is here.
 
     Refuses a batch that isn't pending review, parsed nothing, or failed its
     crosscheck — approving a bad parse is how fiction reaches a money surface.
+
+    ``confirmed_source`` is the extra assertion a PDF batch needs: the approver
+    states they compared the parsed lines against the document itself. It is a
+    separate flag from the approval rather than part of it because approving a
+    CSV and approving a picture of a statement are not the same act, and one
+    button that means both would collapse them.
     """
     from hermes.commissions.matching import relink_unmatched
     from hermes.commissions.reconcile import run_rollup
@@ -658,6 +837,14 @@ def commit_statement(
         raise ValueError(
             "crosscheck failed — parsed totals disagree with the carrier's stated "
             "totals; fix the parse rather than approving it"
+        )
+
+    method = str(batch.get("extraction_method") or "")
+    if requires_source_confirmation(method, is_ocr=batch.get("is_ocr")) and not confirmed_source:
+        raise ValueError(
+            f"this batch was read from a PDF ({method}) — its columns are inferred, "
+            "so it cannot be committed until the approver confirms the parsed "
+            "lines match the document (confirmed_source)"
         )
 
     staged = supa.select(STAGING_TABLE, columns="*",
