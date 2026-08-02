@@ -39,6 +39,43 @@ from typing import Any
 DEFAULT_TIMEOUT = 60.0  # a NowCerts password grant alone can take ~26s
 
 
+def _parse_body(raw: str) -> dict[str, Any] | None:
+    """The JSON-RPC body, whether it arrived as JSON or in SSE frames.
+
+    A streamable-HTTP MCP server answers the same request with either shape
+    depending on what it negotiates. The Hermes bridge replies in SSE:
+
+        event: message
+        data: {"jsonrpc":"2.0","id":1,"result":{...}}
+
+    Handing that to json.loads fails, so a client that only speaks JSON cannot
+    talk to it at all — which is how a door serving 30 tools reported zero.
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        pass
+    # SSE: take the last data: frame carrying a JSON-RPC body. Last, not first —
+    # a server may send progress notifications before the result.
+    body = None
+    for line in raw.splitlines():
+        if not line.startswith("data:"):
+            continue
+        chunk = line[len("data:"):].strip()
+        if not chunk or chunk == "[DONE]":
+            continue
+        try:
+            parsed = json.loads(chunk)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict) and ("result" in parsed or "error" in parsed):
+            body = parsed
+    return body
+
+
 def _text_of(result: dict[str, Any]) -> str:
     """The human-readable part of an MCP result, for error messages."""
     parts = [
@@ -107,10 +144,9 @@ class AmsClient:
         except urllib.error.URLError as exc:  # pragma: no cover - transport only
             raise AmsError(f"{method}: cannot reach the AMS door at {self.base_url}") from exc
 
-        try:
-            body = json.loads(raw)
-        except ValueError as exc:
-            raise AmsError(f"{method}: AMS door returned non-JSON: {raw[:200]}") from exc
+        body = _parse_body(raw)
+        if body is None:
+            raise AmsError(f"{method}: AMS door returned non-JSON: {raw[:200]}")
 
         # The whole reason this wrapper exists. A 200 means the request was
         # delivered, not that it worked.
