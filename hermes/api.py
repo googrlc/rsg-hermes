@@ -1939,12 +1939,19 @@ def workspace_stats_endpoint():
         except Exception:
             return []
 
+    # Source matters here in a way it does not for row-level reads: these two
+    # numbers are the headline book size and revenue on the Workspace home. On
+    # the mirror they run ~30% high (450 vs 340 policies, $1.67M vs $1.27M
+    # measured 2026-08-03), and the mirror is what gets served for the first
+    # ~minute after every restart while the AMS pull warms. Reporting that as
+    # settled fact is how a deploy silently rewrites the agency's book value, so
+    # the flag rides along and the UI marks the tiles provisional.
     try:
-        policies = ams_book.select_policies(
+        policies, book_source = ams_book.select_policies_with_source(
             supa, columns="annualized_premium,premium_amount", limit=100000
         )
     except Exception:  # noqa: BLE001 — a KPI tile degrades rather than 500s
-        policies = []
+        policies, book_source = [], ams_book.SOURCE_MIRROR
     annualized = sum(
         float(p.get("annualized_premium") or p.get("premium_amount") or 0) for p in policies
     )
@@ -1952,6 +1959,8 @@ def workspace_stats_endpoint():
         "clients": len(_rows("canonical_clients", "nowcerts_insured_guid")),
         "policies": len(policies),
         "annualized_premium": round(annualized, 2),
+        "book_source": book_source,
+        "provisional": book_source != ams_book.SOURCE_LIVE,
         "renewals": len(_rows("project_85_renewals", "id")),
         "pipeline": len(_rows("opportunities", "id", {"status": "eq.open"})),
         "open_cases": len(_rows("agency_crm_cases", "id", {"status": "eq.open"})),

@@ -244,6 +244,36 @@ def test_ams_failure_falls_back_to_the_mirror(live):
     assert rows == [{"policy_guid": "mirror"}]
 
 
+# --------------------------------------------------------- source reporting
+# The mirror is a superset, not a slightly-stale copy: 450 rows against 340 live
+# on 2026-08-03. Anything publishing a count or a premium total has to be able to
+# tell which one it got, or a restart silently overstates the book by ~30%.
+
+def test_mirror_fallback_reports_its_source(live):
+    supa = _supa()
+    supa.select.return_value = [{"policy_guid": "mirror"}]
+    with patch.object(book, "fetch_book", side_effect=RuntimeError("AMS down")):
+        rows, source = book.select_policies_with_source(supa, columns="policy_guid")
+    assert rows == [{"policy_guid": "mirror"}]
+    assert source == book.SOURCE_MIRROR
+
+
+def test_a_live_read_reports_its_source(live):
+    nc = _nc()
+    _prime(_supa(), nc)
+    rows, source = book.select_policies_with_source(_supa(), nowcerts=nc, limit=10)
+    assert {r["policy_guid"] for r in rows} == {"g1", "g2"}
+    assert source == book.SOURCE_LIVE
+
+
+def test_the_flag_gate_counts_as_mirror(monkeypatch):
+    monkeypatch.delenv("HERMES_AMS_LIVE_READS", raising=False)
+    supa = _supa()
+    supa.select.return_value = [{"policy_guid": "mirror"}]
+    _, source = book.select_policies_with_source(supa, columns="policy_guid")
+    assert source == book.SOURCE_MIRROR
+
+
 # ------------------------------------------------- shared client & backoff
 # Regression cover for the stall diagnosed 2026-07-27: NowCerts' password grant
 # takes ~26s, and every book read used to build a fresh client (empty token
