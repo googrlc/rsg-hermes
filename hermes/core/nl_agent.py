@@ -253,6 +253,45 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "list_cases",
+            "description": (
+                "Open service cases with their checklist progress — task counts, what's "
+                "blocking, and what's ready to close. Use for 'what's open', 'what's "
+                "blocked', 'what can we close', 'cases for [client]', 'where does [case] "
+                "stand'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Filter by case status; 'all' for every status."},
+                    "insured": {"type": "string", "description": "Filter by insured/client name."},
+                    "blocked_only": {"type": "boolean", "description": "Only cases with a required task outstanding."},
+                    "closable_only": {"type": "boolean", "description": "Only cases whose required work is done."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "case_progress",
+            "description": (
+                "One case in full with its task checklist — who owns each task, what's due, "
+                "and which required items are outstanding. Accepts a case number or an "
+                "insured name. Use for 'what's left on [case]', 'why can't we close [case]'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case": {"type": "string", "description": "Case number, or the insured's name."},
+                },
+                "required": ["case"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "commission_summary",
             "description": (
                 "Summarize RSG's commissions from the reconciled ledger — total expected vs "
@@ -484,7 +523,44 @@ def _compose_system_prompt(persona_key: str | None = None) -> str:
         persona = load_named_persona(persona_key)
     if not persona:
         persona = load_persona() or _DEFAULT_PERSONA
-    return persona + "\n\n" + _PLATFORM_GUIDE
+    return persona + "\n\n" + _desk_roster_block(persona_key) + "\n\n" + _PLATFORM_GUIDE
+
+
+# The desk roster, in one place. Each desk is scoped to its own tools, so a
+# question outside its lane is a dead end unless it can name the desk that owns
+# it. Generating the referral text from this table (rather than restating it in
+# each persona file) means adding a desk updates every other desk's knowledge of
+# it — six hand-maintained lists would drift apart within a month.
+_DESKS: dict[str, str] = {
+    "carrier": "carrier appointments, appetite, class codes, underwriter contacts and portal logins — 'who writes this?'",
+    "crm": "the client record end to end: the canonical book, live AMS policies, activity, and documents",
+    "renewals": "what's renewing, what's at risk, and the retention save-list",
+    "cases": "open service cases and their task checklists — what's blocking, what can close",
+    "finance": "commissions: what RSG is owed, what came in short, and which carriers to chase",
+    "intake": "new leads arriving from forms, email, and Slack, before they become clients",
+}
+
+
+def _desk_roster_block(current: str | None) -> str:
+    """The 'who else can help' block appended to every desk persona."""
+    others = [f"- **{name} desk** — {covers}" for name, covers in _DESKS.items() if name != current]
+    if not others:
+        return ""
+    here = _DESKS.get(current or "", "")
+    lead = f"You are the **{current} desk** ({here}).\n\n" if here else ""
+    return (
+        "## The other desks\n\n"
+        + lead
+        + "RSG runs one assistant per desk. Each has its own tools and only its own data, "
+        "so a question outside your lane is one you genuinely cannot answer — not one you "
+        "should attempt from general knowledge.\n\n"
+        + "\n".join(others)
+        + "\n\nWhen a question belongs to another desk, say so in one line and name it — "
+        '"that\'s the finance desk — ask it about the commission shortfall on that policy." '
+        "Hand off the specific question, not just the desk name. If a question spans two "
+        "desks, answer your part fully first, then name the desk that owns the rest. Never "
+        "refuse and stop: the producer should always leave knowing where the answer lives."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -841,6 +917,116 @@ def _exec_carrier_appetite(args: dict[str, Any]) -> DispatchResult:
     if bridge_note:
         msg += f"\n\nExplicit class-code links for this code:\n{bridge_note}"
     return DispatchResult(True, msg, {"matches": rows})
+
+
+def _exec_list_cases(args: dict[str, Any]) -> DispatchResult:
+    """Cases Desk — open service cases with checklist progress.
+
+    Reads v_case_progress, which already joins each case to its task counts, so
+    "what's blocking" and "what can close" are answerable in one query instead of
+    a case fetch plus a per-case task fetch.
+    """
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Case data unavailable: {exc}")
+
+    params: dict[str, str] = {"order": "opened_at.desc"}
+    status = (args.get("status") or "").strip()
+    insured = (args.get("insured") or "").strip()
+    if status and status.lower() != "all":
+        params["status"] = f"eq.{status}"
+    if insured:
+        params["insured_name"] = f"ilike.*{insured}*"
+    try:
+        rows = supa.select("v_case_progress", columns="*", params=params, limit=60)
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Case lookup failed: {exc}")
+    if not rows:
+        return DispatchResult(True, "No cases match that filter.")
+
+    if args.get("blocked_only"):
+        rows = [r for r in rows if (r.get("required_blocking") or 0)]
+        if not rows:
+            return DispatchResult(True, "Nothing is blocked — no case has an outstanding required task.")
+    if args.get("closable_only"):
+        rows = [r for r in rows if r.get("can_close")]
+        if not rows:
+            return DispatchResult(True, "No case is ready to close yet.")
+
+    out = []
+    for r in rows:
+        done, total = r.get("tasks_done") or 0, r.get("tasks_total") or 0
+        line = (f"{r.get('case_number') or '?'} — {r.get('title') or ''}"
+                f" ({r.get('insured_name') or 'no insured'})"
+                f" · {r.get('status') or '?'} · {done}/{total} tasks")
+        blocking = r.get("required_blocking") or 0
+        if blocking:
+            line += f" · {blocking} required task(s) outstanding"
+        elif r.get("can_close"):
+            line += " · ready to close"
+        out.append(line)
+    return DispatchResult(True, f"{len(rows)} cases:\n" + "\n".join(f"• {x}" for x in out),
+                          {"cases": rows})
+
+
+def _exec_case_progress(args: dict[str, Any]) -> DispatchResult:
+    """Cases Desk — one case in full, with its task checklist."""
+    from hermes.integrations.supabase_client import SupabaseClient
+
+    ref = (args.get("case") or "").strip()
+    if not ref:
+        return DispatchResult(False, "Give a case number or the insured's name.")
+    try:
+        supa = SupabaseClient()
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Case data unavailable: {exc}")
+
+    # Match on case number first; fall back to the insured name so a producer can
+    # ask by client without knowing the case number.
+    try:
+        rows = supa.select("v_case_progress", columns="*",
+                           params={"case_number": f"ilike.*{ref}*"}, limit=5)
+        if not rows:
+            rows = supa.select("v_case_progress", columns="*",
+                               params={"insured_name": f"ilike.*{ref}*",
+                                       "order": "opened_at.desc"}, limit=5)
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Case lookup failed: {exc}")
+    if not rows:
+        return DispatchResult(True, f"No case matching '{ref}'.")
+    if len(rows) > 1:
+        listed = ", ".join(f"{r.get('case_number')} ({r.get('title')})" for r in rows)
+        return DispatchResult(True, f"Several cases match '{ref}': {listed}. Which one?",
+                              {"cases": rows})
+
+    case = rows[0]
+    try:
+        tasks = supa.select(
+            "agency_crm_tasks",
+            columns="title,status,priority,assigned_to_email,due_at,is_required,sort_order",
+            params={"case_id": f"eq.{case.get('case_id')}", "order": "sort_order.asc"},
+            limit=100,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Task lookup failed: {exc}")
+
+    out = [f"{case.get('case_number')} — {case.get('title')}",
+           f"  insured: {case.get('insured_name') or 'none'}",
+           f"  status: {case.get('status')} · {case.get('tasks_done') or 0}/{case.get('tasks_total') or 0} tasks"]
+    if case.get("required_blocking"):
+        out.append(f"  BLOCKED: {case['required_blocking']} required task(s) outstanding")
+    elif case.get("can_close"):
+        out.append("  ready to close")
+    for t in tasks:
+        mark = "x" if str(t.get("status") or "").lower() in ("done", "completed", "complete") else " "
+        req = " (required)" if t.get("is_required") else ""
+        who = f" — {t['assigned_to_email']}" if t.get("assigned_to_email") else ""
+        due = f" — due {str(t['due_at'])[:10]}" if t.get("due_at") else ""
+        out.append(f"    [{mark}] {t.get('title')}{req}{who}{due}")
+    return DispatchResult(True, "\n".join(out), {"case": case, "tasks": tasks})
 
 
 def _num(v: Any) -> float:
@@ -1309,6 +1495,8 @@ _EXECUTORS: dict[str, Any] = {
     "match_carrier_appetite": _exec_carrier_appetite,
     "lookup_class_code": _exec_lookup_class_code,
     "appointments_by_line": _exec_appointments_by_line,
+    "list_cases": _exec_list_cases,
+    "case_progress": _exec_case_progress,
     "commission_summary": _exec_commission_summary,
     "commission_shortfalls": _exec_commission_shortfalls,
     "find_client": _exec_find_client,
@@ -1329,7 +1517,16 @@ _WRITE_TOOLS = {"intake_lead"}
 _HUB_TOOLS: dict[str, set[str]] = {
     "carrier": {"list_carriers", "match_carrier_appetite", "lookup_class_code",
                 "appointments_by_line", "web_research"},
+    # Finance Desk — the money. "commissions" stays as an alias so existing
+    # callers and cron jobs keep working.
+    "finance": {"commission_summary", "commission_shortfalls"},
     "commissions": {"commission_summary", "commission_shortfalls"},
+    # Cases Desk — open service work and its checklists. Read-only; creating and
+    # completing cases stays a deliberate action in the Command Center.
+    "cases": {"list_cases", "case_progress", "find_client"},
+    # Renewals Desk — the retention lane. Needs the client lookup and policy view
+    # to answer "what are they paying now" without leaving the desk.
+    "renewals": {"renewals_overview", "find_client", "client_policies"},
     # CRM Desk sees the whole client: the canonical book, live AMS (NowCerts),
     # the custom agency CRM's cases/tasks, and the client's Nextcloud documents —
     # all read-only. Carrier appetite, commissions, and intake stay out of its lane.
@@ -1341,7 +1538,10 @@ _HUB_TOOLS: dict[str, set[str]] = {
 }
 _HUB_PERSONA: dict[str, str] = {
     "carrier": "carrier",
+    "finance": "finance",
     "commissions": "commissions",
+    "cases": "cases",
+    "renewals": "renewals",
     "crm": "crm",
     "intake": "intake",
 }
