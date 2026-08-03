@@ -79,3 +79,13 @@ state/
 * [0-9].cfg
 * [0-9].ini
 Dockerfile [0-9]
+
+# Operator scratch on the deploy box. These are real backups worth keeping on
+# disk (dated .env copies, pre-edit file snapshots) but they are not repo
+# content, and leaving them untracked made `git status` on hermes-gretch noisy
+# enough that genuine drift hid in it — which is how a whole unreleased feature
+# went uncommitted for a week.
+_codex_backups/
+*.bak
+*.bak.*
+*.bak-disabled
