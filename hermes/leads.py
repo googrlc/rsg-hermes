@@ -163,8 +163,18 @@ def create_lead(supa: Any, fields: dict[str, Any], *, created_by: str | None = N
     return supa.insert(TABLE, payload)
 
 
-def update_lead(supa: Any, lead_id: str, fields: dict[str, Any]) -> dict[str, Any]:
-    """Edit a lead. Unknown and API-owned fields are dropped rather than written."""
+def update_lead(
+    supa: Any,
+    lead_id: str,
+    fields: dict[str, Any],
+    *,
+    updated_by: str | None = None,
+) -> dict[str, Any]:
+    """Edit a lead. Unknown and API-owned fields are dropped rather than written.
+
+    ``updated_by`` is recorded as an audit note so the history answers "who
+    changed this, and when".
+    """
     payload = {k: v for k, v in fields.items() if k in EDITABLE_FIELDS}
     if not payload:
         raise ValueError("no editable fields provided")
@@ -172,7 +182,16 @@ def update_lead(supa: Any, lead_id: str, fields: dict[str, Any]) -> dict[str, An
         raise ValueError(f"unknown status '{payload['status']}'; must be one of {list(LEAD_STATUSES)}")
     if "name" in payload and not str(payload["name"] or "").strip():
         raise ValueError("a lead needs a name")
-    return supa.update(TABLE, lead_id, payload)
+    row = supa.update(TABLE, lead_id, payload)
+    # Append an audit trail entry so the history answers who changed what.
+    # Best-effort: a failed note must not roll back a successful edit.
+    try:
+        changed = ", ".join(payload)
+        body = f"Lead updated ({changed})"
+        supa.insert(NOTES_TABLE, {"lead_id": lead_id, "body": body, "author_email": updated_by})
+    except Exception:  # noqa: BLE001
+        log.exception("leads: audit note failed after update: %s", lead_id)
+    return row
 
 
 def get_lead(supa: Any, lead_id: str) -> dict[str, Any] | None:
@@ -256,11 +275,19 @@ def convert_to_opportunity(
     *,
     line_of_business: str,
     opportunity_type: str | None = None,
+    stage: str | None = None,
     premium_estimate: float | None = None,
     assigned_to_email: str | None = None,
+    next_action: str | None = None,
+    expected_close_date: str | None = None,
     created_by: str | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Turn a lead into a pipeline opportunity. Returns ``(lead, opportunity)``.
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    """Turn a lead into a pipeline opportunity. Returns ``(lead, opportunity, duplicate_detected)``.
+
+    ``duplicate_detected`` is True when an opportunity for this client+LOB+type
+    already existed before this call — the caller should warn the user that the
+    deal was returned rather than freshly created, so they can verify it is the
+    right one.
 
     This is the only way a lead moves forward, and it still does not touch
     NowCerts: the opportunity is worked in the CRM and reaches the AMS when it is
@@ -287,9 +314,12 @@ def convert_to_opportunity(
         insured_name=name,
         insured_id=lead.get("nowcerts_insured_guid"),
         insured_type=lead.get("lead_type"),
+        stage=stage,
         premium_estimate=premium_estimate if premium_estimate is not None else lead.get("premium_estimate"),
         lead_source=lead.get("lead_source"),
         assigned_to_email=assigned_to_email or lead.get("owner_email"),
+        next_action=next_action,
+        expected_close_date=expected_close_date,
         # The x-date is why this deal has a deadline; carry it across so the
         # pipeline can date the card instead of starting blank.
         expiration_date=lead.get("x_date"),
@@ -302,7 +332,38 @@ def convert_to_opportunity(
         "converted_opportunity_id": row.get("id"),
         "converted_at": _utcnow_iso(),
     })
-    return updated, row
+
+    # Log a timeline event on the opportunity so the audit history shows where
+    # this deal came from, and who triggered the conversion.
+    try:
+        opp.log_event(
+            supa, str(row.get("id")),
+            event_type=opp.EVENT_CREATED if _created else opp.EVENT_NOTE,
+            actor_email=created_by,
+            summary=(
+                f"Converted from lead {lead_id}"
+                + (f" ({name})" if name else "")
+                + (" — existing opportunity" if not _created else "")
+            ),
+            details={"lead_id": lead_id, "converted_by": created_by, "created": _created},
+        )
+    except Exception:  # noqa: BLE001 — conversion already succeeded; audit is best-effort
+        log.exception("leads: opportunity event log failed after conversion: %s", lead_id)
+
+    # Append an audit note to the lead itself so the lead's own history is complete.
+    try:
+        opp_id = str(row.get("id") or "")
+        body = (
+            f"Converted to opportunity on {line_of_business}"
+            + (f" (opportunity {opp_id})" if opp_id else "")
+            + (" — existing opportunity returned (duplicate detected)" if not _created else "")
+        )
+        supa.insert(NOTES_TABLE, {"lead_id": lead_id, "body": body, "author_email": created_by})
+    except Exception:  # noqa: BLE001
+        log.exception("leads: audit note failed after conversion: %s", lead_id)
+
+    duplicate_detected = not _created
+    return updated, row, duplicate_detected
 
 
 def _utcnow_iso() -> str:
