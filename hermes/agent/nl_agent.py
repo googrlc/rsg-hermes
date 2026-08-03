@@ -1541,11 +1541,6 @@ def ask(
                 tool_results.append({"tool_call_id": tc.id, "content": "Invalid arguments."})
                 continue
 
-            if fn_name in disabled:
-                tool_results.append({"tool_call_id": tc.id,
-                                     "content": f"The {fn_name} capability is not available on this instance."})
-                continue
-
             executor = _EXECUTORS.get(fn_name)
             if not executor:
                 tool_results.append({"tool_call_id": tc.id, "content": f"Unknown tool: {fn_name}"})
