@@ -388,6 +388,58 @@ def _sort(rows: list[dict[str, Any]], order: str) -> list[dict[str, Any]]:
     )
 
 
+SOURCE_LIVE = "live"
+SOURCE_MIRROR = "mirror"
+
+
+def select_policies_with_source(
+    supa: "SupabaseClient",
+    *,
+    columns: str | None = None,
+    params: dict[str, Any] | None = None,
+    limit: int | None = None,
+    nowcerts: "NowCertsClient | None" = None,
+) -> tuple[list[dict[str, Any]], str]:
+    """``select_policies``, plus where the rows actually came from.
+
+    The two sources are not interchangeable and the difference is not small. The
+    mirror is a superset that retains policies the live pull no longer returns:
+    measured 2026-08-03, 450 mirror rows against 340 live — 97 Expired, 4
+    Renewed, 1 Cancelled and 8 still-Active, every one of them a real row the
+    book has simply moved past. It is not stale-by-a-few-minutes, and no column
+    filter reproduces the live book from it (``active`` splits 130/320, nowhere
+    near the 340 line).
+
+    So a caller that publishes a count or a premium total off the mirror is
+    publishing a number ~30% high. That is fine while the background pull warms
+    — a degraded read beats a broken portal — but it has to be *labelled*, which
+    is what this variant exists to make possible. Callers that only read fields
+    off individual rows can keep using ``select_policies``.
+    """
+    params = dict(params or {})
+    if not live_reads_enabled():
+        return supa.select(POLICIES_TABLE, columns=columns, params=params, limit=limit), SOURCE_MIRROR
+
+    try:
+        rows = fetch_book(supa, nowcerts=nowcerts)
+    except Exception:  # noqa: BLE001
+        log.exception("ams.book: live read failed; falling back to the mirror")
+        return supa.select(POLICIES_TABLE, columns=columns, params=params, limit=limit), SOURCE_MIRROR
+
+    order = params.pop("order", None)
+    for field, expr in params.items():
+        rows = [r for r in rows if _matches(r, field, expr)]
+    if order:
+        rows = _sort(rows, str(order))
+    if limit is not None:
+        rows = rows[:limit]
+
+    if columns and columns != "*":
+        wanted = [c.strip() for c in columns.split(",") if c.strip()]
+        rows = [{c: r.get(c) for c in wanted} for r in rows]
+    return rows, SOURCE_LIVE
+
+
 def select_policies(
     supa: "SupabaseClient",
     *,
@@ -401,27 +453,9 @@ def select_policies(
     Falls back to Supabase unless ``HERMES_AMS_LIVE_READS`` is set, and also on
     any AMS failure — a degraded read beats a broken portal.
     """
-    params = dict(params or {})
-    if not live_reads_enabled():
-        return supa.select(POLICIES_TABLE, columns=columns, params=params, limit=limit)
-
-    try:
-        rows = fetch_book(supa, nowcerts=nowcerts)
-    except Exception:  # noqa: BLE001
-        log.exception("ams.book: live read failed; falling back to the mirror")
-        return supa.select(POLICIES_TABLE, columns=columns, params=params, limit=limit)
-
-    order = params.pop("order", None)
-    for field, expr in params.items():
-        rows = [r for r in rows if _matches(r, field, expr)]
-    if order:
-        rows = _sort(rows, str(order))
-    if limit is not None:
-        rows = rows[:limit]
-
-    if columns and columns != "*":
-        wanted = [c.strip() for c in columns.split(",") if c.strip()]
-        rows = [{c: r.get(c) for c in wanted} for r in rows]
+    rows, _ = select_policies_with_source(
+        supa, columns=columns, params=params, limit=limit, nowcerts=nowcerts
+    )
     return rows
 
 
