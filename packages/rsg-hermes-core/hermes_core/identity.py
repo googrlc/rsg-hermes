@@ -44,6 +44,23 @@ def memory_scope() -> str:
     return (os.environ.get("HERMES_MEMORY_SCOPE") or agent_id()).strip()
 
 
+def disabled_tools() -> frozenset[str]:
+    """Tool names this instance must NOT expose (comma-separated HERMES_DISABLED_TOOLS).
+
+    A CRM-scoped instance sets e.g. HERMES_DISABLED_TOOLS=web_research so the
+    agent never offers public-web business research.
+
+    This was lost when nl_agent moved from hermes/core to hermes/agent: the
+    caller kept using the name and the definition did not come along, so every
+    tool-calling question raised NameError until the reference was deleted. That
+    deletion fixed the crash and silently retired the capability with it —
+    setting the variable did nothing. Restored here, where its two callers in
+    nl_agent (the tool-list filter and the dispatch guard) can both reach it.
+    """
+    raw = os.environ.get("HERMES_DISABLED_TOOLS", "")
+    return frozenset(t.strip() for t in raw.split(",") if t.strip())
+
+
 @functools.lru_cache(maxsize=8)
 def load_persona(path: str | None = None) -> str:
     """Read the persona markdown for this instance, or '' if none is configured.

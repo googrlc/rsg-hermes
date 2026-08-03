@@ -1474,6 +1474,7 @@ def ask(
     Returns:
         DispatchResult with the agent's response.
     """
+    from hermes_core.identity import disabled_tools
     from hermes_core.llm_client import get_client, resolve_model, LLMConfigError
 
     try:
@@ -1491,7 +1492,14 @@ def ask(
         messages.extend(conversation)
     messages.append({"role": "user", "content": text})
 
-    active_tools = _scoped_tools(_TOOLS, hub)
+    # Two layers, deliberately. Filtering the advertised list is what stops the
+    # model reaching for a retired tool; the guard in the dispatch loop below is
+    # what holds if it asks anyway — a model can name a tool it was never shown,
+    # from earlier conversation turns or its own priors.
+    disabled = disabled_tools()
+    active_tools = _scoped_tools(
+        [t for t in _TOOLS if t["function"]["name"] not in disabled], hub
+    )
 
     def _complete(with_model: str):
         return oai.chat.completions.create(
@@ -1539,6 +1547,11 @@ def ask(
                 fn_args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
                 tool_results.append({"tool_call_id": tc.id, "content": "Invalid arguments."})
+                continue
+
+            if fn_name in disabled:
+                tool_results.append({"tool_call_id": tc.id,
+                                     "content": f"The {fn_name} capability is not available on this instance."})
                 continue
 
             executor = _EXECUTORS.get(fn_name)
