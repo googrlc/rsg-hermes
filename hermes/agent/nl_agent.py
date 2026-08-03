@@ -193,6 +193,45 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "list_cases",
+            "description": (
+                "Open service cases with their checklist progress — task counts, what's "
+                "blocking, and what's ready to close. Use for 'what's open', 'what's "
+                "blocked', 'what can we close', 'cases for [client]', 'where does [case] "
+                "stand'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Filter by case status; 'all' for every status."},
+                    "insured": {"type": "string", "description": "Filter by insured/client name."},
+                    "blocked_only": {"type": "boolean", "description": "Only cases with a required task outstanding."},
+                    "closable_only": {"type": "boolean", "description": "Only cases whose required work is done."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "case_progress",
+            "description": (
+                "One case in full with its task checklist — who owns each task, what's due, "
+                "and which required items are outstanding. Accepts a case number or an "
+                "insured name. Use for 'what's left on [case]', 'why can't we close [case]'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case": {"type": "string", "description": "Case number, or the insured's name."},
+                },
+                "required": ["case"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "match_carrier_appetite",
             "description": (
                 "Find carriers whose appetite matches a risk — by line of business, state, "
@@ -486,7 +525,49 @@ def _compose_system_prompt(persona_key: str | None = None) -> str:
         persona = load_named_persona(persona_key)
     if not persona:
         persona = load_persona() or _DEFAULT_PERSONA
-    return persona + "\n\n" + _PLATFORM_GUIDE
+    return persona + "\n\n" + _desk_roster_block(persona_key) + "\n\n" + _PLATFORM_GUIDE
+
+
+# The desk roster, in one place. Each desk is scoped to its own tools, so a
+# question outside its lane is a dead end unless it can name the desk that owns
+# it. Generating the referral text from this table (rather than restating it in
+# each persona file) means adding a desk updates every other desk's knowledge of
+# it — six hand-maintained lists would drift apart within a month.
+#
+# Keyed by PERSONA key, not hub key, because that is what _compose_system_prompt
+# is handed. The money desk is "commissions" here even though the hub also
+# answers to "finance": key it by the alias and the desk reading its own prompt
+# is told it is someone else, and then offers to refer work to itself.
+_DESKS: dict[str, str] = {
+    "carrier": "carrier appointments, appetite, class codes, underwriter contacts and portal logins — 'who writes this?'",
+    "crm": "the client record end to end: the canonical book, live AMS policies, activity, and documents",
+    "renewals": "what's renewing, what's at risk, and the retention save-list",
+    "cases": "open service cases and their task checklists — what's blocking, what can close",
+    "commissions": "the money: what RSG is owed, what came in short, and which carriers to chase",
+    "intake": "new leads arriving from forms, email, and Slack, before they become clients",
+}
+
+
+def _desk_roster_block(current: str | None) -> str:
+    """The 'who else can help' block appended to every desk persona."""
+    others = [f"- **{name} desk** — {covers}" for name, covers in _DESKS.items() if name != current]
+    if not others:
+        return ""
+    here = _DESKS.get(current or "", "")
+    lead = f"You are the **{current} desk** ({here}).\n\n" if here else ""
+    return (
+        "## The other desks\n\n"
+        + lead
+        + "RSG runs one assistant per desk. Each has its own tools and only its own data, "
+        "so a question outside your lane is one you genuinely cannot answer — not one you "
+        "should attempt from general knowledge.\n\n"
+        + "\n".join(others)
+        + "\n\nWhen a question belongs to another desk, say so in one line and name it — "
+        '"that\'s the finance desk — ask it about the commission shortfall on that policy." '
+        "Hand off the specific question, not just the desk name. If a question spans two "
+        "desks, answer your part fully first, then name the desk that owns the rest. Never "
+        "refuse and stop: the producer should always leave knowing where the answer lives."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -830,6 +911,154 @@ def _exec_carrier_appetite(args: dict[str, Any]) -> DispatchResult:
     if bridge_note:
         msg += f"\n\nExplicit class-code links for this code:\n{bridge_note}"
     return DispatchResult(True, msg, {"matches": rows})
+
+
+# ---------------------------------------------------------------------------
+# Cases Desk.
+#
+# Cases left this repo in #322 — googrlc/rsg-hermes-cases owns them, and it owns
+# the progress arithmetic too (what counts as done, what counts as blocking,
+# whether a case can close). So these read over HTTP rather than querying
+# v_case_progress directly. A second copy of that arithmetic here is exactly the
+# duplication the split was performed to end: it would keep answering after the
+# service's rules changed, and answer differently.
+# ---------------------------------------------------------------------------
+
+CASES_URL = (os.environ.get("HERMES_CASES_URL") or "http://rsg-hermes-cases:8802").rstrip("/")
+
+# Progress is one call per case, so a broad question does not turn into an
+# unbounded fan-out. The book is 13 cases today; this is headroom, not a limit
+# anyone should be hitting.
+_CASE_PROGRESS_FANOUT = 25
+
+
+def _cases_get(path: str, params: dict[str, Any] | None = None) -> Any:
+    """GET from the cases service. Raises on any failure; callers turn that into
+    a DispatchResult so the desk says what went wrong instead of half-answering."""
+    import urllib.parse
+    import urllib.request
+
+    url = CASES_URL + path
+    if params:
+        url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode())
+
+
+def _case_line(case: dict[str, Any], prog: dict[str, Any] | None) -> str:
+    line = (f"{case.get('case_number') or '?'} — {case.get('title') or ''}"
+            f" ({case.get('insured_name') or 'no insured'})"
+            f" · {case.get('status') or '?'}")
+    if prog:
+        line += f" · {prog.get('tasks_done') or 0}/{prog.get('tasks_total') or 0} tasks"
+        blocking = prog.get("required_blocking") or 0
+        if blocking:
+            line += f" · {blocking} required task(s) outstanding"
+        elif prog.get("can_close"):
+            line += " · ready to close"
+    return line
+
+
+def _exec_list_cases(args: dict[str, Any]) -> DispatchResult:
+    """Cases Desk — open service cases with checklist progress."""
+    blocked_only = bool(args.get("blocked_only"))
+    closable_only = bool(args.get("closable_only"))
+    status = (args.get("status") or "").strip()
+    insured = (args.get("insured") or "").strip().lower()
+
+    try:
+        if blocked_only:
+            # The service computes its own blocked set; asking it beats deriving one.
+            payload = _cases_get("/api/cases/blocked")
+            cases = payload.get("blocked_cases") or []
+        else:
+            params: dict[str, Any] = {"limit": 100}
+            if status and status.lower() != "all":
+                params["status"] = status
+            cases = (_cases_get("/api/cases", params) or {}).get("cases") or []
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Case lookup failed: {exc}")
+
+    # The service has no insured filter, so it is applied here rather than asked for.
+    if insured:
+        cases = [c for c in cases if insured in str(c.get("insured_name") or "").lower()]
+    if not cases:
+        return DispatchResult(True, "No cases match that filter.")
+
+    truncated = len(cases) > _CASE_PROGRESS_FANOUT
+    shown = cases[:_CASE_PROGRESS_FANOUT]
+    progress: dict[str, dict[str, Any]] = {}
+    for c in shown:
+        cid = c.get("id") or c.get("case_id")
+        if not cid:
+            continue
+        try:
+            progress[cid] = _cases_get(f"/api/cases/{cid}/progress")
+        except Exception:  # noqa: BLE001 — one unreadable case must not blank the list
+            log.warning("cases: progress unavailable for %s", cid, exc_info=True)
+
+    if closable_only:
+        shown = [c for c in shown if (progress.get(c.get("id") or "") or {}).get("can_close")]
+        if not shown:
+            return DispatchResult(True, "No case is ready to close yet.")
+    if blocked_only and not shown:
+        return DispatchResult(True, "Nothing is blocked — no case has an outstanding required task.")
+
+    out = [_case_line(c, progress.get(c.get("id") or "")) for c in shown]
+    msg = f"{len(shown)} cases:\n" + "\n".join(f"• {x}" for x in out)
+    if truncated:
+        msg += f"\n\n(showing the first {_CASE_PROGRESS_FANOUT} of {len(cases)})"
+    return DispatchResult(True, msg, {"cases": shown, "progress": progress})
+
+
+def _exec_case_progress(args: dict[str, Any]) -> DispatchResult:
+    """Cases Desk — one case in full, with its task checklist."""
+    ref = (args.get("case") or "").strip()
+    if not ref:
+        return DispatchResult(False, "Give a case number or the insured's name.")
+
+    try:
+        cases = (_cases_get("/api/cases", {"limit": 200}) or {}).get("cases") or []
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Case lookup failed: {exc}")
+
+    # Case number first, then the insured name, so a producer can ask by client
+    # without knowing the number.
+    needle = ref.lower()
+    rows = [c for c in cases if needle in str(c.get("case_number") or "").lower()]
+    if not rows:
+        rows = [c for c in cases if needle in str(c.get("insured_name") or "").lower()]
+    if not rows:
+        return DispatchResult(True, f"No case matching '{ref}'.")
+    if len(rows) > 1:
+        listed = ", ".join(f"{r.get('case_number')} ({r.get('title')})" for r in rows[:8])
+        return DispatchResult(True, f"Several cases match '{ref}': {listed}. Which one?",
+                              {"cases": rows})
+
+    case = rows[0]
+    cid = case.get("id")
+    try:
+        prog = _cases_get(f"/api/cases/{cid}/progress")
+        tasks = (_cases_get("/api/tasks", {"case_id": cid, "limit": 100}) or {}).get("tasks") or []
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Case lookup failed: {exc}")
+
+    out = [f"{case.get('case_number')} — {case.get('title')}",
+           f"  insured: {case.get('insured_name') or 'none'}",
+           f"  status: {case.get('status')} · {prog.get('tasks_done') or 0}/{prog.get('tasks_total') or 0} tasks"]
+    if prog.get("required_blocking"):
+        out.append(f"  BLOCKED: {prog['required_blocking']} required task(s) outstanding")
+    elif prog.get("can_close"):
+        out.append("  ready to close")
+    tasks = sorted(tasks, key=lambda t: (t.get("sort_order") is None, t.get("sort_order") or 0))
+    for t in tasks:
+        mark = "x" if str(t.get("status") or "").lower() in ("done", "completed", "complete") else " "
+        req = " (required)" if t.get("is_required") else ""
+        who = f" — {t['assigned_to_email']}" if t.get("assigned_to_email") else ""
+        due = f" — due {str(t['due_at'])[:10]}" if t.get("due_at") else ""
+        out.append(f"    [{mark}] {t.get('title')}{req}{who}{due}")
+    return DispatchResult(True, "\n".join(out), {"case": case, "progress": prog, "tasks": tasks})
 
 
 def _num(v: Any) -> float:
@@ -1338,6 +1567,8 @@ _EXECUTORS: dict[str, Any] = {
     "match_carrier_appetite": _exec_carrier_appetite,
     "lookup_class_code": _exec_lookup_class_code,
     "appointments_by_line": _exec_appointments_by_line,
+    "list_cases": _exec_list_cases,
+    "case_progress": _exec_case_progress,
     "commission_summary": _exec_commission_summary,
     "commission_shortfalls": _exec_commission_shortfalls,
     "find_client": _exec_find_client,
@@ -1358,7 +1589,12 @@ _WRITE_TOOLS = {"intake_lead"}
 _HUB_TOOLS: dict[str, set[str]] = {
     "carrier": {"list_carriers", "match_carrier_appetite", "lookup_class_code",
                 "appointments_by_line", "web_research"},
+    # The money desk answers to both names. The portal and the split services
+    # call it "finance"; this file has always called it "commissions". Aliasing
+    # beats renaming — a rename silently turns every existing caller's hub into
+    # an unknown one.
     "commissions": {"commission_summary", "commission_shortfalls"},
+    "finance": {"commission_summary", "commission_shortfalls"},
     # CRM Desk sees the whole client: the canonical book, live AMS (NowCerts),
     # the custom agency CRM's cases/tasks, and the client's Nextcloud documents —
     # all read-only. Carrier appetite, commissions, and intake stay out of its lane.
@@ -1378,7 +1614,11 @@ _HUB_TOOLS: dict[str, set[str]] = {
     # cannot triage a case without knowing who the client is and what they hold;
     # its persona extends the CRM one for the same reason. Read-only for now: the
     # case write tools exist in the API but are not exposed to the agent yet.
+    #
+    # list_cases/case_progress are what make the desk answerable at all — before
+    # them its persona described a queue it had no tool to read.
     "cases": {
+        "list_cases", "case_progress",
         "find_client", "client_policies", "renewals_overview",
         "ams_client_snapshot", "crm_client_activity", "client_documents",
     },
@@ -1387,6 +1627,7 @@ _HUB_TOOLS: dict[str, set[str]] = {
 _HUB_PERSONA: dict[str, str] = {
     "carrier": "carrier",
     "commissions": "commissions",
+    "finance": "commissions",
     "crm": "crm",
     "cases": "cases",
     "renewals": "renewals",
