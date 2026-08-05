@@ -39,13 +39,15 @@ RULE = {"id": "rule-1", "carrier_name": "Acme Mutual", "lob": "General Liability
 
 def cpol(policy_number="P1", *, guid=None, insured="ins1", status="Active",
          carrier="Acme Mutual", lob="General Liability", premium=1000.0,
-         agency_commission_amount=None, eff="2026-01-01", exp="2027-01-01", state="GA"):
+         agency_commission_amount=None, eff="2026-01-01", exp="2027-01-01",
+         cancellation_date=None, state="GA"):
     return {
         "policy_number": policy_number, "policy_guid": guid or f"pg-{policy_number}",
         "nowcerts_insured_guid": insured, "status": status, "carrier": carrier,
         "lines_of_business": lob, "premium_amount": premium,
         "annualized_premium": premium, "agency_commission_amount": agency_commission_amount,
-        "effective_date": eff, "expiration_date": exp, "state": state,
+        "effective_date": eff, "expiration_date": exp,
+        "cancellation_date": cancellation_date, "state": state,
     }
 
 
@@ -65,7 +67,8 @@ def _led_row(**over):
         "id": "led-x", "policy_number": "P1", "nowcerts_policy_id": None,
         "carrier_name": "Old", "lob": "General Liability", "client_name": "Old",
         "statement_date": "2026-06-01", "policy_effective_date": "2026-01-01",
-        "policy_expiration_date": "2027-01-01", "is_renewal": False,
+        "policy_expiration_date": "2027-01-01", "cancellation_date": None,
+        "is_renewal": False,
         "gross_premium": 500.0, "expected_commission": 50.0, "actual_commission": 137.0,
         "delta": 87.0, "reconciliation_status": "reconciled", "payment_received": True,
         "statement_source": "carrier_statement", "commission_rule_id": None,
@@ -127,6 +130,55 @@ def test_non_commissionable_status_skipped():
     supa = supa_with([cpol("P1", status="Cancelled")])
     res = cs.run_commission_sync(supa)
     assert res.skipped_not_commissionable == 1 and res.inserted == 0
+
+
+def test_cancelled_with_date_refreshes_existing_ledger_only():
+    """Mid-term cancel: stamp cancellation_date, never insert, never touch actuals."""
+    supa = supa_with(
+        [cpol("P1", status="Cancelled", cancellation_date="2026-06-15",
+              exp="2027-01-01")],
+        ledger=[_led_row(policy_number="P1")],
+    )
+    res = cs.run_commission_sync(supa)
+    assert res.cancel_dates_updated == 1
+    assert res.inserted == 0 and res.skipped_not_commissionable == 0
+    assert res.balanced, res.message
+    row = supa.tables[cs.LEDGER_TABLE][0]
+    assert row["cancellation_date"] == "2026-06-15"
+    assert row["policy_expiration_date"] == "2027-01-01"  # original term end kept
+    assert row["actual_commission"] == 137.0
+    assert row["reconciliation_status"] == "reconciled"
+    assert row["statement_source"] == "carrier_statement"
+
+
+def test_cancelled_without_existing_ledger_still_skipped():
+    supa = supa_with([cpol("P1", status="Cancelled", cancellation_date="2026-06-15")])
+    res = cs.run_commission_sync(supa)
+    assert res.skipped_not_commissionable == 1
+    assert res.cancel_dates_updated == 0 and res.inserted == 0
+    assert supa.tables.get(cs.LEDGER_TABLE, []) == []
+
+
+def test_cancelled_without_cancel_date_does_not_touch_ledger():
+    supa = supa_with(
+        [cpol("P1", status="Cancelled", cancellation_date=None)],
+        ledger=[_led_row(policy_number="P1")],
+    )
+    res = cs.run_commission_sync(supa)
+    assert res.skipped_not_commissionable == 1
+    assert res.cancel_dates_updated == 0
+    assert supa.tables[cs.LEDGER_TABLE][0].get("cancellation_date") is None
+
+
+def test_active_refresh_copies_cancellation_date_when_present():
+    supa = supa_with(
+        [cpol("P1", status="Active", cancellation_date="2026-08-01", premium=3000.0,
+              agency_commission_amount=450.0)],
+        ledger=[_led_row(policy_number="P1")],
+    )
+    res = cs.run_commission_sync(supa)
+    assert res.updated == 1
+    assert supa.tables[cs.LEDGER_TABLE][0]["cancellation_date"] == "2026-08-01"
 
 
 def test_up_for_renewal_excluded():

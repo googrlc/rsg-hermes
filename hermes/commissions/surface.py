@@ -215,7 +215,11 @@ class Overview:
 
 LEDGER_COLUMNS = (
     "id,policy_number,client_name,carrier_name,lob,gross_premium,expected_commission,"
-    "actual_commission,delta,reconciliation_status,statement_date"
+    "actual_commission,delta,reconciliation_status,statement_date,"
+    # Close-month worklist (agency portal Money workstation) keys off effective.
+    "policy_effective_date,policy_expiration_date"
+    # cancellation_date lands with the mid-term cancel migration — add to the
+    # select only after that column exists in Supabase.
 )
 
 
