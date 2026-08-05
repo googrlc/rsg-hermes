@@ -38,6 +38,7 @@ _CLIENT_COLS = {
 _POLICY_COLS = {
     "policy_guid", "nowcerts_insured_guid", "policy_number", "lines_of_business",
     "business_type", "carrier", "status", "active", "effective_date", "expiration_date",
+    "cancellation_date",
     "current_term_amount", "premium_amount", "annualized_premium", "renewed_policy", "state",
 }
 
@@ -104,6 +105,11 @@ def _map_policy_volatile(p: dict[str, Any]) -> dict[str, Any]:
         "active": _policy_active(p, status),
         "effective_date": strip_date(p.get("effectiveDate") or p.get("EffectiveDate")),
         "expiration_date": strip_date(p.get("expirationDate") or p.get("ExpirationDate")),
+        # Mid-term cancels keep the original expiration_date; cancellationDate is
+        # the real cutoff (docs/integrations/nowcerts-import-mapping.md §1).
+        "cancellation_date": strip_date(
+            p.get("cancellationDate") or p.get("CancellationDate")
+        ),
         "current_term_amount": premium,
         "premium_amount": premium,
         "annualized_premium": premium,

@@ -45,10 +45,17 @@ STATEMENT_SOURCE = "canonical_book"
 # yet won) and all cancelled/expired/lapsed/non-renewed statuses.
 LEDGER_STATUSES = frozenset({"Active", "Renewed"})
 
+# Cancelled book still needs its AMS cancellation_date mirrored onto any ledger
+# row that already exists (seeded while Active). Never INSERT a cancelled row —
+# only refresh the cancel date (+ leave policy_expiration_date as the original
+# term end). Mid-term chargeback estimates in the finance portal depend on this.
+CANCEL_DATE_STATUSES = frozenset({"Cancelled", "Flat Cancel", "Pending Cancel"})
+
 # Fallback ledger columns when the table is empty (schema-adaptive otherwise).
 _LEDGER_COLS = {
     "policy_number", "nowcerts_policy_id", "carrier_name", "lob", "client_name",
-    "statement_date", "policy_effective_date", "policy_expiration_date", "is_renewal",
+    "statement_date", "policy_effective_date", "policy_expiration_date",
+    "cancellation_date", "is_renewal",
     "gross_premium", "expected_commission", "reconciliation_status", "statement_source",
     "commission_rule_id", "commission_basis", "state", "updated_at",
 }
@@ -64,6 +71,7 @@ class CommissionSyncResult:
     skipped_no_value: int = 0        # neither premium nor an AMS commission amount
     skipped_out_of_window: int = 0
     skipped_no_date: int = 0         # statement_date is NOT NULL and nothing to seed it
+    cancel_dates_updated: int = 0    # Cancelled/Flat/Pending: cancel date onto existing ledger
     no_expected: int = 0             # seeded, but no expected commission could be derived
     overrides_retired: int = 0       # portal corrections the AMS has caught up to
     overrides_conflicted: int = 0    # AMS moved somewhere unexpected — needs a human
@@ -84,6 +92,7 @@ class CommissionSyncResult:
             + self.skipped_no_value
             + self.skipped_out_of_window
             + self.skipped_no_date
+            + self.cancel_dates_updated
         )
 
     @property
@@ -103,7 +112,8 @@ class CommissionSyncResult:
             f"no_policy_number={self.skipped_no_policy_number} "
             f"not_commissionable={self.skipped_not_commissionable} "
             f"no_value={self.skipped_no_value} out_of_window={self.skipped_out_of_window} "
-            f"no_date={self.skipped_no_date} no_expected={self.no_expected} "
+            f"no_date={self.skipped_no_date} cancel_dates={self.cancel_dates_updated} "
+            f"no_expected={self.no_expected} "
             f"overrides_retired={self.overrides_retired} "
             f"overrides_conflicted={self.overrides_conflicted} "
             f"balanced={self.balanced} errors={len(self.errors)}"
@@ -230,7 +240,31 @@ def run_commission_sync(
             continue
         status = elig.normalize_status(p.get("status"))
         if status not in LEDGER_STATUSES:
-            result.skipped_not_commissionable += 1
+            # Cancelled (etc.) never get a NEW ledger row, but an existing row
+            # still needs the AMS cancellation_date so the portal can estimate
+            # chargebacks without overwriting policy_expiration_date.
+            if (
+                status in CANCEL_DATE_STATUSES
+                and pn in existing
+                and p.get("cancellation_date")
+            ):
+                cancel_refresh = _project({
+                    "cancellation_date": p.get("cancellation_date"),
+                    # Keep term end current from AMS; never replace it with cancel.
+                    "policy_expiration_date": p.get("expiration_date"),
+                    "policy_effective_date": p.get("effective_date"),
+                    "nowcerts_policy_id": p.get("policy_guid"),
+                    "updated_at": now_iso,
+                }, ledger_cols)
+                try:
+                    if not dry_run and cancel_refresh:
+                        supa.update(LEDGER_TABLE, existing[pn], cancel_refresh)
+                    result.cancel_dates_updated += 1
+                except Exception as exc:  # noqa: BLE001
+                    result.errors.append(f"policy {pn}: {exc}")
+                    log.warning("commission sync cancel-date error on %s: %s", pn, exc)
+            else:
+                result.skipped_not_commissionable += 1
             continue
         if not _has_commissionable_value(p):
             result.skipped_no_value += 1
@@ -264,6 +298,8 @@ def run_commission_sync(
             "client_name": clients.get(guid) or None,
             "policy_effective_date": eff,
             "policy_expiration_date": exp,
+            # Present when AMS already stamped a cancel (e.g. Pending Cancel).
+            "cancellation_date": p.get("cancellation_date"),
             "is_renewal": is_renewal,
             "gross_premium": prem,
             "expected_commission": expected,
