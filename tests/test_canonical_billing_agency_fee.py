@@ -28,6 +28,13 @@ def test_billing_type_direct_bill_100():
     assert normalize_billing_type("") is None
 
 
+def test_billing_type_nowcerts_underscore_forms():
+    # PolicyDetailList returns these spellings live.
+    assert normalize_billing_type("Direct_Bill_100") == "Direct Bill 100"
+    assert normalize_billing_type("Agency_Bill") == "Agency Bill"
+    assert normalize_billing_type("Direct_Bill_Autopay") == "Direct Bill"
+
+
 def test_billing_fields_in_policy_cols():
     assert "billing_type" in _POLICY_COLS
     assert "agency_fee_amount" in _POLICY_COLS

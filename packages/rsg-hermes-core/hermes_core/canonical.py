@@ -44,9 +44,12 @@ _POLICY_COLS = {
 }
 
 # NowCerts Policy.billingType → canonical enum (docs/integrations/nowcerts-import-mapping.md §2).
+# Live PolicyDetailList returns underscore forms (Direct_Bill_100, Direct_Bill_Autopay).
 _BILLING_NORMALIZE = {
     "direct bill": "Direct Bill", "direct": "Direct Bill", "db": "Direct Bill",
+    "direct bill autopay": "Direct Bill", "db autopay": "Direct Bill",
     "agency bill": "Agency Bill", "agency": "Agency Bill", "ab": "Agency Bill",
+    "agency bill autopay": "Agency Bill",
     "direct bill 100": "Direct Bill 100", "db 100": "Direct Bill 100", "db100": "Direct Bill 100",
     "agency bill 100": "Agency Bill 100", "ab 100": "Agency Bill 100", "ab100": "Agency Bill 100",
 }
@@ -57,7 +60,9 @@ def normalize_billing_type(raw: Any) -> str | None:
     text = str(raw or "").strip()
     if not text:
         return None
-    return _BILLING_NORMALIZE.get(text.lower(), text)
+    # Direct_Bill_100 / Agency_Bill → spaced keys used in the table above.
+    key = text.lower().replace("_", " ").strip()
+    return _BILLING_NORMALIZE.get(key, text.replace("_", " "))
 
 def _num(value: Any) -> float | None:
     try:
