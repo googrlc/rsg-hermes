@@ -33,10 +33,11 @@ def test_the_split_services_serve_exactly_what_the_single_app_serves() -> None:
     for name in SERVICES:
         split |= _routes(create_app(name))
 
-    # Each split app adds its own /health; the monolith has one already.
-    health = {(m, p) for m, p in split if p == "/health"}
+    # Each split app adds its own /health and /healthz; the monolith has /health
+    # already and gets /healthz via attach_monolith_healthz.
+    health = {(m, p) for m, p in split if p in ("/health", "/healthz")}
     split -= health
-    whole -= {(m, p) for m, p in whole if p == "/health"}
+    whole -= {(m, p) for m, p in whole if p in ("/health", "/healthz")}
 
     missing = whole - split
     assert not missing, (
@@ -52,7 +53,7 @@ def test_no_two_services_claim_the_same_route() -> None:
     clashes = []
     for name in SERVICES:
         for route in _routes(create_app(name)):
-            if route[1] == "/health":
+            if route[1] in ("/health", "/healthz"):
                 continue
             if route in seen:
                 clashes.append(f"{route} claimed by both {seen[route]} and {name}")
