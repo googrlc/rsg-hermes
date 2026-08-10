@@ -403,6 +403,24 @@ def run_intake_writebacks(req: deps.ExecutorRunRequest):
     return {"ok": True, **summary}
 
 
+
+@router.get("/api/reference/picklists/{list_key}")
+def picklist_options_endpoint(list_key: str):
+    """NowCerts option IDs for a picklist (lead statuses, pipeline stages, etc.)."""
+    from hermes_app import deps
+    from hermes_core import picklists as pl
+
+    allowed = {
+        pl.LIST_PIPELINE_NB, pl.LIST_PIPELINE_RN, pl.LIST_LEAD_STATUS,
+        pl.LIST_RENEWAL_STATUS, pl.LIST_ENDORSEMENT,
+    }
+    if list_key not in allowed:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"unknown picklist {list_key}")
+    options = pl.list_options(deps.get_supa(), list_key)
+    return {"list_key": list_key, "options": options, "count": len(options)}
+
+
 @router.get("/api/pipeline/stages")
 def pipeline_stages_endpoint():
     """The stage vocabulary, in order, per pipeline.
