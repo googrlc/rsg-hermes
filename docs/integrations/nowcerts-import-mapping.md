@@ -56,9 +56,9 @@ Useful keys:
 | `commissionRate` | `commission_rate` | float | If value > 1, divide by 100 (formula handles this too) |
 | `coverageAmount` | `coverage_amount` | currency | |
 | `deductible` | `deductible` | currency | |
-| `agencyFee` | `agency_fee` | currency | |
+| `agencyFee` | `agency_fee` / canonical `agency_fee_amount` | currency | Fee RSG charges the insured (not carrier commission) |
 | `businessType` | `business_type` | varchar(100) | |
-| `billingType` | `billing_type` | **enum** | Must match exact options — see §2 |
+| `billingType` | `billing_type` | **enum** | Must match exact options — see §2. Agency Bill stays on the Money chase list with a badge. |
 | `policyTerm` *(months)* | `policy_term` | int | 6 or 12 |
 | `cancellationReason` | `cancellation_reason` | text | |
 | `policyStatus` *(or `status`)* | `status` | **enum** | Must match exact options — see §2 |

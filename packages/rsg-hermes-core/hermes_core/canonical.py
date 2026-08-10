@@ -39,8 +39,30 @@ _POLICY_COLS = {
     "policy_guid", "nowcerts_insured_guid", "policy_number", "lines_of_business",
     "business_type", "carrier", "status", "active", "effective_date", "expiration_date",
     "cancellation_date",
+    "billing_type", "agency_fee_amount",
     "current_term_amount", "premium_amount", "annualized_premium", "renewed_policy", "state",
 }
+
+# NowCerts Policy.billingType → canonical enum (docs/integrations/nowcerts-import-mapping.md §2).
+# Live PolicyDetailList returns underscore forms (Direct_Bill_100, Direct_Bill_Autopay).
+_BILLING_NORMALIZE = {
+    "direct bill": "Direct Bill", "direct": "Direct Bill", "db": "Direct Bill",
+    "direct bill autopay": "Direct Bill", "db autopay": "Direct Bill",
+    "agency bill": "Agency Bill", "agency": "Agency Bill", "ab": "Agency Bill",
+    "agency bill autopay": "Agency Bill",
+    "direct bill 100": "Direct Bill 100", "db 100": "Direct Bill 100", "db100": "Direct Bill 100",
+    "agency bill 100": "Agency Bill 100", "ab 100": "Agency Bill 100", "ab100": "Agency Bill 100",
+}
+
+
+def normalize_billing_type(raw: Any) -> str | None:
+    """Map any AMS billing spelling to the canonical enum, or None if blank/unknown."""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    # Direct_Bill_100 / Agency_Bill → spaced keys used in the table above.
+    key = text.lower().replace("_", " ").strip()
+    return _BILLING_NORMALIZE.get(key, text.replace("_", " "))
 
 def _num(value: Any) -> float | None:
     try:
@@ -109,6 +131,14 @@ def _map_policy_volatile(p: dict[str, Any]) -> dict[str, Any]:
         # the real cutoff (docs/integrations/nowcerts-import-mapping.md §1).
         "cancellation_date": strip_date(
             p.get("cancellationDate") or p.get("CancellationDate")
+        ),
+        "billing_type": normalize_billing_type(
+            p.get("billingType") or p.get("BillingType") or p.get("billing_type")
+        ),
+        # Agency fee the shop charges the insured (distinct from carrier commission).
+        "agency_fee_amount": _num(
+            p.get("agencyFee") if p.get("agencyFee") is not None
+            else (p.get("AgencyFee") if p.get("AgencyFee") is not None else p.get("agency_fee"))
         ),
         "current_term_amount": premium,
         "premium_amount": premium,

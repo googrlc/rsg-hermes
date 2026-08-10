@@ -55,7 +55,8 @@ CANCEL_DATE_STATUSES = frozenset({"Cancelled", "Flat Cancel", "Pending Cancel"})
 _LEDGER_COLS = {
     "policy_number", "nowcerts_policy_id", "carrier_name", "lob", "client_name",
     "statement_date", "policy_effective_date", "policy_expiration_date",
-    "cancellation_date", "is_renewal",
+    "cancellation_date", "billing_type", "agency_fee_amount", "admin_fee_amount",
+    "is_renewal",
     "gross_premium", "expected_commission", "reconciliation_status", "statement_source",
     "commission_rule_id", "commission_basis", "state", "updated_at",
 }
@@ -300,6 +301,10 @@ def run_commission_sync(
             "policy_expiration_date": exp,
             # Present when AMS already stamped a cancel (e.g. Pending Cancel).
             "cancellation_date": p.get("cancellation_date"),
+            "billing_type": p.get("billing_type"),
+            # Agency fee the shop charges; also seed admin_fee_amount for "% of Admin Fee" rules.
+            "agency_fee_amount": p.get("agency_fee_amount"),
+            "admin_fee_amount": p.get("agency_fee_amount"),
             "is_renewal": is_renewal,
             "gross_premium": prem,
             "expected_commission": expected,
