@@ -96,6 +96,12 @@ CRON_TZ=America/New_York
 # 15 8 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-sweep >> /root/hermes-cron.log 2>&1
 # Commission audit (Revenue Integrity) — Mondays 7:00am ET -> Slack
 0 7 * * 1 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-audit >> /root/hermes-cron.log 2>&1
+# Commission DQ / AMS anomaly scan — weekdays 6:15am ET (after agency snapshot,
+# before revenue sentinel). Report-only: book vs rulebook vs ledger for NB/renewal
+# misclassification, rate drift, as-earned/advance timing, Agency Bill gaps.
+# Idempotent (one post/day). Dry-run: hermes --commission-dq-dry-run
+# Channel: HERMES_COMMISSION_DQ_CHANNEL (falls back to audit / #systems-check).
+15 6 * * 1-5 cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-dq >> /root/hermes-cron.log 2>&1
 # End-of-month revenue scorecard — 1st of month 7:00am ET -> Slack
 0 7 1 * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --eom-scorecard >> /root/hermes-cron.log 2>&1
 # RETIRED 2026-07-23 — EspoCRM decommissioned. --changelog QUERIES EspoCRM for 24h changes

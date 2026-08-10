@@ -17,6 +17,9 @@ Slack output includes an `Update Commission %` button per policy. Button actions
 - `hermes --commission-audit-dry-run`: render output without posting.
 - `hermes --commission-audit-force`: bypass same-day duplicate-post guard.
 
+For AMS vs rulebook vs ledger anomalies (NB/renewal, rate drift, timing, Agency
+Bill), see [Commission DQ](commission-dq.md) (`hermes --commission-dq`).
+
 ## Config
 
 - `HERMES_COMMISSION_AUDIT_CHANNEL`: Slack destination channel (falls back to default notifier channel if unset).
