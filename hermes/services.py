@@ -119,37 +119,62 @@ def base_url(service: str) -> str:
     return _base_url(SERVICES[service])
 
 
-def create_app(service: str | None = None) -> FastAPI:
+def create_app(service: str | None = None, *, enforce_credentials: bool = False) -> FastAPI:
     """Build the app for one service, or the whole thing.
 
     "all" returns `hermes.api.app` itself rather than a reconstruction, so the
     unsplit deployment runs the exact object it runs today.
+
+    ``enforce_credentials`` is False by default so route-inventory tests can
+    build apps without NowCerts env. ``main()`` passes True and refuses to
+    start on a credential / role violation.
     """
+    from hermes_app.role import (
+        ROLE_MIRROR_READER,
+        ROLE_WRITE_IN,
+        assert_role_config,
+        modules_for,
+    )
+
     service = (service or current_service()).strip().lower()
-
-    if service == ALL:
-        from hermes.api import app
-
-        return app
-
-    if service not in SERVICES:
+    if service != ALL and service not in SERVICES:
         raise SystemExit(
             f"unknown service {service!r}; expected one of: {ALL}, "
             + ", ".join(sorted(SERVICES))
         )
 
+    role = assert_role_config(service, enforce_credentials=enforce_credentials)
+
+    if role == "finance_readout":
+        return build_app(SERVICES["finance"])
+
+    if service == ALL:
+        if role != ROLE_WRITE_IN:
+            raise SystemExit(
+                f"HERMES_SERVICE=all requires HERMES_ROLE=write_in (got {role})"
+            )
+        from hermes.api import app, attach_monolith_healthz
+
+        attach_monolith_healthz(app)
+        return app
+
     spec = SERVICES[service]
 
-    # The hub is `hermes.api`, which builds its own app with everything mounted.
-    # Serving hub alone means its own router only — not the apps it also mounts
-    # for the unsplit case.
     if service == "hub":
+        if role != ROLE_WRITE_IN:
+            raise SystemExit(f"HERMES_SERVICE=hub requires HERMES_ROLE=write_in (got {role})")
         from hermes.api import router as hub_router
 
         from hermes_app.service import bare_app
 
-        app = bare_app(spec)
+        modules = modules_for(ROLE_WRITE_IN, "hub")
+        app = bare_app(spec, modules=modules)
         app.include_router(hub_router)
         return app
+
+    if role == ROLE_MIRROR_READER and service not in ("intake", "renewals", "carriers"):
+        raise SystemExit(
+            f"HERMES_ROLE=mirror_reader cannot serve HERMES_SERVICE={service}"
+        )
 
     return build_app(spec)

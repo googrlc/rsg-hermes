@@ -55,8 +55,67 @@ def base_url(spec: ServiceSpec) -> str:
     return f"http://{host}:{spec.port}"
 
 
-def bare_app(spec: ServiceSpec) -> FastAPI:
-    """An app carrying nothing but its identity and a health endpoint."""
+def _attach_healthz(app: FastAPI, *, service: str, modules: tuple[str, ...]) -> None:
+    """Register GET /healthz with role / credential / db_user reporting.
+
+    Never includes the NowCerts key — only a boolean. mirror_lag_seconds is
+    filled for write_in only (best-effort; null when the DB is unreachable).
+    """
+    from hermes_app.role import (
+        ROLE_WRITE_IN,
+        current_role,
+        inferred_db_user,
+        modules_loaded_names,
+        nowcerts_creds_present,
+    )
+
+    role = current_role(service)
+    loaded = modules_loaded_names(modules)
+    app.state.hermes_role = role
+    app.state.hermes_modules = list(loaded)
+    app.state.hermes_service = service
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, object]:
+        payload: dict[str, object] = {
+            "role": role,
+            "service": service,
+            "modules_loaded": loaded,
+            "nowcerts": nowcerts_creds_present(),
+            "db_user": inferred_db_user(role),
+            "mirror_lag_seconds": None,
+        }
+        if role == ROLE_WRITE_IN:
+            payload["mirror_lag_seconds"] = _mirror_lag_seconds()
+        return payload
+
+
+def _mirror_lag_seconds() -> float | None:
+    """Seconds since the last completed outbound_sync_queue job, if known."""
+    from datetime import datetime, timezone
+
+    try:
+        from hermes_app import deps
+
+        recent = deps.get_supa().select(
+            "outbound_sync_queue",
+            columns="updated_at",
+            params={"status": "eq.completed", "order": "updated_at.desc"},
+            limit=1,
+        )
+        if not recent or not recent[0].get("updated_at"):
+            return None
+        raw = str(recent[0]["updated_at"]).replace("Z", "+00:00")
+        ts = datetime.fromisoformat(raw)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - ts).total_seconds())
+    except Exception:  # noqa: BLE001 — healthz must never 500
+        return None
+
+
+def bare_app(spec: ServiceSpec, *, modules: tuple[str, ...] | None = None) -> FastAPI:
+    """An app carrying nothing but its identity and health endpoints."""
     app = FastAPI(
         title=f"Hermes — {spec.name}",
         description=spec.description,
@@ -69,6 +128,11 @@ def bare_app(spec: ServiceSpec) -> FastAPI:
         port is obvious rather than reassuring."""
         return {"ok": True, "service": spec.name, "prefixes": list(spec.path_prefixes)}
 
+    _attach_healthz(
+        app,
+        service=spec.name,
+        modules=modules if modules is not None else spec.router_modules,
+    )
     return app
 
 
@@ -76,8 +140,14 @@ def build_app(spec: ServiceSpec) -> FastAPI:
     """Compose a service from the routers its spec names."""
     import importlib
 
-    app = bare_app(spec)
-    for module_path in spec.router_modules:
+    from hermes_app.role import current_role, modules_for
+
+    role = current_role(spec.name)
+    allowed = set(modules_for(role, spec.name))
+    to_mount = tuple(m for m in spec.router_modules if m in allowed)
+
+    app = bare_app(spec, modules=to_mount or spec.router_modules)
+    for module_path in to_mount:
         mod = importlib.import_module(module_path)
         for attr in ("router", "dashboard_router"):
             r = getattr(mod, attr, None)

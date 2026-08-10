@@ -260,6 +260,47 @@ def health():
     return {"status": "ok", "service": "hermes"}
 
 
+def attach_monolith_healthz(target_app: FastAPI | None = None) -> None:
+    """Attach GET /healthz on the unsplit app (idempotent).
+
+    Split services get /healthz from hermes_app.service.bare_app. The monolith
+    builds its routes before create_app runs, so we register here once.
+    """
+    from hermes_app.role import (
+        ROLE_WRITE_IN,
+        current_role,
+        inferred_db_user,
+        modules_for,
+        modules_loaded_names,
+        nowcerts_creds_present,
+    )
+    from hermes_app.service import _mirror_lag_seconds
+
+    app_obj = target_app if target_app is not None else app
+    if getattr(app_obj.state, "hermes_healthz_attached", False):
+        return
+
+    role = current_role("all")
+    loaded = modules_loaded_names(modules_for(role, "all"))
+    app_obj.state.hermes_role = role
+    app_obj.state.hermes_modules = list(loaded)
+    app_obj.state.hermes_healthz_attached = True
+
+    @app_obj.get("/healthz")
+    def healthz() -> dict[str, object]:
+        payload: dict[str, object] = {
+            "role": role,
+            "service": "all",
+            "modules_loaded": loaded,
+            "nowcerts": nowcerts_creds_present(),
+            "db_user": inferred_db_user(role),
+            "mirror_lag_seconds": None,
+        }
+        if role == ROLE_WRITE_IN:
+            payload["mirror_lag_seconds"] = _mirror_lag_seconds()
+        return payload
+
+
 @router.get("/hermes/ping", response_model=DispatchResponse)
 def hermes_ping():
     """Compatibility ping endpoint for WebUI connectors that call /hermes/ping."""
@@ -2540,6 +2581,7 @@ def main() -> int:
         )
 
     from hermes.services import ALL, SERVICES, create_app, current_service
+    from hermes_app.role import assert_role_config
 
     parser = argparse.ArgumentParser(description="Hermes private HTTP API")
     parser.add_argument("--host", default=os.environ.get("HERMES_API_HOST", "0.0.0.0"))
@@ -2555,7 +2597,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    served = create_app(args.service)
+    role = assert_role_config(args.service, enforce_credentials=True)
+    log.info("HERMES_ROLE=%s HERMES_SERVICE=%s", role, args.service)
+
+    served = create_app(args.service, enforce_credentials=True)
     # Port precedence: an explicit --port always wins. After that a NAMED service
     # uses its registered port, ahead of HERMES_API_PORT.
     #
