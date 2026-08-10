@@ -1,4 +1,4 @@
-"""Commit an approved new-business intake — Supabase pipeline, CRM-only by default.
+"""Commit an approved new-business intake — AMS GUID first (via gateway), then CRM.
 
 On approval this:
   1. Creates the Supabase ``opportunities`` rows (the pipeline — immediate, no AMS write).
@@ -109,8 +109,10 @@ def commit_intake(
     source: str | None = None,
     created_by: str = "hermes-intake",
     assigned_to: str = DEFAULT_ASSIGNEE,
+    source_pdf: "bytes | None" = None,
+    source_pdf_name: str | None = None,
 ) -> dict[str, Any]:
-    """Commit an approved intake. Returns a summary. No synchronous NowCerts write."""
+    """Commit an approved intake. AMS GUID first via gateway when configured."""
     if not opportunities_spec:
         raise ValueError("opportunities_spec must have at least one line of business")
 
@@ -155,17 +157,36 @@ def commit_intake(
         )
         opp_rows.append(row)
 
-    # 2. NowCerts insured-create job — opt-in only (see the module docstring).
-    # ptype (Hot/Cold/Prospect) stays on the opportunities row; the NowCerts
-    # insured write uses the connector's numeric type code (prospect=1).
-    #
-    # The payload is still BUILT when staging is off. It costs nothing, it goes
-    # back in the summary as `insured_preview`, and it is what lets an operator
-    # see exactly what would reach the AMS without anything being queued.
+    # 2. AMS-first: earn/adopt a NowCerts GUID via the intake gateway, then
+    # (optionally) stage a legacy queue create when HERMES_INTAKE_STAGES_AMS_INSURED=1.
     insured_payload = nowcerts_map.map_to_insured(account, insured_type=itype, is_prospect=True)
     job: dict[str, Any] = {}
+    gateway_ams: dict[str, Any] = {}
+    try:
+        from hermes.intake.gateway_ams import create_or_adopt_insured
+
+        gateway_ams = create_or_adopt_insured(account, approved_by=approved_by)
+        guid = gateway_ams.get("insured_database_id")
+        if guid:
+            # Key CRM pipeline rows on the NowCerts GUID when we have one.
+            for row in opp_rows:
+                try:
+                    if row.get("id"):
+                        supa.update(
+                            "opportunities",
+                            str(row["id"]),
+                            {"insured_id": guid, "nowcerts_insured_guid": guid},
+                        )
+                        row["insured_id"] = guid
+                        row["nowcerts_insured_guid"] = guid
+                except Exception:  # noqa: BLE001
+                    log.exception("intake commit: failed to stamp GUID on opportunity %s", row.get("id"))
+    except Exception:
+        log.exception("intake commit: gateway AMS-first failed for %s", cid)
+        gateway_ams = {"ok": False, "error": "gateway_ams_exception"}
+
     staged_ams = stages_ams_insured()
-    if staged_ams:
+    if staged_ams and not gateway_ams.get("insured_database_id"):
         job = _stage_insured_job(
             supa,
             insured_payload=insured_payload,
@@ -198,9 +219,24 @@ def commit_intake(
         from hermes_integrations.nextcloud_client import NextcloudClient
 
         nc = NextcloudClient()
+    pdf_path = None
     try:
         if nc.is_configured() and name:
             folder = nc.ensure_client_folders(str(name))
+            # PDF-of-record: source intake PDF lands in Clients/{name}/Intake/.
+            if source_pdf:
+                from hermes_integrations.nextcloud_client import _sanitize_segment
+
+                fname = _sanitize_segment(source_pdf_name or "intake.pdf")
+                if not fname.lower().endswith(".pdf"):
+                    fname = f"{fname}.pdf"
+                rel = f"Clients/{_sanitize_segment(str(name))}/Intake/{fname}"
+                try:
+                    nc.ensure_dirs(f"Clients/{_sanitize_segment(str(name))}/Intake")
+                    pdf_path = nc.put_file(rel, source_pdf, content_type="application/pdf")
+                except Exception:
+                    log.exception("intake commit: failed to file source PDF for %s", name)
+                    pdf_path = None
     except Exception:
         folder = None
 
@@ -208,12 +244,13 @@ def commit_intake(
         "client_identifier": cid,
         "opportunities": opp_rows,
         "opportunity_count": len(opp_rows),
-        # None when nothing was staged. `ams_insured_staged` says which of the two
-        # reasons that is, so "no job id" is never read as a silent failure.
         "intake_job_id": job.get("id"),
         "ams_insured_staged": staged_ams,
+        "ams_gateway": gateway_ams,
+        "nowcerts_insured_guid": gateway_ams.get("insured_database_id"),
         "insured_preview": insured_payload,
         "nextcloud_folder": folder,
+        "intake_pdf_path": pdf_path,
         "prospect_type": ptype,
         "insured_type": itype,
         "prime": prime,
