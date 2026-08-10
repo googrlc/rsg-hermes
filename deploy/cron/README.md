@@ -34,6 +34,7 @@ revenue briefing. This artifact makes it repeatable.
 | `--revenue-sentinel` | weekdays 8:00am | Project-85 briefing → #the-boss |
 | `--renewal-sweep` | weekdays 8:15am | renewal prep Tasks for Gretchen |
 | `--commission-audit` | Mondays 7:00am | Revenue-integrity audit → Slack |
+| `--commission-dq` | weekdays 6:15am | Commission DQ / AMS anomaly scan → `#systems-check` (or `HERMES_COMMISSION_DQ_CHANNEL`) |
 | `--eom-scorecard` | 1st of month 7:00am | End-of-month scorecard → Slack |
 | `--changelog` | nightly 8:00pm | Nightly CRM changelog → #the-boss |
 

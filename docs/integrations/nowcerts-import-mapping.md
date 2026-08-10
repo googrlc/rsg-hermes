@@ -115,6 +115,10 @@ Useful keys:
 | `agency bill 100`, `ab 100`, `ab100` | `Agency Bill 100` |
 | *blank / unknown* | `""` |
 
+Agency Bill rows with missing `agency_fee_amount` are flagged as Info by the
+weekday [Commission DQ](../commission-dq.md) scan (`DQ-BILL2`) — AMS list pulls
+often omit the fee.
+
 ### Reference enums you should NOT write (READONLY, computed)
 
 - `sync_status`: `"" | "Synced" | "Pending" | "Error" | "Skipped"` — set programmatically post-write

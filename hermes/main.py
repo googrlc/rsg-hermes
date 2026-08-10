@@ -288,6 +288,27 @@ def main() -> int:
         help="Bypass daily idempotency guard for commission audit",
     )
     parser.add_argument(
+        "--commission-dq",
+        action="store_true",
+        help="Run commission DQ / AMS anomaly scan (NB/renewal/rate/timing/Agency Bill)",
+    )
+    parser.add_argument(
+        "--commission-dq-dry-run",
+        action="store_true",
+        help="Render commission DQ report without posting",
+    )
+    parser.add_argument(
+        "--commission-dq-force",
+        action="store_true",
+        help="Bypass daily idempotency guard for commission DQ",
+    )
+    parser.add_argument(
+        "--commission-dq-limit",
+        type=int,
+        default=None,
+        help="Optional cap on findings included in the commission DQ report",
+    )
+    parser.add_argument(
         "--eom-scorecard",
         action="store_true",
         help="Post end-of-month revenue scorecard for previous month",
@@ -1102,6 +1123,21 @@ def main() -> int:
         result = revenue_integrity.run_commission_audit(
             dry_run=args.commission_audit_dry_run,
             force=args.commission_audit_force,
+        )
+        print(result.message)
+        if result.warnings:
+            print("Warnings:")
+            for warning in result.warnings:
+                print(f"- {warning}")
+        return 0 if result.ok else 1
+
+    if args.commission_dq or args.commission_dq_dry_run:
+        from hermes.jobs import commission_dq
+
+        result = commission_dq.run_commission_dq(
+            dry_run=args.commission_dq_dry_run,
+            force=args.commission_dq_force,
+            limit=args.commission_dq_limit,
         )
         print(result.message)
         if result.warnings:
