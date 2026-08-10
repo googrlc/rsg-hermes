@@ -400,11 +400,41 @@ def advance_stage(
     The move is written to the deal's timeline with who made it — a stage change
     applied in place, with the previous value overwritten, is unauditable, and Lost
     is exactly the stage someone will later want explained."""
-    # Any non-empty stage is accepted — NowCerts is the source of truth for the
-    # pipeline vocabulary, so we don't gate drag-to-stage on our known enum.
+    # Stages must resolve to a NowCerts picklist option (option_id or known label).
     stage = str(stage or "").strip()
     if not stage:
         raise ValueError("stage is required")
+    try:
+        from hermes_core import picklists as _pl
+
+        # Prefer option_id when the caller passed a UUID; otherwise treat as label.
+        looks_like_id = len(stage) == 36 and stage.count("-") == 4
+        # Opportunity type unknown here — accept if present in either pipeline list.
+        hit = None
+        if looks_like_id:
+            hit = _pl.resolve(supa, _pl.LIST_PIPELINE_NB, option_id=stage) or _pl.resolve(
+                supa, _pl.LIST_PIPELINE_RN, option_id=stage
+            )
+        else:
+            hit = _pl.resolve(supa, _pl.LIST_PIPELINE_NB, label=stage) or _pl.resolve(
+                supa, _pl.LIST_PIPELINE_RN, label=stage
+            )
+        if hit is None and _pl.list_options(supa, _pl.LIST_PIPELINE_NB):
+            # Table is populated but value unknown — reject free-form.
+            raise ValueError(
+                f"Unknown pipeline stage {stage!r}; use a NowCerts option_id from "
+                "/api/reference/picklists/pipeline_new_business (or pipeline_renewal)"
+            )
+        if hit:
+            stage = str(hit["label"])
+            # Stash option_id on the row when the column exists (best-effort below).
+            stage_option_id = hit["option_id"]
+        else:
+            stage_option_id = None
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001 — picklist table missing: fall back to label
+        stage_option_id = None
     # Read the old stage BEFORE the update: "moved to Lost" is half a fact, and the
     # row is about to stop being able to tell us where it came from.
     try:
@@ -423,6 +453,8 @@ def advance_stage(
         # sync_source='crm' skip.
         "sync_source": "crm",
     }
+    if stage_option_id:
+        payload["stage_option_id"] = stage_option_id
     if status_for_stage(stage) == STATUS_LOST and lost_reason:
         payload["lost_reason"] = lost_reason
     row = supa.update(TABLE, opportunity_id, payload)

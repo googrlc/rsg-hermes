@@ -168,8 +168,31 @@ def update_lead(supa: Any, lead_id: str, fields: dict[str, Any]) -> dict[str, An
     payload = {k: v for k, v in fields.items() if k in EDITABLE_FIELDS}
     if not payload:
         raise ValueError("no editable fields provided")
-    if "status" in payload and str(payload["status"]) not in LEAD_STATUSES:
-        raise ValueError(f"unknown status '{payload['status']}'; must be one of {list(LEAD_STATUSES)}")
+    if "status" in payload:
+        raw = str(payload["status"])
+        try:
+            from hermes_core import picklists as _pl
+
+            looks_like_id = len(raw) == 36 and raw.count("-") == 4
+            if _pl.list_options(supa, _pl.LIST_LEAD_STATUS):
+                hit = (
+                    _pl.require_option(supa, _pl.LIST_LEAD_STATUS, option_id=raw)
+                    if looks_like_id
+                    else _pl.require_option(supa, _pl.LIST_LEAD_STATUS, label=raw)
+                )
+                payload["status"] = hit["label"]
+                payload["status_option_id"] = hit["option_id"]
+            elif raw not in LEAD_STATUSES:
+                raise ValueError(
+                    f"unknown status '{raw}'; must be one of {list(LEAD_STATUSES)}"
+                )
+        except ValueError:
+            raise
+        except Exception:
+            if raw not in LEAD_STATUSES:
+                raise ValueError(
+                    f"unknown status '{raw}'; must be one of {list(LEAD_STATUSES)}"
+                ) from None
     if "name" in payload and not str(payload["name"] or "").strip():
         raise ValueError("a lead needs a name")
     return supa.update(TABLE, lead_id, payload)
