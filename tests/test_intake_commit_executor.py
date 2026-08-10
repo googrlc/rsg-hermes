@@ -198,3 +198,27 @@ def test_commit_draft_infers_personal_from_lob():
 def test_commit_draft_requires_line_of_business():
     with pytest.raises(ValueError):
         ic.commit_draft(MagicMock(), {"account": {"name": "X"}, "opportunities": []}, approved_by="lamar")
+
+
+def test_commit_ams_first_adopts_guid_via_gateway(monkeypatch):
+    """When the gateway reports an adoptable insured, CRM rows key on that GUID."""
+    monkeypatch.setenv("INTAKE_GATEWAY_URL", "http://gateway.test")
+    monkeypatch.setenv("HERMES_INTAKE_AMS_FIRST", "1")
+
+    def fake_create(account, approved_by):
+        return {"ok": True, "adopted": True, "insured_database_id": "GUID-9", "reason": "name+email"}
+
+    monkeypatch.setattr("hermes.intake.gateway_ams.create_or_adopt_insured", fake_create)
+    supa = _router_supa()
+    nc = MagicMock()
+    nc.is_configured.return_value = False
+    out = ic.commit_intake(
+        supa,
+        account={"account_name": "Acme Plumbing LLC", "email": "a@b.c", "insured_type": "Commercial"},
+        opportunities_spec=[{"line_of_business": "General Liability"}],
+        approved_by="lamar",
+        nextcloud=nc,
+    )
+    assert out["nowcerts_insured_guid"] == "GUID-9"
+    assert out["ams_gateway"]["adopted"] is True
+    assert out["ams_insured_staged"] is False

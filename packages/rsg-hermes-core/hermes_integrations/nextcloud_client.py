@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     import requests
 
 # The confirmed per-client document categories.
-CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Quotes", "Correspondence")
+CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Quotes", "Correspondence", "Intake")
 
 # PROPFIND body — ask only for the props list_dir surfaces (keeps the response small).
 _PROPFIND_BODY = (

@@ -1750,6 +1750,31 @@ def create_policy_endpoint(req: PolicyCreateRequest):
     return {"ok": True, "policy": created, "sent": payload}
 
 
+
+class IntakeAmsWriteLogRequest(BaseModel):
+    object_id: str | None = None
+    insured_database_id: str | None = None
+    action: str = "create"
+    approved_by: str | None = None
+    actor: str | None = None
+    adopted: bool = False
+    verified: bool | None = None
+    fingerprint: str | None = None
+    source: str | None = "cptintake_gateway"
+
+
+@router.post("/api/ams/intake-write-log")
+def intake_ams_write_log(req: IntakeAmsWriteLogRequest, request: Request):
+    """Gateway callback: record an AMS create/adopt into portal_write_log + queue."""
+    _require_hermes_token(request)
+    from hermes.ams.intake_audit import record_intake_ams_write
+
+    try:
+        return record_intake_ams_write(_get_supa(), _model_dict(req))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/api/ams/failed-pushes")
 def list_failed_pushes(limit: int = 50):
     """Corrections that never reached NowCerts.
@@ -1865,16 +1890,100 @@ def client_360_endpoint(insured_guid: str):
         "agency_crm_tasks", "id,title,status,priority,due_at,assigned_to_email,case_id",
         {"insured_database_id": f"eq.{insured_guid}", "order": "due_at.asc"},
     )
+    documents = _client_documents_list(client[0] if client else None)
     return {
         "client": client[0] if client else None,
         "policies": policies, "opportunities": opportunities, "cases": cases, "tasks": tasks,
+        "documents": documents,
         "editable_fields": sorted(CLIENT_OVERRIDABLE_FIELDS),
         "editable_policy_fields": sorted(POLICY_OVERRIDABLE_FIELDS),
         "counts": {
             "policies": len(policies), "opportunities": len(opportunities),
             "cases": len(cases), "tasks": len(tasks),
+            "documents": len(documents),
         },
     }
+
+
+def _client_documents_list(client_row: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """List files in the client's Nextcloud tree (Intake + other categories)."""
+    if not client_row:
+        return []
+    name = client_row.get("insured_name") or client_row.get("commercial_name")
+    if not name:
+        return []
+    try:
+        from hermes_integrations.nextcloud_client import NextcloudClient, _sanitize_segment
+
+        nc = NextcloudClient()
+        if not nc.is_configured():
+            return []
+        base = f"Clients/{_sanitize_segment(str(name))}"
+        out: list[dict[str, Any]] = []
+        for entry in nc.list_dir(base):
+            if entry.get("is_dir"):
+                for child in nc.list_dir(entry.get("path") or f"{base}/{entry.get('name')}"):
+                    if child.get("is_dir"):
+                        continue
+                    out.append({
+                        "name": child.get("name"),
+                        "path": child.get("path"),
+                        "size": child.get("size"),
+                        "uploaded_at": child.get("modified"),
+                        "source": entry.get("name"),
+                    })
+            else:
+                out.append({
+                    "name": entry.get("name"),
+                    "path": entry.get("path"),
+                    "size": entry.get("size"),
+                    "uploaded_at": entry.get("modified"),
+                    "source": "root",
+                })
+        return out
+    except Exception:  # noqa: BLE001
+        log.exception("client 360 documents list failed for %s", name)
+        return []
+
+
+class ClientDocumentUploadRequest(BaseModel):
+    filename: str
+    content_base64: str
+    content_type: str = "application/pdf"
+    folder: str = "Intake"
+
+
+@router.post("/api/clients/{insured_guid}/documents")
+def upload_client_document(insured_guid: str, req: ClientDocumentUploadRequest, request: Request):
+    """Manual upload into the client's Nextcloud folder (PDF-of-record landing zone)."""
+    _require_hermes_token(request)
+    import base64 as _b64
+
+    from hermes_integrations.nextcloud_client import NextcloudClient, NextcloudError, _sanitize_segment
+
+    rows = _get_supa().select(
+        "canonical_clients",
+        columns="nowcerts_insured_guid,insured_name",
+        params={"nowcerts_insured_guid": f"eq.{insured_guid}"},
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="client not found")
+    name = rows[0].get("insured_name") or insured_guid
+    try:
+        raw = _b64.b64decode(req.content_base64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid content_base64") from exc
+    folder = _sanitize_segment(req.folder or "Intake")
+    fname = _sanitize_segment(req.filename or "upload.bin")
+    rel = f"Clients/{_sanitize_segment(str(name))}/{folder}/{fname}"
+    nc = NextcloudClient()
+    try:
+        nc.ensure_client_folders(str(name))
+        path = nc.put_file(rel, raw, content_type=req.content_type or "application/octet-stream")
+    except NextcloudError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"ok": True, "path": path, "insured_guid": insured_guid}
 
 
 def _term_sort_key(p: dict[str, Any]) -> tuple:
