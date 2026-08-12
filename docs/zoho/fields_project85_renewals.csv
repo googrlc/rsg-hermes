@@ -1,0 +1,20 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Project85_Renewals,Name,Name,Single Line,255,Y,N,N,,,,Z-only,,"Policy_Number + Expiration_Date"
+Project85_Renewals,Hermes Renewal ID,Hermes_Renewal_ID,Single Line,36,N,Y,Y,,,System,id,UUID; FK for actions/receipts
+Project85_Renewals,Policy Number,Policy_Number,Single Line,100,Y,Y,N,,,AMS→Z projection,policy_number,UNIQUE natural key
+Project85_Renewals,Policy,Policy,Lookup (Policies),,N,N,N,,,AMS→Z via join,,"Join on Policy_Number"
+Project85_Renewals,Account Name,Account_Name,Lookup (Accounts),,N,N,N,,,AMS→Z via Policy,,
+Project85_Renewals,Client Name,Client_Name,Single Line,255,Y,N,N,,,Projection / Z override,client_name,Correctable
+Project85_Renewals,Expiration Date,Expiration_Date,Date,,Y,N,N,,,Projection / Z override,expiration_date,Correctable
+Project85_Renewals,Premium Current,Premium_Current,Currency,16.2,N,N,N,,,Projection / Z override,premium_current,Correctable
+Project85_Renewals,Premium Renewal,Premium_Renewal,Currency,16.2,N,N,N,,,Z override,premium_renewal,Correctable
+Project85_Renewals,Increase Percent,Increase_Percent,Formula (Decimal),,,N,N,N,,,Derived,increase_percentage,"((Premium_Renewal-Premium_Current)/Premium_Current)*100"
+Project85_Renewals,Risk Status,Risk_Status,Picklist,20,N,N,N,SAFE,picklists_hermes_vocab.csv:risk_status_p85,Projection / Z override,risk_status,
+Project85_Renewals,Strategy Notes,Strategy_Notes,Multi Line,32000,N,N,N,,,Derived / Z override,ai_strategy_notes,Correctable
+Project85_Renewals,Last Contact Date,Last_Contact_Date,Date,,N,N,N,,,Z-only,last_contact_date,Correctable
+Project85_Renewals,Carrier,Carrier,Single Line,150,N,N,N,,,AMS→Z via Policy,(joined),From canonical_policies
+Project85_Renewals,Line of Business,Line_of_Business,Single Line,150,N,N,N,,,AMS→Z via Policy,(joined),From canonical_policies
+Project85_Renewals,Effective Date,Effective_Date,Date,,N,N,N,,,AMS→Z via Policy,(joined),From canonical_policies
+Project85_Renewals,Dismissed,Dismissed,Checkbox,,N,N,N,false,,Z-only override,(portal_overrides),Soft-remove; not a DB column
+Project85_Renewals,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
+Project85_Renewals,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

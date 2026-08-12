@@ -1,0 +1,20 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Accounts,Account Name,Account_Name,Single Line,255,Y,N,N,,,"AMS→Z / Z→AMS",insured_name,Maps AMS CommercialName; pushable
+Accounts,Hermes Account ID,Hermes_Account_ID,Single Line,36,N,Y,N,,,System,id,UUID surrogate
+Accounts,NowCerts Insured GUID,NowCerts_Insured_GUID,Single Line,36,N,Y,Y,,,AMS→Z,nowcerts_insured_guid,PRIMARY AMS key / Zoho External ID
+Accounts,Insured Name Normalized,Insured_Name_Normalized,Single Line,255,N,N,N,,,Derived,insured_name_normalized,Lowercase of name; optional Formula
+Accounts,First Name,First_Name,Single Line,100,N,N,N,,,AMS→Z,first_name,Prefer primary Contact in Zoho
+Accounts,Last Name,Last_Name,Single Line,100,N,N,N,,,AMS→Z,last_name,Prefer primary Contact in Zoho
+Accounts,FEIN,FEIN,Single Line,32,N,N,N,,,AMS→Z,fein,Commercial dedupe key
+Accounts,Insured Type,Insured_Type,Picklist,50,N,N,N,,picklists_hermes_vocab.csv:insured_type,AMS→Z,client_type,"Personal|Commercial"
+Accounts,Business Type,Business_Type,Single Line,100,N,N,N,,,AMS→Z,business_type,AMS typeOfBusiness
+Accounts,Account Type,Account_Type,Picklist,50,N,N,N,,picklists_hermes_vocab.csv:insured_type,Z-only / AMS→Z,account_type,Align with Insured_Type
+Accounts,Email,Email,Email,100,N,N,N,,,AMS→Z / Z→AMS,email,Pushable as AMS EMail
+Accounts,Phone,Phone,Phone,30,N,N,N,,,AMS→Z / Z→AMS,phone,Pushable as AMS PhoneNumber
+Accounts,Mobile,Mobile,Phone,30,N,N,N,,,AMS→Z,cell_phone,Not in current AMS push map
+Accounts,Billing Street,Billing_Street,Single Line,255,N,N,N,,,AMS→Z / Z→AMS,address_line1,Pushable AddressLine1
+Accounts,Billing City,Billing_City,Single Line,100,N,N,N,,,AMS→Z / Z→AMS,city,Pushable
+Accounts,Billing State,Billing_State,Single Line,50,N,N,N,,,AMS→Z / Z→AMS,state,Pushable
+Accounts,Billing Code,Billing_Code,Single Line,20,N,N,N,,,AMS→Z / Z→AMS,zip,AMS zipCode; pushable Zip
+Accounts,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,System field
+Accounts,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,System field

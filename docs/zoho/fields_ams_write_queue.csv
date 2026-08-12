@@ -1,0 +1,22 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+AMS_Write_Queue,Name,Name,Single Line,255,Y,N,N,,,,System,,"Object_Type + Object_ID + Action"
+AMS_Write_Queue,Queue ID,Queue_ID,Single Line,36,N,Y,Y,,,System,id,UUID External ID
+AMS_Write_Queue,Sync Run ID,Sync_Run_ID,Single Line,36,N,N,N,,,System,run_id,Optional batch
+AMS_Write_Queue,Mapping ID,Mapping_ID,Single Line,36,N,N,N,,,System,mapping_id,Legacy crosswalk
+AMS_Write_Queue,Object Type,Object_Type,Picklist,40,Y,N,N,,picklists_hermes_vocab.csv:queue_object_type,System,object_type,
+AMS_Write_Queue,Object ID,Object_ID,Single Line,255,N,N,N,,,System,object_id,Nullable on creates
+AMS_Write_Queue,Destination,Destination,Picklist,20,Y,N,N,nowcerts,picklists_hermes_vocab.csv:queue_destination,System,destination_system,
+AMS_Write_Queue,Action,Action,Picklist,20,Y,N,N,create,picklists_hermes_vocab.csv:queue_action,System,action,
+AMS_Write_Queue,Payload,Payload,Multi Line,32000,Y,N,N,,,System,payload,JSON instruction; structured form preferred
+AMS_Write_Queue,Status,Status,Picklist,20,Y,N,N,queued,picklists_hermes_vocab.csv:queue_status,System,status,queued→processing→completed|failed|dead
+AMS_Write_Queue,Attempt Count,Attempt_Count,Number (Integer),5,N,N,N,0,,System,attempt_count,>=0
+AMS_Write_Queue,Last Error,Last_Error,Multi Line,32000,N,N,N,,,System,last_error,
+AMS_Write_Queue,Approved By,Approved_By,Single Line,255,N,N,N,,,Z-only,approved_by,REQUIRED with Approved_At before AMS drain
+AMS_Write_Queue,Approved At,Approved_At,DateTime,,N,N,N,,,Z-only,approved_at,REQUIRED for renewal executor
+AMS_Write_Queue,Scheduled For,Scheduled_For,DateTime,,N,N,N,,,System,scheduled_for,Backoff not-before
+AMS_Write_Queue,Related Account,Related_Account,Lookup (Accounts),,N,N,N,,,Z-only,,"Optional convenience"
+AMS_Write_Queue,Related Deal,Related_Deal,Lookup (Deals),,N,N,N,,,Z-only,,"Optional convenience"
+AMS_Write_Queue,Related Policy,Related_Policy,Lookup (Policies),,N,N,N,,,Z-only,,"Optional convenience"
+AMS_Write_Queue,Related Renewal,Related_Renewal,Lookup (Project85_Renewals),,N,N,N,,,Z-only,,"For object_type=renewal"
+AMS_Write_Queue,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
+AMS_Write_Queue,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

@@ -1,0 +1,86 @@
+vocab_key,sort_order,value,zoho_field,source
+opportunity_type,1,Bundling,Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+opportunity_type,2,Competitive Replacements (BOR),Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+opportunity_type,3,Cross-selling,Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+opportunity_type,4,Life Events,Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+opportunity_type,5,New Business,Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+opportunity_type,6,Remarket,Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+opportunity_type,7,Renewals,Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+opportunity_type,8,Seasonal / Event,Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+opportunity_type,9,Upselling,Deals.Opportunity_Type,hermes_core/opportunities.py OPPORTUNITY_TYPES
+prospect_type,1,Prospect,Deals.Prospect_Type,hermes_core/opportunities.py PROSPECT_TYPES
+prospect_type,2,Hot_Prospect,Deals.Prospect_Type,hermes_core/opportunities.py PROSPECT_TYPES
+prospect_type,3,Cold_Prospect,Deals.Prospect_Type,hermes_core/opportunities.py PROSPECT_TYPES
+insured_type,1,Personal,Accounts.Insured_Type / Deals.Insured_Type,hermes_core/opportunities.py INSURED_TYPES
+insured_type,2,Commercial,Accounts.Insured_Type / Deals.Insured_Type,hermes_core/opportunities.py INSURED_TYPES
+win_likelihood,1,Excellent,Deals.Win_Likelihood,hermes_core/opportunities.py LIKELIHOODS
+win_likelihood,2,Very Good,Deals.Win_Likelihood,hermes_core/opportunities.py LIKELIHOODS
+win_likelihood,3,Good,Deals.Win_Likelihood,hermes_core/opportunities.py LIKELIHOODS
+win_likelihood,4,Moderate,Deals.Win_Likelihood,hermes_core/opportunities.py LIKELIHOODS
+win_likelihood,5,Not Likely,Deals.Win_Likelihood,hermes_core/opportunities.py LIKELIHOODS
+deal_status,1,open,Deals.Deal_Status,hermes_core/opportunities.py STATUS_*
+deal_status,2,won,Deals.Deal_Status,hermes_core/opportunities.py STATUS_*
+deal_status,3,lost,Deals.Deal_Status,hermes_core/opportunities.py STATUS_*
+policy_status_normalized,1,Active,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,2,Up for Renewal,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,3,Renewing,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,4,Renewed,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,5,Rewritten,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,6,Expired,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,7,Cancelled,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,8,Flat Cancel,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,9,Pending Cancel,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,10,Non-Renewed,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+policy_status_normalized,11,Lapsed,Policies.Policy_Status,hermes_core/canonical.py _STATUS_NORMALIZE
+billing_type,1,Direct Bill,Policies.Billing_Type,hermes_core/canonical.py _BILLING_NORMALIZE
+billing_type,2,Agency Bill,Policies.Billing_Type,hermes_core/canonical.py _BILLING_NORMALIZE
+billing_type,3,Direct Bill 100,Policies.Billing_Type,hermes_core/canonical.py _BILLING_NORMALIZE
+billing_type,4,Agency Bill 100,Policies.Billing_Type,hermes_core/canonical.py _BILLING_NORMALIZE
+risk_status_p85,1,SAFE,Project85_Renewals.Risk_Status,renewal_risk_status enum + tracker
+risk_status_p85,2,AT_RISK,Project85_Renewals.Risk_Status,renewal_risk_status enum + tracker
+risk_status_p85,3,CRITICAL,Project85_Renewals.Risk_Status,renewal_risk_status enum + tracker
+risk_status_p85,4,RENEWED,Project85_Renewals.Risk_Status,renewal_risk_status enum
+risk_status_p85,5,LAPSED,Project85_Renewals.Risk_Status,renewal_risk_status enum
+risk_status_candidate,1,SAFE,Renewal_Events.Risk_Status,renewal_candidates
+risk_status_candidate,2,AT_RISK,Renewal_Events.Risk_Status,renewal_candidates
+risk_status_candidate,3,CRITICAL,Renewal_Events.Risk_Status,renewal_candidates
+eligibility_state,1,eligible,Renewal_Events.Eligibility,renewal_candidates
+eligibility_state,2,needs_verification,Renewal_Events.Eligibility,renewal_candidates
+eligibility_state,3,excluded,Renewal_Events.Eligibility,renewal_candidates
+renewal_branch,1,current_term,Renewal_Events.Branch,renewal_candidates
+renewal_branch,2,staged_next_term,Renewal_Events.Branch,renewal_candidates
+renewal_branch,3,medicare_annual,Renewal_Events.Branch,renewal_candidates
+renewal_segment,1,auto_6mo,Renewal_Events.Segment,eligibility engine
+renewal_segment,2,personal_12mo,Renewal_Events.Segment,eligibility engine
+renewal_segment,3,commercial_small,Renewal_Events.Segment,eligibility engine
+renewal_segment,4,commercial_mid,Renewal_Events.Segment,eligibility engine
+renewal_segment,5,benefits,Renewal_Events.Segment,eligibility engine
+renewal_segment,6,medicare,Renewal_Events.Segment,eligibility engine
+queue_object_type,1,renewal,AMS_Write_Queue.Object_Type,hermes_core/queue.py + executors
+queue_object_type,2,intake,AMS_Write_Queue.Object_Type,hermes_core/queue.py
+queue_object_type,3,quote,AMS_Write_Queue.Object_Type,hermes_core/queue.py
+queue_object_type,4,case,AMS_Write_Queue.Object_Type,hermes_core/queue.py
+queue_object_type,5,task,AMS_Write_Queue.Object_Type,hermes_core/queue.py
+queue_object_type,6,opportunity_writeback,AMS_Write_Queue.Object_Type,hermes_core/queue.py
+queue_object_type,7,intake_ams,AMS_Write_Queue.Object_Type,hermes_core/queue.py
+queue_object_type,8,intake_crm,AMS_Write_Queue.Object_Type,hermes_core/queue.py
+queue_object_type,9,client,AMS_Write_Queue.Object_Type,hermes/ams/writeback.py
+queue_object_type,10,policy,AMS_Write_Queue.Object_Type,hermes/ams/writeback.py
+queue_object_type,11,opportunity_won,AMS_Write_Queue.Object_Type,hermes/sync/opportunity_won.py
+queue_destination,1,nowcerts,AMS_Write_Queue.Destination,hermes_core/queue.py
+queue_destination,2,crm,AMS_Write_Queue.Destination,hermes_core/queue.py
+queue_action,1,create,AMS_Write_Queue.Action,sync_control queue_action enum
+queue_action,2,update,AMS_Write_Queue.Action,sync_control queue_action enum
+queue_action,3,skip,AMS_Write_Queue.Action,sync_control queue_action enum
+queue_status,1,queued,AMS_Write_Queue.Status,hermes_core/queue.py + migration comments
+queue_status,2,processing,AMS_Write_Queue.Status,hermes_core/queue.py
+queue_status,3,completed,AMS_Write_Queue.Status,hermes_core/queue.py
+queue_status,4,failed,AMS_Write_Queue.Status,hermes_core/queue.py
+queue_status,5,dead,AMS_Write_Queue.Status,hermes_core/queue.py
+queue_status,6,needs_approval,AMS_Write_Queue.Status,original queue_status enum (optional pre-approve)
+renewal_queue_action,1,request_terms,AMS_Write_Queue.Payload.action,renewal executor
+renewal_queue_action,2,prepare_options,AMS_Write_Queue.Payload.action,renewal executor
+renewal_queue_action,3,client_follow_up,AMS_Write_Queue.Payload.action,renewal executor
+renewal_queue_action,4,update_ams,AMS_Write_Queue.Payload.action,renewal executor
+sync_owner,1,book_sync,Policies.Sync_Owner,canonical_policy_ownership
+sync_owner,2,rsg-import,Policies.Sync_Owner,canonical_policy_ownership

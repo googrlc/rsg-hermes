@@ -1,0 +1,5 @@
+Module_API_Name,Display_Singular,Display_Plural,Description,Hermes_Source,Suggested_Related_Lists
+Policies,Policy,Policies,Canonical AMS policy book mirror,canonical_policies,Deals; Renewal_Events; Project85_Renewals
+Renewal_Events,Renewal Event,Renewal Events,Event-identity renewal ledger (eligibility engine),renewal_candidates,Project85_Renewals
+Project85_Renewals,Project 85 Renewal,Project 85 Renewals,Desk projection of eligible renewals,project_85_renewals,AMS_Write_Queue; Renewal Actions (future)
+AMS_Write_Queue,AMS Write Queue Item,AMS Write Queue,Approval-gated outbound NowCerts/Momentum writes,outbound_sync_queue,

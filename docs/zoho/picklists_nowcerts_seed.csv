@@ -1,0 +1,37 @@
+list_key,sort_order,option_id,label,active,zoho_pipeline_or_field,zoho_stage_probability_pct
+pipeline_new_business,0,d82f13b9-f96d-d154-cdf9-251cc0f03c93,Not Assigned,true,Deal Pipeline: New Business,5
+pipeline_new_business,1,9c3bae52-2c28-2c49-ffe7-226c5417c41c,Preparing Application,true,Deal Pipeline: New Business,10
+pipeline_new_business,2,09092bd2-3444-429a-7ff6-fdb58f77a68b,Sent For Quoting,true,Deal Pipeline: New Business,25
+pipeline_new_business,3,092bb8e4-18f6-fa69-4263-5ca10f78826f,Quotes Received,true,Deal Pipeline: New Business,50
+pipeline_new_business,4,e3047f00-88c6-930d-5683-9761bae9f632,Sent Proposal,true,Deal Pipeline: New Business,65
+pipeline_new_business,5,16f23fa8-2515-e6ec-9e11-423849b4d2f1,Request to Bind,true,Deal Pipeline: New Business,85
+pipeline_new_business,6,82f61678-caea-09f8-e731-5f696449ee0d,Bound / Won,true,Deal Pipeline: New Business,100
+pipeline_new_business,7,c9ad07f3-689b-36b4-928c-0d7b8597f154,Lost,true,Deal Pipeline: New Business,0
+pipeline_renewal,8,bb6eb18f-8b31-cf43-3b57-45cea520183a,Renewal in 90 days,true,Deal Pipeline: Renewals,40
+pipeline_renewal,9,f7ffbbe0-2f08-3e1a-5765-f5fe6e8ce997,Renewal in 60 days,true,Deal Pipeline: Renewals,55
+pipeline_renewal,10,0c76b0dc-acf4-72f1-9a01-1222dede624f,Renewal in 30 days,true,Deal Pipeline: Renewals,70
+pipeline_renewal,11,9fea61ef-40d1-c7a8-58b5-01b7a74c617b,Requote Renewal,true,Deal Pipeline: Renewals,60
+pipeline_renewal,12,b917834c-4262-9863-6720-f912daa6f219,Annual Policy Review,true,Deal Pipeline: Renewals,50
+pipeline_renewal,13,8eb2161c-1925-43d0-602b-5c1486f93def,Complete/Auto-Renewal,true,Deal Pipeline: Renewals,100
+pipeline_renewal,14,76a8a582-6a6f-dbf7-2929-50096e26cb50,Bound / Won,true,Deal Pipeline: Renewals,100
+pipeline_renewal,15,cbad2c95-ef0a-94f2-a534-fc38f2907b02,Not Renewed,true,Deal Pipeline: Renewals,0
+lead_status,16,b2e18587-57b1-91bc-6b1a-d7690c1a4618,new,true,Leads.Lead_Status,
+lead_status,17,7d82ec17-15db-7f3d-2744-a0ade49c15a0,working,true,Leads.Lead_Status,
+lead_status,18,51836de6-5193-2fbc-ca70-a9fec7e41946,quoted,true,Leads.Lead_Status,
+lead_status,19,a97b0b79-7b68-43b1-dd2f-1c1f5ce5a9e8,converted,true,Leads.Lead_Status,
+lead_status,20,ab69f551-f77f-9a65-bb98-5ffd4da476ba,lost,true,Leads.Lead_Status,
+renewal_status,21,95a4fc61-bc52-c296-1113-156e343b35da,Up for Renewal,true,Policies.Policy_Status (subset),
+renewal_status,22,3d01d3f4-d334-f3ed-39a5-e04e0381b56d,Renewing,true,Policies.Policy_Status (subset),
+renewal_status,23,3dd5b4be-44be-f13e-842a-e814774a6041,Renewed,true,Policies.Policy_Status (subset),
+renewal_status,24,c35d86b7-fb74-2a17-f734-7c1395c51713,Non-Renewed,true,Policies.Policy_Status (subset),
+renewal_status,25,a2b134fa-5416-5873-9493-979b501e6f2c,Cancelled,true,Policies.Policy_Status (subset),
+endorsement_type,26,1966a48e-07a5-f5bb-9e1d-f2f862318381,Add Driver,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,27,a9ce714b-c49d-94c6-f95b-d7def7f6de96,Remove Driver,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,28,2c3c659a-7568-63a8-5ef9-a17d0fb45d54,Replace Driver,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,29,3669f7eb-0878-d3ae-204a-10dde33d2b44,Add Vehicle,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,30,384baf5f-0058-db81-0d7b-1963b3a7792a,Replace Vehicle,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,31,5c7583c3-2288-eeb5-0b77-3dc08307f0bf,Address Change,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,32,91feb5aa-2fce-7963-06e6-b66204cdaf55,Coverage Change,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,33,391d6b38-2742-a68f-90bf-05c435824a96,Policy Change,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,34,39b78879-21ce-6f4f-59d4-b153c330295f,Certificate of Insurance,true,Cases or Endorsements.Endorsement_Type,
+endorsement_type,35,d92e98fd-533c-1958-e938-3a8ad75065aa,Other,true,Cases or Endorsements.Endorsement_Type,

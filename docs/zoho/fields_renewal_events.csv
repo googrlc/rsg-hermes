@@ -1,0 +1,32 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Renewal_Events,Name,Name,Single Line,255,Y,N,N,,,,Z-only,,"Policy_Number + Renewal_Event_Date"
+Renewal_Events,Hermes Candidate ID,Hermes_Candidate_ID,Single Line,36,N,Y,Y,,,System,id,UUID; External ID
+Renewal_Events,Account Name,Account_Name,Lookup (Accounts),,N,N,N,,,AMS→Z,insured_id,
+Renewal_Events,NowCerts Insured GUID,NowCerts_Insured_GUID,Single Line,36,Y,N,N,,,AMS→Z,insured_id,Part of natural key
+Renewal_Events,Policy Lineage ID,Policy_Lineage_ID,Single Line,100,Y,N,N,,,Derived,policy_lineage_id,Part of natural key
+Renewal_Events,Renewal Event Date,Renewal_Event_Date,Date,,Y,N,N,,,Derived,renewal_event_date,Part of natural key
+Renewal_Events,Renewal Key,Renewal_Key,Single Line,200,N,Y,N,,,Derived,,"insured_id|policy_lineage_id|renewal_event_date"
+Renewal_Events,Policy,Policy,Lookup (Policies),,N,N,N,,,AMS→Z,nowcerts_policy_guid,
+Renewal_Events,NowCerts Policy GUID,NowCerts_Policy_GUID,Single Line,36,N,N,N,,,AMS→Z,nowcerts_policy_guid,
+Renewal_Events,Policy Number,Policy_Number,Single Line,100,N,N,N,,,AMS→Z,policy_number,
+Renewal_Events,Insured Active,Insured_Active,Checkbox,,N,N,N,,,AMS→Z,insured_active,
+Renewal_Events,Policy Active,Policy_Active,Checkbox,,N,N,N,,,AMS→Z,policy_active,
+Renewal_Events,Normalized Status,Normalized_Status,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:policy_status_normalized,AMS→Z,normalized_status,
+Renewal_Events,Branch,Branch,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:renewal_branch,Derived,branch,
+Renewal_Events,Effective Date,Effective_Date,Date,,N,N,N,,,AMS→Z,effective_date,
+Renewal_Events,Expiration Date,Expiration_Date,Date,,N,N,N,,,AMS→Z / Z override,expiration_date,Correctable via overrides
+Renewal_Events,Predecessor Policy,Predecessor_Policy,Single Line,100,N,N,N,,,Derived,predecessor_policy_number,
+Renewal_Events,Successor Policy,Successor_Policy,Single Line,100,N,N,N,,,Derived,successor_policy_number,
+Renewal_Events,Eligibility,Eligibility,Picklist,40,Y,N,N,needs_verification,picklists_hermes_vocab.csv:eligibility_state,Derived / Z dismiss,eligibility_state,Dismiss = excluded
+Renewal_Events,Eligibility Reason,Eligibility_Reason,Multi Line,2000,N,N,N,,,Derived,eligibility_reason,
+Renewal_Events,Last Verified,Last_Verified,DateTime,,N,N,N,,,System,last_verified_at,
+Renewal_Events,Segment,Segment,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:renewal_segment,Derived,segment,
+Renewal_Events,Line of Business,Line_of_Business,Single Line,150,N,N,N,,,AMS→Z / Z override,line_of_business,Correctable
+Renewal_Events,Client Name,Client_Name,Single Line,255,N,N,N,,,AMS→Z / Z override,client_name,Correctable
+Renewal_Events,In Working Queue,In_Working_Queue,Checkbox,,N,N,N,false,,Derived,in_working_queue,
+Renewal_Events,Workflow Entry Date,Workflow_Entry_Date,Date,,N,N,N,,,Derived,workflow_entry_date,
+Renewal_Events,Risk Status,Risk_Status,Picklist,20,N,N,N,,picklists_hermes_vocab.csv:risk_status_candidate,Derived / Z override,risk_status,SAFE|AT_RISK|CRITICAL
+Renewal_Events,Premium Current,Premium_Current,Currency,16.2,N,N,N,,,AMS→Z / Z override,premium_current,Correctable
+Renewal_Events,Premium Renewal,Premium_Renewal,Currency,16.2,N,N,N,,,Z override,premium_renewal,Correctable
+Renewal_Events,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
+Renewal_Events,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,
