@@ -5,6 +5,9 @@ On approval this:
   2. Creates the client's Nextcloud folder tree (if configured).
   3. Only when ``HERMES_INTAKE_STAGES_AMS_INSURED=1``: stages a NowCerts
      ``create_insured`` (prospect) job on ``outbound_sync_queue``.
+  4. Only when ``HERMES_WRITE_TO_ZOHO=1``: mirrors the intake into Zoho CRM
+     (Account / Contacts / Deals). Best-effort — Zoho failure never rolls back
+     the Supabase rows.
 
 Step 3 is OFF by default, and that default is the agency's rule rather than a
 matter of caution:
@@ -52,6 +55,10 @@ DEFAULT_ASSIGNEE = "gretchen"
 # insurance.
 ENV_STAGE_AMS_INSURED = "HERMES_INTAKE_STAGES_AMS_INSURED"
 
+# Opt-in: mirror the intake into Zoho CRM after Supabase writes succeed.
+# Default off — Zoho is additive; Supabase remains the Hermes source of truth.
+ENV_WRITE_TO_ZOHO = "HERMES_WRITE_TO_ZOHO"
+
 
 def stages_ams_insured(env: "dict[str, str] | None" = None) -> bool:
     """Whether an intake commit stages a NowCerts insured create.
@@ -61,6 +68,16 @@ def stages_ams_insured(env: "dict[str, str] | None" = None) -> bool:
     prospects silently landing in the system of record.
     """
     raw = (env if env is not None else os.environ).get(ENV_STAGE_AMS_INSURED, "")
+    return str(raw).strip().lower() in ("1", "true", "yes")
+
+
+def writes_to_zoho(env: "dict[str, str] | None" = None) -> bool:
+    """Whether an intake commit mirrors into Zoho CRM.
+
+    Explicit "1"/"true"/"yes" only. Default off so a missing Zoho credential
+    never surprises a working Supabase commit.
+    """
+    raw = (env if env is not None else os.environ).get(ENV_WRITE_TO_ZOHO, "false")
     return str(raw).strip().lower() in ("1", "true", "yes")
 
 
@@ -111,8 +128,16 @@ def commit_intake(
     assigned_to: str = DEFAULT_ASSIGNEE,
     source_pdf: "bytes | None" = None,
     source_pdf_name: str | None = None,
+    intake_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Commit an approved intake. AMS GUID first via gateway when configured."""
+    """Commit an approved intake. AMS GUID first via gateway when configured.
+
+    ``intake_payload`` is the full synthesized intake (account + contacts +
+    opportunities + note + facts). When present and ``HERMES_WRITE_TO_ZOHO`` is
+    on, it is mirrored to Zoho after the Supabase rows land. Callers that only
+    have the reduced ``account`` / ``opportunities_spec`` still work — Zoho
+    reconstructs a minimal payload from those.
+    """
     if not opportunities_spec:
         raise ValueError("opportunities_spec must have at least one line of business")
 
@@ -240,6 +265,26 @@ def commit_intake(
     except Exception:
         folder = None
 
+    # 4. Zoho CRM mirror (opt-in, best-effort). Runs AFTER Supabase opportunity
+    # inserts and Nextcloud folder creation so the Account can carry the folder
+    # path / AMS GUID. A Zoho failure must never undo the Supabase rows.
+    zoho_result: dict[str, Any] | None = None
+    if writes_to_zoho():
+        zoho_result = _write_zoho_after_commit(
+            supa,
+            opp_rows=opp_rows,
+            account=account,
+            opportunities_spec=opportunities_spec,
+            approved_by=approved_by,
+            intake_payload=intake_payload,
+            client_identifier=cid,
+            nextcloud_folder=folder,
+            nowcerts_insured_guid=gateway_ams.get("insured_database_id"),
+            source_pdf=source_pdf,
+            source_pdf_name=source_pdf_name,
+            source=source,
+        )
+
     return {
         "client_identifier": cid,
         "opportunities": opp_rows,
@@ -254,7 +299,119 @@ def commit_intake(
         "prospect_type": ptype,
         "insured_type": itype,
         "prime": prime,
+        "zoho": zoho_result,
     }
+
+
+def _build_zoho_payload(
+    *,
+    account: dict[str, Any],
+    opportunities_spec: list[dict[str, Any]],
+    intake_payload: dict[str, Any] | None,
+    client_identifier: str,
+    nextcloud_folder: str | None,
+    nowcerts_insured_guid: str | None,
+    source_pdf: "bytes | None",
+    source_pdf_name: str | None,
+    source: str | None,
+) -> dict[str, Any]:
+    """Assemble the payload ``write_intake_to_zoho`` expects.
+
+    Prefer the full synthesized intake when the worker/gateway supplied it
+    (contacts, note, facts, full opportunity cards). Fall back to a minimal
+    account + LOB list reconstructed from ``commit_intake``'s reduced args.
+    """
+    payload: dict[str, Any] = dict(intake_payload or {})
+    if not payload.get("account"):
+        payload["account"] = dict(account)
+    if not payload.get("opportunities"):
+        payload["opportunities"] = [
+            {
+                "line_of_business": s.get("line_of_business"),
+                "premium": s.get("premium_estimate"),
+                "carrier": s.get("carrier"),
+                "assigned_to": s.get("assigned_to"),
+                "description": s.get("description"),
+            }
+            for s in opportunities_spec
+            if s.get("line_of_business")
+        ]
+    payload["client_identifier"] = client_identifier
+    if nextcloud_folder and not payload.get("nextcloud_folder_url") and not payload.get("nextcloud_folder"):
+        payload["nextcloud_folder"] = nextcloud_folder
+    if nowcerts_insured_guid and not payload.get("nowcerts_insured_guid"):
+        payload["nowcerts_insured_guid"] = nowcerts_insured_guid
+    if source_pdf is not None:
+        payload["source_pdf"] = source_pdf
+        payload["source_pdf_name"] = source_pdf_name
+    if source and not payload.get("source"):
+        payload["source"] = source
+    return payload
+
+
+def _write_zoho_after_commit(
+    supa: "SupabaseClient",
+    *,
+    opp_rows: list[dict[str, Any]],
+    account: dict[str, Any],
+    opportunities_spec: list[dict[str, Any]],
+    approved_by: str,
+    intake_payload: dict[str, Any] | None,
+    client_identifier: str,
+    nextcloud_folder: str | None,
+    nowcerts_insured_guid: str | None,
+    source_pdf: "bytes | None",
+    source_pdf_name: str | None,
+    source: str | None,
+) -> dict[str, Any]:
+    """Mirror the intake to Zoho and stamp Zoho ids onto the opportunity rows.
+
+    Never raises — every failure is logged and returned in ``errors``.
+    """
+    try:
+        from hermes.intake.zoho_writer import write_intake_to_zoho
+
+        synthesized = _build_zoho_payload(
+            account=account,
+            opportunities_spec=opportunities_spec,
+            intake_payload=intake_payload,
+            client_identifier=client_identifier,
+            nextcloud_folder=nextcloud_folder,
+            nowcerts_insured_guid=nowcerts_insured_guid,
+            source_pdf=source_pdf,
+            source_pdf_name=source_pdf_name,
+            source=source,
+        )
+        zoho_result = write_intake_to_zoho(
+            intake_payload=synthesized,
+            approved_by=approved_by,
+        )
+        log.info("Zoho CRM write result: %s", zoho_result)
+
+        # Cross-reference: stamp Zoho ids on every opportunity opened by this
+        # intake. One account, many deals — each pipeline row carries the
+        # account id plus the full deal-id list for later reconciliation.
+        if zoho_result.get("zoho_account_id"):
+            stamp = {
+                "zoho_account_id": zoho_result["zoho_account_id"],
+                "zoho_deal_ids": zoho_result.get("zoho_deal_ids") or [],
+            }
+            for row in opp_rows:
+                opp_id = row.get("id")
+                if not opp_id:
+                    continue
+                try:
+                    supa.update("opportunities", str(opp_id), stamp)
+                    row.update(stamp)
+                except Exception:  # noqa: BLE001 — stamp failure must not fail intake
+                    log.exception(
+                        "intake commit: failed to stamp Zoho ids on opportunity %s",
+                        opp_id,
+                    )
+        return zoho_result
+    except Exception as exc:  # noqa: BLE001 — Zoho is additive; Supabase stays intact
+        log.error("Zoho CRM write failed (non-fatal): %s", exc)
+        return {"zoho_account_id": None, "zoho_deal_ids": [], "zoho_contact_ids": [], "errors": [str(exc)]}
 
 
 _PERSONAL_LOBS = {
@@ -322,4 +479,7 @@ def commit_draft(
         insured_type=_derive_insured_type(account, spec),
         nextcloud=nextcloud,
         source=source or "agency_intake",
+        # Full synthesized intake (contacts / note / facts / rich opportunities)
+        # so the Zoho mirror is not limited to the reduced opportunities_spec.
+        intake_payload=payload,
     )
