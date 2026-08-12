@@ -8,7 +8,7 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `fields_deals.csv` | Deal custom fields ← `opportunities` |
 | `fields_policies.csv` | Custom module **Policies** ← `canonical_policies` |
 | `fields_renewal_events.csv` | Custom module **Renewal_Events** ← `renewal_candidates` |
-| `fields_project85_renewals.csv` | Custom module **Project85_Renewals** ← `project_85_renewals` |
+| `fields_renewals.csv` | Custom module **Renewals** ← `project_85_renewals` |
 | `fields_ams_write_queue.csv` | Custom module **AMS_Write_Queue** ← `outbound_sync_queue` |
 | `picklists_nowcerts_seed.csv` | Exact Hermes `nowcerts_picklist_options` seeds (labels + option_id UUIDs) |
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |
@@ -16,7 +16,7 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 
 ## How to use
 
-1. Create custom modules **Policies**, **Renewal_Events**, **Project85_Renewals**, **AMS_Write_Queue** (if not using Zoho Insurance vertical for Policies).
+1. Create custom modules **Policies**, **Renewal_Events**, **Renewals**, **AMS_Write_Queue** (if not using Zoho Insurance vertical for Policies).
 2. Create two Deal pipelines: **New Business** and **Renewals**, with stages copied from `picklists_nowcerts_seed.csv` (`pipeline_new_business` / `pipeline_renewal`).
 3. For each `fields_*.csv` row: create the field with the given **API_Name**, **Data_Type**, **Length**, and picklist values.
 4. Store NowCerts option UUIDs in the companion `*_Option_ID` fields (do not invent new UUIDs).

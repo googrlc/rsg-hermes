@@ -36,11 +36,11 @@ billing_type,1,Direct Bill,Policies.Billing_Type,hermes_core/canonical.py _BILLI
 billing_type,2,Agency Bill,Policies.Billing_Type,hermes_core/canonical.py _BILLING_NORMALIZE
 billing_type,3,Direct Bill 100,Policies.Billing_Type,hermes_core/canonical.py _BILLING_NORMALIZE
 billing_type,4,Agency Bill 100,Policies.Billing_Type,hermes_core/canonical.py _BILLING_NORMALIZE
-risk_status_p85,1,SAFE,Project85_Renewals.Risk_Status,renewal_risk_status enum + tracker
-risk_status_p85,2,AT_RISK,Project85_Renewals.Risk_Status,renewal_risk_status enum + tracker
-risk_status_p85,3,CRITICAL,Project85_Renewals.Risk_Status,renewal_risk_status enum + tracker
-risk_status_p85,4,RENEWED,Project85_Renewals.Risk_Status,renewal_risk_status enum
-risk_status_p85,5,LAPSED,Project85_Renewals.Risk_Status,renewal_risk_status enum
+risk_status_renewals,1,SAFE,Renewals.Risk_Status,renewal_risk_status enum + tracker
+risk_status_renewals,2,AT_RISK,Renewals.Risk_Status,renewal_risk_status enum + tracker
+risk_status_renewals,3,CRITICAL,Renewals.Risk_Status,renewal_risk_status enum + tracker
+risk_status_renewals,4,RENEWED,Renewals.Risk_Status,renewal_risk_status enum
+risk_status_renewals,5,LAPSED,Renewals.Risk_Status,renewal_risk_status enum
 risk_status_candidate,1,SAFE,Renewal_Events.Risk_Status,renewal_candidates
 risk_status_candidate,2,AT_RISK,Renewal_Events.Risk_Status,renewal_candidates
 risk_status_candidate,3,CRITICAL,Renewal_Events.Risk_Status,renewal_candidates

@@ -6,7 +6,7 @@ Use with the CSVs in this folder. Labels and UUIDs for seeded NowCerts picklists
 
 - [ ] Zoho CRM org with API access
 - [ ] Decide: custom module **Policies** vs Zoho Insurance Policy module
-- [ ] Create custom modules: `Renewal_Events`, `Project85_Renewals`, `AMS_Write_Queue`
+- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`
 - [ ] Create Users matching `agency_crm_users` emails (for Deal Owner / Approved By)
 
 ## 1. Picklists & pipelines (do first)
@@ -90,7 +90,7 @@ Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_
 | 2 | `fields_policies.csv` | Policies | `NowCerts_Policy_GUID` |
 | 3 | `fields_deals.csv` | Deals | `Hermes_Opportunity_ID` (optional); unique NowCerts IDs |
 | 4 | `fields_renewal_events.csv` | Renewal_Events | `Hermes_Candidate_ID` |
-| 5 | `fields_project85_renewals.csv` | Project85_Renewals | `Hermes_Renewal_ID` |
+| 5 | `fields_renewals.csv` | Renewals | `Hermes_Renewal_ID` |
 | 6 | `fields_ams_write_queue.csv` | AMS_Write_Queue | `Queue_ID` |
 
 For each row: create field → set length → set picklist → mark mandatory/unique → set External ID where flagged.
@@ -102,7 +102,7 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Deals: unique `(Client_Identifier, Line_of_Business, Opportunity_Type)` — Zoho: workflow or custom unique constraint / Deluge guard (native multi-field unique is limited; enforce in sync layer)
 - [ ] Deals: unique `NowCerts_Opportunity_ID` / `NowCerts_Quote_GUID` / `NowCerts_Policy_GUID` when non-blank
 - [ ] Renewal_Events: unique `Renewal_Key` = `insured|lineage|date`
-- [ ] Project85_Renewals: unique `Policy_Number`
+- [ ] Renewals: unique `Policy_Number`
 - [ ] AMS_Write_Queue: at most one **queued** row per `(Object_Type, Object_ID, Destination, Action)`
 
 ### Lookups
@@ -110,8 +110,8 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Deals → Accounts
 - [ ] Policies → Accounts
 - [ ] Renewal_Events → Accounts, Policies
-- [ ] Project85_Renewals → Policies, Accounts, Renewal_Events (optional)
-- [ ] AMS_Write_Queue → Accounts / Deals / Policies / Project85_Renewals (optional convenience)
+- [ ] Renewals → Policies, Accounts, Renewal_Events (optional)
+- [ ] AMS_Write_Queue → Accounts / Deals / Policies / Renewals (optional convenience)
 
 ## 4. Approval & AMS write rules (Zoho Blueprint / Approval)
 
@@ -129,7 +129,7 @@ For each row: create field → set length → set picklist → mark mandatory/un
 
 ## 5. Formulas
 
-- [ ] `Project85_Renewals.Increase_Percent` = `((Premium_Renewal - Premium_Current) / Premium_Current) * 100` (null-safe when Premium_Current = 0 → 0)
+- [ ] `Renewals.Increase_Percent` = `((Premium_Renewal - Premium_Current) / Premium_Current) * 100` (null-safe when Premium_Current = 0 → 0)
 - [ ] Optional: Deal Probability default from Stage (see pipeline tables above)
 
 ## 6. Sync direction smoke tests
