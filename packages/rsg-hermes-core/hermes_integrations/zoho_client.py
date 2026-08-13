@@ -644,3 +644,41 @@ class ZohoClient:
         )
         log.info("Zoho: added tag %r on %s/%s", tag, record_module, record_id)
         return body if isinstance(body, dict) else {"result": body}
+
+    def upsert_by_field(
+        self,
+        module: str,
+        record: dict[str, Any],
+        *,
+        match_field: str,
+        match_value: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or update a record matched on ``match_field`` (e.g. an external GUID).
+
+        Used by the Momentum→Zoho backfill for Policies / Renewals custom modules.
+        Returns ``{"id": zoho_id, "action": "created"|"updated"}``.
+        """
+        value = match_value if match_value is not None else record.get(match_field)
+        if not value:
+            raise ZohoClientError(
+                f"upsert_by_field({module}): match_field {match_field!r} has no value"
+            )
+        existing = self._find_first(
+            module,
+            f"({match_field}:equals:{_escape_criteria_value(str(value))})",
+        )
+        payload = {k: v for k, v in record.items() if _present(v) or v is False}
+        if match_field not in payload:
+            payload[match_field] = value
+
+        if existing and existing.get("id"):
+            zoho_id = str(existing["id"])
+            body = self._put(module, {"data": [{"id": zoho_id, **payload}]})
+            rid = self._assert_write_ok(body, action="update", module=module)
+            log.info("Zoho: updated %s id=%s %s=%r", module, rid, match_field, value)
+            return {"id": rid, "action": "updated"}
+
+        body = self._post(module, {"data": [payload]})
+        rid = self._assert_write_ok(body, action="create", module=module)
+        log.info("Zoho: created %s id=%s %s=%r", module, rid, match_field, value)
+        return {"id": rid, "action": "created"}
