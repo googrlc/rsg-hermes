@@ -89,6 +89,95 @@ def test_unset_flag_stages_nothing(monkeypatch):
     assert ic.stages_ams_insured() is False
 
 
+def test_zoho_write_off_by_default(monkeypatch):
+    monkeypatch.delenv(ic.ENV_WRITE_TO_ZOHO, raising=False)
+    assert ic.writes_to_zoho() is False
+    monkeypatch.setenv(ic.ENV_WRITE_TO_ZOHO, "false")
+    assert ic.writes_to_zoho() is False
+
+
+def test_zoho_write_runs_after_supabase_when_enabled(monkeypatch):
+    """Zoho is additive: opportunity inserts happen first; Zoho failure stays non-fatal."""
+    monkeypatch.setenv(ic.ENV_WRITE_TO_ZOHO, "1")
+    supa = _router_supa()
+    nc = MagicMock()
+    nc.is_configured.return_value = True
+    nc.ensure_client_folders.return_value = "Clients/Acme Plumbing LLC"
+
+    zoho_calls: list[dict] = []
+
+    def _fake_zoho(intake_payload, approved_by=None, **kwargs):
+        zoho_calls.append({"payload": intake_payload, "approved_by": approved_by})
+        return {
+            "zoho_account_id": "z-acc-1",
+            "zoho_deal_ids": ["z-deal-1", "z-deal-2"],
+            "zoho_contact_ids": ["z-c-1"],
+            "errors": [],
+        }
+
+    monkeypatch.setattr("hermes.intake.zoho_writer.write_intake_to_zoho", _fake_zoho)
+
+    out = ic.commit_intake(
+        supa,
+        account={"account_name": "Acme Plumbing LLC", "fein": "12-3456789", "insured_type": "Commercial"},
+        opportunities_spec=[
+            {"line_of_business": "General Liability"},
+            {"line_of_business": "Workers Comp"},
+        ],
+        approved_by="lamar",
+        nextcloud=nc,
+        intake_payload={
+            "account": {"account_name": "Acme Plumbing LLC", "fein": "12-3456789"},
+            "contacts": [{"full_name": "Pat Owner", "email": "pat@acme.test"}],
+            "opportunities": [
+                {"line_of_business": "General Liability", "opportunity_name": "Acme - GL"},
+                {"line_of_business": "Workers Comp", "opportunity_name": "Acme - WC"},
+            ],
+            "note": {"title": "Intake", "body": "New commercial prospect"},
+        },
+    )
+
+    # Supabase still wrote both opportunities first.
+    assert [c.args[0] for c in supa.insert.call_args_list] == ["opportunities", "opportunities"]
+    assert out["opportunity_count"] == 2
+    assert len(zoho_calls) == 1
+    assert zoho_calls[0]["approved_by"] == "lamar"
+    assert zoho_calls[0]["payload"]["nextcloud_folder"] == "Clients/Acme Plumbing LLC"
+    assert out["zoho"]["zoho_account_id"] == "z-acc-1"
+
+    # Zoho ids stamped onto every opportunity row.
+    updates = [c for c in supa.update.call_args_list if c.args[0] == "opportunities"]
+    zoho_stamps = [c.args[2] for c in updates if "zoho_account_id" in c.args[2]]
+    assert len(zoho_stamps) == 2
+    assert all(s["zoho_account_id"] == "z-acc-1" for s in zoho_stamps)
+    assert all(s["zoho_deal_ids"] == ["z-deal-1", "z-deal-2"] for s in zoho_stamps)
+
+
+def test_zoho_write_failure_does_not_break_supabase_commit(monkeypatch):
+    monkeypatch.setenv(ic.ENV_WRITE_TO_ZOHO, "true")
+    supa = _router_supa()
+    nc = MagicMock()
+    nc.is_configured.return_value = False
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("zoho down")
+
+    monkeypatch.setattr("hermes.intake.zoho_writer.write_intake_to_zoho", _boom)
+
+    out = ic.commit_intake(
+        supa,
+        account={"account_name": "Solo Co", "insured_type": "Commercial"},
+        opportunities_spec=[{"line_of_business": "BOP"}],
+        approved_by="lamar",
+        nextcloud=nc,
+    )
+    assert out["opportunity_count"] == 1
+    assert out["zoho"]["zoho_account_id"] is None
+    assert out["zoho"]["errors"]
+    # Supabase insert still happened; no Zoho stamp updates.
+    assert [c.args[0] for c in supa.insert.call_args_list] == ["opportunities"]
+
+
 def test_commit_without_nextcloud_configured():
     supa = _router_supa()
     nc = MagicMock()
