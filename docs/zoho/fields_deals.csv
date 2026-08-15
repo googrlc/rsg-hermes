@@ -1,0 +1,48 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Deals,Deal Name,Deal_Name,Single Line,255,Y,N,N,,,,Z-only,,"Use Insured_Name + LOB"
+Deals,Hermes Opportunity ID,Hermes_Opportunity_ID,Single Line,36,N,Y,Y,,,System,id,UUID; secondary External ID
+Deals,Account Name,Account_Name,Lookup (Accounts),,N,N,N,,,AMS→Z / Z-only,insured_id,"Lookup; also store GUID"
+Deals,Client Identifier,Client_Identifier,Single Line,255,Y,N,N,,,Z-only,client_identifier,Part of unique key before AMS GUID
+Deals,NowCerts Insured GUID,NowCerts_Insured_GUID,Single Line,36,N,N,N,,,AMS→Z,insured_id,Same as Account External ID
+Deals,Insured Name,Insured_Name,Single Line,255,N,N,N,,,AMS→Z,insured_name,Denormalized display
+Deals,NowCerts Opportunity ID,NowCerts_Opportunity_ID,Single Line,36,N,Y,N,,,AMS→Z,nowcerts_opportunity_id,Required for stage writeback
+Deals,NowCerts Quote GUID,NowCerts_Quote_GUID,Single Line,36,N,Y,N,,,AMS→Z / Z→AMS,nowcerts_quote_guid,Quote Policy databaseId
+Deals,Quote Number,Quote_Number,Single Line,100,N,N,N,,,AMS→Z,quote_number,
+Deals,Bound Policy Number,Bound_Policy_Number,Single Line,100,N,N,N,,,Z→AMS on win,policy_number,Required for opportunity_won
+Deals,NowCerts Policy GUID,NowCerts_Policy_GUID,Single Line,36,N,Y,N,,,AMS←Z after win,nowcerts_policy_guid,Filled after AMS policy create
+Deals,AMS Pushed At,AMS_Pushed_At,DateTime,,N,N,N,,,System,ams_pushed_at,
+Deals,Opportunity Type,Opportunity_Type,Picklist,80,Y,N,N,New Business,picklists_hermes_vocab.csv:opportunity_type,AMS→Z / Z-only,opportunity_type,Renewals → renewal pipeline
+Deals,Line of Business,Line_of_Business,Picklist,100,N,N,N,,,Z-only / AMS→Z,line_of_business,Part of unique key; free LOB labels OK
+Deals,Prospect Type,Prospect_Type,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:prospect_type,AMS→Z,prospect_type,
+Deals,Insured Type,Insured_Type,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:insured_type,AMS→Z,insured_type,
+Deals,Stage,Stage,Picklist (Pipeline),80,Y,N,N,Preparing Application,picklists_nowcerts_seed.csv:pipeline_*,Z-only → AMS terminal,stage,Exact NowCerts labels; two pipelines
+Deals,Stage Option ID,Stage_Option_ID,Single Line,36,N,N,N,,picklists_nowcerts_seed.csv option_id,AMS↔Z,stage_option_id,Store UUID from seed; do not invent
+Deals,Deal Status,Deal_Status,Picklist,20,Y,N,N,open,picklists_hermes_vocab.csv:deal_status,Derived,status,open|won|lost from stage
+Deals,Win Likelihood,Win_Likelihood,Picklist,40,Y,N,N,Good,picklists_hermes_vocab.csv:win_likelihood,Z-only,likelihood,AMS-required category
+Deals,Probability,Probability,Number (Integer),3,N,N,N,,,Derived / Z-only,probability,0-100; stage-driven default
+Deals,Disposition,Disposition,Multi Line,2000,N,N,N,,,Z-only,disposition,Free text; not a stage
+Deals,Reason For Loss,Reason_For_Loss,Multi Line,2000,N,N,N,,,Z-only,lost_reason,Required when Lost
+Deals,Referral Source,Referral_Source,Single Line,255,N,N,N,,,AMS→Z,referral_source,READ-ONLY in Hermes
+Deals,Lead Source,Lead_Source,Single Line,100,N,N,N,,,Z-only / AMS→Z,lead_source,
+Deals,Amount,Amount,Currency,16.2,N,N,N,,,Z-only,premium_estimate,Working estimate
+Deals,Premium Estimate,Premium_Estimate,Currency,16.2,N,N,N,,,Z-only,premium_estimate,Duplicate Amount if preferred
+Deals,Premium Actual,Premium_Actual,Currency,16.2,N,N,N,,,AMS→Z,premium_actual,Quoted/real premium
+Deals,Carrier,Carrier,Single Line,150,N,N,N,,,Z-only / AMS→Z,carrier,
+Deals,Policy Status,Policy_Status,Single Line,80,N,N,N,,,AMS→Z,policy_status,AMS quote/policy status string
+Deals,Effective Date,Effective_Date,Date,,N,N,N,,,AMS→Z / Z→AMS on win,effective_date,
+Deals,Expiration Date,Expiration_Date,Date,,N,N,N,,,AMS→Z,expiration_date,Quote x-date
+Deals,Needed By,Needed_By,Date,,N,N,N,,,AMS→Z,needed_by,AMS neededBy
+Deals,Closing Date,Closing_Date,Date,,N,N,N,,,Z-only,expected_close_date,
+Deals,Stage Due Date,Stage_Due_Date,Date,,N,N,N,,,Z-only,stage_due_date,
+Deals,Closed Date,Closed_Date,Date,,N,N,N,,,Derived / Z-only,closed_date,
+Deals,Next Action,Next_Action,Single Line,255,N,N,N,,,Z-only,next_action,
+Deals,Next Action Date,Next_Action_Date,Date,,N,N,N,,,Z-only,next_action_date,
+Deals,Assigned To AMS,Assigned_To_AMS,Single Line,255,N,N,N,,,AMS shape,assigned_to,Legacy AMS JSON-ish; prefer Owner
+Deals,Deal Owner,Owner,Lookup (Users),,N,N,N,,,Z-only,assigned_to_email,Map agency_crm_users.email
+Deals,Description,Description,Multi Line,32000,N,N,N,,,Z-only,description,
+Deals,Intake Source,Intake_Source,Single Line,80,N,N,N,,,Z-only,source,
+Deals,Sync Source,Sync_Source,Single Line,80,N,N,N,,,System,sync_source,nowcerts_quote_sync|nowcerts-opportunity-sync|crm
+Deals,Last AMS Sync,Last_AMS_Sync,DateTime,,N,N,N,,,System,synced_at,
+Deals,Created By Hermes,Created_By_Hermes,Single Line,100,N,N,N,,,System,created_by,
+Deals,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
+Deals,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

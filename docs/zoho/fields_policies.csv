@@ -1,0 +1,27 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Policies,Policy Name,Name,Single Line,255,Y,N,N,,,,Z-only,,"Policy_Number + Carrier"
+Policies,Hermes Policy ID,Hermes_Policy_ID,Single Line,36,N,Y,N,,,System,id,UUID surrogate
+Policies,NowCerts Policy GUID,NowCerts_Policy_GUID,Single Line,36,Y,Y,Y,,,AMS→Z,policy_guid,PRIMARY AMS key / External ID
+Policies,Policy Number,Policy_Number,Single Line,100,Y,Y,N,,,AMS→Z,policy_number,Unique in Hermes book
+Policies,Account Name,Account_Name,Lookup (Accounts),,N,N,N,,,AMS→Z,client_id,
+Policies,NowCerts Insured GUID,NowCerts_Insured_GUID,Single Line,36,N,N,N,,,AMS→Z,nowcerts_insured_guid,Join safety
+Policies,Line of Business,Line_of_Business,Single Line,150,N,N,N,,,AMS→Z / Z→AMS,lines_of_business,Pushable LineOfBusinessName
+Policies,Business Type,Business_Type,Single Line,100,N,N,N,,,AMS→Z,business_type,
+Policies,Carrier,Carrier,Single Line,150,N,N,N,,,AMS→Z / Z→AMS,carrier,Pushable CarrierName
+Policies,Policy Status,Policy_Status,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:policy_status_normalized,AMS→Z,status,Also see renewal_status seed subset
+Policies,Active,Active,Checkbox,,N,N,N,false,,Derived,active,Do NOT push to AMS
+Policies,Effective Date,Effective_Date,Date,,N,N,N,,,AMS→Z / Z→AMS,effective_date,Pushable
+Policies,Expiration Date,Expiration_Date,Date,,N,N,N,,,AMS→Z / Z→AMS,expiration_date,Pushable
+Policies,Cancellation Date,Cancellation_Date,Date,,N,N,N,,,AMS→Z,cancellation_date,Mid-term cancel cutoff
+Policies,Billing Type,Billing_Type,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:billing_type,AMS→Z,billing_type,
+Policies,Agency Fee,Agency_Fee,Currency,16.2,N,N,N,,,AMS→Z,agency_fee_amount,Shop fee ≠ commission
+Policies,Premium,Premium,Currency,16.2,N,N,N,,,AMS→Z / Z→AMS,premium_amount,Pushable
+Policies,Current Term Premium,Current_Term_Premium,Currency,16.2,N,N,N,,,AMS→Z,current_term_amount,
+Policies,Annualized Premium,Annualized_Premium,Currency,16.2,N,N,N,,,AMS→Z / Z→AMS,annualized_premium,Pushable (same AMS Premium)
+Policies,Agency Commission,Agency_Commission,Currency,16.2,N,N,N,,,AMS→Z,agency_commission_amount,AMS totalAgencyCommission
+Policies,Renewed Policy GUID,Renewed_Policy_GUID,Single Line,36,N,N,N,,,AMS→Z + lineage,renewed_policy,Also in policy_lineage table
+Policies,Risk State,Risk_State,Single Line,10,N,N,N,,,AMS→Z,state,Policy state not mailing address
+Policies,Sync Owner,Sync_Owner,Picklist,40,N,N,N,book_sync,picklists_hermes_vocab.csv:sync_owner,System,sync_owner,Who may tombstone
+Policies,Last Synced,Last_Synced,DateTime,,N,N,N,,,System,synced_at,
+Policies,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
+Policies,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,
