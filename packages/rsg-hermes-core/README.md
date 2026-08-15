@@ -11,7 +11,7 @@ Two top-level packages:
   (`dispatch`), identity/persona loading, PHI redaction, field and due-date
   normalisation, the schema registry, the LLM client.
 - **`hermes_integrations`** — one module per external system: Supabase,
-  NowCerts, Nextcloud (+ Deck), Microsoft 365, Gmail, Slack, Supermemory, the
+  NowCerts, Nextcloud (+ Deck), Microsoft 365, Slack, Supermemory, the
   retrieval index, and the team-notify fan-out.
 
 ## The rule

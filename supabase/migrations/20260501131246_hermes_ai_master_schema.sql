@@ -41,7 +41,7 @@ CREATE TABLE public.hermes_ai_roles (
 
 CREATE TABLE public.crm_write_queue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    target_system VARCHAR(50) NOT NULL DEFAULT 'HubSpot',
+    target_system VARCHAR(50) NOT NULL,
     entity_type VARCHAR(50) NOT NULL,
     entity_id VARCHAR(100),
     payload JSONB NOT NULL,

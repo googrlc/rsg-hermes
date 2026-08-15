@@ -1,6 +1,6 @@
 ---
 name: client-onboarding
-description: RSG's new-client setup playbook. Use this skill ANY time a client is signed, bound, or needs to be stood up in the system — creating the Hermes account and contacts, opening one opportunity per line of business, flagging cross-sell gaps, building the NextCloud folder structure, drafting the welcome email, registering the renewal date in Walker, and setting first-touch follow-up tasks. Triggers include "set up this new client," "we just bound [client]," "new client onboarding," "create the folders for [client]," "draft the welcome email," "what's left to do on this new account," or any mention of a newly signed or newly bound piece of business. When in doubt, use it — a half-onboarded client is how retention leaks.
+description: RSG's new-client setup playbook. Use this skill ANY time a client is signed, bound, or needs to be stood up in the system — creating the Hermes account and contacts, opening one opportunity per line of business, flagging cross-sell gaps, building the NextCloud folder structure, drafting the welcome email, and setting first-touch follow-up tasks. Triggers include "set up this new client," "we just bound [client]," "new client onboarding," "create the folders for [client]," "draft the welcome email," "what's left to do on this new account," or any mention of a newly signed or newly bound piece of business. When in doubt, use it — a half-onboarded client is how retention leaks.
 ---
 
 # Client Onboarding

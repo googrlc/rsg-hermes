@@ -221,7 +221,7 @@ def _payload_dict_to_raw_text(payload: dict[str, Any]) -> str:
     if notes:
         parts.append(f"=== NOTES ===\n{notes}")
 
-    # Email transport (ms365 / gmail triage) — the message itself is the source
+    # Email transport (ms365 triage) — the message itself is the source
     # content. Triage writes {channel: "email", from, subject, body, ...}; flatten
     # those into an EMAIL section so the LLM contract stays identical to the other
     # transports. Without this, email payloads have no recognised section and

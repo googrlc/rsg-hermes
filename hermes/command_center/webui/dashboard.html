@@ -257,7 +257,7 @@ async function loadEmail(){
     const c=d.counts||{};
     const processing=(c.received||0)+(c.synthesizing||0)+(c.synthesized||0)+(c.drafting||0);
     document.getElementById("email-note").innerHTML =
-      `<b>${c.awaiting_approval||0}</b> ready · <b>${processing}</b> processing · <b>${c.failed||0}</b> failed · ${d.total} shown. Source: intake_submissions (email-ms365 / gmail).`;
+      `<b>${c.awaiting_approval||0}</b> ready · <b>${processing}</b> processing · <b>${c.failed||0}</b> failed · ${d.total} shown. Source: intake_submissions (email-ms365).`;
   }catch(e){ el.innerHTML='<div class="err">⚠ '+e.message+'</div>'; }
 }
 
