@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-IntakeSource = Literal["cowork", "voice_tool", "manual_curl", "n8n", "intake_gate"]
+IntakeSource = Literal["cowork", "voice_tool", "manual_curl", "intake_gate"]
 IntakeAgent = Literal["lamar", "gretchen"]
 IntakeKind = Literal["full_intake", "task", "note", "update", "other"]
 

@@ -2295,7 +2295,7 @@ class DocumentSaveRequest(BaseModel):
 
 @router.post("/api/documents/save")
 def documents_save(req: DocumentSaveRequest):
-    """Save a document to the library (Supermemory + Drive mirror + index).
+    """Save a document to the library (Supermemory + index).
 
     ``account_name`` => client folder; otherwise it lands in the internal
     space under ``folder`` (default 'General').

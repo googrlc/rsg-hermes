@@ -76,7 +76,7 @@ def test_the_email_card_still_filters_to_the_email_lanes():
     supa = FakeSupa([EMAIL_ROW, GATE_ROW])
     out = dashboard.email_queue(supa)
     assert [i["id"] for i in out["items"]] == ["e1"]
-    assert supa.params["source"] == "in.(email-ms365,email-gmail)"
+    assert supa.params["source"] == "in.(email-ms365)"
 
 
 def test_the_email_card_keeps_its_original_field_names():

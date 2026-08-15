@@ -88,8 +88,3 @@ category, so the overlap is idempotent.
 For a local/venv install the command is simply `hermes --email-triage
 --email-provider ms365 …`.
 
-## Gmail
-
-The Google/Gmail lane is a separate connector (`gmail_client.py`,
-service-account + domain-wide delegation) feeding the same triage pipeline.
-See [email-triage-gmail.md](email-triage-gmail.md).

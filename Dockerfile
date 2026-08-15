@@ -29,10 +29,8 @@ RUN poetry lock \
 COPY . .
 # The shared bottom layer first — the app imports hermes_core / hermes_integrations
 # at module scope, so it must be installed before the app is.
-RUN pip install -e './packages/rsg-hermes-core[gmail]'
-# [gmail] extra pulls google-auth, needed at runtime by the Gmail email-triage
-# lane and the Google Drive document mirror.
-RUN pip install -e '.[gmail]'
+RUN pip install -e './packages/rsg-hermes-core'
+RUN pip install -e '.'
 # Belt-and-suspenders: guarantee the PDF dependency is present + pinned in the image
 # (renewal worksheet PDF generation). Verified in CI/rebuild via `python -c import reportlab`.
 RUN pip install "reportlab==5.0.0"

@@ -101,7 +101,7 @@ INSERT INTO public.crm_write_queue (
 VALUES
   (
     'a1000001-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid,
-    'HubSpot',
+    'NowCerts',
     'Contact',
     'crm-seed-contact-4401',
     jsonb_build_object(
@@ -114,7 +114,7 @@ VALUES
   ),
   (
     'a1000002-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid,
-    'HubSpot',
+    'NowCerts',
     'Deal',
     'crm-seed-deal-9812',
     jsonb_build_object('intent', 'create_note', 'body', 'Hermes proof-of-queue staged before worker execution.'),
@@ -124,7 +124,7 @@ VALUES
   ),
   (
     'a1000003-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid,
-    'HubSpot',
+    'NowCerts',
     'Note',
     'crm-seed-deal-9812',
     jsonb_build_object(
@@ -145,7 +145,7 @@ VALUES (
   'hs_seed_txn_99331',
   jsonb_build_object(
     'status', '200',
-    'provider', 'hubspot',
+    'provider', 'nowcerts',
     'result', jsonb_build_object('updated', true, 'id', 'crm-seed-contact-4401'),
     'correlation', 'hermes_seed_v1'
   )

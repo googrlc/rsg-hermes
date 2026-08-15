@@ -77,7 +77,7 @@ def activity_feed(supa, limit: int = 25) -> list[dict]:
     return supa.select("cc_review_events", params={"order": "at.desc"}, limit=limit)
 
 
-EMAIL_SOURCES = ("email-ms365", "email-gmail")
+EMAIL_SOURCES = ("email-ms365",)
 
 
 def _submission_title(row: dict) -> tuple[str, str]:

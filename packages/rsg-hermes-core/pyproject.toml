@@ -19,10 +19,6 @@ dependencies = [
   "pydantic>=2.0",
 ]
 
-[project.optional-dependencies]
-# Gmail lane (hermes_integrations/gmail_client.py): service-account token
-# minting + domain-wide delegation. Only the apps that read mail need it.
-gmail = ["google-auth>=2.20"]
 
 [build-system]
 requires = ["setuptools>=61"]

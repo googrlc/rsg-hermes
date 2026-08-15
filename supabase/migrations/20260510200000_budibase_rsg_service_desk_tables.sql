@@ -1,5 +1,5 @@
--- RSG Operations Console (Budibase) — core tables for Service Desk, AI review, and carrier appetite.
--- Budibase connects via direct Postgres (pooler or primary); RLS still protects PostgREST/anon paths.
+-- RSG Operations Console — core tables for Service Desk, AI review, and carrier appetite.
+-- RLS still protects PostgREST/anon paths.
 
 -- -------------------------------------------------------------------------------------
 -- service_requests — RSG Service Desk queue
@@ -23,8 +23,7 @@ CREATE TABLE public.service_requests (
   files_links jsonb DEFAULT '[]'::jsonb,
   ai_summary text,
   ai_suggested_action text,
-  n8n_status text DEFAULT 'Not Started',
-  source text DEFAULT 'Budibase',
+  source text,
   created_by text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
@@ -48,7 +47,7 @@ CREATE POLICY "Service Role Full Access" ON public.service_requests
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- -------------------------------------------------------------------------------------
--- ai_review_queue — human approval before n8n pushes to CRM / AMS
+-- ai_review_queue — human approval before anything pushes to CRM / AMS
 -- -------------------------------------------------------------------------------------
 CREATE TABLE public.ai_review_queue (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -76,7 +75,7 @@ CREATE POLICY "Service Role Full Access" ON public.ai_review_queue
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- -------------------------------------------------------------------------------------
--- carrier_appetite — operator-maintained appetite grid (Budibase admin screens)
+-- carrier_appetite — operator-maintained appetite grid
 -- -------------------------------------------------------------------------------------
 CREATE TABLE public.carrier_appetite (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
