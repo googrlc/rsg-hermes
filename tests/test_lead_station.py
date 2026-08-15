@@ -167,7 +167,9 @@ def test_converting_opens_a_deal_and_marks_the_lead(monkeypatch):
         return {"id": "opp-1", **kw}, True
 
     monkeypatch.setattr("hermes_core.opportunities.create_opportunity", fake_create)
-    lead, opp = L.convert_to_opportunity(supa, "lead-1", line_of_business="General Liability")
+    lead, opp, duplicate_detected = L.convert_to_opportunity(
+        supa, "lead-1", line_of_business="General Liability"
+    )
 
     assert opp["id"] == "opp-1"
     assert made["line_of_business"] == "General Liability"
@@ -177,15 +179,88 @@ def test_converting_opens_a_deal_and_marks_the_lead(monkeypatch):
     assert made["source"] == "lead-conversion"
     assert lead["status"] == "converted"
     assert lead["converted_opportunity_id"] == "opp-1"
+    assert duplicate_detected is False
+
+
+def test_converting_passes_stage_and_next_action(monkeypatch):
+    """Stage, next_action, and expected_close_date are carried to create_opportunity."""
+    supa = FakeSupa({"crm_leads": [_lead(company="Beta LLC")]})
+    made = {}
+
+    def fake_create(_supa, **kw):
+        made.update(kw)
+        return {"id": "opp-2", **kw}, True
+
+    monkeypatch.setattr("hermes_core.opportunities.create_opportunity", fake_create)
+    L.convert_to_opportunity(
+        supa, "lead-1",
+        line_of_business="BOP",
+        stage="Sent For Quoting",
+        next_action="Send proposal",
+        expected_close_date="2026-12-01",
+    )
+
+    assert made["stage"] == "Sent For Quoting"
+    assert made["next_action"] == "Send proposal"
+    assert made["expected_close_date"] == "2026-12-01"
+
+
+def test_converting_detects_duplicate_opportunity(monkeypatch):
+    """When create_opportunity returns an existing deal (created=False), the
+    conversion reports duplicate_detected=True so the caller can warn the user."""
+    supa = FakeSupa({"crm_leads": [_lead(company="Beta LLC")]})
+    monkeypatch.setattr("hermes_core.opportunities.create_opportunity",
+                        lambda _s, **kw: ({"id": "opp-existing"}, False))
+    lead, opp, duplicate_detected = L.convert_to_opportunity(
+        supa, "lead-1", line_of_business="BOP"
+    )
+    assert opp["id"] == "opp-existing"
+    assert duplicate_detected is True
+    # The lead is still marked converted — the deal is there, just not new.
+    assert lead["status"] == "converted"
 
 
 def test_converting_never_writes_to_the_ams(monkeypatch):
-    """A converted lead is still only a deal. NowCerts hears about it when it is won."""
+    """A converted lead is still only a deal. NowCerts hears about it when it is won.
+    The note and event inserts are internal audit records (CRM-only), not AMS writes."""
     supa = FakeSupa({"crm_leads": [_lead()]})
     monkeypatch.setattr("hermes_core.opportunities.create_opportunity",
                         lambda _s, **kw: ({"id": "opp-1"}, True))
     L.convert_to_opportunity(supa, "lead-1", line_of_business="BOP")
-    assert supa.inserted == []          # nothing staged, nothing queued
+    # Only CRM tables must have been touched — no AMS/NowCerts tables.
+    ams_writes = [t for t, _ in supa.inserted
+                  if t not in {L.NOTES_TABLE, "opportunity_events"}]
+    assert ams_writes == []
+
+
+def test_converting_appends_audit_note_to_lead(monkeypatch):
+    """After a conversion the lead's notes gain an audit entry describing what happened."""
+    supa = FakeSupa({"crm_leads": [_lead()]})
+    monkeypatch.setattr("hermes_core.opportunities.create_opportunity",
+                        lambda _s, **kw: ({"id": "opp-1"}, True))
+    L.convert_to_opportunity(
+        supa, "lead-1", line_of_business="General Liability", created_by="lamar@x.net"
+    )
+    audit_notes = [(t, p) for t, p in supa.inserted if t == L.NOTES_TABLE]
+    assert audit_notes, "expected an audit note in crm_lead_notes"
+    body = audit_notes[0][1]["body"]
+    assert "General Liability" in body
+    assert audit_notes[0][1]["author_email"] == "lamar@x.net"
+
+
+def test_converting_logs_event_to_opportunity_timeline(monkeypatch):
+    """Conversion appends a timeline event to the opportunity so the audit answers
+    where this deal came from."""
+    supa = FakeSupa({"crm_leads": [_lead(company="Acme LLC")]})
+    monkeypatch.setattr("hermes_core.opportunities.create_opportunity",
+                        lambda _s, **kw: ({"id": "opp-timeline"}, True))
+    L.convert_to_opportunity(
+        supa, "lead-1", line_of_business="GL", created_by="user@x.net"
+    )
+    events = [(t, p) for t, p in supa.inserted if t == "opportunity_events"]
+    assert events, "expected an opportunity_events entry"
+    summary = events[0][1]["summary"]
+    assert "lead-1" in summary
 
 
 def test_converting_keeps_the_lead_for_the_upsell(monkeypatch):
@@ -225,13 +300,36 @@ def test_conversion_runs_against_the_REAL_create_opportunity():
         # No existing row → create_opportunity inserts rather than adopting.
         "opportunities": [],
     })
-    lead, opp = L.convert_to_opportunity(supa, "lead-1", line_of_business="General Liability")
+    lead, opp, duplicate_detected = L.convert_to_opportunity(
+        supa, "lead-1", line_of_business="General Liability"
+    )
 
-    table, payload = supa.inserted[0]
-    assert table == "opportunities"
+    opp_inserts = [(t, p) for t, p in supa.inserted if t == "opportunities"]
+    assert opp_inserts, "expected opportunities insert"
+    table, payload = opp_inserts[0]
     assert payload["line_of_business"] == "General Liability"
     assert payload["insured_name"] == "Prospect Co"
     # The x-date is why the deal has a deadline. It has to land on the row itself,
     # not merely be accepted as an argument.
     assert payload["expiration_date"] == "2026-09-15"
     assert lead["status"] == "converted"
+    assert duplicate_detected is False
+
+
+# --- update audit trail -------------------------------------------------------
+def test_update_lead_appends_audit_note():
+    """Every lead edit leaves a note so the history answers who changed what."""
+    supa = FakeSupa()
+    L.update_lead(supa, "lead-1", {"status": "working"}, updated_by="lamar@x.net")
+    audit_notes = [(t, p) for t, p in supa.inserted if t == L.NOTES_TABLE]
+    assert audit_notes, "expected an audit note after update"
+    assert audit_notes[0][1]["author_email"] == "lamar@x.net"
+    assert "status" in audit_notes[0][1]["body"]
+
+
+def test_update_lead_audit_note_failure_does_not_block_edit():
+    """A broken notes table must not roll back a successful lead edit."""
+    supa = FakeSupa(fail_on={"crm_lead_notes"})
+    # Should not raise even though the audit insert will fail.
+    result = L.update_lead(supa, "lead-1", {"status": "working"})
+    assert result is not None

@@ -220,6 +220,7 @@ class LeadWriteRequest(BaseModel):
     nowcerts_insured_guid: str | None = None
     lost_reason: str | None = None
     created_by_email: str | None = None
+    updated_by_email: str | None = None     # who made this edit (for audit log)
 
 
 @router.post("/api/leads")
@@ -230,6 +231,7 @@ def create_lead_endpoint(req: LeadWriteRequest):
     supa = deps.get_supa()
     fields = req.model_dump(exclude_unset=True)
     creator = fields.pop("created_by_email", None)
+    fields.pop("updated_by_email", None)
     if fields.get("owner_email"):
         deps.require_users(supa, [("owner_email", fields["owner_email"])])
     try:
@@ -270,10 +272,11 @@ def update_lead_endpoint(lead_id: str, req: LeadWriteRequest):
     supa = deps.get_supa()
     fields = req.model_dump(exclude_unset=True)
     fields.pop("created_by_email", None)
+    updated_by = fields.pop("updated_by_email", None)
     if fields.get("owner_email"):
         deps.require_users(supa, [("owner_email", fields["owner_email"])])
     try:
-        lead = L.update_lead(supa, lead_id, fields)
+        lead = L.update_lead(supa, lead_id, fields, updated_by=updated_by)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -323,9 +326,12 @@ def add_lead_note_endpoint(lead_id: str, req: LeadNoteRequest):
 
 class LeadConvertRequest(BaseModel):
     line_of_business: str
-    opportunity_type: str | None = None
+    opportunity_type: str | None = None     # defaults to New Business
+    stage: str | None = None                # defaults to the type's first stage
     premium_estimate: float | None = None
     assigned_to_email: str | None = None
+    next_action: str | None = None
+    expected_close_date: str | None = None  # CRM-owned forecast (YYYY-MM-DD)
     created_by: str | None = None
 
 
@@ -334,19 +340,26 @@ def convert_lead_endpoint(lead_id: str, req: LeadConvertRequest):
     """Turn a lead into a pipeline opportunity.
 
     Still nothing written to NowCerts: the deal is worked in the CRM and reaches
-    the AMS when it is won. Idempotent — converting twice returns the same deal."""
+    the AMS when it is won. Idempotent — converting twice returns the same deal.
+
+    ``duplicate_detected`` in the response is True when an opportunity for this
+    client+LOB+type already existed before this call; the caller should surface a
+    warning so the user can verify the returned deal is the right one."""
     from hermes import leads as L
 
     supa = deps.get_supa()
     if req.assigned_to_email:
         deps.require_users(supa, [("assigned_to_email", req.assigned_to_email)])
     try:
-        lead, opportunity = L.convert_to_opportunity(
+        lead, opportunity, duplicate_detected = L.convert_to_opportunity(
             supa, lead_id,
             line_of_business=req.line_of_business,
             opportunity_type=req.opportunity_type,
+            stage=req.stage,
             premium_estimate=req.premium_estimate,
             assigned_to_email=req.assigned_to_email,
+            next_action=req.next_action,
+            expected_close_date=req.expected_close_date,
             created_by=req.created_by,
         )
     except ValueError as exc:
@@ -354,7 +367,8 @@ def convert_lead_endpoint(lead_id: str, req: LeadConvertRequest):
     except Exception as exc:
         log.exception("lead conversion failed: %s", lead_id)
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "lead": lead, "opportunity": opportunity}
+    return {"ok": True, "lead": lead, "opportunity": opportunity,
+            "duplicate_detected": duplicate_detected}
 
 
 @router.get("/api/intake/queue")
