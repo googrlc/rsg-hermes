@@ -155,6 +155,14 @@ commands return `requires_confirmation` unless called with `confirm=true`.
 > come back in the JSON-RPC body (`-32001 Unauthorized`). Never key a smoke test
 > on the HTTP status — read the body.
 
+## Amy (Copilot Studio orchestrator)
+
+**Amy** is the agency assistant UX in Microsoft Copilot Studio — the intelligence and
+orchestration layer on top of Zoho, NowCerts, Supabase, and SharePoint. She routes through
+the MCP bridge above, not to source systems directly. See
+[`docs/amy-getting-started.md`](docs/amy-getting-started.md) and
+[`docs/rsg-digital-operating-system.md`](docs/rsg-digital-operating-system.md).
+
 ## Operations Center (Supabase governance)
 
 Hermes carries a Supabase-backed governance layer (the "Operating Constitution").
