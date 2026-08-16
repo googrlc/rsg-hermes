@@ -13,6 +13,23 @@ cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 VENV="$REPO_ROOT/.venv"
 
+# System dependencies. The default base image ships python3 but not the venv
+# package (no ensurepip), and WeasyPrint (proposal HTML->PDF) needs native Pango
+# libs + a base font. Install only what's missing so idempotent re-runs stay
+# fast. Kept here rather than in a Dockerfile so the repo-managed environment
+# works from the default image with no extra base config.
+SYS_PKGS=(python3-venv python3-dev build-essential \
+  libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core shared-mime-info)
+missing=()
+for pkg in "${SYS_PKGS[@]}"; do
+  dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+done
+if [ "${#missing[@]}" -gt 0 ]; then
+  if [ "$(id -u)" -eq 0 ]; then SUDO=""; elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else SUDO=""; fi
+  $SUDO apt-get update -qq
+  $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+fi
+
 # Prefer python3.11 if present (the app targets 3.11+); fall back to python3.
 if command -v python3.11 >/dev/null 2>&1; then
   PY=python3.11
