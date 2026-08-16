@@ -12,6 +12,9 @@ python scripts/gen_tool_map.py
 
 Use `--check` in CI to fail when the doc drifts from the live catalog.
 
+Operator roles, write tiers, and approval tokens:
+[`identity-permissions-matrix.md`](identity-permissions-matrix.md).
+
 ## Live runtime tools
 
 <!-- LIVE_RUNTIME_TOOLS_BEGIN -->
