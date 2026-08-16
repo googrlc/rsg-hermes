@@ -72,6 +72,15 @@ are set.
 
 ## Smoke tests (do this before Copilot)
 
+Run all checks in one shot (after API and bridge are up):
+
+```bash
+source .venv/bin/activate
+API_SERVER_KEY=dev-key ./scripts/mcp_smoke_test.sh
+```
+
+Or step through manually:
+
 ### 1. Hermes API
 
 ```bash
