@@ -39,10 +39,11 @@ echo "Ensure TLS cert paths in that file match your box (edit if needed)."
 if command -v nginx >/dev/null 2>&1; then
   nginx -t
   nginx -s reload || true
-fi
-if command -v openresty >/dev/null 2>&1; then
-  openresty -t
-  openresty -s reload || true
+elif docker ps --format '{{.Names}}' 2>/dev/null | grep -qx elestio-nginx; then
+  docker exec elestio-nginx nginx -t
+  docker exec elestio-nginx nginx -s reload
+else
+  echo "WARN: no nginx/openresty on PATH and elestio-nginx container not found — reload nginx manually" >&2
 fi
 
 if [[ -f "$ENV_FILE" ]]; then
