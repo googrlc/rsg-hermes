@@ -32,6 +32,12 @@ Supabase            = Intelligence, Search, Analytics
 Microsoft Copilot   = User Experience Layer
 ```
 
+> **Migration note.** The custom Command Center CRM (Supabase-backed) is being
+> **decommissioned** in favor of **Zoho** as the CRM system of record. During the
+> cutover, CRM relationship data moves Command Center → Zoho, and Command Center
+> CRM reads become read-only until they are repointed at Zoho. NowCerts/Momentum
+> (policy truth) and SharePoint (knowledge) are unaffected.
+
 ## Glossary
 
 - **Amy:** The agency assistant and primary AI interface for Risk Solutions Group.
@@ -112,7 +118,9 @@ Acts as:
 - Central architecture
 - AI platform
 - Integration hub
-- Future Amy headquarters
+- Headless tools / intelligence backend behind Amy (exposed via the `rsg-hermes` MCP bridge)
+
+After the CRM and user experience migrate to Zoho and Copilot Studio, Hermes keeps this backend role. It stops being the CRM and the UI — it does not stop being the platform. The heavy domain logic Amy relies on (carrier-appetite matching, class-code lookup, the Project 85 renewal engine, revenue sentinel, commission reconciliation, intake extraction, deliverable/PDF generation, canonical-book sync, KPI snapshots) continues to live here and is called as tools.
 
 ### rsg-hermes-infra
 
@@ -225,6 +233,10 @@ Supports:
 - Client profile lookup
 - Open case retrieval
 
+> Sourced from **Zoho** (the CRM system of record) — or a Zoho → Supabase mirror —
+> not the decommissioned Command Center CRM. Supabase enriches and indexes this
+> data for search; it does not own it.
+
 #### Semantic Search
 
 Supports:
@@ -257,6 +269,49 @@ Instead, use **Amy** with specialized tools behind the scenes.
 ## Amy Tool Map
 
 Each Amy tool should have a clear purpose, expected inputs, source system, output type, and permission level. The tool map should help Amy decide which capability to use for a user request and when to ask for clarification before running a tool. Tools that retrieve information should be separated from tools that write, update, create tasks, or trigger workflows.
+
+### Live runtime tools
+
+The table below is generated from the live catalog at `GET /api/command-center/skills`
+(`hermes-api`). These are the callable tools Amy invokes; they are almost entirely
+**read** today, with writes handled through separate, approval-gated paths (see the
+note under the table). Regenerate this table whenever the catalog changes.
+
+| Tool | Purpose | Source system | Tier |
+|---|---|---|---|
+| `find_client` | Search the canonical client book by name | Canonical book (NowCerts mirror) | Read |
+| `client_policies` | A client's policies with active count | Canonical book (NowCerts mirror) | Read |
+| `ams_client_snapshot` | Live insured/policy snapshot for one client | NowCerts (live AMS) | Read |
+| `crm_client_activity` | Open cases + tasks for a client | Command Center CRM (→ Zoho) | Read |
+| `run_report` | Run a CRM report or dashboard view | Command Center CRM (→ Zoho) / Supabase | Read |
+| `list_cases` | Open service cases with checklist progress | Command Center CRM (→ Zoho) | Read |
+| `case_progress` | One case in full with its task checklist | Command Center CRM (→ Zoho) | Read |
+| `renewals_overview` | Upcoming/at-risk renewals (Project 85) | Supabase (`project_85_renewals`) | Read |
+| `list_carriers` | Carriers RSG has appointments/data on | Supabase (`carriers`) | Read |
+| `match_carrier_appetite` | Carriers whose appetite matches a risk | Supabase (`carrier_appetite`) | Read |
+| `appointments_by_line` | Carrier panel grouped by line of business | Supabase (carriers / appointments) | Read |
+| `lookup_class_code` | What a GL/WC class code means | Supabase (classification tables) | Read |
+| `commission_summary` | Expected vs received commission totals | Supabase (commission ledger) | Read |
+| `commission_shortfalls` | Policies underpaid or missing a statement | Supabase (commission ledger) | Read |
+| `client_documents` | A client's documents | Nextcloud | Read |
+| `email_search` | Search the agency mailbox | Microsoft 365 | Read |
+| `web_research` | Research a business/client on the public web | Public web | Read |
+| `list_intake_submissions` | Recent intake submissions and status | Supabase (intake queue) | Read |
+| `list_skills` | List Hermes's own tools + domain playbooks | Hermes (self) | Read (meta) |
+| `intake_lead` | Process a casual lead intake message | Intake queue → CRM | **Write** (staged; requires approval) |
+
+**Writes are deliberately not in the read tool set.** Higher-risk actions — moving a
+pipeline opportunity, sending a record to NowCerts, executing a renewal, committing
+commission/money data — run through separate approval-gated endpoints and skills
+(for example `hermes-crm-writer`, `renewal-desk`), never as a side effect of a read
+tool. This matches the Governance section: money data never auto-commits, and write
+tiers require explicit authorization tokens (`APPROVE CRM ONLY`, `APPROVE SUPABASE ONLY`,
+`APPROVE ALL`).
+
+Alongside these runtime tools, Amy has ~30 **domain playbooks** (also listed by the
+same endpoint under `domain_skills` — e.g. `carrier-appetite`, `renewal-review`,
+`commercial-risk-intake`, `commission-reconciliation`) that describe *how* to carry out
+a workflow rather than being directly callable tools.
 
 ---
 
