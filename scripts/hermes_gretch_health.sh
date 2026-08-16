@@ -7,6 +7,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+MCP_EGRESS_URL="${MCP_EGRESS_URL:-https://hermes-mcp.risksolutionsgroup.net}"
+
 if [[ -f .venv/bin/activate ]]; then
   # shellcheck source=/dev/null
   source .venv/bin/activate
@@ -42,6 +44,17 @@ if curl -sf "$MCP_URL/healthz" >/dev/null; then
   green "MCP bridge up — running mcp_smoke_test.sh"
   API_SERVER_KEY="${API_SERVER_KEY:-dev-key}" MCP_URL="$MCP_URL" HERMES_API_URL="$API_URL" \
     "$REPO_ROOT/scripts/mcp_smoke_test.sh"
+  echo
+  echo "=== Public egress (optional) ==="
+  if curl -sf "$MCP_EGRESS_URL/healthz" >/dev/null 2>&1; then
+    CHECK_EGRESS=1 API_SERVER_KEY="${API_SERVER_KEY:-dev-key}" \
+      MCP_URL="$MCP_URL" HERMES_API_URL="$API_URL" \
+      "$REPO_ROOT/scripts/mcp_smoke_test.sh" | tail -5
+  else
+    echo "Public egress not reachable yet: $MCP_EGRESS_URL"
+    echo "After Wix DNS + install_mcp_egress.sh, re-run or:"
+    echo "  CHECK_EGRESS=1 API_SERVER_KEY=... ./scripts/mcp_smoke_test.sh"
+  fi
 else
   echo "MCP bridge not on $MCP_URL — skip (start app-rsg-hermes-mcp-1 or uvicorn bridge)"
 fi

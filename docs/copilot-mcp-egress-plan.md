@@ -22,10 +22,27 @@ Related: [`amy-getting-started.md`](amy-getting-started.md) ·
 
 ---
 
-## Option A — Reverse proxy on a public host (recommended)
+## Locked decision (August 2026)
 
-Expose only the MCP bridge through nginx/Caddy on a small VPS or Elestio edge
-with a public hostname, e.g. `https://hermes-mcp.risksolutionsgroup.net/mcp`.
+| Item | Value |
+|---|---|
+| **Option** | **A** — reverse proxy on hermes-gretch (Elestio nginx) |
+| **Public hostname** | `hermes-mcp.risksolutionsgroup.net` |
+| **MCP URL (Copilot connector)** | `https://hermes-mcp.risksolutionsgroup.net/mcp` |
+| **Health** | `https://hermes-mcp.risksolutionsgroup.net/healthz` |
+| **DNS** | Wix: **A** `hermes-mcp` → `152.53.201.154` |
+| **Bridge env** | `MCP_PUBLIC_BASE_URL=https://hermes-mcp.risksolutionsgroup.net` |
+| **Install on box** | `sudo ./scripts/install_mcp_egress.sh` |
+
+Repo artifacts: `deploy/nginx/hermes-mcp.risksolutionsgroup.net.conf`,
+`deploy/nginx/README.md`, `scripts/install_mcp_egress.sh`.
+
+Until DNS + nginx + TLS are live, Copilot cannot reach the bridge — tailnet URLs
+are not sufficient.
+
+---
+
+## Option A — Reverse proxy on hermes-gretch (chosen)
 
 ```text
 Copilot Studio  →  HTTPS (public)  →  nginx/Caddy  →  http://hermes-gretch:8081/mcp
@@ -102,7 +119,6 @@ Back up all three in 1Password — see bridge README empty-token guard.
 
 | Date | Decision |
 |---|---|
-| *(pending)* | Choose Option A vs B after security review |
-| *(pending)* | Public hostname + proxy host provisioned |
-
-Update this table when Operations locks the path.
+| 2026-08-16 | **Option A** locked; hostname `hermes-mcp.risksolutionsgroup.net`; nginx snippet + install script committed |
+| *(pending)* | Wix DNS A record live |
+| *(pending)* | TLS cert on box + `install_mcp_egress.sh` run; public smoke green |

@@ -12,6 +12,7 @@ set -euo pipefail
 
 API_URL="${HERMES_API_URL:-http://127.0.0.1:8787}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8081}"
+MCP_EGRESS_URL="${MCP_EGRESS_URL:-https://hermes-mcp.risksolutionsgroup.net}"
 API_KEY="${API_SERVER_KEY:-dev-key}"
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -72,3 +73,28 @@ pass "MCP tools/list"
 
 echo
 green "All smoke checks passed."
+
+if [[ "${CHECK_EGRESS:-}" == "1" ]] || [[ "$MCP_URL" == http://127.0.0.1:* ]]; then
+  echo
+  echo "Egress probe: $MCP_EGRESS_URL"
+  egress_health="$(curl -sf "$MCP_EGRESS_URL/healthz" 2>/dev/null || true)"
+  if [[ -z "$egress_health" ]]; then
+    red "FAIL: public egress $MCP_EGRESS_URL/healthz unreachable (DNS/nginx/TLS?)"
+    exit 1
+  fi
+  pass "public egress /healthz → $egress_health"
+  egress_ping="$(curl -s \
+    -H "Authorization: Bearer $API_KEY" \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ping","arguments":{}}}' \
+    "$MCP_EGRESS_URL/mcp")"
+  if echo "$egress_ping" | grep -q 'Unauthorized\|-32001'; then
+    fail "public egress MCP auth failed"
+  fi
+  if ! echo "$egress_ping" | grep -q 'bridge reachable'; then
+    fail "public egress ping unexpected: $egress_ping"
+  fi
+  pass "public egress MCP ping"
+  green "Egress smoke checks passed."
+fi

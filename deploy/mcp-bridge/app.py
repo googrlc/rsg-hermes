@@ -128,7 +128,7 @@ def _base_url(request: "Request | None" = None) -> str:
         if host:
             proto = (request.headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
             return f"{proto}://{host}"
-    return "https://hermes-gretch-u69864.vm.elestio.app"
+    return "https://hermes-mcp.risksolutionsgroup.net"
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
