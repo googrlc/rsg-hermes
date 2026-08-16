@@ -3,6 +3,11 @@
 Read-only SharePoint knowledge tools for Amy Phase 1 — SOPs, carrier guides, training
 docs. Uses Microsoft Graph with the same Entra app as mail triage (`MS365_*`).
 
+> **Not the full Microsoft MCP.** For Power Automate, OneDrive, Excel, and Power Apps
+> in Cursor, use **`powerautomate-mcp`** (npm) on your desktop — see
+> [`docs/microsoft-mcp-cursor-config.md`](../../docs/microsoft-mcp-cursor-config.md).
+> This server is the **Hermes-hosted, app-only, read-only** SharePoint bridge for Amy.
+
 ## Two transports
 
 | Mode | Entry | Use case |

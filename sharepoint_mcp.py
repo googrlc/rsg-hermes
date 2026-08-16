@@ -21,6 +21,9 @@ Cursor MCP config (project or user settings):
 ```
 
 Hosted HTTP mode: see deploy/sharepoint_mcp/README.md
+
+For Power Automate + OneDrive + SharePoint in one Cursor MCP, see
+docs/microsoft-mcp-cursor-config.md (powerautomate-mcp npm package).
 """
 
 from __future__ import annotations
