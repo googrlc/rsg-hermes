@@ -119,6 +119,40 @@ API_SERVER_KEY=dev-key HERMES_API_URL=http://127.0.0.1:8787 \
   uvicorn deploy.mcp-bridge.app:app --host 127.0.0.1 --port 8081
 ```
 
+## Phase 1 — SharePoint MCP (Cursor + hosted)
+
+Repo entry point: [`sharepoint_mcp.py`](../sharepoint_mcp.py) (stdio for Cursor) and
+[`deploy/sharepoint_mcp/`](../deploy/sharepoint_mcp/) (HTTP on port **8082**).
+
+```json
+{
+  "mcpServers": {
+    "sharepoint": {
+      "command": "python3",
+      "args": ["/absolute/path/to/rsg-hermes/sharepoint_mcp.py"],
+      "env": {
+        "MS365_TENANT_ID": "...",
+        "MS365_CLIENT_ID": "...",
+        "MS365_CLIENT_SECRET": "...",
+        "SHAREPOINT_SITE_URL": "https://tenant.sharepoint.com/sites/RSG-Knowledge"
+      }
+    }
+  }
+}
+```
+
+Entra app needs **Sites.Read.All** and **Files.Read.All** (application, admin-consented).
+See [`deploy/sharepoint_mcp/README.md`](../deploy/sharepoint_mcp/README.md).
+
+**Consolidating several sites into one?** See
+[`sharepoint-knowledge-consolidation.md`](sharepoint-knowledge-consolidation.md).
+
+**Power Automate, OneDrive, Power Apps in Cursor?** See
+[`microsoft-mcp-cursor-config.md`](microsoft-mcp-cursor-config.md) — that is a separate
+npm MCP (`powerautomate-mcp`), not this Hermes SharePoint server.
+
+**Entra / tenant checklist (2 apps + secrets):** [`microsoft-tenant-mcp-setup.md`](microsoft-tenant-mcp-setup.md)
+
 ## Copilot Studio wiring (Phase 2)
 
 1. **Create the Amy agent** in Copilot Studio — one assistant, RSG persona and guardrails.
@@ -153,7 +187,7 @@ Aligned with [`rsg-digital-operating-system.md`](rsg-digital-operating-system.md
 
 | Phase | Goal | Amy capability |
 |---|---|---|
-| **1 — Knowledge** | Obsidian → SharePoint, organized by function | Answer from SharePoint grounding |
+| **1 — Knowledge** | Obsidian → SharePoint, organized by function | SharePoint MCP + Copilot native grounding |
 | **2 — Read-only** | Supabase, Zoho, NowCerts, SharePoint via Hermes | Safe retrieval through MCP read tools |
 | **3 — Controlled automation** | Renewals, commissions, intake, service | Approval-gated writes (`hermes_dispatch`, tokens) |
 
