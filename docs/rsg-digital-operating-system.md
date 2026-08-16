@@ -52,6 +52,20 @@ Microsoft Copilot   = User Experience Layer
 
 When systems disagree, Amy should defer to the system of record for that data type. Momentum or NowCerts controls policy and coverage data. Zoho controls CRM relationship data. SharePoint controls procedures, templates, training, and internal knowledge. Supabase supports search, classification, analytics, and intelligence, but should not override the official source systems.
 
+### Synchronization & Freshness
+
+Because Supabase mirrors and enriches data owned elsewhere, every mirrored dataset needs a defined refresh path and a freshness expectation — not just a rule for who wins a disagreement. Today the canonical book and intelligence layer are populated by scheduled Hermes jobs:
+
+- `--sync-nowcerts` / `--sync-canonical-book` — pull AMS insureds and policies into the canonical book.
+- `--sync-hub-to-nowcerts` — push approved changes back to the AMS.
+- (post-migration) an equivalent **Zoho ↔ Supabase** sync for CRM relationship data.
+
+Rules of thumb:
+
+- Amy prefers the system of record for anything time-sensitive (binding status, current coverage, today's renewal list) and treats Supabase as a fast index/cache.
+- Each mirrored answer should carry a *last-synced* signal so Amy can flag stale data ("this reflects the nightly mirror as of &lt;time&gt;") instead of presenting it as live.
+- Write-backs are one-directional and approval-gated; Supabase never silently overwrites a system of record.
+
 ---
 
 ## Target User Experience
@@ -86,18 +100,26 @@ Amy routes to the correct source automatically.
 
 ```text
                          Amy
-                  (Copilot Studio)
+                  (Copilot Studio)              ← user experience layer
+                          |
+                rsg-hermes MCP bridge           ← "one door" tool surface
+                          |
+             hermes-api (tools + domain logic)  ← intelligence / backend
                           |
        ┌──────────────────┼──────────────────┐
        |                  |                  |
-   SharePoint          Supabase        Power Automate
-   Knowledge         Intelligence      Orchestration
+    Supabase          Zoho CRM          Momentum AMS
+  Intelligence        CRM (SoR)         Policy (SoR)
        |                  |                  |
        └──────────────────┼──────────────────┘
                           |
-              Zoho CRM          Momentum AMS
-                CRM              Policy Truth
+              SharePoint            Nextcloud
+              Knowledge             Documents
+
+  Power Automate — scheduled system-to-system glue between the stores above
 ```
+
+**Reading the diagram.** Copilot Studio is the *replacement* for the decommissioned Command Center web UI, not a parallel build. Amy does not talk to the source systems directly: requests flow through the `rsg-hermes` MCP bridge (the single public "one door") to `hermes-api`, which hosts the tools and domain logic and reads/writes the stores below it. SharePoint knowledge is surfaced through Copilot's native grounding; Power Automate handles scheduled system-to-system syncs rather than live user requests.
 
 ## Amy Operating Rules
 
@@ -188,6 +210,8 @@ Potential future employee and client portal.
 ## Repository Rule
 
 Hermes should remain the primary platform repository unless a new repository has a clearly different deployment boundary, security model, or runtime. CarrierHub, Commission Tracker, CPT Intake, and Agency Portal should be treated as modules or applications within the broader Hermes operating system unless there is a strong technical reason to separate them.
+
+> The existing repositories predate this principle. "Avoid creating more repositories" (below) means *stop adding new ones* and fold CarrierHub, Commission Tracker, CPT Intake, and Agency Portal into Hermes over time — not that the current count is a contradiction.
 
 ---
 
@@ -356,6 +380,27 @@ Connects:
 ## Governance
 
 Every AI action should be observable, auditable, and permission-aware. Amy should log retrievals, tool calls, proposed outputs, workflow triggers, and write actions. Lower-risk actions such as searching knowledge can be logged lightly, while higher-risk actions such as updating client data, creating tasks, sending communications, or triggering workflows should require stronger authorization and clearer audit trails.
+
+### Identity & Permissions
+
+"Permission-aware" needs a concrete identity model, not just risk tiers. The backend already provides the primitives: `hermes-api` authenticates callers with a bearer token (`HERMES_API_TOKEN`) and runs role-scoped services (for example `create_app("finance")`), and write actions require explicit approval tokens (`APPROVE CRM ONLY`, `APPROVE SUPABASE ONLY`, `APPROVE ALL`). The operating model should map:
+
+- **Amy user → role** (e.g. Boss/Lamar, Personal Lines/Gretchen, service) → allowed read scopes and **write tier**.
+- **Each write tool → minimum role + approval token** required to run it.
+- **Every write → logged** with the acting identity, the tool, and the approval token used.
+
+Copilot Studio should pass the authenticated user through to the MCP bridge so authorization is enforced in `hermes-api`, not in the UI.
+
+### Data Handling & Compliance
+
+The platform touches regulated data — client PII, and health-adjacent data through the group benefits and **Medicare** intake flows. The operating model should state, at minimum:
+
+- **Classification:** what counts as PII/PHI and where it may live (system of record vs. Supabase index vs. logs).
+- **Minimization in logs:** audit logs record *that* an action happened and by whom — not raw PII/PHI payloads.
+- **Retention & deletion:** how long intelligence-layer copies persist, and how a deletion in the system of record propagates to mirrors.
+- **Residency & access:** which vendors (Supabase, Microsoft 365, Nextcloud, the LLM provider) process which data, under least-privilege access.
+
+This sits beside Governance because it constrains what Amy is allowed to retrieve, surface, and log.
 
 ---
 
