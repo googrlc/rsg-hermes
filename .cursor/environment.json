@@ -1,0 +1,4 @@
+{
+  "name": "rsg-hermes",
+  "install": "bash .cursor/install.sh"
+}
