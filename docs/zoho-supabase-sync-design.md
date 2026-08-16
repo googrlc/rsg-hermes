@@ -7,6 +7,17 @@ layer.
 
 **Status:** draft — implementation is partial (`HERMES_WRITE_TO_ZOHO` on intake
 commit, `scripts/backfill_zoho_from_momentum.py` for one-shot backfill).
+**Next build:** scheduled Zoho ↔ Supabase mirror (Section B below) and chained
+daily AMS → Zoho policy feed (Section A). Track progress in this doc's status table.
+
+| Flow | Status | Notes |
+|---|---|---|
+| NowCerts → Supabase book | **Live** | Daily `--sync-nowcerts` |
+| Outbound AMS queue | **Live** | Scheduler + `approved_by` gate |
+| Intake → Zoho (opt-in) | **Live** | `HERMES_WRITE_TO_ZOHO=1` |
+| One-shot Zoho backfill | **Script** | `backfill_zoho_from_momentum.py` |
+| Zoho → Supabase mirror | **Not built** | Section B — agent read path |
+| AMS → Zoho daily chain | **Not built** | Section A — after mirror design |
 
 ---
 

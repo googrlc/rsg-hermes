@@ -195,5 +195,7 @@ Do not hand-edit the running container copy — this repo is the source of truth
 
 - [`rsg-digital-operating-system.md`](rsg-digital-operating-system.md) — north star and governance
 - [`identity-permissions-matrix.md`](identity-permissions-matrix.md) — operator roles and write tiers
+- [`hermes-gretch-health-checklist.md`](hermes-gretch-health-checklist.md) — creds + ops-doctor on the box
+- [`copilot-mcp-egress-plan.md`](copilot-mcp-egress-plan.md) — public path for Copilot → MCP bridge
 - [`hermes-tool-map.md`](hermes-tool-map.md) — live Hermes tool catalog
 - [`deploy/mcp-bridge/README.md`](../../deploy/mcp-bridge/README.md) — bridge deployment reality
