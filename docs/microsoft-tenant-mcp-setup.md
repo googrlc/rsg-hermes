@@ -212,15 +212,18 @@ are exposed.
 
 ## SharePoint tenant work (non-Entra)
 
-Do in SharePoint admin / site settings:
+Do in SharePoint admin / site settings. **Inventory first** — do not create
+**RSG-Knowledge** until every source site is mapped.
 
 | Step | Action |
 |---|---|
-| 1 | Create (or rename) site **`RSG-Knowledge`** — Team site or Communication site |
-| 2 | Build folder tree from [`sharepoint-knowledge-consolidation.md`](sharepoint-knowledge-consolidation.md) |
-| 3 | Add `00-meta/site-index.md` |
-| 4 | Migrate content from old sites; retire old site URLs |
-| 5 | Set `SHAREPOINT_SITE_URL` to the final site URL everywhere |
+| 1 | **Inventory** — run `python scripts/sharepoint_site_inventory.py --deep` (or MCP `list_sites` / Power Platform `search_sharepoint_sites`); review [`sharepoint-site-inventory.md`](sharepoint-site-inventory.md) |
+| 2 | **Approve map** — assign keep / merge / archive / delete / exclude per site |
+| 3 | Create (or rename) site **`RSG-Knowledge`** — Team site or Communication site |
+| 4 | Build folder tree from [`sharepoint-knowledge-consolidation.md`](sharepoint-knowledge-consolidation.md) |
+| 5 | Add `00-meta/site-index.md` |
+| 6 | Migrate content from mapped source sites (copy, never cut); log in `migration-log.md` |
+| 7 | Retire old site URLs; set `SHAREPOINT_SITE_URL` to the final site everywhere |
 
 **Copilot Studio (Amy Phase 1):** ground the agent on **this site only** after consolidation.
 
@@ -289,7 +292,9 @@ Run once per app registration (`RSG-Hermes-Service`, `RSG-Power-Platform-MCP`).
 
 ### SharePoint content
 
-- [ ] Single **RSG-Knowledge** site live
+- [ ] Site inventory generated and reviewed ([`sharepoint-site-inventory.md`](sharepoint-site-inventory.md))
+- [ ] Keep / merge / archive decisions approved for every source site
+- [ ] Single **RSG-Knowledge** site live (after inventory approved)
 - [ ] Old knowledge sites read-only or deleted
 - [ ] Copilot Studio grounded on RSG-Knowledge only
 

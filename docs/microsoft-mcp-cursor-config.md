@@ -55,14 +55,24 @@ After restart, you should see tool groups such as:
 | **Power Automate** | flow list/create/run/diagnostics (group varies by permission preset) |
 | **Power Apps / Dataverse** | connection and table tools (if enabled in setup) |
 
-**Site inventory for consolidation** (several sites → one):
+**Site inventory for consolidation** (required **before** building RSG-Knowledge):
+
+```bash
+python scripts/sharepoint_site_inventory.py --deep
+```
+
+Or via MCP:
 
 ```text
+# Hermes SharePoint MCP
+list_sites query="*"
+
+# Power Platform MCP (npm)
 search_sharepoint_sites query="RSG"
 list_sharepoint_files ...
 ```
 
-That replaces our Hermes `list_sites` when you are on the npm MCP.
+Output: [`sharepoint-site-inventory.md`](sharepoint-site-inventory.md) — fill Decision / Target folder, then build the single site.
 
 Docs: [powerplatform-mcp-docs](https://github.com/rcb0727/powerplatform-mcp-docs)
 

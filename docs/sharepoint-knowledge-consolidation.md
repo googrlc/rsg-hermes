@@ -74,19 +74,50 @@ RSG-Knowledge/
 
 ## Consolidation workflow
 
-### Phase A — Inventory (1 session)
+> **Rule:** Run a **site inventory before** creating or populating **RSG-Knowledge**.
+> Pull and merge content from other sites only after each source is mapped.
+
+### Phase A — Inventory (required first)
+
+**Automated (Hermes / Cursor with `MS365_*` set):**
+
+```bash
+source .venv/bin/activate
+python scripts/sharepoint_site_inventory.py --deep
+python scripts/sharepoint_site_inventory.py --query RSG --deep
+python scripts/sharepoint_site_inventory.py --query training --deep
+```
+
+Writes [`sharepoint-site-inventory.md`](sharepoint-site-inventory.md) (review + fill Decision columns).
+
+**Or via MCP:**
+
+```text
+list_sites query="*"
+list_sites query="RSG"
+get_site_info site_url="https://tenant.sharepoint.com/sites/Some-Old-Site"
+list_folder path="/"
+```
+
+**Or via Power Platform MCP (your Mac):**
+
+```text
+search_sharepoint_sites query="RSG"
+list_sharepoint_files ...
+```
 
 1. List every SharePoint site that might hold agency knowledge (Teams-connected sites, old project sites, Obsidian sync folders, etc.).
-2. For each site, capture in a spreadsheet or `00-meta/migration-log.md`:
+2. For each site, capture in the inventory doc or spreadsheet:
 
 | Source site | Library / folder | Topic | Keep / merge / archive / delete | Target path in RSG-Knowledge |
 |---|---|---|---|---|
 | `sites/Old-Training` | Documents/SOPs | PL quoting | merge | `02-personal-lines/reference/` |
 | … | … | … | … | … |
 
-Use the SharePoint MCP tool **`list_sites`** (search query) or Microsoft admin center to enumerate sites.
+3. **Review inventory** — assign keep / merge / archive / delete / exclude for every site.
+4. **Only then** create or designate **RSG-Knowledge** and the folder tree below.
 
-### Phase B — Build the target (half day)
+### Phase B — Build the target (after inventory approved)
 
 1. Create site **RSG-Knowledge** (or rename an existing site if it is already the largest).
 2. Create the folder tree above (empty folders are fine).
@@ -157,6 +188,7 @@ Suggested mapping:
 
 ## Checklist — “done” definition
 
+- [ ] Site inventory complete ([`sharepoint-site-inventory.md`](sharepoint-site-inventory.md)); decisions approved
 - [ ] Single site **RSG-Knowledge** exists with folder tree
 - [ ] `site-index.md` and `migration-log.md` in `00-meta/`
 - [ ] All keepers migrated; duplicates merged
