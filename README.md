@@ -13,12 +13,26 @@ two entry points:
   repo is what sits behind that door.
 
 > **Migration state (July 2026).** RSG ran on EspoCRM; it has been
-> **decommissioned**, and the inbound **Slack Socket Mode** listener has been
-> **retired**. Data now lives in **NowCerts + Supabase**. The Espo client and its
-> CLI flags have now been **deleted** from the tree; a few Espo-era `.env` keys
-> remain but are unused — see
+> **decommissioned**. Data now lives in **NowCerts + Supabase**. The Espo client
+> and its CLI flags have now been **deleted** from the tree; a few Espo-era `.env`
+> keys remain but are unused — see
 > [Legacy / decommissioned](#legacy--decommissioned) so a fresh reader does not
 > mistake them for live paths.
+
+> **Communication happens in the CRM.** Staff briefings, notifications, task
+> queues, and alerts are delivered **in the CRM**. RSG does **not** use Slack or
+> Nextcloud Talk. Some legacy jobs still contain Slack/Nextcloud-Talk posting code
+> that is being removed in favor of CRM delivery — see
+> [Legacy / decommissioned](#legacy--decommissioned).
+
+> **CRM direction (in progress).** The custom **Command Center CRM** (the Supabase
+> `agency_crm_*` tables) is today's CRM source of truth, but RSG is migrating the
+> CRM system of record to **Zoho**. Zoho writes are currently **additive and
+> opt-in** — gated behind `HERMES_WRITE_TO_ZOHO=1` (see `hermes/intake/zoho_writer.py`
+> and `hermes_integrations/zoho_client.py`), and a Zoho failure never rolls back the
+> Supabase write. The plan is to promote Zoho to the CRM system of record and
+> **decommission the Command Center CRM**. **NowCerts stays the AMS system of record**
+> and **Supabase stays the intelligence layer** throughout.
 
 ## Setup
 
@@ -37,10 +51,12 @@ The credentials that matter now are:
 | **Supabase (Command Center DB)** | `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | **`hermes-api` bearer** | `HERMES_API_TOKEN`, `HERMES_API_HOST`, `HERMES_API_PORT` |
 | **LLM (advisor / NL agent)** | `HERMES_OPENAI_API_KEY` / `LITELLM_API_KEY` + `LITELLM_BASE_URL` |
-| **Slack posting** (outbound only) | `SLACK_THE_BOSS`, `HERMES_SENTINEL_SLACK_CHANNEL`, bot token |
 | **Nextcloud (file storage)** | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_APP_PASSWORD` |
+| **Zoho CRM** (migration target; opt-in mirror today) | `HERMES_WRITE_TO_ZOHO`, `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, `ZOHO_DATA_CENTER` |
 
-The `ESPO_*` keys are gone from `.env.example` — nothing reads them. See
+The `ZOHO_*` keys are **not yet in `.env.example`** — set them (plus
+`HERMES_WRITE_TO_ZOHO=1`) only where the Zoho mirror is being exercised. The
+`ESPO_*` keys are gone from `.env.example` — nothing reads them. See
 [`docs/DEPLOY.md`](docs/DEPLOY.md) for the box layout.
 
 ## Run
@@ -68,19 +84,19 @@ hermes --renewal-executor        # execute queued, approved renewal actions
 hermes --run-renewal-executor-worker
 
 # Revenue Sentinel (reads Supabase since July 2026)
-hermes --revenue-sentinel                # proactive briefing → Slack
+hermes --revenue-sentinel                # proactive briefing → CRM
 hermes --revenue-sentinel-dry-run        # preview without posting
 hermes --revenue-sentinel-health         # freshness + config check
 hermes --revenue-sentinel-force          # bypass same-day idempotency
 
 # Commissions
-hermes --commission-audit                # audit expected vs actual → Slack
+hermes --commission-audit                # audit expected vs actual → CRM
 hermes --commission-ingest               # ingest a staged commission batch
 hermes --commission-reconcile-file ./statements/carrier.csv
 hermes --sync-commissions
 
 # Scorecards / changelog
-hermes --eom-scorecard                   # end-of-month scorecard → Slack
+hermes --eom-scorecard                   # end-of-month scorecard → CRM
 hermes --changelog                       # recent-activity changelog
 
 # Intake / casework executors (queue → NowCerts/Supabase)
@@ -119,10 +135,9 @@ docker compose run --rm hermes hermes --ops-doctor        # one-shot job / cron 
 docker compose logs -f hermes-api
 ```
 
-Because Slack Socket Mode is retired and `restart` on the `hermes` service is
-`no`, a plain `docker compose up -d` no longer keeps a listener container alive —
-recurring work is driven by **scheduled `docker compose run` invocations**, not a
-24/7 loop.
+Because `restart` on the `hermes` service is `no`, a plain `docker compose up -d`
+does not keep an always-on listener container alive — recurring work is driven by
+**scheduled `docker compose run` invocations**, not a 24/7 loop.
 
 > The `hermes-crm-queue-worker` service was **removed 2026-07-21** — it drained
 > the EspoCRM-era `crm_write_queue`, which no longer exists.
@@ -154,7 +169,6 @@ See [`docs/hermes-operating-constitution.md`](docs/hermes-operating-constitution
 Key live capabilities:
 - **`--ops-doctor`** — verifies Supabase connectivity and the Hermes tables.
 - **`--snapshot-kpis`** — records system/finance/renewal metrics to `dashboard_kpis`.
-- **Slack Router** — registry-aware posting that refuses unregistered channels.
 - **Renewal Tracker** — Project 85 lifecycle state in Supabase.
 
 Schema lives in `supabase/migrations/`; operations modules in `hermes/operations/`.
@@ -176,11 +190,12 @@ For readiness checks use **`--ops-doctor`** (Supabase connectivity + Hermes
 tables). `docs/espocrm-read-lane.md` is historical (the direct-Postgres read lane
 was removed in PR #191).
 
-Still in the tree but retired:
+Still in the tree but being removed:
 
-- **Slack Socket Mode** (`--slack`) — the inbound listener was retired July 2026.
-  Slack **outbound posting** (sentinel, scorecards, alerts) via the bot token is
-  still live.
+- **Slack and Nextcloud Talk** — RSG does **not** use either; communication is in
+  the CRM. Some jobs (revenue sentinel, EOM scorecard, commission audit, the daily
+  team queue) still contain Slack/Nextcloud-Talk posting code and the `--slack`
+  flag. These paths are slated for removal in favor of CRM delivery.
 
 ## TLS Note
 
