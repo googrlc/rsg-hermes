@@ -144,6 +144,9 @@ Repo entry point: [`sharepoint_mcp.py`](../sharepoint_mcp.py) (stdio for Cursor)
 Entra app needs **Sites.Read.All** and **Files.Read.All** (application, admin-consented).
 See [`deploy/sharepoint_mcp/README.md`](../deploy/sharepoint_mcp/README.md).
 
+**Consolidating several sites into one?** See
+[`sharepoint-knowledge-consolidation.md`](sharepoint-knowledge-consolidation.md).
+
 ## Copilot Studio wiring (Phase 2)
 
 1. **Create the Amy agent** in Copilot Studio — one assistant, RSG persona and guardrails.

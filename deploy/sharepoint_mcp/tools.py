@@ -29,6 +29,22 @@ def run_ping(_args: dict[str, Any]) -> str:
     return _get_client().ping()
 
 
+def run_list_sites(args: dict[str, Any]) -> str:
+    query = str(args.get("query") or "*")
+    limit = int(args.get("limit") or 50)
+    sites = _get_client().list_sites(query, limit=limit)
+    rows = [
+        {
+            "id": s.get("id"),
+            "name": s.get("name"),
+            "displayName": s.get("displayName"),
+            "webUrl": s.get("webUrl"),
+        }
+        for s in sites
+    ]
+    return _text({"query": query, "count": len(rows), "sites": rows})
+
+
 def run_get_site(args: dict[str, Any]) -> str:
     url = (args.get("site_url") or "").strip() or None
     site = _get_client().get_site(url)
@@ -102,6 +118,7 @@ def run_read_document(args: dict[str, Any]) -> str:
 
 HANDLERS: dict[str, Any] = {
     "ping": run_ping,
+    "list_sites": run_list_sites,
     "get_site_info": run_get_site,
     "list_libraries": run_list_libraries,
     "list_folder": run_list_folder,
@@ -114,6 +131,24 @@ MCP_TOOLS: list[dict[str, Any]] = [
         "name": "ping",
         "description": "Verify SharePoint Graph auth and default site connectivity.",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_sites",
+        "description": (
+            "Search SharePoint sites in the tenant — use during consolidation to inventory "
+            "sites before merging into RSG-Knowledge."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search text (use * for broad inventory)",
+                    "default": "*",
+                },
+                "limit": {"type": "integer", "default": 50},
+            },
+        },
     },
     {
         "name": "get_site_info",

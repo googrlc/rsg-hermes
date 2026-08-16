@@ -31,6 +31,11 @@ def build_server() -> MCPServer:
         return call_tool("ping", {})
 
     @mcp.tool()
+    def list_sites(query: str = "*", limit: int = 50) -> str:
+        """Search SharePoint sites in the tenant (consolidation inventory)."""
+        return call_tool("list_sites", {"query": query, "limit": limit})
+
+    @mcp.tool()
     def get_site_info(site_url: str = "") -> str:
         """Resolve a SharePoint site URL to its Graph id and web URL."""
         args = {"site_url": site_url} if site_url else {}

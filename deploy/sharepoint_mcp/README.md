@@ -57,6 +57,7 @@ Use the **absolute path** to `sharepoint_mcp.py` on your machine. Activate `.ven
 | Tool | Description |
 |---|---|
 | `ping` | Auth + default site check |
+| `list_sites` | Search tenant sites (consolidation inventory) |
 | `get_site_info` | Resolve site URL → Graph id |
 | `list_libraries` | Document libraries on the site |
 | `list_folder` | Browse folders under the default library |

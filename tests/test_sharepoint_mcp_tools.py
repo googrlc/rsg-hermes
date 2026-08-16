@@ -18,6 +18,7 @@ def test_every_declared_tool_has_handler() -> None:
 def test_handlers_are_callable(tool: str) -> None:
     with patch("deploy.sharepoint_mcp.tools._get_client") as mock_client:
         mock_client.return_value.ping.return_value = "ok"
+        mock_client.return_value.list_sites.return_value = []
         mock_client.return_value.get_site.return_value = {"id": "1"}
         mock_client.return_value.list_drives.return_value = []
         mock_client.return_value.list_folder.return_value = []
@@ -25,6 +26,8 @@ def test_handlers_are_callable(tool: str) -> None:
         mock_client.return_value.read_item_text.return_value = "body"
         if tool == "ping":
             call_tool(tool, {})
+        elif tool == "list_sites":
+            call_tool(tool, {"query": "RSG"})
         elif tool == "get_site_info":
             call_tool(tool, {})
         elif tool == "list_libraries":

@@ -29,6 +29,27 @@ def test_parse_site_url_rejects_bad_url() -> None:
         "MS365_TENANT_ID": "t",
         "MS365_CLIENT_ID": "c",
         "MS365_CLIENT_SECRET": "s",
+    },
+)
+def test_list_sites_calls_graph() -> None:
+    client = SharePointClient()
+    with patch.object(
+        client,
+        "_request",
+        return_value={"value": [{"webUrl": "https://x/sites/A", "displayName": "A"}]},
+    ) as req:
+        sites = client.list_sites("RSG", limit=10)
+    assert len(sites) == 1
+    req.assert_called_once()
+    assert req.call_args[0][1] == "/sites"
+
+
+@patch.dict(
+    "os.environ",
+    {
+        "MS365_TENANT_ID": "t",
+        "MS365_CLIENT_ID": "c",
+        "MS365_CLIENT_SECRET": "s",
         "SHAREPOINT_SITE_URL": "https://contoso.sharepoint.com/sites/RSG",
     },
 )

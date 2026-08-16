@@ -63,6 +63,16 @@ class SharePointClient(MS365Client):
             path = "/" + path
         return host, path
 
+    def list_sites(self, query: str = "*", *, limit: int = 50) -> list[dict[str, Any]]:
+        """Search SharePoint sites in the tenant (for consolidation inventory)."""
+        q = (query or "*").strip() or "*"
+        body = self._request(
+            "GET",
+            "/sites",
+            params={"search": q, "$top": str(max(1, min(limit, 100)))},
+        )
+        return body.get("value", []) if isinstance(body, dict) else []
+
     def get_site(self, site_url: str | None = None) -> dict[str, Any]:
         """Resolve a site URL to a Graph site resource (includes ``id``)."""
         url = (site_url or self.default_site_url).strip()
