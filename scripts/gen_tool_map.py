@@ -31,6 +31,31 @@ DEFAULT_URL = "http://127.0.0.1:8787/api/command-center/skills"
 BEGIN_MARKER = "<!-- LIVE_RUNTIME_TOOLS_BEGIN -->"
 END_MARKER = "<!-- LIVE_RUNTIME_TOOLS_END -->"
 
+# Data/backend source for each runtime tool — derived from hermes/agent/nl_agent.py
+# handlers. Update when a tool's backing store changes.
+TOOL_SOURCES: dict[str, str] = {
+    "ams_client_snapshot": "NowCerts (live AMS)",
+    "appointments_by_line": "Supabase (`carriers`)",
+    "case_progress": "Supabase (`agency_crm_*`, legacy → Zoho)",
+    "client_documents": "Nextcloud",
+    "client_policies": "Canonical book (Supabase, NowCerts-sourced)",
+    "commission_shortfalls": "Supabase (`commission_ledger`)",
+    "commission_summary": "Supabase (`commission_ledger`)",
+    "crm_client_activity": "Supabase (`agency_crm_*`, legacy → Zoho)",
+    "email_search": "Microsoft 365 Graph",
+    "find_client": "Canonical book (Supabase, NowCerts-sourced)",
+    "intake_lead": "Supabase intake; Zoho CRM when `HERMES_WRITE_TO_ZOHO`",
+    "list_carriers": "Supabase (`carriers`)",
+    "list_cases": "Supabase (`agency_crm_*`, legacy → Zoho)",
+    "list_intake_submissions": "Supabase (`intake_submissions`)",
+    "list_skills": "Hermes catalog (meta)",
+    "lookup_class_code": "Supabase (`gl_class_codes`, `wc_class_codes`)",
+    "match_carrier_appetite": "Supabase (`carrier_appetite`)",
+    "renewals_overview": "Supabase (`project_85_renewals`)",
+    "run_report": "Supabase + Hermes report dispatcher",
+    "web_research": "Public web",
+}
+
 
 def _fetch_catalog(url: str, timeout: float) -> dict[str, Any]:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -53,13 +78,14 @@ def _escape_cell(text: str) -> str:
 
 def _render_table(runtime_tools: list[dict[str, str]]) -> str:
     lines = [
-        "| Tool | Description |",
-        "| --- | --- |",
+        "| Tool | Source | Description |",
+        "| --- | --- | --- |",
     ]
     for tool in sorted(runtime_tools, key=lambda t: t.get("name", "")):
         name = _escape_cell(tool.get("name") or "?")
+        source = _escape_cell(TOOL_SOURCES.get(name, "—"))
         desc = _escape_cell(tool.get("description") or "")
-        lines.append(f"| `{name}` | {desc} |")
+        lines.append(f"| `{name}` | {source} | {desc} |")
     return "\n".join(lines)
 
 
@@ -118,6 +144,15 @@ def main() -> int:
     runtime_tools = catalog.get("runtime_tools") or []
     if not runtime_tools:
         print("error: catalog has no runtime_tools", file=sys.stderr)
+        return 1
+
+    names = {t.get("name") for t in runtime_tools}
+    missing_sources = sorted(n for n in names if n and n not in TOOL_SOURCES)
+    if missing_sources:
+        print(
+            f"error: add TOOL_SOURCES entries for: {', '.join(missing_sources)}",
+            file=sys.stderr,
+        )
         return 1
 
     new_block = _build_generated_block(runtime_tools)

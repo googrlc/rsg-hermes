@@ -31,6 +31,8 @@ def test_gen_tool_map_offline_updates_doc():
     assert "<!-- LIVE_RUNTIME_TOOLS_BEGIN -->" in text
     assert "`renewals_overview`" in text
     assert "`list_skills`" in text
+    assert "| Tool | Source | Description |" in text
+    assert "legacy → Zoho" in text
 
 
 def test_gen_tool_map_check_passes_after_regen():
