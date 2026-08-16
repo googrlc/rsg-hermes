@@ -1,22 +1,29 @@
 # Hermes (rsg-hermes)
 
-Python operations engine for Risk Solutions Group's **custom CRM / Command
-Center**, backed by **NowCerts** (the AMS system of record) and **Supabase**
-(the Command Center database — analytics, queues, KPIs, renewal state). It ships
-two entry points:
+Python operations engine for Risk Solutions Group, bridging **Zoho CRM**
+(the CRM system of record), **NowCerts** (the AMS system of record), and
+**Supabase** (the operations layer — canonical book mirror, queues, KPIs,
+renewal state, intake governance). It ships two entry points:
 
 - **`hermes`** — a one-shot / REPL CLI that runs the scheduled jobs (sync,
   renewals, revenue sentinel, commissions, scorecards, intake execution).
-- **`hermes-api`** — the private HTTP backend for the Command Center
-  (`rsg-hermes-api:8787`). In production the **`rsg-hermes` MCP bridge** (a
+- **`hermes-api`** — the private HTTP backend and Command Center operations UI
+  host (`rsg-hermes-api:8787`). In production the **`rsg-hermes` MCP bridge** (a
   separate thin facade container) is the public "one door" in front of it; this
   repo is what sits behind that door.
 
-> **Migration state (July 2026).** RSG ran on EspoCRM; it has been
-> **decommissioned**, and the inbound **Slack Socket Mode** listener has been
-> **retired**. Data now lives in **NowCerts + Supabase**. The Espo client and its
-> CLI flags have now been **deleted** from the tree; a few Espo-era `.env` keys
-> remain but are unused — see
+> **Migration state (August 2026).** RSG's CRM system of record is **Zoho CRM**.
+> The custom **Command Center CRM** (the Supabase-backed client/pipeline/case
+> layer that replaced EspoCRM) has been **decommissioned** — Hermes no longer
+> treats Supabase tables as the CRM. The **Command Center web UI**
+> (`/command-center/`) remains the operations workstation (intake review,
+> renewal desk, dashboards, task queues); it is not the CRM.
+>
+> EspoCRM was decommissioned July 2026; the inbound **Slack Socket Mode**
+> listener has been **retired**. Insured and policy truth live in **NowCerts**;
+> Hermes mirrors them into **Supabase** for analytics and syncs client/pipeline
+> work to **Zoho**. The Espo client and its CLI flags have been **deleted** from
+> the tree; a few Espo-era `.env` keys remain but are unused — see
 > [Legacy / decommissioned](#legacy--decommissioned) so a fresh reader does not
 > mistake them for live paths.
 
@@ -33,8 +40,9 @@ The credentials that matter now are:
 
 | Purpose | Vars |
 |---|---|
+| **Zoho CRM (system of record)** | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`; optional `ZOHO_DATA_CENTER`, `HERMES_WRITE_TO_ZOHO` |
 | **NowCerts (AMS, system of record)** | `NOWCERTS_API_URL`, `NOWCERTS_USERNAME`, `NOWCERTS_PASSWORD` |
-| **Supabase (Command Center DB)** | `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+| **Supabase (operations DB)** | `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | **`hermes-api` bearer** | `HERMES_API_TOKEN`, `HERMES_API_HOST`, `HERMES_API_PORT` |
 | **LLM (advisor / NL agent)** | `HERMES_OPENAI_API_KEY` / `LITELLM_API_KEY` + `LITELLM_BASE_URL` |
 | **Slack posting** (outbound only) | `SLACK_THE_BOSS`, `HERMES_SENTINEL_SLACK_CHANNEL`, bot token |
@@ -54,12 +62,12 @@ hermes --snapshot-kpis           # record system/finance/renewal KPIs → dashbo
 hermes --commands                # print the command catalog
 
 # NowCerts → Supabase ingest / enrich
-hermes --sync-nowcerts           # pull AMS insureds/policies into the Command Center
+hermes --sync-nowcerts           # pull AMS insureds/policies into the canonical book
 hermes --sync-canonical-book     # rebuild the canonical book of business
 hermes --enrich-nowcerts         # backfill/enrich NowCerts-sourced records
 
-# Command Center → NowCerts (outbound)
-hermes --sync-hub-to-nowcerts    # push queued Command Center changes to the AMS
+# Supabase queue → NowCerts (outbound AMS writes)
+hermes --sync-hub-to-nowcerts    # push queued outbound_sync_queue changes to the AMS
 
 # Renewals (Project 85)
 hermes --renewal-refresh         # refresh renewal pipeline state from the book
@@ -108,7 +116,7 @@ Run `hermes --commands` for the full catalog.
 | Container | Service | Role | Restart |
 |---|---|---|---|
 | `rsg-hermes` | `hermes` | Per-cron runner — jobs run as `docker compose run --rm hermes hermes --<job>`. Default command is a harmless read-only check; **not** an always-on listener. | `no` |
-| `rsg-hermes-api` | `hermes-api` | The Command Center HTTP backend, `8788:8787`, on the external `hermes-shared` network. | `unless-stopped` |
+| `rsg-hermes-api` | `hermes-api` | Hermes HTTP backend + Command Center operations UI, `8788:8787`, on the external `hermes-shared` network. | `unless-stopped` |
 | `rsg-hermes-intake-worker` | `hermes-intake-worker` | Polls the intake queue (`--run-intake-worker`, 5s). | `unless-stopped` |
 | `rsg-hermes-scheduler` | `hermes-scheduler` | Executor scheduler — drains `outbound_sync_queue` → NowCerts (renewal, intake, quote, casework, opportunity-writeback). **Disabled by default** — gated behind the `scheduler` compose profile *and* `SCHEDULER_ENABLED`. | `unless-stopped` |
 
@@ -129,7 +137,8 @@ recurring work is driven by **scheduled `docker compose run` invocations**, not 
 
 ## Private API bridge (`hermes-api`)
 
-`hermes-api` is the Command Center backend and the surface the `rsg-hermes` MCP
+`hermes-api` is the Hermes HTTP backend. It serves the Command Center
+operations UI (`/command-center/`) and is the surface the `rsg-hermes` MCP
 bridge proxies:
 
 ```bash
@@ -161,10 +170,18 @@ Schema lives in `supabase/migrations/`; operations modules in `hermes/operations
 
 ## Legacy / decommissioned
 
-The **EspoCRM code path is gone**, not merely inert. `hermes/core/client.py`
-(the Espo REST client), `hermes/core/auditor.py`, and `hermes/core/schema_map.py`
-were deleted, along with the flags that only made sense against Espo metadata
-(`--doctor`, `--audit-fields`, `--audit-schema`, `--inventory-metadata`) and the
+Three CRM surfaces are gone — not merely inert:
+
+| Surface | Decommissioned | Replaced by |
+|---|---|---|
+| **EspoCRM** | July 2026 | Command Center CRM (July 2026) → Zoho CRM (August 2026) |
+| **Command Center CRM** | August 2026 | **Zoho CRM** (system of record) |
+| **Slack Socket Mode** (`--slack`) | July 2026 | Outbound Slack posting only (sentinel, scorecards, alerts) |
+
+The **EspoCRM code path is deleted**. `hermes/core/client.py` (the Espo REST
+client), `hermes/core/auditor.py`, and `hermes/core/schema_map.py` were removed,
+along with the flags that only made sense against Espo metadata (`--doctor`,
+`--audit-fields`, `--audit-schema`, `--inventory-metadata`) and the
 write-back/queue flags (`--espo-writeback`, `--process-crm-queue`,
 `--espo-db-doctor`). The two survivors were repointed:
 
@@ -174,7 +191,9 @@ write-back/queue flags (`--espo-writeback`, `--process-crm-queue`,
 
 For readiness checks use **`--ops-doctor`** (Supabase connectivity + Hermes
 tables). `docs/espocrm-read-lane.md` is historical (the direct-Postgres read lane
-was removed in PR #191).
+was removed in PR #191). Zoho field packs and backfill scripts live under
+`docs/zoho/`; the Supabase `agency_crm_*` tables are legacy tail — do not treat
+them as the CRM.
 
 Still in the tree but retired:
 

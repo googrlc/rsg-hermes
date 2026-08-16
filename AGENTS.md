@@ -21,8 +21,12 @@ This repository supports the Hermes AI operations environment for Risk Solutions
 
 Hermes is a single Python 3.11+ app (`rsg-hermes`) with a shared path package
 `rsg-hermes-core` under `packages/`. Two entrypoints: the `hermes` CLI and the
-`hermes-api` FastAPI backend (which also serves the Command Center web UI). See
-`README.md` for the full command catalog and Docker layout.
+`hermes-api` FastAPI backend (which also serves the Command Center operations
+UI at `/command-center/`). **Zoho CRM** is the CRM system of record; **NowCerts**
+is the AMS system of record; **Supabase** is the operations/analytics layer
+(canonical book mirror, queues, KPIs, renewal state). The custom Command Center
+CRM (Supabase-backed pipeline/cases) is decommissioned — see `README.md` for the
+full command catalog and Docker layout.
 
 - **Virtualenv.** The dev environment lives in `.venv` (gitignored). Activate it
   before running anything: `source .venv/bin/activate`. The startup update
@@ -45,8 +49,9 @@ Hermes is a single Python 3.11+ app (`rsg-hermes`) with a shared path package
 - **Credentials.** No secrets are set by default. Live end-to-end work (sync,
   KPIs, `hermes --ops-doctor`, dashboards, LLM one-shots) needs `SUPABASE_URL` +
   `SUPABASE_SERVICE_ROLE_KEY`, `NOWCERTS_*`, and an LLM key added via the Secrets
-  panel. `--ops-doctor` fails fast with "SUPABASE_URL ... must be set" when they
-  are absent.
+  panel. Zoho CRM writes (`HERMES_WRITE_TO_ZOHO=1`) need `ZOHO_CLIENT_ID`,
+  `ZOHO_CLIENT_SECRET`, and `ZOHO_REFRESH_TOKEN`. `--ops-doctor` fails fast with
+  "SUPABASE_URL ... must be set" when Supabase creds are absent.
 - **Deliverable generation is self-contained.** Renewal worksheet PDFs
   (`hermes/renewals/pdf.py`, reportlab) and proposal HTML→PDF
   (`hermes/proposals/generator.py`, WeasyPrint) run without any external service;
