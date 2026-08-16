@@ -20,6 +20,15 @@ two entry points:
 > [Legacy / decommissioned](#legacy--decommissioned) so a fresh reader does not
 > mistake them for live paths.
 
+> **CRM direction (in progress).** The custom **Command Center CRM** (the Supabase
+> `agency_crm_*` tables) is today's CRM source of truth, but RSG is migrating the
+> CRM system of record to **Zoho**. Zoho writes are currently **additive and
+> opt-in** — gated behind `HERMES_WRITE_TO_ZOHO=1` (see `hermes/intake/zoho_writer.py`
+> and `hermes_integrations/zoho_client.py`), and a Zoho failure never rolls back the
+> Supabase write. The plan is to promote Zoho to the CRM system of record and
+> **decommission the Command Center CRM**. **NowCerts stays the AMS system of record**
+> and **Supabase stays the intelligence layer** throughout.
+
 ## Setup
 
 ```bash
@@ -39,8 +48,11 @@ The credentials that matter now are:
 | **LLM (advisor / NL agent)** | `HERMES_OPENAI_API_KEY` / `LITELLM_API_KEY` + `LITELLM_BASE_URL` |
 | **Slack posting** (outbound only) | `SLACK_THE_BOSS`, `HERMES_SENTINEL_SLACK_CHANNEL`, bot token |
 | **Nextcloud (file storage)** | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_APP_PASSWORD` |
+| **Zoho CRM** (migration target; opt-in mirror today) | `HERMES_WRITE_TO_ZOHO`, `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, `ZOHO_DATA_CENTER` |
 
-The `ESPO_*` keys are gone from `.env.example` — nothing reads them. See
+The `ZOHO_*` keys are **not yet in `.env.example`** — set them (plus
+`HERMES_WRITE_TO_ZOHO=1`) only where the Zoho mirror is being exercised. The
+`ESPO_*` keys are gone from `.env.example` — nothing reads them. See
 [`docs/DEPLOY.md`](docs/DEPLOY.md) for the box layout.
 
 ## Run

@@ -24,6 +24,13 @@ Hermes is a single Python 3.11+ app (`rsg-hermes`) with a shared path package
 `hermes-api` FastAPI backend (which also serves the Command Center web UI). See
 `README.md` for the full command catalog and Docker layout.
 
+- **CRM direction.** The custom Command Center CRM (Supabase `agency_crm_*`) is
+  today's CRM source of truth; RSG is migrating the CRM system of record to **Zoho**.
+  Zoho writes are additive and opt-in today (`HERMES_WRITE_TO_ZOHO=1`, using
+  `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` / `ZOHO_REFRESH_TOKEN` / `ZOHO_DATA_CENTER`);
+  the Command Center CRM will be decommissioned once Zoho is promoted. NowCerts
+  stays the AMS system of record and Supabase stays the intelligence layer.
+
 - **Virtualenv.** The dev environment lives in `.venv` (gitignored). Activate it
   before running anything: `source .venv/bin/activate`. The startup update
   script installs both editable packages into this venv, plus `pytest`.
