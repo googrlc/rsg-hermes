@@ -151,6 +151,8 @@ See [`deploy/sharepoint_mcp/README.md`](../deploy/sharepoint_mcp/README.md).
 [`microsoft-mcp-cursor-config.md`](microsoft-mcp-cursor-config.md) — that is a separate
 npm MCP (`powerautomate-mcp`), not this Hermes SharePoint server.
 
+**Entra / tenant checklist (2 apps + secrets):** [`microsoft-tenant-mcp-setup.md`](microsoft-tenant-mcp-setup.md)
+
 ## Copilot Studio wiring (Phase 2)
 
 1. **Create the Amy agent** in Copilot Studio — one assistant, RSG persona and guardrails.

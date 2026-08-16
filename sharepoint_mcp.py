@@ -24,6 +24,9 @@ Hosted HTTP mode: see deploy/sharepoint_mcp/README.md
 
 For Power Automate + OneDrive + SharePoint in one Cursor MCP, see
 docs/microsoft-mcp-cursor-config.md (powerautomate-mcp npm package).
+
+**Tenant / Entra checklist (apps, permissions, secrets):**
+[`microsoft-tenant-mcp-setup.md`](docs/microsoft-tenant-mcp-setup.md)
 """
 
 from __future__ import annotations

@@ -129,6 +129,8 @@ Optional third: **`sharepoint-hermes`** only if you want to test the repo’s ap
 
 Do **not** point the same server name at both `sharepoint_mcp.py` and `powerautomate-mcp`.
 
+**Full tenant checklist:** [`microsoft-tenant-mcp-setup.md`](microsoft-tenant-mcp-setup.md)
+
 ---
 
 ## Hermes-hosted SharePoint (production / Amy)
