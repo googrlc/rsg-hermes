@@ -386,10 +386,10 @@ _TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "crm_client_activity",
             "description": (
-                "Open cases and their tasks for a client from the agency CRM (the custom cockpit "
-                "CRM: agency_crm_cases / agency_crm_tasks) — renewal, service, marketing, and claims "
-                "work in flight plus the to-dos on each. Use for 'what's open on X', 'any cases for "
-                "X', 'what's the team working on for X'. Read-only."
+                "Open cases and their tasks for a client — read from the legacy Supabase "
+                "agency CRM tables (`agency_crm_cases` / `agency_crm_tasks`) while service "
+                "cases migrate to Zoho. Use for 'what's open on X', 'any cases for X', "
+                "'what's the team working on for X'. Read-only."
             ),
             "parameters": {
                 "type": "object",
@@ -1329,8 +1329,8 @@ def _exec_ams_snapshot(args: dict[str, Any]) -> DispatchResult:
 
 
 def _exec_crm_activity(args: dict[str, Any]) -> DispatchResult:
-    """CRM hub tool — a client's open cases + tasks from the custom agency CRM
-    (agency_crm_cases / agency_crm_tasks in Supabase)."""
+    """CRM hub tool — a client's open cases + tasks from legacy Supabase agency CRM
+    (`agency_crm_cases` / `agency_crm_tasks`; migrating to Zoho)."""
     who = (args.get("client") or "").strip()
     if not who:
         return DispatchResult(False, "Tell me which client.")
