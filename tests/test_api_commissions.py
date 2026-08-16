@@ -290,3 +290,50 @@ def test_analytics_endpoint_is_honest_on_empty_ledger(client):
     body = r.json()
     assert body["by_carrier"] == [] and body["by_lob"] == []
     assert body["totals"]["ledger_rows"] == 0
+
+
+# --- settings gate (commission rules) ----------------------------------------
+
+
+class SettingsSupa(OverrideSupa):
+    """agency_crm_users with administrator + csr roles."""
+
+    def __init__(self):
+        super().__init__([])
+        self.tables["agency_crm_users"] = [
+            {"email": "admin@example.com", "active": True, "role": "administrator"},
+            {"email": "csr@example.com", "active": True, "role": "csr"},
+        ]
+        self.tables["commission_rules"] = []
+
+
+def test_commission_rule_save_requires_administrator(client):
+    supa = SettingsSupa()
+    with patch("hermes_app.deps.get_supa", return_value=supa):
+        denied = client.post("/api/commission-rules", json={
+            "carrier_name": "Progressive",
+            "lob": "Personal Auto",
+            "nb_percent": 12.0,
+            "saved_by": "csr@example.com",
+        })
+        allowed = client.post("/api/commission-rules", json={
+            "carrier_name": "Safeco",
+            "lob": "Homeowners",
+            "nb_percent": 10.0,
+            "saved_by": "admin@example.com",
+        })
+    assert denied.status_code == 403
+    assert "administrator" in denied.json()["detail"]
+    assert allowed.status_code == 200, allowed.text
+    assert len(supa.tables["commission_rules"]) == 1
+
+
+def test_commission_rule_save_requires_saved_by(client):
+    supa = SettingsSupa()
+    with patch("hermes_app.deps.get_supa", return_value=supa):
+        r = client.post("/api/commission-rules", json={
+            "carrier_name": "Progressive",
+            "lob": "Personal Auto",
+            "nb_percent": 12.0,
+        })
+    assert r.status_code == 422

@@ -72,6 +72,15 @@ are set.
 
 ## Smoke tests (do this before Copilot)
 
+Run all checks in one shot (after API and bridge are up):
+
+```bash
+source .venv/bin/activate
+API_SERVER_KEY=dev-key ./scripts/mcp_smoke_test.sh
+```
+
+Or step through manually:
+
 ### 1. Hermes API
 
 ```bash
@@ -186,5 +195,7 @@ Do not hand-edit the running container copy — this repo is the source of truth
 
 - [`rsg-digital-operating-system.md`](rsg-digital-operating-system.md) — north star and governance
 - [`identity-permissions-matrix.md`](identity-permissions-matrix.md) — operator roles and write tiers
+- [`hermes-gretch-health-checklist.md`](hermes-gretch-health-checklist.md) — creds + ops-doctor on the box
+- [`copilot-mcp-egress-plan.md`](copilot-mcp-egress-plan.md) — public path for Copilot → MCP bridge
 - [`hermes-tool-map.md`](hermes-tool-map.md) — live Hermes tool catalog
 - [`deploy/mcp-bridge/README.md`](../../deploy/mcp-bridge/README.md) — bridge deployment reality
