@@ -12,7 +12,7 @@ docs. Uses Microsoft Graph with the same Entra app as mail triage (`MS365_*`).
 
 | Mode | Entry | Use case |
 |---|---|---|
-| **stdio** | `python3 sharepoint_mcp.py` | Cursor / Claude Desktop (local MCP) |
+| **stdio** | `python3 sharepoint_mcp.py` or `.cursor/bin/sharepoint-mcp.sh` | Cursor / Claude Desktop (local MCP) |
 | **HTTP** | `uvicorn deploy.sharepoint_mcp.http_app:app --host 0.0.0.0 --port 8082` | Hosted on hermes-gretch, Copilot connectors |
 
 Set `SHAREPOINT_MCP_TRANSPORT=http` to run HTTP mode via the root script instead.
@@ -55,7 +55,9 @@ Mail permissions (`Mail.ReadWrite`) are separate — the same app registration c
 }
 ```
 
-Use the **absolute path** to `sharepoint_mcp.py` on your machine. Activate `.venv` first or point `command` at `.venv/bin/python3`.
+Use the **absolute path** to `sharepoint_mcp.py` on your machine. The script re-execs
+into `.venv` automatically when system `python3` lacks the `mcp` package. You can
+also set `"command"` to `.cursor/bin/sharepoint-mcp.sh` or `.venv/bin/python3`.
 
 ## Tools
 

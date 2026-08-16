@@ -34,6 +34,27 @@ from __future__ import annotations
 import os
 import sys
 
+
+def _ensure_venv_python() -> None:
+    """Re-exec with repo .venv when not already running in it."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    venv_dir = os.path.join(root, ".venv")
+    venv_py = os.path.join(venv_dir, "bin", "python3")
+    if not os.path.isfile(venv_py):
+        return
+    # venv python may symlink to the system binary; sys.prefix is the reliable signal.
+    if os.path.normpath(sys.prefix) == os.path.normpath(venv_dir):
+        return
+    try:
+        import mcp  # noqa: F401
+        return
+    except ImportError:
+        pass
+    os.execv(venv_py, [venv_py, __file__, *sys.argv[1:]])
+
+
+_ensure_venv_python()
+
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
