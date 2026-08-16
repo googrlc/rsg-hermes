@@ -64,11 +64,10 @@ day-to-day operations:
 | Edit reporting schedules | `reporting_schedules` | **Denied** (policy) |
 | Change integration credentials | Secrets / env panel | **Denied** (policy) |
 
-> **Implementation note:** parity and the Settings deny are **documented policy**.
-> The API today does not distinguish Lamar vs Gretchen on most routes — only
-> `approved_by` ∈ `agency_crm_users`. Gate Settings saves on `role =
-> administrator` (or an explicit `can_save_settings` flag) when the Settings UI
-> lands.
+> **Implementation note:** Gretchen **Settings save deny** is enforced on
+> `POST /api/commission-rules` (`saved_by` must be `administrator`). Other
+> settings routes (registry, schedules, credentials UI) still need gates when
+> those surfaces ship.
 
 ---
 
@@ -189,10 +188,11 @@ which routers load.
 | Finance DB role cannot write `outbound_sync_queue` | `supabase/migrations/20260810120000_hermes_role_grants.sql` |
 | Intake token vocabulary | `ALLOWED_APPROVAL_TOKENS` + intake router validation |
 | Bearer on privileged HTTP routes | `HERMES_API_TOKEN` on selected `/api/hermes/*` routes |
+| Settings save — commission rules | `require_administrator(saved_by)` on `POST /api/commission-rules` |
 
 ## Policy not yet role-gated in code
 
-- **Settings save** — Gretchen deny is policy-only until Settings UI + API gate ships.
+- **Settings save** — Gretchen deny enforced for commission rules; registry/schedules/credentials UI still pending.
 - Which operator may issue each intake approval token (Lamar vs Gretchen) — both may use all tokens per owner policy above.
 - LOB ownership enforcement on writes (enforced by convention + sync defaults, not RBAC).
 - Zoho CRM module permissions (Zoho-side; Hermes uses OAuth service user).

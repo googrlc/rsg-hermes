@@ -34,6 +34,7 @@ class CommissionRuleRequest(BaseModel):
     renewal_percent: float | None = None
     commission_basis: str | None = "gross"
     active: bool = True
+    saved_by: str
 
 
 @router.get("/api/commission-rules")
@@ -52,6 +53,7 @@ def upsert_commission_rule(req: CommissionRuleRequest):
     """Add or update a commission term (carrier + LOB rate). Feeds expected
     commission when NowCerts doesn't carry an agency commission amount."""
     supa = deps.get_supa()
+    deps.require_administrator(supa, req.saved_by)
     payload = {k: v for k, v in {
         "carrier_name": (req.carrier_name or "").strip(),
         "lob": (req.lob or "").strip(),
