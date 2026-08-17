@@ -37,6 +37,7 @@ curl -s http://localhost:8081/healthz
 | `API_SERVER_KEY` | The shared bearer that gates the bridge itself |
 | `HERMES_API_TOKEN` | Sent as `Authorization: Bearer` to `rsg-hermes-api` |
 | `HERMES_API_URL` | Upstream base (defaults to the api service) |
+| `MCP_PUBLIC_BASE_URL` | Public origin for Copilot (`https://hermes-mcp.risksolutionsgroup.net`) |
 
 These live in **`/opt/app/.env`**, which is gitignored and untracked — git will
 never touch it, but an Elestio redeploy of `/opt/app` can.

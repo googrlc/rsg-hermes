@@ -122,6 +122,47 @@ def require_users(supa, pairs: list[tuple[str, str | None]]) -> None:
             )
 
 
+def user_role(supa, email: str) -> str | None:
+    """Active ``agency_crm_users.role`` for ``email``, or None if not found."""
+    needle = (email or "").strip().lower()
+    if not needle:
+        return None
+    rows = supa.select(
+        "agency_crm_users",
+        columns="role",
+        params={"email": f"eq.{needle}", "active": "eq.true"},
+        limit=1,
+    )
+    if not rows:
+        return None
+    return str(rows[0].get("role") or "")
+
+
+def require_administrator(
+    supa,
+    email: str | None,
+    *,
+    field_label: str = "saved_by",
+) -> None:
+    """Settings-save gate — Lamar (``administrator``) only per identity matrix.
+
+    Gretchen and other operators may read settings surfaces but cannot mutate
+    commission rules, registry config, schedules, or credentials.
+    """
+    if not (email or "").strip():
+        raise HTTPException(status_code=400, detail=f"{field_label} is required")
+    require_users(supa, [(field_label, email)])
+    role = user_role(supa, email)
+    if role != "administrator":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"{field_label} '{email}' cannot save settings — "
+                "administrator role required"
+            ),
+        )
+
+
 class ExecutorRunRequest(BaseModel):
     """How much of a queue to drain, and whether to only preview it.
 

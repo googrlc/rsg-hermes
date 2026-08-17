@@ -34,6 +34,8 @@ dependencies = [
   "weasyprint>=60",
   # Voice output — free Edge TTS (no API key needed).
   "edge-tts>=6.1",
+  # SharePoint MCP stdio server (sharepoint_mcp.py)
+  "mcp>=2.0.0",
 ]
 
 [project.scripts]

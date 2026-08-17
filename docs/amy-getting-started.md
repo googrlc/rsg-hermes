@@ -26,12 +26,16 @@ one assistant**, not separate visible agents.
 
 ## What must be running
 
-On the **hermes-gretch** box (or your dev machine):
+On **hermes-gretch** (or your dev machine):
 
 | Service | Typical name | Port | Health |
 |---|---|---|---|
-| Hermes API | `rsg-hermes-api` / `app-rsg-hermes-api-1` | 8787 | `GET /health` |
+| Hermes API | `rsg-hermes-api` / `app-rsg-hermes-api-1` | 8787 (8788 on host) | `GET /health` |
 | MCP bridge | `app-rsg-hermes-mcp-1` | 8081 | `GET /healthz` |
+| SharePoint MCP | `rsg-sharepoint-mcp` | 8082 | `GET /healthz` |
+
+**No host `.venv` on hermes-gretch** — Python services run in Docker images built from
+this repo. Use `./scripts/start_sharepoint_mcp.sh` instead of `uvicorn` on the shell.
 
 The MCP bridge is **not** in this repo's `docker-compose.yml`; it is deployed separately.
 Source of truth for the bridge code: [`deploy/mcp-bridge/app.py`](../deploy/mcp-bridge/app.py).
@@ -71,6 +75,15 @@ are set.
 - **Phase 2:** MCP connector in Copilot Studio pointed at the bridge URL
 
 ## Smoke tests (do this before Copilot)
+
+Run all checks in one shot (after API and bridge are up):
+
+```bash
+source .venv/bin/activate
+API_SERVER_KEY=dev-key ./scripts/mcp_smoke_test.sh
+```
+
+Or step through manually:
 
 ### 1. Hermes API
 
@@ -119,11 +132,45 @@ API_SERVER_KEY=dev-key HERMES_API_URL=http://127.0.0.1:8787 \
   uvicorn deploy.mcp-bridge.app:app --host 127.0.0.1 --port 8081
 ```
 
+## Phase 1 — SharePoint MCP (Cursor + hosted)
+
+Repo entry point: [`sharepoint_mcp.py`](../sharepoint_mcp.py) (stdio for Cursor) and
+[`deploy/sharepoint_mcp/`](../deploy/sharepoint_mcp/) (HTTP on port **8082**).
+
+```json
+{
+  "mcpServers": {
+    "sharepoint": {
+      "command": "python3",
+      "args": ["/absolute/path/to/rsg-hermes/sharepoint_mcp.py"],
+      "env": {
+        "MS365_TENANT_ID": "...",
+        "MS365_CLIENT_ID": "...",
+        "MS365_CLIENT_SECRET": "...",
+        "SHAREPOINT_SITE_URL": "https://tenant.sharepoint.com/sites/RSG-Knowledge"
+      }
+    }
+  }
+}
+```
+
+Entra app needs **Sites.Read.All** and **Files.Read.All** (application, admin-consented).
+See [`deploy/sharepoint_mcp/README.md`](../deploy/sharepoint_mcp/README.md).
+
+**Consolidating several sites into one?** See
+[`sharepoint-knowledge-consolidation.md`](sharepoint-knowledge-consolidation.md).
+
+**Power Automate, OneDrive, Power Apps in Cursor?** See
+[`microsoft-mcp-cursor-config.md`](microsoft-mcp-cursor-config.md) — that is a separate
+npm MCP (`powerautomate-mcp`), not this Hermes SharePoint server.
+
+**Entra / tenant checklist (2 apps + secrets):** [`microsoft-tenant-mcp-setup.md`](microsoft-tenant-mcp-setup.md)
+
 ## Copilot Studio wiring (Phase 2)
 
 1. **Create the Amy agent** in Copilot Studio — one assistant, RSG persona and guardrails.
-2. **Phase 1 grounding** — connect SharePoint knowledge (no MCP required for basic Q&A on
-   procedures and SOPs).
+2. **Phase 1 grounding** — connect SharePoint knowledge (no MCP required). Step-by-step:
+   [`amy-copilot-knowledge-setup.md`](amy-copilot-knowledge-setup.md) (site: **RSG** on `riskintranet`).
 3. **Add MCP connector** (Streamable HTTP):
    - **URL:** reachable from Microsoft cloud (public HTTPS or approved egress path). On the
      tailnet, `http://hermes-gretch:8081/mcp` works from devices on Tailscale only — Copilot
@@ -153,7 +200,7 @@ Aligned with [`rsg-digital-operating-system.md`](rsg-digital-operating-system.md
 
 | Phase | Goal | Amy capability |
 |---|---|---|
-| **1 — Knowledge** | Obsidian → SharePoint, organized by function | Answer from SharePoint grounding |
+| **1 — Knowledge** | Obsidian → SharePoint, organized by function | SharePoint MCP + Copilot native grounding |
 | **2 — Read-only** | Supabase, Zoho, NowCerts, SharePoint via Hermes | Safe retrieval through MCP read tools |
 | **3 — Controlled automation** | Renewals, commissions, intake, service | Approval-gated writes (`hermes_dispatch`, tokens) |
 
@@ -184,7 +231,13 @@ Do not hand-edit the running container copy — this repo is the source of truth
 
 ## Related docs
 
+- [`amy-copilot-hermes-mcp-setup.md`](amy-copilot-hermes-mcp-setup.md) — Hermes MCP connector + box/Copilot tests
+- [`amy-copilot-knowledge-setup.md`](amy-copilot-knowledge-setup.md) — Copilot Studio SharePoint knowledge (native, no Hermes)
+- [`amy-copilot-tool-wiring.md`](amy-copilot-tool-wiring.md) — wire SharePoint + Hermes tools one at a time in Copilot
+- [`sharepoint-migration-status.md`](sharepoint-migration-status.md) — Obsidian → RSG-Knowledge completion record
 - [`rsg-digital-operating-system.md`](rsg-digital-operating-system.md) — north star and governance
 - [`identity-permissions-matrix.md`](identity-permissions-matrix.md) — operator roles and write tiers
+- [`hermes-gretch-health-checklist.md`](hermes-gretch-health-checklist.md) — creds + ops-doctor on the box
+- [`copilot-mcp-egress-plan.md`](copilot-mcp-egress-plan.md) — public path for Copilot → MCP bridge
 - [`hermes-tool-map.md`](hermes-tool-map.md) — live Hermes tool catalog
 - [`deploy/mcp-bridge/README.md`](../../deploy/mcp-bridge/README.md) — bridge deployment reality

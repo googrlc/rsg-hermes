@@ -107,6 +107,31 @@ services:
     stop_grace_period: 60s
     command: ["hermes", "--run-scheduler", "--scheduler-interval", "300", "--scheduler-batch", "10"]
 
+  # SharePoint MCP — read-only agency knowledge for Amy (Graph app-only auth).
+  # Host port bound to loopback only; public egress via nginx (see
+  # scripts/install_sharepoint_mcp_egress.sh). On hermes-gretch there is no
+  # host .venv — start this service instead of uvicorn on the shell.
+  sharepoint-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rsg-sharepoint-mcp
+    # On hermes-gretch: MS365_* may still live in repo .env; secrets canonical in
+    # /opt/app/.env (HERMES_ENV_FILE). Later file wins on duplicate keys.
+    env_file:
+      - .env
+      - ${HERMES_ENV_FILE:-.env}
+    environment:
+      SHAREPOINT_MCP_TRANSPORT: http
+      SHAREPOINT_MCP_HOST: "0.0.0.0"
+      SHAREPOINT_MCP_PORT: "8082"
+    ports:
+      - "127.0.0.1:8082:8082"
+    restart: unless-stopped
+    command: ["python3", "sharepoint_mcp.py"]
+    networks:
+      - hermes-shared
+
 volumes:
   # Job-idempotency state: sentinel "already sent today", commission-audit and
   # EOM-scorecard watermarks. Named so it survives compose down/up and container
