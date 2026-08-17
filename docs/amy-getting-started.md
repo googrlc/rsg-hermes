@@ -169,8 +169,8 @@ npm MCP (`powerautomate-mcp`), not this Hermes SharePoint server.
 ## Copilot Studio wiring (Phase 2)
 
 1. **Create the Amy agent** in Copilot Studio — one assistant, RSG persona and guardrails.
-2. **Phase 1 grounding** — connect SharePoint knowledge (no MCP required for basic Q&A on
-   procedures and SOPs).
+2. **Phase 1 grounding** — connect SharePoint knowledge (no MCP required). Step-by-step:
+   [`amy-copilot-knowledge-setup.md`](amy-copilot-knowledge-setup.md) (site: **RSG** on `riskintranet`).
 3. **Add MCP connector** (Streamable HTTP):
    - **URL:** reachable from Microsoft cloud (public HTTPS or approved egress path). On the
      tailnet, `http://hermes-gretch:8081/mcp` works from devices on Tailscale only — Copilot
@@ -231,6 +231,7 @@ Do not hand-edit the running container copy — this repo is the source of truth
 
 ## Related docs
 
+- [`amy-copilot-knowledge-setup.md`](amy-copilot-knowledge-setup.md) — Copilot Studio SharePoint knowledge (native, no Hermes)
 - [`amy-copilot-tool-wiring.md`](amy-copilot-tool-wiring.md) — wire SharePoint + Hermes tools one at a time in Copilot
 - [`sharepoint-migration-status.md`](sharepoint-migration-status.md) — Obsidian → RSG-Knowledge completion record
 - [`rsg-digital-operating-system.md`](rsg-digital-operating-system.md) — north star and governance
