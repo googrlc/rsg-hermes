@@ -127,6 +127,43 @@ If step 1 works in Copilot but 2–4 fail, Hermes bridge is fine — check Supab
 
 ---
 
+## Investigating dead `outbound_sync_queue` jobs
+
+Amy’s `sync_health` reports counts only. To see the four dead rows in **Supabase SQL**:
+
+```sql
+-- Optional: list actual columns (prod may differ from migrations)
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = 'outbound_sync_queue'
+ORDER BY ordinal_position;
+
+SELECT id, object_type, object_id, destination_system, action, status,
+       attempt_count, approved_by, approved_at,
+       created_at, updated_at,
+       payload
+FROM outbound_sync_queue
+WHERE status = 'dead'
+ORDER BY updated_at DESC;
+```
+
+There is **no** `error_message` column on `outbound_sync_queue`. Errors may be:
+
+- `payload` JSON (sometimes `payload->>'last_error'` if executors stored it there)
+- `last_error` column (if your migration applied it — omit if missing)
+- `sync_errors` table joined on `queue_id`:
+
+```sql
+SELECT q.id, q.object_type, q.destination_system, q.updated_at,
+       e.error_message, e.error_detail
+FROM outbound_sync_queue q
+LEFT JOIN sync_errors e ON e.queue_id = q.id
+WHERE q.status = 'dead'
+ORDER BY q.updated_at DESC;
+```
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
