@@ -24,6 +24,7 @@ fi
 cd "$COMPOSE_DIR"
 
 echo "Building and starting sharepoint-mcp (env: $ENV_FILE)"
+export HERMES_ENV_FILE="$ENV_FILE"
 docker compose --env-file "$ENV_FILE" up -d --build sharepoint-mcp
 
 sleep 2

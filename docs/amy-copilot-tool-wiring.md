@@ -155,7 +155,8 @@ git pull origin cursor/amy-tool-wiring-e461   # after merge
 grep -E '^(MS365_|SHAREPOINT_SITE_URL)' /opt/app/.env
 
 # Start SharePoint MCP (Docker — hermes-gretch has no host .venv)
-./scripts/start_sharepoint_mcp.sh
+export HERMES_ENV_FILE=/opt/app/.env
+docker compose --env-file /opt/app/.env up -d --force-recreate sharepoint-mcp
 
 # Public egress (nginx + DNS)
 sudo ./scripts/install_sharepoint_mcp_egress.sh
