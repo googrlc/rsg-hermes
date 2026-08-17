@@ -231,6 +231,7 @@ Do not hand-edit the running container copy — this repo is the source of truth
 
 ## Related docs
 
+- [`amy-copilot-hermes-mcp-setup.md`](amy-copilot-hermes-mcp-setup.md) — Hermes MCP connector + box/Copilot tests
 - [`amy-copilot-knowledge-setup.md`](amy-copilot-knowledge-setup.md) — Copilot Studio SharePoint knowledge (native, no Hermes)
 - [`amy-copilot-tool-wiring.md`](amy-copilot-tool-wiring.md) — wire SharePoint + Hermes tools one at a time in Copilot
 - [`sharepoint-migration-status.md`](sharepoint-migration-status.md) — Obsidian → RSG-Knowledge completion record
