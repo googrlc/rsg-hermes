@@ -62,9 +62,7 @@ if curl -sf "http://127.0.0.1:${SP_MCP_PORT}/healthz" >/dev/null 2>&1; then
   echo "SharePoint MCP local healthz OK on :$SP_MCP_PORT"
 else
   echo "WARN: nothing on 127.0.0.1:$SP_MCP_PORT — start SharePoint MCP before Copilot wiring:" >&2
-  echo "  source .venv/bin/activate" >&2
-  echo "  set -a && source $ENV_FILE && set +a" >&2
-  echo "  SHAREPOINT_MCP_TRANSPORT=http uvicorn deploy.sharepoint_mcp.http_app:app --host 127.0.0.1 --port $SP_MCP_PORT" >&2
+  echo "  cd $REPO_ROOT && ./scripts/start_sharepoint_mcp.sh" >&2
 fi
 
 echo

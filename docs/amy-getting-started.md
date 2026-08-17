@@ -26,12 +26,16 @@ one assistant**, not separate visible agents.
 
 ## What must be running
 
-On the **hermes-gretch** box (or your dev machine):
+On **hermes-gretch** (or your dev machine):
 
 | Service | Typical name | Port | Health |
 |---|---|---|---|
-| Hermes API | `rsg-hermes-api` / `app-rsg-hermes-api-1` | 8787 | `GET /health` |
+| Hermes API | `rsg-hermes-api` / `app-rsg-hermes-api-1` | 8787 (8788 on host) | `GET /health` |
 | MCP bridge | `app-rsg-hermes-mcp-1` | 8081 | `GET /healthz` |
+| SharePoint MCP | `rsg-sharepoint-mcp` | 8082 | `GET /healthz` |
+
+**No host `.venv` on hermes-gretch** — Python services run in Docker images built from
+this repo. Use `./scripts/start_sharepoint_mcp.sh` instead of `uvicorn` on the shell.
 
 The MCP bridge is **not** in this repo's `docker-compose.yml`; it is deployed separately.
 Source of truth for the bridge code: [`deploy/mcp-bridge/app.py`](../deploy/mcp-bridge/app.py).

@@ -150,22 +150,21 @@ returns `requires_confirmation=true` on first call.
 ```bash
 cd /opt/rsg-hermes
 git pull origin cursor/amy-tool-wiring-e461   # after merge
-source .venv/bin/activate
 
 # MS365 + site URL must already be in /opt/app/.env
 grep -E '^(MS365_|SHAREPOINT_SITE_URL)' /opt/app/.env
 
-# Start SharePoint MCP (first time — pick one)
-# Option 1: host uvicorn under systemd/supervisor
-SHAREPOINT_MCP_TRANSPORT=http API_SERVER_KEY="$API_SERVER_KEY" \
-  uvicorn deploy.sharepoint_mcp.http_app:app --host 127.0.0.1 --port 8082
+# Start SharePoint MCP (Docker — hermes-gretch has no host .venv)
+./scripts/start_sharepoint_mcp.sh
 
-# Option 2: after egress install, use install script (nginx + env)
+# Public egress (nginx + DNS)
 sudo ./scripts/install_sharepoint_mcp_egress.sh
 
 # Smoke
-API_SERVER_KEY="$API_SERVER_KEY" ./scripts/sharepoint_mcp_smoke_test.sh
-CHECK_EGRESS=1 API_SERVER_KEY="$API_SERVER_KEY" ./scripts/sharepoint_mcp_smoke_test.sh
+API_SERVER_KEY="$(grep '^API_SERVER_KEY=' /opt/app/.env | cut -d= -f2-)" \
+  ./scripts/sharepoint_mcp_smoke_test.sh
+CHECK_EGRESS=1 API_SERVER_KEY="$(grep '^API_SERVER_KEY=' /opt/app/.env | cut -d= -f2-)" \
+  ./scripts/sharepoint_mcp_smoke_test.sh
 ```
 
 Wix DNS: **A** `sharepoint-mcp` → `152.53.201.154` (same as `hermes-mcp`).

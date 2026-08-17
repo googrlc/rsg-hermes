@@ -73,18 +73,47 @@ also set `"command"` to `.cursor/bin/sharepoint-mcp.sh` or `.venv/bin/python3`.
 
 ## Deploy on hermes-gretch
 
+**hermes-gretch has no host `.venv`.** Python, `uvicorn`, and `mcp` live inside the
+Docker image — same as `rsg-hermes-api`. Do **not** `source .venv/bin/activate` on the box.
+
+### Start (recommended)
+
 ```bash
-# From /opt/app after git pull + rebuild, or docker cp for a hotfix:
-docker cp sharepoint_mcp.py app-rsg-sharepoint-mcp-1:/app/sharepoint_mcp.py 2>/dev/null || true
-docker cp deploy/sharepoint_mcp app-rsg-sharepoint-mcp-1:/app/deploy/ 2>/dev/null || true
+cd /opt/rsg-hermes
+git pull   # must include sharepoint_mcp.py + deploy/sharepoint_mcp/
+./scripts/start_sharepoint_mcp.sh
+```
 
-# First-time: run via uvicorn on host or add a compose service (port 8082).
-source .venv/bin/activate
-SHAREPOINT_MCP_TRANSPORT=http API_SERVER_KEY=... \
-  uvicorn deploy.sharepoint_mcp.http_app:app --host 127.0.0.1 --port 8082
+That runs `docker compose --env-file /opt/app/.env up -d --build sharepoint-mcp` and
+binds **127.0.0.1:8082** only.
 
+Verify:
+
+```bash
 curl -s http://127.0.0.1:8082/healthz
 ```
+
+### Manual compose (if you prefer)
+
+```bash
+cd /opt/rsg-hermes   # or /opt/app if that is your compose root
+docker compose --env-file /opt/app/.env up -d --build sharepoint-mcp
+```
+
+### One-off without compose file update (emergency)
+
+```bash
+docker compose --env-file /opt/app/.env build hermes-api
+docker run -d --restart unless-stopped \
+  --name rsg-sharepoint-mcp \
+  -p 127.0.0.1:8082:8082 \
+  --env-file /opt/app/.env \
+  -e SHAREPOINT_MCP_TRANSPORT=http \
+  rsg-hermes-sharepoint-mcp \
+  python3 sharepoint_mcp.py
+```
+
+(Replace image name with `docker images | grep hermes` if the project prefix differs.)
 
 Add `MS365_*` and `SHAREPOINT_SITE_URL` to `/opt/app/.env` (same file as Hermes).
 
