@@ -20,9 +20,10 @@ Related: [`sharepoint-migration-status.md`](sharepoint-migration-status.md) ·
 Both use the same secret: `API_SERVER_KEY` from `/opt/app/.env` as `X-API-Key` or
 `Authorization: Bearer`.
 
-**Phase 1 grounding (optional, parallel):** In Copilot Studio → Knowledge → SharePoint,
-add **only** the **RSG-Knowledge** site. That gives Amy Q&A without MCP. MCP tools below
-are for browse/search/read-by-id when grounding is thin or you need explicit citations.
+**Phase 1 grounding (do this now — DLP fixed Aug 2026):** In Copilot Studio → Knowledge →
+SharePoint, add **only** site **RSG** (`riskintranet`, path `/sites/RSG`). That gives Amy
+Q&A without MCP. MCP tools below are for browse/search/read-by-id when grounding is thin or
+you need explicit citations.
 
 ---
 
@@ -61,7 +62,7 @@ DNS `sharepoint-mcp` → box IP; nginx vhost installed.
 
 | # | Tool | Wire step | Amy test prompt | Pass criteria |
 |---|---|---|---|---|
-| A0 | *(grounding)* | Knowledge → SharePoint → RSG-Knowledge only | "Where is the COI SOP?" | Answer cites SharePoint path under `01-operations/` or `02-personal-lines/` |
+| A0 | *(grounding)* | Knowledge → SharePoint → **RSG** only (`/sites/RSG`) | "Where is the COI SOP?" | Answer cites SharePoint path under `01-operations/` or `02-personal-lines/` |
 | A1 | `ping` | Add SharePoint MCP connector; test connection | "Run SharePoint ping" | Auth OK + default site name |
 | A2 | `get_site_info` | Same connector (auto-listed) | "What SharePoint site is configured for knowledge?" | `webUrl` ends with `/sites/RSG-Knowledge` |
 | A3 | `list_libraries` | — | "List document libraries on RSG-Knowledge" | At least **Documents** drive |

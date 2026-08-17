@@ -22,6 +22,9 @@ Related: [`sharepoint-migration-status.md`](sharepoint-migration-status.md) ·
 Hermes MCP (`hermes-mcp…`) handles book, renewals, sync, commissions.  
 This knowledge source handles **how we work** (SOPs, templates, training).
 
+**Status (Aug 2026):** Power Platform **DLP** updated — SharePoint knowledge connector is
+**unblocked**. Wire site **RSG** below, then run Step 5 smoke tests.
+
 ---
 
 ## Prerequisites
@@ -133,45 +136,33 @@ Do **not** add SharePoint MCP (`sharepoint-mcp…`) unless you need explicit bro
 | Wrong site content | Remove other SharePoint sources; only **RSG** for Phase 1 |
 | “I can’t access SharePoint” | Agent owner / connection account needs read access to RSG site |
 | Procedures OK, book data wrong | Expected — wire Hermes tools for AMS/Supabase; don’t ground book data in SharePoint |
-| **“Blocked by your organization’s data loss prevention policy”** | Power Platform **DLP** — see below |
+| **“Blocked by your organization’s data loss prevention policy”** | DLP was fixed Aug 2026. If it returns, see **DLP reference** below |
 
-### DLP policy block (not a Hermes / SharePoint site bug)
+### DLP reference (resolved Aug 2026)
 
-Microsoft enforces **Data Loss Prevention** on Copilot Studio agents (tenant-wide since 2025).
-If adding SharePoint knowledge fails with a data policy violation, **IT must change Power
-Platform DLP** — you cannot fix this on hermes-gretch.
+Tenant DLP now allows **Knowledge source with SharePoint and OneDrive in Copilot Studio**
+(least-privilege: host `riskintranet.sharepoint.com`, path `/sites/RSG`).
 
-**Who:** Power Platform admin or Global admin (environment admins may not see tenant policies).
+If the block reappears after a policy change:
+
+**Who:** Power Platform admin or Global admin.
 
 **Where:** [Power Platform admin center](https://admin.powerplatform.com) → **Policies** →
-**Data policies** → check policies scoped to **All environments** (tenant-level wins over
-environment-level).
-
-**Connectors to allow (Business group or explicit allow):**
-
-- **Knowledge source with SharePoint and OneDrive in Copilot Studio**
-- Optionally: **Knowledge source with documents in Copilot Studio**
+**Data policies** → policies scoped to **All environments**.
 
 Microsoft docs: [Configure data policies for agents](https://learn.microsoft.com/en-us/microsoft-copilot-studio/admin-data-loss-prevention),
 [DLP troubleshooting](https://learn.microsoft.com/en-us/microsoft-copilot-studio/admin-dlp-troubleshooting).
 
-**Least-privilege alternative:** instead of allowing all SharePoint, use **connector endpoint
-filtering** on that knowledge connector to permit only:
+**In Copilot Studio:** **Details** / error report lists the **DLP policy name** and **policy id**.
 
-- Host: `riskintranet.sharepoint.com`
-- Path prefix: `/sites/RSG`
-
-**In Copilot Studio:** use **Details** / download the error report on the agent — it lists
-the **DLP policy name** and **policy id** to hand to IT.
-
-**If DLP cannot change soon:** upload critical SOPs via **Documents** knowledge source (if
-that connector is allowed), or finish Entra `Sites.Read.All` for Hermes SharePoint MCP on
-the box (separate path — still needs admin consent, not DLP in PPAC).
+**Fallback (no SharePoint knowledge):** upload critical SOPs via **Documents** knowledge source,
+or use Hermes SharePoint MCP on the box (needs Entra `Sites.Read.All` — separate from PPAC DLP).
 
 ---
 
 ## Done checklist
 
+- [x] Power Platform DLP allows SharePoint knowledge connector (Aug 2026)
 - [ ] SharePoint knowledge source = **RSG** only (`riskintranet` tenant, path `/sites/RSG`)
 - [ ] Generative answers enabled with Amy guardrails
 - [ ] COI / service-desk smoke question passes with SharePoint-backed answer

@@ -1,7 +1,8 @@
 # Amy — Hermes MCP connector setup & test
 
 Copilot Studio → **Hermes MCP bridge** → `hermes-api` (book, renewals, sync, commissions, AMS).
-This is **separate** from SharePoint native knowledge (blocked by DLP until IT fixes that).
+This is **separate** from SharePoint native knowledge (DLP unblocked Aug 2026 — see
+[`amy-copilot-knowledge-setup.md`](amy-copilot-knowledge-setup.md)).
 
 Related: [`amy-getting-started.md`](amy-getting-started.md) ·
 [`copilot-mcp-egress-plan.md`](copilot-mcp-egress-plan.md) ·
