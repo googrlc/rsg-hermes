@@ -133,6 +133,40 @@ Do **not** add SharePoint MCP (`sharepoint-mcp…`) unless you need explicit bro
 | Wrong site content | Remove other SharePoint sources; only **RSG** for Phase 1 |
 | “I can’t access SharePoint” | Agent owner / connection account needs read access to RSG site |
 | Procedures OK, book data wrong | Expected — wire Hermes tools for AMS/Supabase; don’t ground book data in SharePoint |
+| **“Blocked by your organization’s data loss prevention policy”** | Power Platform **DLP** — see below |
+
+### DLP policy block (not a Hermes / SharePoint site bug)
+
+Microsoft enforces **Data Loss Prevention** on Copilot Studio agents (tenant-wide since 2025).
+If adding SharePoint knowledge fails with a data policy violation, **IT must change Power
+Platform DLP** — you cannot fix this on hermes-gretch.
+
+**Who:** Power Platform admin or Global admin (environment admins may not see tenant policies).
+
+**Where:** [Power Platform admin center](https://admin.powerplatform.com) → **Policies** →
+**Data policies** → check policies scoped to **All environments** (tenant-level wins over
+environment-level).
+
+**Connectors to allow (Business group or explicit allow):**
+
+- **Knowledge source with SharePoint and OneDrive in Copilot Studio**
+- Optionally: **Knowledge source with documents in Copilot Studio**
+
+Microsoft docs: [Configure data policies for agents](https://learn.microsoft.com/en-us/microsoft-copilot-studio/admin-data-loss-prevention),
+[DLP troubleshooting](https://learn.microsoft.com/en-us/microsoft-copilot-studio/admin-dlp-troubleshooting).
+
+**Least-privilege alternative:** instead of allowing all SharePoint, use **connector endpoint
+filtering** on that knowledge connector to permit only:
+
+- Host: `riskintranet.sharepoint.com`
+- Path prefix: `/sites/RSG`
+
+**In Copilot Studio:** use **Details** / download the error report on the agent — it lists
+the **DLP policy name** and **policy id** to hand to IT.
+
+**If DLP cannot change soon:** upload critical SOPs via **Documents** knowledge source (if
+that connector is allowed), or finish Entra `Sites.Read.All` for Hermes SharePoint MCP on
+the box (separate path — still needs admin consent, not DLP in PPAC).
 
 ---
 
