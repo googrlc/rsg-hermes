@@ -116,9 +116,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: rsg-sharepoint-mcp
-    # On hermes-gretch secrets live in /opt/app/.env — set HERMES_ENV_FILE there.
-    # `docker compose --env-file /opt/app/.env` alone does NOT inject into containers.
+    # On hermes-gretch: MS365_* may still live in repo .env; secrets canonical in
+    # /opt/app/.env (HERMES_ENV_FILE). Later file wins on duplicate keys.
     env_file:
+      - .env
       - ${HERMES_ENV_FILE:-.env}
     environment:
       SHAREPOINT_MCP_TRANSPORT: http
