@@ -107,8 +107,8 @@ MS365_CLIENT_SECRET=<secret-value>
 MS365_MAILBOXES=lamar@risk-solutionsgroup.com,intake@risksolutionsgroup.net
 HERMES_ASK_MAILBOX=lamar@risk-solutionsgroup.com
 
-# SharePoint knowledge (Amy Phase 1)
-SHAREPOINT_SITE_URL=https://<tenant>.sharepoint.com/sites/RSG-Knowledge
+# SharePoint knowledge (Amy Phase 1) — tenant host riskintranet, site /sites/RSG
+SHAREPOINT_SITE_URL=https://<tenant-host>.sharepoint.com/sites/RSG
 
 # MCP bridge auth (generate long random strings — not Entra)
 API_SERVER_KEY=<openssl rand -hex 32>

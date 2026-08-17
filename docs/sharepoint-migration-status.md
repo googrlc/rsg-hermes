@@ -12,8 +12,11 @@ Source playbook: [`sharepoint-knowledge-consolidation.md`](sharepoint-knowledge-
 
 | Item | Value |
 |---|---|
-| **Site** | RSG-Knowledge |
-| **URL** | `https://<tenant>.sharepoint.com/sites/RSG-Knowledge` (set `SHAREPOINT_SITE_URL`) |
+| **Site** | RSG (live; consolidation playbook called it **RSG-Knowledge**) |
+| **Host** | `riskintranet.sharepoint.com` |
+| **Site path** | `/sites/RSG` |
+| **Browser home** | `…/SitePages/Home.aspx` on that site — not the API/env URL |
+| **Env** | `SHAREPOINT_SITE_URL` = `https://` + host + `/sites/RSG` |
 | **Library** | Documents (default) |
 | **Amy grounding** | This site **only** |
 | **Obsidian vault** | `rsg-obsidian-vault` — drafting; SharePoint is published SOR for Amy |
