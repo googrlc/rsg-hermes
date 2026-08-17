@@ -227,6 +227,8 @@ Do not hand-edit the running container copy — this repo is the source of truth
 
 ## Related docs
 
+- [`amy-copilot-tool-wiring.md`](amy-copilot-tool-wiring.md) — wire SharePoint + Hermes tools one at a time in Copilot
+- [`sharepoint-migration-status.md`](sharepoint-migration-status.md) — Obsidian → RSG-Knowledge completion record
 - [`rsg-digital-operating-system.md`](rsg-digital-operating-system.md) — north star and governance
 - [`identity-permissions-matrix.md`](identity-permissions-matrix.md) — operator roles and write tiers
 - [`hermes-gretch-health-checklist.md`](hermes-gretch-health-checklist.md) — creds + ops-doctor on the box

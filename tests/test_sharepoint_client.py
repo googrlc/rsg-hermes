@@ -92,7 +92,9 @@ def test_list_drives_uses_default_site() -> None:
         "MS365_TENANT_ID": "t",
         "MS365_CLIENT_ID": "c",
         "MS365_CLIENT_SECRET": "s",
+        "SHAREPOINT_SITE_URL": "",
     },
+    clear=False,
 )
 def test_ping_without_site_url() -> None:
     client = SharePointClient()

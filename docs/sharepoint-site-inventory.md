@@ -1,10 +1,10 @@
 # SharePoint site inventory
 
-> **Status:** Not generated yet — run inventory **before** creating **RSG-Knowledge**.
+> **Status (August 2026):** Obsidian vault → **RSG-Knowledge** migration is **complete**.
+> See [`sharepoint-migration-status.md`](sharepoint-migration-status.md). Re-run the script
+> below to refresh tenant-wide site list or audit retired sources.
 >
-> This file is overwritten by `scripts/sharepoint_site_inventory.py`. Until `MS365_*`
-> credentials are set, fill the manual table below or run the script from a machine
-> with Entra app access.
+> This file is overwritten by `scripts/sharepoint_site_inventory.py` when you run it.
 
 See [`sharepoint-knowledge-consolidation.md`](sharepoint-knowledge-consolidation.md) for the
 full workflow (inventory → approve map → build site → migrate → retire old sites).

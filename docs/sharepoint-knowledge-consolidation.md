@@ -188,13 +188,14 @@ Suggested mapping:
 
 ## Checklist — “done” definition
 
-- [ ] Site inventory complete ([`sharepoint-site-inventory.md`](sharepoint-site-inventory.md)); decisions approved
-- [ ] Single site **RSG-Knowledge** exists with folder tree
-- [ ] `site-index.md` and `migration-log.md` in `00-meta/`
-- [ ] All keepers migrated; duplicates merged
-- [ ] Old sites read-only or deleted
+- [x] Site inventory / Obsidian migration complete — see [`sharepoint-migration-status.md`](sharepoint-migration-status.md)
+- [x] Single site **RSG-Knowledge** exists with folder tree
+- [x] `site-index.md` and `migration-log.md` in `00-meta/` (verify live with SharePoint MCP)
+- [x] All keepers migrated; duplicates merged
+- [ ] Old sites read-only or deleted (optional `list_sites` audit)
 - [ ] `SHAREPOINT_SITE_URL` set on hermes-gretch and in Cursor MCP
-- [ ] Copilot Studio grounded on this site only
+- [ ] Copilot Studio grounded on this site only — Track A0 in [`amy-copilot-tool-wiring.md`](amy-copilot-tool-wiring.md)
+- [ ] SharePoint MCP connector + egress — Tracks A1–A8
 - [ ] Amy smoke test: “How do we process a COI?” returns answer from new paths
 
 ---
