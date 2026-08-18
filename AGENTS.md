@@ -56,3 +56,39 @@ full command catalog and Docker layout.
   (`hermes/renewals/pdf.py`, reportlab) and proposal HTML→PDF
   (`hermes/proposals/generator.py`, WeasyPrint) run without any external service;
   WeasyPrint's native Pango libs are part of the environment.
+
+## Data Quality Investigator (Cursor agent)
+
+Dedicated Cursor Cloud agent for **single-policy cross-system investigations**
+(AMS vs mirror vs renewal worklist vs CRM). Not Amy — this agent runs in Cursor
+with full MCP access and is allowed to read production data.
+
+**Skill:** `.claude/skills/data-quality-investigator/SKILL.md` — read it first on
+every investigation task.
+
+**Primary tool:** `investigate_policy` — Hermes API
+`GET /api/hermes/investigate-policy?policy_number=...` (also on the MCP bridge
+as `investigate_policy`). Book-wide drift: `book_sync_health` /
+`GET /api/hermes/book-sync`.
+
+**Required MCP servers (authenticate in Cursor desktop before cloud runs):**
+
+| Server | Use |
+|---|---|
+| Supabase | Mirror, renewal_candidates, project_85, portal_overrides |
+| ZohoMCP | CRM policy/deal status (when wired) |
+| Hermes MCP bridge | `investigate_policy`, `ams_search_insured`, `book_sync_health` |
+| 1password | Optional — env bootstrap only with explicit approval |
+
+**Input format:** `policy_number, client name, line of business` (e.g.
+`990414352, Steven Prak, Auto`).
+
+**Writes:** Never auto-apply corrections. Report verdict + recommended actions;
+wait for human approval before `sync-canonical-book`, `renewal-refresh`, AMS
+pushback, or renewal dismissals.
+
+**Typical invocation (Cursor agent prompt):**
+
+> Investigate policy {number} for {client}, {LOB}. Use the data-quality-investigator
+> skill. Call investigate_policy, summarize the verdict, and stage correction
+> steps for approval.

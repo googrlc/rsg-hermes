@@ -2207,6 +2207,53 @@ def book_sync_health(request: Request, max_pages: int = 50):
 
 
 # ---------------------------------------------------------------------------
+# Policy investigation — cross-system diff for one policy (AMS vs mirror vs
+# renewal worklist). Read-only; used by the data-quality-investigator agent.
+# See hermes/book_sync/investigate.py.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/hermes/investigate-policy")
+def investigate_policy_endpoint(
+    request: Request,
+    policy_number: str,
+    client_name: str | None = None,
+    line_of_business: str | None = None,
+):
+    """Investigate one policy across NowCerts, the canonical mirror, and renewals.
+
+    Gated by HERMES_API_TOKEN bearer (skipped if env var unset).
+
+    Query params:
+      policy_number: required — the AMS policy number
+      client_name: optional — disambiguation / display
+      line_of_business: optional — disambiguation / display
+    """
+    _require_hermes_token(request)
+    from hermes.book_sync import investigate_policy
+
+    pn = (policy_number or "").strip()
+    if not pn:
+        raise HTTPException(status_code=400, detail="policy_number is required")
+
+    try:
+        report = investigate_policy(
+            pn,
+            client_name=client_name,
+            line_of_business=line_of_business,
+            nowcerts=_get_nowcerts(),
+            supa=_get_supa(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive top-level
+        log.exception("investigate-policy failed for %s", pn)
+        raise HTTPException(status_code=500, detail=f"investigate-policy failed: {exc}") from exc
+
+    return report.to_dict()
+
+
+# ---------------------------------------------------------------------------
 # AMS insured search — the search-before-insert gate used by the bridge's
 # `ams_search_insured` tool (GET /api/ams/search-insured?name=&email=&fein=).
 # Read-only proxy to NowCerts InsuredList. See integrations/nowcerts_client.py.

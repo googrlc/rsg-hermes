@@ -122,6 +122,45 @@ class TestDashboardDispatch:
         assert data["outbound_sync_queue"]["failed"] == 2
         assert data["latest_completed"]["id"] == "job-1"
 
+    @patch("hermes.api._get_nowcerts")
+    @patch("hermes.api._get_supa")
+    def test_investigate_policy_endpoint(self, mock_get_supa, mock_get_nc, client) -> None:
+        nc = MagicMock()
+        nc.find_policy_by_number.return_value = {
+            "databaseId": "pg-1",
+            "insuredDatabaseId": "ins-1",
+            "policyStatus": "Cancelled",
+            "expirationDate": "2026-12-09",
+            "insuredCommercialName": "Steven Prak",
+        }
+        nc.is_insured_active.return_value = False
+        mock_get_nc.return_value = nc
+
+        supa = MagicMock()
+        supa.select.side_effect = [
+            [{"policy_guid": "m1", "policy_number": "990414352", "status": "Active",
+              "active": True, "sync_owner": "rsg-import", "expiration_date": "2026-12-10",
+              "nowcerts_insured_guid": "ins-1", "lines_of_business": "Personal Auto",
+              "carrier": "PROGRESSIVE", "premium_amount": 4618.55, "effective_date": "2025-06-10",
+              "renewed_policy": None}],
+            [{"nowcerts_insured_guid": "ins-1", "insured_name": "Steven Prak", "active": True}],
+            [],
+            [],
+            [],
+            [],
+        ]
+        mock_get_supa.return_value = supa
+
+        resp = client.get(
+            "/api/hermes/investigate-policy",
+            params={"policy_number": "990414352", "client_name": "Steven Prak"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["policy_number"] == "990414352"
+        assert data["verdict"] == "outcome_a_stale_mirror"
+        assert data["ams"]["status"] == "Cancelled"
+
 
 def test_requires_confirmation_for_write_like_commands() -> None:
     from hermes.api import requires_confirmation

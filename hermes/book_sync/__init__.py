@@ -14,10 +14,18 @@ from hermes.book_sync.health import (
     DriftCheck,
     run_book_sync_health,
 )
+from hermes.book_sync.investigate import (
+    PolicyInvestigationReport,
+    RecommendedAction,
+    investigate_policy,
+)
 
 __all__ = [
     "BookSyncReport",
     "CarrierBreakdown",
     "DriftCheck",
+    "PolicyInvestigationReport",
+    "RecommendedAction",
+    "investigate_policy",
     "run_book_sync_health",
 ]
