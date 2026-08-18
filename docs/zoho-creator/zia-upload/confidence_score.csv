@@ -1,0 +1,26 @@
+ID,Condition,Points
+S1,Policy_Number blank,-40
+S2,NowCerts_Policy_GUID blank,-25
+S3,CRM_Policy_ID blank,-10
+S4,Insured_Name blank,-10
+S5,Carrier blank,-8
+S6,Line_of_Business blank,-5
+S7,Effective_Date or Expiration_Date blank,-10 each
+S8,Policy_Status blank or unnormalized,-15
+S9,AMS vs CRM status differ,-12
+S10,AMS vs Creator status differ,-12
+S11,Premium blank on Active policy,-15
+S12,Abs premium $ delta >= 25,-10
+S13,Abs premium % delta >= 1,-8
+S14,Abs premium $ delta >= 500,-15 extra
+S15,Duplicate_Count > 1,-30
+S16,Cancellation without class,-12
+S17,Rewrite detected but Rewrite_Of empty,-15
+S18,Lineage pointer set but target missing,-12
+S19,Last_Synced older than 48h,-8
+S20,Last_Synced older than 7 days,-12 extra
+S21,Renewal_Queue stale,-10
+S22,Pending_Queue_Jobs > 0,-8
+S23,Active=true but status in EXCLUDE_STATUSES,-20
+S24,Active=false but status = Active,-15
+S25,Agency Bill Active missing Agency_Fee,-5

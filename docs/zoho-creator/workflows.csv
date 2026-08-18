@@ -1,0 +1,28 @@
+Workflow_Name,Form_or_App,Trigger,Phase,Function,Description
+Compose Policy Name,Policy_Master,On add; On edit,1,inline,Set Name = Policy_Number + " — " + Carrier (or Policy_Number if Carrier empty)
+Derive Active Flag,Policy_Master,On add; On edit,1,inline,Active = true only if Policy_Status == "Active"
+Require Cancel Class,Policy_Master,On add; On edit,1,inline,If Policy_Status in Cancelled|Flat Cancel|Pending Cancel and Cancellation_Class empty → alert and prevent save
+Require Rewrite Link,Policy_Master,On add; On edit,1,inline,If Is_Rewrite = true and Rewrite_Of empty → alert
+Set Policy Tier,Policy_Master,On add; On edit,1,inline,A if Annualized_Premium >= 5000 or (Insured_Type=Commercial and Premium >= 2500); else B if Active or expiration within 90 days; else C
+Status History Hook,Policy_Master,On edit (Policy_Status or Active changed),1,thisapp.recon.writeStatusHistory,Insert Policy_Status_History row; never skip
+Initial Status History,Policy_Master,On add,1,thisapp.recon.writeStatusHistory,Insert first history row Old_Status empty
+Run Recon On Save,Policy_Master,On add; On edit if Run_Recon_On_Save,2,thisapp.recon.runOne,Then clear Run_Recon_On_Save
+Button Run Recon,Policy_Master,Custom button,2,thisapp.recon.runOne,CSR one record; Admin same
+Compose History Name,Policy_Status_History,On add,1,inline,Name = Policy_Number + " " + Changed_At
+Block History Edit,Policy_Status_History,On edit,1,inline,CSR: deny all edits. Admin: allow Notes/Raw_Payload only if needed; production prefer deny
+Compose Queue Name,Renewal_Queue,On add; On edit,1,inline,Name = Policy_Number + " x " + Expiration_Date
+Touch Stamp,Renewal_Queue,On edit of Queue_Status|Last_Contact_Date|Strategy_Notes|Risk_Status,1,inline,Set Last_Touched_At = now. Do NOT stamp on other fields or form open
+One Open Queue Row,Renewal_Queue,On add; On edit,1,inline,If Queue_Status in Open|In Progress|Waiting Client|Waiting Carrier|Stale count other rows for same Policy with those statuses > 0 → alert
+Recompute Cadence,Renewal_Queue,On add; On edit Expiration_Date,2,inline,Set Cadence_Bucket from days to expiration
+Recompute Risk,Renewal_Queue,On add; On edit Premium_* or Expiration_Date,2,inline,Hermes classifier: increase first then timing
+Compose Audit Name,Policy_Audit,On add,2,inline,Name = Policy_Number + " @ " + Run_At
+Compose Exception Name,Audit_Exceptions,On add; On edit,2,inline,Name = Severity + " — " + Policy_Number + " — " + Verdict
+Exception First Touch,Audit_Exceptions,On edit Status to In Progress,3,inline,If First_Touched_At empty set now
+Exception Resolve Guard,Audit_Exceptions,On edit Status to Resolved,3,inline,Require Resolution_Notes and Resolution_Class; Gretchen cannot resolve High/Critical
+Exception SLA Hours,Audit_Exceptions,On add,2,thisapp.recon.upsertException,Set SLA_Hours from severity; SLA_Due_At = Opened_At + hours
+Daily Recon Schedule,App,Schedule 06:45 ET daily,3,thisapp.recon.runDaily,Tier A/B + window + dirty verdicts
+Weekly Tier C Schedule,App,Schedule Sunday 07:00 ET,3,thisapp.recon.runDaily,Filter Policy_Tier = C and inactive
+SLA Sweep Schedule,App,Schedule hourly 08:00-18:00 ET weekdays,3,thisapp.recon.upsertException,Set SLA_Breached; notify
+CRM Pull Schedule,App,Schedule 06:40 ET daily,4,thisapp.recon.pullCRM,After expected book sync; read-only
+Button Approve CRM Draft,Policy_Master,Custom button Admin only,4,stub,Sets Approved_To_Push only; does not call CRM until separate Push button
+Button Push CRM Draft,Policy_Master,Custom button Admin only,4,gated stub,Execute zoho.crm.updateRecord only if approval gate passes

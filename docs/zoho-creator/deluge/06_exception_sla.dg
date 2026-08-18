@@ -1,0 +1,179 @@
+// Exception upsert + SLA. Spec sections 6.3, 9.3, 11.
+
+int thisapp.recon.slaHours(string severity)
+{
+	if(severity == "Critical")
+	{
+		return 4;
+	}
+	if(severity == "High")
+	{
+		return 24;
+	}
+	if(severity == "Medium")
+	{
+		return 72;
+	}
+	return 120;
+}
+
+
+int thisapp.recon.upsertException(int auditID)
+{
+	aud = Policy_Audit[ID == auditID];
+	if(!aud.count())
+	{
+		return 0;
+	}
+	verdict = aud.Verdict;
+	if(verdict == "clean_match")
+	{
+		thisapp.recon.maybeAutoClose(aud.Policy, verdict);
+		return 0;
+	}
+	conf = ifnull(aud.Confidence, 0);
+	sev = thisapp.recon.severityFor(verdict, aud.Policy, conf);
+	hours = thisapp.recon.slaHours(sev);
+	opened = zoho.currenttime;
+	due = opened.addHour(hours);
+	existing = Audit_Exceptions[Policy == aud.Policy && Verdict == verdict && Status in {"Open", "In Progress", "Waiting"}];
+	nm = sev + " — " + aud.Policy_Number + " — " + verdict;
+	if(existing.count())
+	{
+		ex = existing;
+		ex.Audit=auditID;
+		ex.Severity=sev;
+		ex.Name=nm;
+		if(thisapp.recon.severityRank(sev) > thisapp.recon.severityRank(ex.Severity))
+		{
+			ex.SLA_Hours=hours;
+			ex.SLA_Due_At=due;
+		}
+		aud.Exception_Created=true;
+		aud.Related_Exception=ex.ID;
+		return ex.ID;
+	}
+	ownerEmail = thisapp.recon.defaultOwner(sev);
+	row = insert into Audit_Exceptions
+	[
+		Name=nm
+		Policy=aud.Policy
+		Policy_Number=aud.Policy_Number
+		Audit=auditID
+		Verdict=verdict
+		Severity=sev
+		Status="Open"
+		SLA_Hours=hours
+		SLA_Due_At=due
+		SLA_Breached=false
+		Owner=ownerEmail
+		Opened_At=opened
+		Notify_Sent=false
+	];
+	aud.Exception_Created=true;
+	aud.Related_Exception=row;
+	return row;
+}
+
+
+int thisapp.recon.severityRank(string sev)
+{
+	if(sev == "Critical")
+	{
+		return 4;
+	}
+	if(sev == "High")
+	{
+		return 3;
+	}
+	if(sev == "Medium")
+	{
+		return 2;
+	}
+	return 1;
+}
+
+
+// Assign by role label. Replace with actual Creator user emails in production.
+
+string thisapp.recon.defaultOwner(string severity)
+{
+	if(severity == "High" || severity == "Critical")
+	{
+		return "lamar";
+	}
+	return "gretchen";
+}
+
+
+void thisapp.recon.maybeAutoClose(int policyID, string newVerdict)
+{
+	if(newVerdict != "clean_match")
+	{
+		return;
+	}
+	openRows = Audit_Exceptions[Policy == policyID && Status in {"Open", "In Progress", "Waiting"}];
+	for each ex in openRows
+	{
+		if(ex.Verdict == "pending_sync" || ex.Verdict == "stale_crm")
+		{
+			ex.Status="Resolved";
+			ex.Resolution_Class="Data lag";
+			ex.Resolution_Notes="Auto-closed: subsequent audit was clean_match.";
+			ex.Resolved_At=zoho.currenttime;
+		}
+	}
+}
+
+
+// Hourly SLA sweep.
+
+void thisapp.recon.slaSweep()
+{
+	openRows = Audit_Exceptions[Status in {"Open", "In Progress", "Waiting"} && SLA_Breached == false];
+	for each ex in openRows
+	{
+		if(ex.SLA_Due_At != null && zoho.currenttime > ex.SLA_Due_At)
+		{
+			ex.SLA_Breached=true;
+			thisapp.recon.notifyException(ex.ID, "SLA_Breached");
+		}
+	}
+}
+
+
+void thisapp.recon.notifyException(int exceptionID, string eventName)
+{
+	ex = Audit_Exceptions[ID == exceptionID];
+	if(!ex.count())
+	{
+		return;
+	}
+	if(eventName != "SLA_Breached")
+	{
+		if(ex.Notify_Sent == true && ex.Last_Notify_At != null)
+		{
+			ageHours = (zoho.currenttime.toLong() - ex.Last_Notify_At.toLong()) / 3600000;
+			if(ex.Severity == "Critical" && ageHours < 24)
+			{
+				return;
+			}
+		}
+	}
+	subj = "[RSG Recon] " + eventName + " " + ex.Severity + " " + ex.Policy_Number + " " + ex.Verdict;
+	body = "Policy: " + ex.Policy_Number + "\nVerdict: " + ex.Verdict + "\nSeverity: " + ex.Severity + "\nDue: " + ex.SLA_Due_At;
+	// Replace with actual user emails after install.
+	sendmail
+	[
+		from: zoho.adminuserid
+		to: zoho.adminuserid
+		subject: subj
+		message: body
+	]
+	ex.Notify_Sent=true;
+	ex.Last_Notify_At=zoho.currenttime;
+	if(ex.Severity == "High" || ex.Severity == "Critical")
+	{
+		ex.Escalated_To_Lamar=true;
+	}
+}

@@ -1,0 +1,280 @@
+// Orchestrator: one policy + daily batch. Spec section 9.
+
+int thisapp.recon.runOne(int policyID, string runType, string runID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return 0;
+	}
+	if(ifnull(runID, "") == "")
+	{
+		runID = zoho.currenttime.toString("yyyyMMddHHmmss");
+	}
+	if(ifnull(runType, "") == "")
+	{
+		runType = "manual";
+	}
+	norm = thisapp.recon.normalizeStatus(ifnull(rec.AMS_Status_Raw, rec.Policy_Status));
+	if(norm != "" && rec.Policy_Status != norm)
+	{
+		rec.Policy_Status=norm;
+		rec.Active=thisapp.recon.isActiveStatus(norm);
+	}
+	bt = thisapp.recon.normalizeBilling(ifnull(rec.Billing_Type, ""));
+	if(bt != "")
+	{
+		rec.Billing_Type=bt;
+	}
+	rec.Policy_Tier=thisapp.recon.computeTier(policyID);
+	rw = thisapp.recon.detectRewrite(policyID);
+	if(rw.get("detected") == true && rw.get("successor_id") != 0)
+	{
+		thisapp.recon.applyRewriteLink(policyID);
+	}
+	thisapp.recon.refreshQueueDerived(policyID);
+	scoreMap = thisapp.recon.scoreDetail(policyID);
+	vmap = thisapp.recon.verdictDetail(policyID);
+	verdict = vmap.get("verdict");
+	score = scoreMap.get("score");
+	stamp = zoho.currenttime;
+	qstale = thisapp.recon.evaluateQueueStaleFromPolicy(policyID);
+	prem = rec.Premium;
+	crmPrem = rec.CRM_Premium;
+	delta = null;
+	deltaPct = null;
+	if(prem != null && crmPrem != null)
+	{
+		delta = prem - crmPrem;
+		if(crmPrem != 0)
+		{
+			dabs = delta;
+			if(dabs < 0)
+			{
+				dabs = dabs * -1;
+			}
+			deltaPct = (dabs / crmPrem) * 100;
+		}
+	}
+	nm = rec.Policy_Number + " @ " + stamp;
+	aud = insert into Policy_Audit
+	[
+		Name=nm
+		Policy=policyID
+		Policy_Number=rec.Policy_Number
+		Run_ID=runID
+		Run_At=stamp
+		Run_Type=runType
+		Verdict=verdict
+		Confidence=score
+		AMS_Status=thisapp.recon.normalizeStatus(ifnull(rec.AMS_Status_Raw, rec.Policy_Status))
+		CRM_Status=thisapp.recon.normalizeStatus(ifnull(rec.CRM_Status, ""))
+		Creator_Status=thisapp.recon.normalizeStatus(ifnull(rec.Policy_Status, ""))
+		AMS_Premium=prem
+		CRM_Premium=crmPrem
+		Premium_Delta=delta
+		Premium_Delta_Pct=deltaPct
+		Queue_Stale=qstale.get("stale")
+		Duplicate_Count=scoreMap.get("duplicate_count")
+		Rewrite_Linked=if(rec.Rewrite_Of != null, true, false)
+		Pending_Queue_Jobs=ifnull(rec.Pending_Queue_Jobs, 0)
+		Findings=vmap.get("findings")
+		Recommendation=vmap.get("recommendation")
+		Score_Breakdown=scoreMap.get("breakdown")
+		Exception_Created=false
+	];
+	rec.Last_Verdict=verdict;
+	rec.Last_Confidence=score;
+	rec.Last_Audit_Date=stamp;
+	rec.Run_Recon_On_Save=false;
+	thisapp.recon.upsertException(aud);
+	if(verdict != "clean_match")
+	{
+		ex = Audit_Exceptions[Audit == aud && Status == "Open"];
+		if(ex.count() && (ex.Severity == "Critical" || (ex.Severity == "High" && verdict == "missing_in_ams")))
+		{
+			thisapp.recon.notifyException(ex.ID, "New exception");
+		}
+	}
+	return aud;
+}
+
+
+void thisapp.recon.runDaily()
+{
+	runID = "daily-" + zoho.currenttime.toString("yyyyMMddHHmmss");
+	windowDate = zoho.currentdate.addDay(120);
+	targets = Policy_Master[Policy_Tier == "A" || Policy_Tier == "B" || Active == true || Expiration_Date <= windowDate || Last_Verdict != "clean_match" || Last_Audit_Date == null];
+	for each rec in targets
+	{
+		thisapp.recon.runOne(rec.ID, "scheduled_daily", runID);
+	}
+	thisapp.recon.slaSweep();
+}
+
+
+void thisapp.recon.runWeeklyTierC()
+{
+	runID = "tierc-" + zoho.currenttime.toString("yyyyMMddHHmmss");
+	targets = Policy_Master[Policy_Tier == "C"];
+	for each rec in targets
+	{
+		thisapp.recon.runOne(rec.ID, "scheduled_tier", runID);
+	}
+}
+
+
+void thisapp.recon.refreshQueueDerived(int policyID)
+{
+	q = Renewal_Queue[Policy == policyID && Dismissed == false];
+	if(!q.count())
+	{
+		return;
+	}
+	for each row in q
+	{
+		row.Cadence_Bucket=thisapp.recon.cadenceBucket(row.Expiration_Date);
+		row.Risk_Status=thisapp.recon.classifyRisk(row.ID);
+		st = thisapp.recon.evaluateQueueStale(row.ID);
+		row.Stale_Flag=st.get("stale");
+		row.Stale_Reason=st.get("reason");
+		if(st.get("stale") == true && row.Queue_Status == "Open")
+		{
+			row.Queue_Status="Stale";
+		}
+	}
+}
+
+
+string thisapp.recon.cadenceBucket(date exp)
+{
+	if(exp == null)
+	{
+		return "";
+	}
+	days = daysBetween(zoho.currentdate, exp);
+	if(days < 0)
+	{
+		return "Past Due";
+	}
+	if(days <= 30)
+	{
+		return "30";
+	}
+	if(days <= 60)
+	{
+		return "60";
+	}
+	if(days <= 90)
+	{
+		return "90";
+	}
+	return "";
+}
+
+
+string thisapp.recon.classifyRisk(int queueID)
+{
+	row = Renewal_Queue[ID == queueID];
+	if(!row.count())
+	{
+		return "SAFE";
+	}
+	cur = ifnull(row.Premium_Current, 0);
+	ren = row.Premium_Renewal;
+	if(ren != null && cur > 0)
+	{
+		inc = ((ren - cur) / cur) * 100;
+		if(inc > 15)
+		{
+			return "CRITICAL";
+		}
+		if(inc >= 5)
+		{
+			return "AT_RISK";
+		}
+	}
+	if(row.Expiration_Date == null)
+	{
+		return "SAFE";
+	}
+	days = daysBetween(zoho.currentdate, row.Expiration_Date);
+	if(days <= 30)
+	{
+		return "CRITICAL";
+	}
+	if(days <= 90)
+	{
+		return "AT_RISK";
+	}
+	return "SAFE";
+}
+
+
+map thisapp.recon.evaluateQueueStale(int queueID)
+{
+	out = Map();
+	out.put("stale", false);
+	out.put("reason", "");
+	row = Renewal_Queue[ID == queueID];
+	if(!row.count())
+	{
+		return out;
+	}
+	pol = Policy_Master[ID == row.Policy];
+	pstat = thisapp.recon.normalizeStatus(ifnull(pol.Policy_Status, ""));
+	openish = {"Open", "In Progress", "Waiting Client", "Waiting Carrier", "Stale"};
+	if(pstat == "Cancelled" || pstat == "Flat Cancel" || pstat == "Rewritten" || pstat == "Renewed" || pstat == "Non-Renewed")
+	{
+		if(openish.contains(row.Queue_Status))
+		{
+			out.put("stale", true);
+			out.put("reason", "Policy_Status=" + pstat + " but queue still " + row.Queue_Status);
+			return out;
+		}
+	}
+	if(pol.Expiration_Date != null && row.Expiration_Date != null && pol.Expiration_Date != row.Expiration_Date)
+	{
+		out.put("stale", true);
+		out.put("reason", "Queue Expiration_Date != Policy_Master Expiration_Date");
+		return out;
+	}
+	ageDays = 0;
+	if(row.Last_Touched_At != null)
+	{
+		ageDays = daysBetween(row.Last_Touched_At.toDate(), zoho.currentdate);
+	}
+	else
+	{
+		ageDays = 999;
+	}
+	bucket = ifnull(row.Cadence_Bucket, thisapp.recon.cadenceBucket(row.Expiration_Date));
+	qstat = ifnull(row.Queue_Status, "");
+	if((bucket == "30" || bucket == "Past Due") && (qstat == "Open" || qstat == "In Progress") && ageDays > 7)
+	{
+		out.put("stale", true);
+		out.put("reason", "Cadence " + bucket + " untouched " + ageDays + " days");
+		return out;
+	}
+	if(bucket == "60" && qstat == "Open" && ageDays > 14)
+	{
+		out.put("stale", true);
+		out.put("reason", "Cadence 60 Open untouched " + ageDays + " days");
+		return out;
+	}
+	return out;
+}
+
+
+map thisapp.recon.evaluateQueueStaleFromPolicy(int policyID)
+{
+	q = Renewal_Queue[Policy == policyID && Dismissed == false];
+	out = Map();
+	out.put("stale", false);
+	out.put("reason", "");
+	if(!q.count())
+	{
+		return out;
+	}
+	return thisapp.recon.evaluateQueueStale(q.ID);
+}

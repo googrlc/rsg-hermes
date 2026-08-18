@@ -1,0 +1,24 @@
+Form,Section,Display_Label,Deluge_Name,Data_Type,Length,Mandatory,Unique,Default_Value,Picklist_Key,Formula,Notes
+Renewal_Queue,Core,Name,Name,Single Line,255,Y,N,,,,"Auto: Policy_Number + "" x "" + Expiration_Date"
+Renewal_Queue,Core,Policy,Policy,Lookup Policy_Master,,Y,N,,,,Deluge: at most one Open row per policy
+Renewal_Queue,Core,Policy Number,Policy_Number,Single Line,100,Y,N,,,,Snapshot
+Renewal_Queue,Core,Insured Name,Insured_Name,Single Line,255,Y,N,,,,CSR may correct
+Renewal_Queue,Core,Carrier,Carrier,Single Line,150,N,N,,,,Snapshot
+Renewal_Queue,Core,Line of Business,Line_of_Business,Single Line,150,N,N,,,,
+Renewal_Queue,Dates,Expiration Date,Expiration_Date,Date,,Y,N,,,,
+Renewal_Queue,Dates,Effective Date,Effective_Date,Date,,N,N,,,,
+Renewal_Queue,Money,Premium Current,Premium_Current,Currency,16.2,N,N,,,,
+Renewal_Queue,Money,Premium Renewal,Premium_Renewal,Currency,16.2,N,N,,,,Human-entered; never invent
+Renewal_Queue,Money,Increase Percent,Increase_Percent,Formula Decimal,,,N,,,if(Premium_Current==0,0
+Renewal_Queue,Risk,Risk Status,Risk_Status,Picklist,20,Y,N,SAFE,risk_status,,SAFE|AT_RISK|CRITICAL|RENEWED|LAPSED
+Renewal_Queue,Risk,Queue Status,Queue_Status,Picklist,30,Y,N,Open,queue_status,,
+Renewal_Queue,Risk,Cadence Bucket,Cadence_Bucket,Picklist,20,N,N,,cadence_bucket,,90|60|30|Past Due
+Renewal_Queue,Work,Last Contact Date,Last_Contact_Date,Date,,N,N,,,,
+Renewal_Queue,Work,Last Touched At,Last_Touched_At,Date-Time,,Y,N,,,,Default now; not on form-open
+Renewal_Queue,Work,Stale Flag,Stale_Flag,Checkbox,,N,N,false,,,Set by agent
+Renewal_Queue,Work,Stale Reason,Stale_Reason,Multi Line,2000,N,N,,,,
+Renewal_Queue,Work,Eligibility,Eligibility,Picklist,40,N,N,eligible,eligibility,,
+Renewal_Queue,Work,Assigned To,Assigned_To,Users,,N,N,,,,Default Gretchen
+Renewal_Queue,Work,Strategy Notes,Strategy_Notes,Multi Line,32000,N,N,,,,
+Renewal_Queue,Work,Dismissed,Dismissed,Checkbox,,N,N,false,,,Soft-remove
+Renewal_Queue,Work,Hermes Renewal ID,Hermes_Renewal_ID,Single Line,36,N,N,,,,project_85_renewals.id

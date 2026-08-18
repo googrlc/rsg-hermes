@@ -1,0 +1,263 @@
+// thisapp.recon.score
+// Returns 0–100 integer. Also writes last breakdown into a Map returned via
+// thisapp.recon.scoreDetail for Policy_Audit.Score_Breakdown.
+// Spec section 7. Do not invent extra deductions.
+
+int thisapp.recon.score(int policyID)
+{
+	detail = thisapp.recon.scoreDetail(policyID);
+	return detail.get("score");
+}
+
+
+map thisapp.recon.scoreDetail(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	out = Map();
+	lines = List();
+	score = 100;
+	if(!rec.count())
+	{
+		out.put("score", 0);
+		out.put("breakdown", "S0 -100 policy not found");
+		return out;
+	}
+	status = thisapp.recon.normalizeStatus(ifnull(rec.Policy_Status, rec.AMS_Status_Raw));
+	crmStatus = thisapp.recon.normalizeStatus(ifnull(rec.CRM_Status, ""));
+	amsStatus = thisapp.recon.normalizeStatus(ifnull(rec.AMS_Status_Raw, rec.Policy_Status));
+	dup = thisapp.recon.duplicateCount(policyID);
+	prem = rec.Premium;
+	crmPrem = rec.CRM_Premium;
+	deltaAbs = 0.0;
+	deltaPct = 0.0;
+	hasDelta = false;
+	if(prem != null && crmPrem != null)
+	{
+		deltaAbs = prem - crmPrem;
+		if(deltaAbs < 0)
+		{
+			deltaAbs = deltaAbs * -1;
+		}
+		hasDelta = true;
+		if(crmPrem != 0)
+		{
+			deltaPct = (deltaAbs / crmPrem) * 100;
+		}
+	}
+	if(ifnull(rec.Policy_Number, "") == "")
+	{
+		score = score - 40;
+		lines.add("S1 -40 Policy_Number blank");
+	}
+	if(ifnull(rec.NowCerts_Policy_GUID, "") == "")
+	{
+		score = score - 25;
+		lines.add("S2 -25 NowCerts_Policy_GUID blank");
+	}
+	if(ifnull(rec.CRM_Policy_ID, "") == "")
+	{
+		score = score - 10;
+		lines.add("S3 -10 CRM_Policy_ID blank");
+	}
+	if(ifnull(rec.Insured_Name, "") == "")
+	{
+		score = score - 10;
+		lines.add("S4 -10 Insured_Name blank");
+	}
+	if(ifnull(rec.Carrier, "") == "")
+	{
+		score = score - 8;
+		lines.add("S5 -8 Carrier blank");
+	}
+	if(ifnull(rec.Line_of_Business, "") == "")
+	{
+		score = score - 5;
+		lines.add("S6 -5 Line_of_Business blank");
+	}
+	if(rec.Effective_Date == null)
+	{
+		score = score - 10;
+		lines.add("S7 -10 Effective_Date blank");
+	}
+	if(rec.Expiration_Date == null)
+	{
+		score = score - 10;
+		lines.add("S7 -10 Expiration_Date blank");
+	}
+	if(status == "")
+	{
+		score = score - 15;
+		lines.add("S8 -15 Policy_Status blank or unnormalized");
+	}
+	if(amsStatus != "" && crmStatus != "" && amsStatus != crmStatus)
+	{
+		score = score - 12;
+		lines.add("S9 -12 AMS vs CRM status differ");
+	}
+	if(amsStatus != "" && status != "" && amsStatus != status)
+	{
+		score = score - 12;
+		lines.add("S10 -12 AMS vs Creator status differ");
+	}
+	if(status == "Active" && prem == null)
+	{
+		score = score - 15;
+		lines.add("S11 -15 Premium blank on Active policy");
+	}
+	if(hasDelta && deltaAbs >= 25)
+	{
+		score = score - 10;
+		lines.add("S12 -10 abs premium $ delta >= 25");
+	}
+	if(hasDelta && crmPrem != 0 && deltaPct >= 1)
+	{
+		score = score - 8;
+		lines.add("S13 -8 abs premium % delta >= 1");
+	}
+	if(hasDelta && deltaAbs >= 500)
+	{
+		score = score - 15;
+		lines.add("S14 -15 abs premium $ delta >= 500 extra");
+	}
+	if(dup > 1)
+	{
+		score = score - 30;
+		lines.add("S15 -30 Duplicate_Count > 1");
+	}
+	if(thisapp.recon.isCancelStatus(status) && ifnull(rec.Cancellation_Class, "") == "")
+	{
+		score = score - 12;
+		lines.add("S16 -12 Cancellation without class");
+	}
+	if(rec.Is_Rewrite == true && rec.Rewrite_Of == null)
+	{
+		score = score - 15;
+		lines.add("S17 -15 Rewrite detected but Rewrite_Of empty");
+	}
+	if(thisapp.recon.lineageBroken(policyID))
+	{
+		score = score - 12;
+		lines.add("S18 -12 Lineage pointer set but target missing");
+	}
+	if(rec.Last_Synced != null)
+	{
+		ageHours = (zoho.currenttime.toLong() - rec.Last_Synced.toLong()) / 3600000;
+		if(ageHours > 48)
+		{
+			score = score - 8;
+			lines.add("S19 -8 Last_Synced older than 48h");
+		}
+		if(ageHours > 168)
+		{
+			score = score - 12;
+			lines.add("S20 -12 Last_Synced older than 7 days extra");
+		}
+	}
+	if(thisapp.recon.queueIsStale(policyID))
+	{
+		score = score - 10;
+		lines.add("S21 -10 Renewal_Queue stale");
+	}
+	if(ifnull(rec.Pending_Queue_Jobs, 0) > 0)
+	{
+		score = score - 8;
+		lines.add("S22 -8 Pending_Queue_Jobs > 0");
+	}
+	if(rec.Active == true && thisapp.recon.isExcludeStatus(status))
+	{
+		score = score - 20;
+		lines.add("S23 -20 Active=true but status in EXCLUDE_STATUSES");
+	}
+	if(rec.Active == false && status == "Active")
+	{
+		score = score - 15;
+		lines.add("S24 -15 Active=false but status = Active");
+	}
+	bt = ifnull(rec.Billing_Type, "");
+	if(status == "Active" && bt.contains("Agency") && rec.Agency_Fee == null)
+	{
+		score = score - 5;
+		lines.add("S25 -5 Agency Bill Active missing Agency_Fee");
+	}
+	if(score < 0)
+	{
+		score = 0;
+	}
+	if(score > 100)
+	{
+		score = 100;
+	}
+	out.put("score", score);
+	out.put("breakdown", lines.toString("\n"));
+	out.put("duplicate_count", dup);
+	out.put("delta_abs", deltaAbs);
+	out.put("delta_pct", deltaPct);
+	return out;
+}
+
+
+int thisapp.recon.duplicateCount(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return 0;
+	}
+	n = 0;
+	num = ifnull(rec.Policy_Number, "");
+	guid = ifnull(rec.NowCerts_Policy_GUID, "");
+	if(num != "")
+	{
+		n = Policy_Master[Policy_Number == num].count();
+	}
+	g = 0;
+	if(guid != "")
+	{
+		g = Policy_Master[NowCerts_Policy_GUID == guid].count();
+	}
+	if(g > n)
+	{
+		return g;
+	}
+	return n;
+}
+
+
+bool thisapp.recon.lineageBroken(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return false;
+	}
+	if(ifnull(rec.Renewed_Policy_GUID, "") != "")
+	{
+		found = Policy_Master[NowCerts_Policy_GUID == rec.Renewed_Policy_GUID].count();
+		if(found == 0)
+		{
+			return true;
+		}
+	}
+	if(ifnull(rec.Successor_Policy_Number, "") != "")
+	{
+		found2 = Policy_Master[Policy_Number == rec.Successor_Policy_Number].count();
+		if(found2 == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+
+bool thisapp.recon.queueIsStale(int policyID)
+{
+	q = Renewal_Queue[Policy == policyID && Dismissed == false && Queue_Status in {"Open", "In Progress", "Waiting Client", "Waiting Carrier", "Stale"}];
+	if(!q.count())
+	{
+		return false;
+	}
+	row = q.getAll().get(0);
+	stale = thisapp.recon.evaluateQueueStale(row.get("ID"));
+	return stale.get("stale");
+}

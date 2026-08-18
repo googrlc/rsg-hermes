@@ -1,0 +1,20 @@
+Form,Section,Display_Label,Deluge_Name,Data_Type,Length,Mandatory,Unique,Default_Value,Picklist_Key,Formula,Notes
+Audit_Exceptions,Core,Name,Name,Single Line,255,Y,N,,,,"Auto: Severity + "" — "" + Policy_Number + "" — "" + Verdict"
+Audit_Exceptions,Core,Policy,Policy,Lookup Policy_Master,,Y,N,,,,
+Audit_Exceptions,Core,Policy Number,Policy_Number,Single Line,100,Y,N,,,,
+Audit_Exceptions,Core,Audit,Audit,Lookup Policy_Audit,,Y,N,,,,
+Audit_Exceptions,Core,Verdict,Verdict,Picklist,40,Y,N,,verdict,,
+Audit_Exceptions,Work,Severity,Severity,Picklist,20,Y,N,,severity,,
+Audit_Exceptions,Work,Status,Status,Picklist,20,Y,N,Open,exception_status,,
+Audit_Exceptions,SLA,SLA Hours,SLA_Hours,Number,5,Y,N,,,,From severity matrix
+Audit_Exceptions,SLA,SLA Due At,SLA_Due_At,Date-Time,,Y,N,,,,Opened_At + SLA_Hours
+Audit_Exceptions,SLA,SLA Breached,SLA_Breached,Checkbox,,N,N,false,,,Set by schedule
+Audit_Exceptions,Work,Owner,Owner,Users,,Y,N,,,,Low/Med Gretchen; High/Crit Lamar
+Audit_Exceptions,Time,Opened At,Opened_At,Date-Time,,Y,N,,,,
+Audit_Exceptions,Time,First Touched At,First_Touched_At,Date-Time,,N,N,,,,
+Audit_Exceptions,Time,Resolved At,Resolved_At,Date-Time,,N,N,,,,
+Audit_Exceptions,Close,Resolution Notes,Resolution_Notes,Multi Line,32000,N,N,,,,Required to resolve
+Audit_Exceptions,Close,Resolution Class,Resolution_Class,Picklist,40,N,N,,resolution_class,,Required to resolve
+Audit_Exceptions,Notify,Escalated To Lamar,Escalated_To_Lamar,Checkbox,,N,N,false,,,
+Audit_Exceptions,Notify,Notify Sent,Notify_Sent,Checkbox,,N,N,false,,,Idempotency
+Audit_Exceptions,Notify,Last Notify At,Last_Notify_At,Date-Time,,N,N,,,,

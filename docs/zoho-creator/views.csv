@@ -1,0 +1,13 @@
+View_Name,Form,Audience,Filter,Sort,Columns
+All Policies,Policy_Master,Admin,all,Insured_Name asc,Policy_Number;Insured_Name;Carrier;Policy_Status;Premium;Last_Verdict;Last_Confidence;Policy_Tier
+Active Book,Policy_Master,Both,Active = true,Annualized_Premium desc,Policy_Number;Insured_Name;Carrier;Line_of_Business;Premium;Expiration_Date;Last_Verdict
+Needs Recon,Policy_Master,Both,Last_Verdict != clean_match OR Last_Audit_Date is null,Last_Confidence asc,Policy_Number;Insured_Name;Last_Verdict;Last_Confidence;Policy_Tier;Assigned_To
+CSR Queue,Audit_Exceptions,Gretchen,Status in (Open,In Progress) AND Severity in (Low,Medium),SLA_Due_At asc,Policy_Number;Verdict;Severity;Status;SLA_Due_At;Owner
+Lamar Exceptions,Audit_Exceptions,Lamar,Severity in (High,Critical) AND Status not in (Resolved,Won't Fix),Severity desc then SLA_Due_At asc,Policy_Number;Verdict;Severity;Status;SLA_Due_At;SLA_Breached
+Stale Renewals,Renewal_Queue,Gretchen,Stale_Flag = true OR Queue_Status = Stale,Expiration_Date asc,Policy_Number;Insured_Name;Cadence_Bucket;Risk_Status;Last_Touched_At;Stale_Reason
+30-Day Radar,Renewal_Queue,Both,Cadence_Bucket in (30,Past Due) AND Dismissed = false,Risk_Status desc then Premium_Current desc,Policy_Number;Insured_Name;Expiration_Date;Premium_Current;Risk_Status;Queue_Status;Assigned_To
+Today's Audits,Policy_Audit,Admin,Run_At is today,Run_At desc,Policy_Number;Verdict;Confidence;Run_Type;Exception_Created
+SLA Breaches,Audit_Exceptions,Lamar,SLA_Breached = true AND Status not in (Resolved,Won't Fix),SLA_Due_At asc,Policy_Number;Verdict;Severity;SLA_Due_At;Owner
+Status History,Policy_Status_History,Admin,all,Changed_At desc,Policy_Number;Source_System;Old_Status;New_Status;Changed_At;Changed_By
+Rewrites,Policy_Master,Both,Is_Rewrite = true OR Policy_Status = Rewritten,Cancellation_Date desc,Policy_Number;Insured_Name;Successor_Policy_Number;Rewrite_Of;Cancellation_Class
+Tier A Daily,Policy_Master,Admin,Policy_Tier = A,Last_Audit_Date asc,Policy_Number;Insured_Name;Premium;Last_Verdict;Last_Confidence;Last_Audit_Date

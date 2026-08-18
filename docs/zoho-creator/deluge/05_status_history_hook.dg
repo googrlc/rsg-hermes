@@ -1,0 +1,44 @@
+// thisapp.recon.writeStatusHistory
+// Called from Policy_Master on add / on edit when Policy_Status or Active changes.
+
+int thisapp.recon.writeStatusHistory(int policyID, string oldStatus, string newStatus, string source)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return 0;
+	}
+	oldA = false;
+	newA = rec.Active;
+	if(thisapp.recon.isActiveStatus(oldStatus))
+	{
+		oldA = true;
+	}
+	stamp = zoho.currenttime;
+	nm = rec.Policy_Number + " " + stamp;
+	row = insert into Policy_Status_History
+	[
+		Name=nm
+		Policy=policyID
+		Policy_Number=rec.Policy_Number
+		Source_System=ifnull(source, "Creator")
+		Old_Status=oldStatus
+		New_Status=newStatus
+		Old_Active=oldA
+		New_Active=newA
+		Changed_At=stamp
+		Changed_By=zoho.loginuser
+		Cancellation_Class=rec.Cancellation_Class
+	];
+	return row;
+}
+
+
+// Form workflow snippet (On Edit, Policy_Master):
+//
+// oldS = old.Policy_Status;
+// newS = input.Policy_Status;
+// if(oldS != newS || old.Active != input.Active)
+// {
+//     thisapp.recon.writeStatusHistory(input.ID, oldS, newS, "Creator");
+// }

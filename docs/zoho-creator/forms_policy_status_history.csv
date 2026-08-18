@@ -1,0 +1,14 @@
+Form,Section,Display_Label,Deluge_Name,Data_Type,Length,Mandatory,Unique,Default_Value,Picklist_Key,Formula,Notes
+Policy_Status_History,Core,Name,Name,Single Line,255,Y,N,,,,Auto: Policy_Number + " " + Changed_At
+Policy_Status_History,Core,Policy,Policy,Lookup Policy_Master,,Y,N,,,,
+Policy_Status_History,Core,Policy Number,Policy_Number,Single Line,100,Y,N,,,,Snapshot
+Policy_Status_History,Core,Source System,Source_System,Picklist,20,Y,N,,source_system,,AMS|CRM|Creator|Hermes
+Policy_Status_History,Core,Old Status,Old_Status,Picklist,40,N,N,,policy_status,,Empty on first insert
+Policy_Status_History,Core,New Status,New_Status,Picklist,40,Y,N,,policy_status,,
+Policy_Status_History,Core,Old Active,Old_Active,Checkbox,,N,N,,,,
+Policy_Status_History,Core,New Active,New_Active,Checkbox,,N,N,,,,
+Policy_Status_History,Core,Changed At,Changed_At,Date-Time,,Y,N,,,,Default now
+Policy_Status_History,Core,Changed By,Changed_By,Single Line,255,N,N,,,,User email or integration
+Policy_Status_History,Core,Change Reason,Change_Reason,Multi Line,2000,N,N,,,,
+Policy_Status_History,Core,Cancellation Class,Cancellation_Class,Picklist,40,N,N,,cancellation_class,,
+Policy_Status_History,Core,Raw Payload,Raw_Payload,Multi Line,32000,N,N,,,,Admin only view

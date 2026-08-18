@@ -1,0 +1,146 @@
+// thisapp.recon.normalizeStatus
+// Map any AMS/CRM spelling to the canonical Policy_Status picklist, or empty string.
+// Source: packages/rsg-hermes-core/hermes_core/canonical.py _STATUS_NORMALIZE
+
+string thisapp.recon.normalizeStatus(string raw)
+{
+	key = ifnull(raw, "").trim().toLowerCase();
+	if(key == "")
+	{
+		return "";
+	}
+	table = Map();
+	table.put("active", "Active");
+	table.put("in force", "Active");
+	table.put("inforce", "Active");
+	table.put("bound", "Active");
+	table.put("up for renewal", "Up for Renewal");
+	table.put("renewal pending", "Up for Renewal");
+	table.put("renewing", "Renewing");
+	table.put("in renewal", "Renewing");
+	table.put("renewal", "Renewing");
+	table.put("renewed", "Renewed");
+	table.put("rewritten", "Rewritten");
+	table.put("expired", "Expired");
+	table.put("cancelled", "Cancelled");
+	table.put("canceled", "Cancelled");
+	table.put("flat cancel", "Flat Cancel");
+	table.put("flat-cancel", "Flat Cancel");
+	table.put("flat cancelled", "Flat Cancel");
+	table.put("pending cancel", "Pending Cancel");
+	table.put("pending cancellation", "Pending Cancel");
+	table.put("cxl pending", "Pending Cancel");
+	table.put("non-renewed", "Non-Renewed");
+	table.put("non renewed", "Non-Renewed");
+	table.put("nonrenewed", "Non-Renewed");
+	table.put("lapsed", "Lapsed");
+	if(table.containKey(key))
+	{
+		return table.get(key);
+	}
+	return "";
+}
+
+
+// thisapp.recon.normalizeBilling
+// Source: hermes_core/canonical.py _BILLING_NORMALIZE
+
+string thisapp.recon.normalizeBilling(string raw)
+{
+	text = ifnull(raw, "").trim();
+	if(text == "")
+	{
+		return "";
+	}
+	key = text.toLowerCase().replaceAll("_", " ").trim();
+	table = Map();
+	table.put("direct bill", "Direct Bill");
+	table.put("direct", "Direct Bill");
+	table.put("db", "Direct Bill");
+	table.put("direct bill autopay", "Direct Bill");
+	table.put("db autopay", "Direct Bill");
+	table.put("agency bill", "Agency Bill");
+	table.put("agency", "Agency Bill");
+	table.put("ab", "Agency Bill");
+	table.put("agency bill autopay", "Agency Bill");
+	table.put("direct bill 100", "Direct Bill 100");
+	table.put("db 100", "Direct Bill 100");
+	table.put("db100", "Direct Bill 100");
+	table.put("agency bill 100", "Agency Bill 100");
+	table.put("ab 100", "Agency Bill 100");
+	table.put("ab100", "Agency Bill 100");
+	if(table.containKey(key))
+	{
+		return table.get(key);
+	}
+	return text.replaceAll("_", " ");
+}
+
+
+// True if normalized status is a cancel class used by cancel_reason_gap.
+
+bool thisapp.recon.isCancelStatus(string normalized)
+{
+	s = ifnull(normalized, "");
+	if(s == "Cancelled" || s == "Flat Cancel" || s == "Pending Cancel")
+	{
+		return true;
+	}
+	return false;
+}
+
+
+// Active checkbox must follow Policy_Status.
+
+bool thisapp.recon.isActiveStatus(string normalized)
+{
+	return ifnull(normalized, "") == "Active";
+}
+
+
+// Exclude statuses that must not be Active=true.
+
+bool thisapp.recon.isExcludeStatus(string normalized)
+{
+	s = ifnull(normalized, "");
+	if(s == "Expired" || s == "Cancelled" || s == "Flat Cancel" || s == "Non-Renewed" || s == "Lapsed")
+	{
+		return true;
+	}
+	return false;
+}
+
+
+// Policy tier: A / B / C. Never invent premium.
+
+string thisapp.recon.computeTier(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return "C";
+	}
+	ann = ifnull(rec.Annualized_Premium, ifnull(rec.Premium, 0));
+	prem = ifnull(rec.Premium, 0);
+	itype = ifnull(rec.Insured_Type, "");
+	if(ann >= 5000)
+	{
+		return "A";
+	}
+	if(itype == "Commercial" && prem >= 2500)
+	{
+		return "A";
+	}
+	days = 9999;
+	if(rec.Expiration_Date != null)
+	{
+		days = rec.Expiration_Date.getDayDiff(zoho.currentdate);
+		// getDayDiff is date2 - date1 in some accounts; use daysBetween if needed:
+		// days = daysBetween(zoho.currentdate, rec.Expiration_Date);
+	}
+	if(rec.Active == true || (days >= 0 && days <= 90))
+	{
+		return "B";
+	}
+	return "C";
+}
