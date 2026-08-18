@@ -3,15 +3,10 @@
 You are building a Zoho Creator application for Risk Solutions Group (RSG)
 called **RSG Policy Reconciliation**.
 
-Zia can attach PRD, BRD, RFP, and process diagrams. Attach these four PDFs:
+You are attaching **one document**: `ZIA_UPLOAD.pdf`. It is the complete
+package (PRD + BRD + RFP + process diagrams + field dictionaries + Deluge).
 
-- `PRD_RSG_Policy_Reconciliation.pdf`
-- `BRD_RSG_Policy_Reconciliation.pdf`
-- `RFP_RSG_Policy_Reconciliation.pdf`
-- `PROCESS_DIAGRAMS_RSG_Policy_Reconciliation.pdf`
-
-Also upload `ZIA_UPLOAD.xlsx` as the field dictionary and Deluge appendix.
-Do not invent fields or verdicts. Build **Phase 1 only**, then stop.
+Build Phase 1 only, then stop.
 
 Read those uploads as the only source of truth (`zia_prompt`,
 `specification_markdown`, `forms`, `picklists`, `deluge`, `sample_records`).

@@ -287,7 +287,7 @@ def main() -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "HOW_TO_ATTACH"
-    ws["A1"] = "Attach these requirement files to Zia: PRD PDF, BRD PDF, RFP PDF, PROCESS_DIAGRAMS PDF. If the dialog only accepts spreadsheets, upload this XLSX plus ZIA_UPLOAD.xlsx."
+    ws["A1"] = "ONE FILE: upload ZIA_UPLOAD.pdf to Zia. It contains PRD + BRD + RFP + diagrams + fields + Deluge. This XLSX is only a spreadsheet fallback."
     ws["A1"].alignment = Alignment(wrap_text=True)
     ws.column_dimensions["A"].width = 120
     for md_name, title, _pdf in docs:
@@ -304,6 +304,143 @@ def main() -> None:
     shutil.copyfile(xlsx, ART / "ZIA_REQUIREMENTS.xlsx")
     print("xlsx", xlsx, xlsx.stat().st_size)
 
+    combined = build_combined_html(docs, diagrams)
+    combined_pdf = ROOT / "ZIA_UPLOAD.pdf"
+    write_pdf(combined, combined_pdf)
+    shutil.copyfile(combined_pdf, OUT / "ZIA_UPLOAD.pdf")
+    shutil.copyfile(combined_pdf, ART / "ZIA_UPLOAD.pdf")
+    shutil.copyfile(combined_pdf, REQ / "ZIA_UPLOAD.pdf")
+    print("combined", combined_pdf, combined_pdf.stat().st_size)
+
+
+def csv_table(path: Path, max_rows: int | None = None) -> str:
+    import csv
+
+    with path.open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    if not rows:
+        return "<p>(empty)</p>"
+    names = list(rows[0].keys())
+    out = ["<table><thead><tr>"]
+    for n in names:
+        out.append(f"<th>{html.escape(n)}</th>")
+    out.append("</tr></thead><tbody>")
+    for i, row in enumerate(rows):
+        if max_rows is not None and i >= max_rows:
+            break
+        out.append("<tr>")
+        for n in names:
+            val = row.get(n, "") or ""
+            if len(val) > 400:
+                val = val[:400] + "…"
+            out.append(f"<td>{html.escape(val)}</td>")
+        out.append("</tr>")
+    out.append("</tbody></table>")
+    return "".join(out)
+
+
+def md_body(md: str) -> str:
+    try:
+        import markdown
+
+        return markdown.markdown(md, extensions=["tables", "fenced_code"])
+    except ImportError:
+        return "<pre>" + html.escape(md) + "</pre>"
+
+
+def build_combined_html(docs: list, diagrams: list) -> str:
+    prompt = (ROOT / "ZIA_PASTE_PROMPT.md").read_text(encoding="utf-8")
+    parts: list[str] = []
+    parts.append(f"""<!doctype html><html><head><meta charset="utf-8">
+<title>ZIA_UPLOAD — RSG Policy Reconciliation</title>
+<style>
+{CSS}
+h1.cover {{ page-break-before: avoid; font-size: 26pt; }}
+h1.section {{ page-break-before: always; }}
+pre.deluge {{ font-size: 7.5pt; line-height: 1.25; background: #f4f7f9; padding: 8px; white-space: pre-wrap; }}
+svg {{ width: 100%; height: auto; margin: 8px 0 20px; border: 1px solid #e2e8f0; }}
+.coverbox {{ border: 3px solid #c45c26; padding: 18px; margin: 16px 0; }}
+</style></head><body>
+<div class="banner"><strong>UPLOAD THIS ONE FILE TO ZIA</strong> &nbsp; Filename: ZIA_UPLOAD.pdf &nbsp; App: RSG Policy Reconciliation</div>
+<h1 class="cover">RSG Policy Reconciliation — Complete Requirements Package</h1>
+<p class="meta">Version 1.0 · 2026-08-18 · Risk Solutions Group · Zoho Creator · Zia AI</p>
+<div class="coverbox">
+<p><strong>This is the only document Zia needs.</strong> It contains the PRD, BRD, RFP, process diagrams, field dictionaries, picklists, verdicts, scoring table, Deluge, and seed acceptance cases.</p>
+<ol>
+<li>Create app <code>rsg_policy_reconciliation</code>.</li>
+<li>Build <strong>Phase 1 only</strong>: five forms, all fields, picklists, lookups, status-history hook, Gretchen vs Lamar permissions.</li>
+<li><strong>Stop.</strong> Do not start Phase 2 until the issuer says so.</li>
+<li>Do not invent fields, verdicts, policy numbers, premiums, or GUIDs.</li>
+<li>Never write NowCerts. Never create Zoho CRM Accounts.</li>
+</ol>
+<p>Five forms in this order: <code>Policy_Master</code> · <code>Policy_Status_History</code> · <code>Renewal_Queue</code> · <code>Policy_Audit</code> · <code>Audit_Exceptions</code>.</p>
+</div>
+""")
+    parts.append("<h1 class='section'>0. Build prompt (Zia)</h1>")
+    parts.append(md_body(prompt))
+
+    labels = [
+        ("PRD — Product Requirements Document", docs[0][0]),
+        ("BRD — Business Requirements Document", docs[1][0]),
+        ("RFP — Statement of Work", docs[2][0]),
+    ]
+    for heading, md_name in labels:
+        parts.append(f"<h1 class='section'>{html.escape(heading)}</h1>")
+        parts.append(md_body((REQ / md_name).read_text(encoding="utf-8")))
+
+    parts.append("<h1 class='section'>Process diagrams</h1>")
+    parts.append("<p>Implement these six flows in Deluge. Do not substitute a different model.</p>")
+    for _name, svg in diagrams:
+        parts.append(svg)
+
+    parts.append("<h1 class='section'>Appendix A — Field dictionaries</h1>")
+    parts.append("<p>Create every row. Use Deluge_Name as the Creator field link name. Do not invent extra fields.</p>")
+    for csv_name, title in (
+        ("forms_policy_master.csv", "Policy_Master"),
+        ("forms_policy_status_history.csv", "Policy_Status_History"),
+        ("forms_renewal_queue.csv", "Renewal_Queue"),
+        ("forms_policy_audit.csv", "Policy_Audit"),
+        ("forms_audit_exceptions.csv", "Audit_Exceptions"),
+    ):
+        parts.append(f"<h2>{html.escape(title)}</h2>")
+        parts.append(csv_table(ROOT / csv_name))
+
+    parts.append("<h1 class='section'>Appendix B — Picklists, views, workflows</h1>")
+    parts.append("<h2>Picklists (exact strings)</h2>")
+    parts.append(csv_table(ROOT / "picklists.csv"))
+    parts.append("<h2>Views</h2>")
+    parts.append(csv_table(ROOT / "views.csv"))
+    parts.append("<h2>Workflows</h2>")
+    parts.append(csv_table(ROOT / "workflows.csv"))
+
+    parts.append("<h1 class='section'>Appendix C — Deluge (install in filename order)</h1>")
+    parts.append("<p>Paste as custom functions <code>thisapp.recon.*</code>. Logic must not change.</p>")
+    for path in sorted((ROOT / "deluge").glob("*.dg")):
+        parts.append(f"<h2>{html.escape(path.name)}</h2>")
+        parts.append("<pre class='deluge'>" + html.escape(path.read_text(encoding="utf-8")) + "</pre>")
+
+    parts.append("<h1 class='section'>Appendix D — Seed acceptance (Phase 2)</h1>")
+    parts.append("<p>TEST DATA ONLY. Import after Phase 2. Expected verdict and confidence must match.</p>")
+    import json
+
+    samples = json.loads((ROOT / "tests" / "sample_records.json").read_text(encoding="utf-8"))
+    parts.append("<table><thead><tr><th>Seed</th><th>Policy_Number</th><th>Expected verdict</th><th>Expected confidence</th></tr></thead><tbody>")
+    for rec in samples["policy_master"]:
+        parts.append(
+            "<tr><td>"
+            + html.escape(rec["seed_id"])
+            + "</td><td>"
+            + html.escape(rec["Policy_Number"])
+            + "</td><td><code>"
+            + html.escape(rec["expected_verdict"])
+            + "</code></td><td>"
+            + str(rec["expected_confidence"])
+            + "</td></tr>"
+        )
+    parts.append("</tbody></table></body></html>")
+    return "\n".join(parts)
+
 
 if __name__ == "__main__":
     main()
+

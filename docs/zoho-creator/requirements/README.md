@@ -1,6 +1,6 @@
 # Requirements package for Zia (PRD / BRD / RFP / diagrams)
 
-Zia can attach **PRD, BRD, RFP, or process diagrams**. Use these four PDFs:
+Zia allows **one** attachment. Upload `../ZIA_UPLOAD.pdf` only.
 
 | Zia attach slot | File |
 |-----------------|------|

@@ -160,6 +160,7 @@ def main() -> int:
         if not (upload / required_upload).exists():
             err(f"zia-upload missing {required_upload}")
     for req_pdf in (
+        "ZIA_UPLOAD.pdf",
         "PRD_RSG_Policy_Reconciliation.pdf",
         "BRD_RSG_Policy_Reconciliation.pdf",
         "RFP_RSG_Policy_Reconciliation.pdf",

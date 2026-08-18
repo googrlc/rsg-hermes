@@ -16,20 +16,15 @@ This app is an **operations reconciliation workspace**. It does **not** replace:
 | **Supabase / Hermes** | Ops/analytics mirror, queues, KPIs, renewal state |
 | **Zoho Creator (this app)** | Compare those systems, score confidence, queue exceptions |
 
-## What to attach in Zia (PRD / BRD / RFP / diagrams)
+## What to attach in Zia (one document)
 
-Zia’s requirements attach slots take standard PRD, BRD, RFP, and process diagrams. Use these four PDFs:
+Zia allows **one** attachment. Upload this file only:
 
-| Slot | File |
-|------|------|
-| PRD | `docs/zoho-creator/PRD_RSG_Policy_Reconciliation.pdf` |
-| BRD | `docs/zoho-creator/BRD_RSG_Policy_Reconciliation.pdf` |
-| RFP | `docs/zoho-creator/RFP_RSG_Policy_Reconciliation.pdf` |
-| Process diagrams | `docs/zoho-creator/PROCESS_DIAGRAMS_RSG_Policy_Reconciliation.pdf` |
+**`docs/zoho-creator/ZIA_UPLOAD.pdf`**
 
-Then upload `ZIA_UPLOAD.xlsx` as the field/Deluge appendix.
+It is the full package: cover instructions, PRD, BRD, RFP, six process diagrams, field dictionaries, picklists, views, workflows, Deluge, and seed acceptance cases.
 
-Spreadsheet fallback: `ZIA_REQUIREMENTS.xlsx`.
+Tell Zia: build **Phase 1 only**, then stop.
 
 Rebuild those generated files after editing sources:
 
