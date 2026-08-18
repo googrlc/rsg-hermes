@@ -1,0 +1,46 @@
+// Renewals Desk — seed the five default tasks once per renewal.
+// Trigger: Renewals on create, and Card page load (idempotent by Subject).
+// Titles must stay identical to hermes/renewals/cases.py DEFAULT_TASK_TEMPLATES.
+
+titles = {
+	"Pull renewal declaration & review exposures",
+	"Request renewal terms from carrier",
+	"Prepare renewal options / comparison",
+	"Send renewal review to client",
+	"Update AMS (NowCerts) & file worksheet"
+};
+details = {
+	"Retrieve the expiring dec page and confirm current exposures on the worksheet.",
+	"Request renewal terms from the incumbent carrier (remarket if flagged).",
+	"Build the option comparison and premium-change explanation for the client.",
+	"Deliver the renewal review and confirm the client's intent.",
+	"Stage the approved NowCerts write-back and file the worksheet in the client folder."
+};
+renewalId = input.get("id");
+accountId = ifnull(input.get("Account_Name"), Map()).get("id");
+existing = zoho.crm.getRelatedRecords("Tasks", "Renewals", renewalId);
+have = List();
+for each task in existing
+{
+	have.add(task.get("Subject"));
+}
+i = 0;
+for each title in titles
+{
+	if(!have.contains(title))
+	{
+		taskMap = Map();
+		taskMap.put("Subject", title);
+		taskMap.put("Description", details.get(i));
+		taskMap.put("Status", "Not Started");
+		taskMap.put("Priority", "Normal");
+		if(accountId != null)
+		{
+			taskMap.put("What_Id", accountId);
+			taskMap.put("$se_module", "Accounts");
+		}
+		taskMap.put("Renewal_Id", renewalId);
+		zoho.crm.createRecord("Tasks", taskMap);
+	}
+	i = i + 1;
+}

@@ -1,0 +1,35 @@
+// Renewals Desk — set Window_Bucket from Expiration_Date + Line_of_Business.
+// Same rules as hermes/renewals/desk.py window_bucket. Hermes also writes this
+// on --sync-zoho-renewals; this keeps the card honest if someone edits x-date.
+
+exp = input.Expiration_Date;
+lob = ifnull(input.Line_of_Business, "");
+if(exp == null)
+{
+	input.Window_Bucket = null;
+	return null;
+}
+today = zoho.currentdate;
+days = daysBetween(today, exp);
+personal = (lob.containsIgnoreCase("personal auto") || lob.containsIgnoreCase("homeowner") || lob.containsIgnoreCase("dwelling fire") || lob.containsIgnoreCase("motorcycle") || lob.containsIgnoreCase("personal umbrella") || lob.containsIgnoreCase("condo owners"));
+if(days < 0)
+{
+	input.Window_Bucket = "past_due";
+}
+else if(personal)
+{
+	input.Window_Bucket = "personal";
+}
+else if(days <= 30)
+{
+	input.Window_Bucket = "30";
+}
+else if(days <= 60)
+{
+	input.Window_Bucket = "60";
+}
+else
+{
+	input.Window_Bucket = "90";
+}
+return null;

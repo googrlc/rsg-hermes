@@ -1,0 +1,33 @@
+// Renewals Desk — on Desk_Stage validate (CRM workflow / Creator button).
+// Mirrors hermes/renewals/desk.py stage_change_allowed.
+// input.Desk_Stage = proposed; old_stage from zoho.crm.getRecordById before edit.
+// input.Producer_Confirmed is a hidden checkbox the producer sets for backward moves.
+
+deskStages = {"Identified", "Outreach Sent", "Quote Requested", "Proposal Sent", "Negotiating", "Closed"};
+here = deskStages.indexOf(ifnull(old_stage, "Identified"));
+there = deskStages.indexOf(input.Desk_Stage);
+if(there < 0)
+{
+	return "unknown desk stage";
+}
+if(there == here)
+{
+	return null;
+}
+if(there == here + 1)
+{
+	if(input.Desk_Stage == "Closed" && (input.Disposition == null || input.Disposition == ""))
+	{
+		return "Closed requires a Disposition";
+	}
+	return null;
+}
+if(there > here + 1)
+{
+	return "cannot skip desk stages";
+}
+if(input.Producer_Confirmed != true)
+{
+	return "moving backward requires producer confirmation";
+}
+return null;

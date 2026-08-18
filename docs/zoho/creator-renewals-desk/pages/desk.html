@@ -1,0 +1,63 @@
+<!--
+  Creator Page: Desk (application home).
+  Bind KPI counts with Creator page scripts against CRM integration reports.
+  Replace {{REPORT_*}} with published report permalinks after create.
+-->
+<section class="desk">
+  <header>
+    <h1>Renewals Desk</h1>
+    <p class="sub">Work the book. Hermes writes the AMS. Gretchen talks to the client.</p>
+  </header>
+
+  <div class="kpi-strip" role="navigation">
+    <a class="kpi" href="{{REPORT_WORKLIST}}?Window_Bucket=90">
+      <span class="label">90 days</span>
+      <span class="value" data-bucket="90">—</span>
+    </a>
+    <a class="kpi" href="{{REPORT_WORKLIST}}?Window_Bucket=60">
+      <span class="label">60 days</span>
+      <span class="value" data-bucket="60">—</span>
+    </a>
+    <a class="kpi" href="{{REPORT_WORKLIST}}?Window_Bucket=30">
+      <span class="label">30 days</span>
+      <span class="value" data-bucket="30">—</span>
+    </a>
+    <a class="kpi risk" href="{{REPORT_WORKLIST}}?Risk_Status=CRITICAL">
+      <span class="label">CRITICAL</span>
+      <span class="value" data-risk="CRITICAL">—</span>
+    </a>
+    <a class="kpi risk" href="{{REPORT_WORKLIST}}?Risk_Status=AT_RISK">
+      <span class="label">AT_RISK</span>
+      <span class="value" data-risk="AT_RISK">—</span>
+    </a>
+    <a class="kpi risk" href="{{REPORT_WORKLIST}}?Risk_Status=SAFE">
+      <span class="label">SAFE</span>
+      <span class="value" data-risk="SAFE">—</span>
+    </a>
+    <a class="kpi recon" href="{{REPORT_NEEDS_VERIFICATION}}">
+      <span class="label">Needs verification</span>
+      <span class="value" data-elig="needs_verification">—</span>
+    </a>
+    <a class="kpi ams" href="{{REPORT_AMS_PENDING}}">
+      <span class="label">Pending AMS</span>
+      <span class="value" data-ams="pending">—</span>
+    </a>
+    <a class="kpi ams" href="{{REPORT_AMS_FAILED}}">
+      <span class="label">Failed AMS</span>
+      <span class="value" data-ams="failed">—</span>
+    </a>
+  </div>
+
+  <p class="empty-hint">
+    Empty buckets must say why they are empty (no eligible renewals vs sync
+    stale vs the current filter). A blank grid is a lie.
+  </p>
+
+  <div class="worklist">
+    <h2>Worklist</h2>
+    <p>Default sort: Expiration Date ascending. Hide Dismissed. Personal rows
+    sit in the personal bucket even inside 30 days.</p>
+    <!-- Embed CRM Renewals integration report: Worklist -->
+    <iframe title="Renewals worklist" src="{{REPORT_WORKLIST}}"></iframe>
+  </div>
+</section>

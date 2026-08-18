@@ -82,6 +82,8 @@ Mirror the existing book-sync discipline:
 |---|---|---|
 | Canonical book (Supabase) | Daily incremental (existing) | Cockpit + agent read latency |
 | Zoho policy/account upsert | Daily after book sync (or chained in same run) | CRM view lags AMS ≤ 24h |
+| Zoho renewals upsert | Daily 2:35am ET after `--renewal-refresh` (`hermes --sync-zoho-renewals`) | Creator Renewals Desk |
+| Zoho AMS_Write_Queue mirror | Daily 2:40am ET (`hermes --sync-zoho-ams-queue`) | Approved Creator jobs → executor |
 | Live AMS reads | On demand (`ams_client_snapshot`) | When user needs "right now" |
 
 ### B. Zoho → Supabase (pipeline mirror, read path)
@@ -151,6 +153,9 @@ Dashboard rule: show **worst-of** book-sync OK + queue depth + Zoho `Last_Synced
 | Zoho REST client | `packages/rsg-hermes-core/hermes_integrations/zoho_client.py` |
 | Intake → Zoho | `hermes/intake/commit.py` (`HERMES_WRITE_TO_ZOHO`) |
 | Momentum → Zoho backfill | `scripts/backfill_zoho_from_momentum.py` |
+| Zoho renewals upsert | `hermes/sync/zoho_renewals.py` (`hermes --sync-zoho-renewals`) |
+| Zoho AMS queue mirror | `hermes/sync/zoho_ams_queue.py` (`hermes --sync-zoho-ams-queue`) |
+| Creator Renewals Desk | `docs/zoho/creator-renewals-desk/` |
 | Canonical book sync | `hermes/sync/canonical_book_sync.py` |
 | Outbound AMS queue | `outbound_sync_queue` + scheduler executors |
 | Zoho field model | `docs/zoho/` |
@@ -160,7 +165,7 @@ Dashboard rule: show **worst-of** book-sync OK + queue depth + Zoho `Last_Synced
 
 ## Open decisions
 
-- Scheduled Zoho sync job name and cron slot (chain after `--sync-nowcerts` vs separate).
+- Scheduled Zoho Accounts/Policies sync job name and cron slot (chain after `--sync-canonical-book` vs separate). `--sync-zoho-renewals` / `--sync-zoho-ams-queue` are scheduled after `--renewal-refresh`.
 - Zoho webhook vs poll for Deal/case mirrors.
 - Whether `opportunities` remains the Hermes pipeline table or becomes a pure mirror with Zoho external IDs only.
 - Case module API names in production Zoho org (confirm against Settings → APIs).
