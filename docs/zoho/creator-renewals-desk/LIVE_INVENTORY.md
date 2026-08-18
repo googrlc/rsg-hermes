@@ -43,9 +43,19 @@ Workflow API accepts these module API names (INVALID_MODULE would mean missing):
 | Pages Desk / Card | missing (`getPages` 3920 No pages available) |
 | Forms / CRM integration forms | missing (`getForms` 3910 No forms available) |
 | Reports Worklist, Needs verification, AMS pending/failed, Open tasks | missing (`getReports` 3930 No reports available) |
-| Sections / Chat Agent | empty |
+| Sections / Chat Agent | empty (`getChatAgentMetadata` zia → 3001 Component cannot be Found) |
 | Deluge (stage, window, tasks, enqueue, approve, dismiss) | missing |
 | CRM integrations inside Creator | missing (`is_connection_referenced`: false) |
+
+Re-checked after the IDE attempt: still one app (`renewals-desk`), still empty, no duplicate created.
+
+## IDE fill blocker
+
+Creator metadata MCP is authenticated (this inventory). The Creator **builder** is a browser session. Cloud computer-use reached
+
+`https://creator.zoho.com/appbuilder/lamar_risksolutionsgroup668/renewals-desk/edit`
+
+and was redirected to `accounts.zoho.com` sign-in. Zia / CRM-integration create is not available through the records MCP. 1Password MCP is down in this environment, so no stored Zoho password was used.
 
 ## How to fill
 
