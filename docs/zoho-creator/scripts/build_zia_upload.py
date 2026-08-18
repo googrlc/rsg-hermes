@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -206,8 +207,64 @@ def main() -> None:
             "Zoho Creator": "this reconciliation workspace only",
         },
     }
+    pack_json = json.dumps(pack, indent=2)
     pack_path = OUT / "RSG_Policy_Reconciliation_Zia_Pack.json"
-    pack_path.write_text(json.dumps(pack, indent=2), encoding="utf-8")
+    pack_path.write_text(pack_json, encoding="utf-8")
+    (OUT / "ZIA_UPLOAD.json").write_text(pack_json, encoding="utf-8")
+
+    # One CSV Zia can ingest: every instruction, field, picklist, and Deluge script.
+    upload_rows: list[dict[str, str]] = []
+
+    def add_upload(section: str, item: str, field: str, value: str) -> None:
+        upload_rows.append({"Section": section, "Item": item, "Field": field, "Value": value})
+
+    add_upload("00_PROMPT", "zia_prompt", "full_text", prompt)
+    add_upload("00_PROMPT", "app_display_name", "value", "RSG Policy Reconciliation")
+    add_upload("00_PROMPT", "app_link_name", "value", "rsg_policy_reconciliation")
+    add_upload(
+        "00_PROMPT",
+        "phase_1_stop",
+        "rule",
+        "Build Phase 1 only (five forms, fields, picklists, lookups, status-history hook). Stop.",
+    )
+    for i, rule in enumerate(pack["hard_rules"], 1):
+        add_upload("00_PROMPT", "hard_rule", str(i), rule)
+    chunk = 15000
+    for i in range(0, len(spec), chunk):
+        add_upload("01_SPEC", "specification", f"part_{i // chunk + 1}", spec[i : i + chunk])
+    for form_file, rows in form_tables.items():
+        for row in rows:
+            item = f"{row['Form']}.{row['Deluge_Name']}"
+            for field, value in row.items():
+                add_upload("02_FIELDS", item, field, value)
+    for row in picklists:
+        add_upload("03_PICKLISTS", row["picklist_key"], str(row["sort_order"]), row["value"])
+    for row in views:
+        for field, value in row.items():
+            add_upload("04_VIEWS", row["View_Name"], field, value)
+    for row in workflows:
+        for field, value in row.items():
+            add_upload("05_WORKFLOWS", row["Workflow_Name"], field, value)
+    for row in verdicts:
+        add_upload("06_VERDICTS", row["Verdict"], "order", row["Order"])
+        add_upload("06_VERDICTS", row["Verdict"], "severity", row["Severity"])
+    for row in scores:
+        add_upload("07_SCORE", row["ID"], "condition", row["Condition"])
+        add_upload("07_SCORE", row["ID"], "points", row["Points"])
+    for row in deluge_rows:
+        add_upload("08_DELUGE", row["File_Name"], "install_order", row["Install_Order"])
+        add_upload("08_DELUGE", row["File_Name"], "code", row["Deluge_Code"])
+    for rec in samples["policy_master"]:
+        sid = rec["seed_id"]
+        for field, value in rec.items():
+            add_upload("09_SEEDS", sid, field, "" if value is None else str(value))
+    for rec in samples["renewal_queue"]:
+        sid = rec["seed_id"]
+        for field, value in rec.items():
+            add_upload("09_SEEDS", sid, field, "" if value is None else str(value))
+    add_upload("10_ACCEPTANCE", "markdown", "full_text", acceptance)
+
+    write_csv(OUT / "ZIA_UPLOAD.csv", upload_rows, ["Section", "Item", "Field", "Value"])
 
     try:
         from openpyxl import Workbook
@@ -280,8 +337,13 @@ def main() -> None:
 
     xlsx_path = OUT / "RSG_Policy_Reconciliation_Build.xlsx"
     wb.save(xlsx_path)
+    shutil.copyfile(xlsx_path, OUT / "ZIA_UPLOAD.xlsx")
+    shutil.copyfile(xlsx_path, ROOT / "ZIA_UPLOAD.xlsx")
+    shutil.copyfile(OUT / "ZIA_UPLOAD.json", ROOT / "ZIA_UPLOAD.json")
+    shutil.copyfile(OUT / "ZIA_UPLOAD.csv", ROOT / "ZIA_UPLOAD.csv")
     print(f"wrote {pack_path} ({pack_path.stat().st_size} bytes)")
     print(f"wrote {xlsx_path} ({xlsx_path.stat().st_size} bytes)")
+    print(f"wrote {OUT / 'ZIA_UPLOAD.csv'} ({(OUT / 'ZIA_UPLOAD.csv').stat().st_size} bytes)")
     print(f"csv count {len(list(OUT.glob('*.csv')))}")
 
 

@@ -5,8 +5,8 @@ called **RSG Policy Reconciliation**.
 
 Zia file upload accepts only: .xls .xlsx .xlsm .csv .tsv .ods .mdb .accdb
 .ds .json .numbers (max 2 GB; over 100 MB must be CSV). Do **not** wait for
-Markdown. Use `zia-upload/RSG_Policy_Reconciliation_Zia_Pack.json` and
-`zia-upload/RSG_Policy_Reconciliation_Build.xlsx` as the specification.
+Markdown. Upload **one** file: `ZIA_UPLOAD.xlsx` (or `ZIA_UPLOAD.json` /
+`ZIA_UPLOAD.csv`). That file is the full specification.
 
 Read those uploads as the only source of truth (`zia_prompt`,
 `specification_markdown`, `forms`, `picklists`, `deluge`, `sample_records`).

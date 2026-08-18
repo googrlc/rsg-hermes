@@ -16,19 +16,19 @@ This app is an **operations reconciliation workspace**. It does **not** replace:
 | **Supabase / Hermes** | Ops/analytics mirror, queues, KPIs, renewal state |
 | **Zoho Creator (this app)** | Compare those systems, score confidence, queue exceptions |
 
-## What to upload to Zia (in order)
+## What to upload to Zia (one file)
 
-1. `zia-upload/00_READ_ME_FIRST.csv` — prompt + Phase 1 stop rule
-2. `zia-upload/RSG_Policy_Reconciliation_Zia_Pack.json` — full spec, Deluge, seeds
-3. `zia-upload/RSG_Policy_Reconciliation_Build.xlsx` — forms, picklists, views, workflows, sample rows
+Use **one** of these — they are the same spec in Zia-accepted formats:
 
-Optional extras if Zia asks for tabular files only:
+| File | Format | Use when |
+|------|--------|----------|
+| `ZIA_UPLOAD.xlsx` | Excel | Best default. Sheets for forms, picklists, Deluge, seeds |
+| `ZIA_UPLOAD.json` | JSON | Full spec + Deluge + seeds in one object |
+| `ZIA_UPLOAD.csv` | CSV | Same content as rows (`Section,Item,Field,Value`) if Excel/JSON is blocked |
 
-- `forms_all.csv` or the five `forms_*.csv`
-- `picklists.csv`, `views.csv`, `workflows.csv`
-- `deluge_scripts.csv`
-- `sample_policy_master.csv`, `sample_renewal_queue.csv`
-- `verdict_matrix.csv`, `confidence_score.csv`, `acceptance_cases.csv`
+Copies also live in `zia-upload/` with the same names.
+
+Do **not** upload Markdown. Zia only accepts `.xls .xlsx .xlsm .csv .tsv .ods .mdb .accdb .ds .json .numbers` (max 2 GB; over 100 MB must be CSV).
 
 Rebuild those generated files after editing sources:
 

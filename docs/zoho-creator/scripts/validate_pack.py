@@ -148,6 +148,9 @@ def main() -> int:
     for required_upload in (
         "RSG_Policy_Reconciliation_Zia_Pack.json",
         "RSG_Policy_Reconciliation_Build.xlsx",
+        "ZIA_UPLOAD.json",
+        "ZIA_UPLOAD.xlsx",
+        "ZIA_UPLOAD.csv",
         "00_READ_ME_FIRST.csv",
         "forms_all.csv",
         "deluge_scripts.csv",
@@ -156,6 +159,9 @@ def main() -> int:
     ):
         if not (upload / required_upload).exists():
             err(f"zia-upload missing {required_upload}")
+    for root_upload in ("ZIA_UPLOAD.csv", "ZIA_UPLOAD.json", "ZIA_UPLOAD.xlsx"):
+        if not (ROOT / root_upload).exists():
+            err(f"root {root_upload} missing")
 
     pack = json.loads((upload / "RSG_Policy_Reconciliation_Zia_Pack.json").read_text())
     if "zia_prompt" not in pack or "deluge" not in pack:
