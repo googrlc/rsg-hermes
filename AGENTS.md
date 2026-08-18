@@ -56,3 +56,7 @@ full command catalog and Docker layout.
   (`hermes/renewals/pdf.py`, reportlab) and proposal HTML→PDF
   (`hermes/proposals/generator.py`, WeasyPrint) run without any external service;
   WeasyPrint's native Pango libs are part of the environment.
+- **Zoho Creator MCP.** Desktop Cursor MCP does not follow cloud agents. If the
+  catalog has no Zoho/Creator server, add it on the Cloud Agents environment
+  (same place as NowCerts / Supabase) and relaunch. Do not commit the
+  `*.zohomcp.in` URL. Playbook: `docs/zoho/creator-mcp-cursor-config.md`.

@@ -201,7 +201,9 @@ For readiness checks use **`--ops-doctor`** (Supabase connectivity + Hermes
 tables). `docs/espocrm-read-lane.md` is historical (the direct-Postgres read lane
 was removed in PR #191). Zoho field packs and backfill scripts live under
 `docs/zoho/`; the Supabase `agency_crm_*` tables are legacy tail — do not treat
-them as the CRM.
+them as the CRM. Zoho **Creator** MCP (Renewals Desk) is desktop-only until it
+is added to the Cloud Agents environment — see
+[`docs/zoho/creator-mcp-cursor-config.md`](docs/zoho/creator-mcp-cursor-config.md).
 
 Still in the tree but retired:
 
