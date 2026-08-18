@@ -18,9 +18,10 @@ Use these when creating automations at [cursor.com/automations/new](https://curs
 
 2. **Name:** `RSG Data Quality Investigator`
 
-3. **Trigger:** **Manual** (recommended for now)
-   - You paste a case when you run the automation; report appears in that agent thread
-   - Webhook is optional later for scripted triggers — see [Invoke via webhook](#invoke-via-webhook-optional) below
+3. **Trigger:** **Manual** for ad-hoc runs; **Webhook** for Zoho (see below)
+   - Manual: paste a case when you run the automation
+   - Webhook: Zoho CRM → Deluge → Cursor — full guide:
+     [`docs/integrations/zoho-data-quality-investigator-webhook.md`](../../docs/integrations/zoho-data-quality-investigator-webhook.md)
 
 4. **Repository:** `googrlc/rsg-hermes`  
    - **Environment:** `rsg-hermes`  
@@ -53,7 +54,16 @@ Investigate policy 990414352 for Steven Prak, Personal Auto
 
 Policy number is required. Client name and LOB are optional but help with duplicates.
 
-### Invoke via webhook (optional)
+### Invoke from Zoho CRM (webhook)
+
+See **[`docs/integrations/zoho-data-quality-investigator-webhook.md`](../../docs/integrations/zoho-data-quality-investigator-webhook.md)** for:
+
+1. Enable **Webhook** trigger on the Cursor automation; copy URL + API key
+2. Store secrets in Zoho **CRM Variables** (`cursor_dqi_webhook_url`, `cursor_dqi_webhook_key`)
+3. Create Deluge function from `docs/zoho/deluge/trigger_policy_investigation.deluge`
+4. Workflow rule on **Renewals** (button: “Investigate data quality”) → call function
+
+### Invoke via webhook (shell)
 
 ```bash
 export CURSOR_AUTOMATION_WEBHOOK_URL="..."   # from automation trigger panel

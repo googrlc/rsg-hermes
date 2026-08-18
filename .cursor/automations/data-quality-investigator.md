@@ -5,9 +5,9 @@ description: >
   Read-only — reports verdict in the Cursor agent run; stages corrections for approval.
 trigger:
   type: manual
-  # Run from Cursor Agents → Automations → RSG Data Quality Investigator → Run.
-  # Paste a policy case when prompted; the report appears in that agent thread.
-  # Webhook optional later — see README.md and scripts/trigger_policy_investigation.sh
+  # Manual: Cursor Agents → Automations → Run → paste policy case.
+  # Webhook: Zoho CRM Deluge → Cursor — see docs/integrations/zoho-data-quality-investigator-webhook.md
+  # Shell: scripts/trigger_policy_investigation.sh
 repository:
   url: https://github.com/googrlc/rsg-hermes
   environment: rsg-hermes

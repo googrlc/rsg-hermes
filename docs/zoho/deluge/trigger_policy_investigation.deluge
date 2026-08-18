@@ -1,0 +1,66 @@
+// Trigger Cursor "RSG Data Quality Investigator" from a Zoho CRM workflow.
+//
+// Function arguments (map from workflow field merge syntax):
+//   policyNumber  (string, required) — ${Renewals.Policy_Number} or ${Policies.Policy_Number}
+//   clientName    (string, optional) — ${Renewals.Client_Name} or ${Policies.Account Name}
+//   lineOfBusiness(string, optional) — ${Renewals.Line_of_Business} or ${Policies.Line_of_Business}
+//   recordId      (string, optional) — ${Renewals.id} or ${Policies.id}
+//   sourceModule  (string, optional) — literal "Renewals" or "Policies"
+//
+// CRM Variables (Setup → Developer Space → CRM Variables):
+//   cursor_dqi_webhook_url
+//   cursor_dqi_webhook_key   (token only — no "Bearer " prefix)
+
+string standalone.trigger_cursor_policy_investigation(String policyNumber, String clientName, String lineOfBusiness, String recordId, String sourceModule)
+{
+	webhookUrl = zoho.crm.getOrgVariable("cursor_dqi_webhook_url");
+	webhookKey = zoho.crm.getOrgVariable("cursor_dqi_webhook_key");
+	out = "";
+
+	if(webhookUrl == null || webhookUrl == "")
+	{
+		return "ERROR: cursor_dqi_webhook_url CRM variable is not set";
+	}
+	if(webhookKey == null || webhookKey == "")
+	{
+		return "ERROR: cursor_dqi_webhook_key CRM variable is not set";
+	}
+	pn = ifnull(policyNumber, "").trim();
+	if(pn == "")
+	{
+		return "ERROR: Policy_Number is empty";
+	}
+
+	payload = Map();
+	payload.put("policy_number", pn);
+	cn = ifnull(clientName, "").trim();
+	if(cn != "")
+	{
+		payload.put("client_name", cn);
+	}
+	lob = ifnull(lineOfBusiness, "").trim();
+	if(lob != "")
+	{
+		payload.put("line_of_business", lob);
+	}
+	payload.put("source", "zoho_" + ifnull(sourceModule, "crm").toLowerCase().replaceAll(" ", "_"));
+	rid = ifnull(recordId, "").trim();
+	if(rid != "")
+	{
+		payload.put("zoho_record_id", rid);
+	}
+
+	headers = Map();
+	headers.put("Content-Type", "application/json");
+	headers.put("Authorization", "Bearer " + webhookKey);
+
+	response = invokeurl
+	[
+		url :webhookUrl
+		type :POST
+		headers:headers
+		body:payload
+	];
+
+	return "Triggered Cursor DQ investigation for policy " + pn + " — response: " + response;
+}

@@ -98,4 +98,5 @@ pushback, or renewal dismissals.
 `.cursor/automations/README.md`. Create at [cursor.com/automations/new](https://cursor.com/automations/new)
 with **rsg-hermes** environment + Hermes/Supabase MCP. **Do not enable Send to
 Slack** — results appear in the Cursor agent run (`cursor.com/agents`). Trigger
-manually or via webhook (`scripts/trigger_policy_investigation.sh`).
+manually, via webhook (`scripts/trigger_policy_investigation.sh`), or from **Zoho CRM**
+(`docs/integrations/zoho-data-quality-investigator-webhook.md`).
