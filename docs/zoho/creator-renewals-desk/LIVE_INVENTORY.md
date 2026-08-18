@@ -57,6 +57,17 @@ Creator metadata MCP is authenticated (this inventory). The Creator **builder** 
 
 and was redirected to `accounts.zoho.com` sign-in. Zia / CRM-integration create is not available through the records MCP. 1Password MCP is down in this environment, so no stored Zoho password was used.
 
+## Custom API Cursor (live)
+
+| Field | Value |
+|---|---|
+| Endpoint | `https://www.zohoapis.com/creator/custom/lamar_risksolutionsgroup668/Cursor` |
+| Method | POST |
+| Auth | OAuth2, admin |
+| Header | `environment: development` (required until production is published) |
+| Function | `desk.cursor_api` |
+| Ping body | `{"action":"ping"}` |
+
 ## How to fill
 
 Open **this** app in the Creator IDE. Paste
