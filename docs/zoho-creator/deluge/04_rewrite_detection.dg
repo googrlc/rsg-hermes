@@ -1,0 +1,121 @@
+// thisapp.recon.detectRewrite
+// Heuristic spec section 8.2. Never invent a successor policy.
+
+map thisapp.recon.detectRewrite(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	out = Map();
+	out.put("detected", false);
+	out.put("reason", "");
+	out.put("successor_id", 0);
+	if(!rec.count())
+	{
+		out.put("reason", "policy not found");
+		return out;
+	}
+	status = thisapp.recon.normalizeStatus(ifnull(rec.Policy_Status, rec.AMS_Status_Raw));
+	cancelLike = thisapp.recon.isCancelStatus(status) || status == "Non-Renewed" || status == "Rewritten";
+	if(!cancelLike && ifnull(rec.Cancellation_Class, "") != "Rewrite")
+	{
+		out.put("reason", "not a cancel/rewrite candidate");
+		return out;
+	}
+	insured = ifnull(rec.NowCerts_Insured_GUID, "");
+	lob = ifnull(rec.Line_of_Business, "");
+	if(insured == "" || lob == "")
+	{
+		out.put("reason", "missing NowCerts_Insured_GUID or Line_of_Business — cannot heuristic-match");
+		return out;
+	}
+	anchor = rec.Cancellation_Date;
+	if(anchor == null)
+	{
+		anchor = rec.Expiration_Date;
+	}
+	if(anchor == null)
+	{
+		out.put("reason", "no Cancellation_Date or Expiration_Date");
+		return out;
+	}
+	start = anchor.addDay(-60);
+	end = anchor.addDay(60);
+	cands = Policy_Master[NowCerts_Insured_GUID == insured && Line_of_Business == lob && ID != policyID && Effective_Date >= start && Effective_Date <= end];
+	ids = List();
+	for each row in cands
+	{
+		st = thisapp.recon.normalizeStatus(ifnull(row.Policy_Status, row.AMS_Status_Raw));
+		if(st == "Active" || st == "Up for Renewal" || st == "Renewing")
+		{
+			if(ifnull(row.NowCerts_Policy_GUID, "") != ifnull(rec.NowCerts_Policy_GUID, ""))
+			{
+				ids.add(row.ID);
+			}
+		}
+	}
+	n = ids.size();
+	if(n == 0)
+	{
+		if(ifnull(rec.Cancellation_Class, "") == "Rewrite" || rec.Is_Rewrite == true)
+		{
+			out.put("detected", true);
+			out.put("reason", "classed as rewrite but no successor found in 60-day window");
+		}
+		else
+		{
+			out.put("reason", "no successor in 60-day window");
+		}
+		return out;
+	}
+	if(n > 1)
+	{
+		out.put("detected", true);
+		out.put("reason", "multiple successor candidates (" + n + "); human must pick");
+		out.put("successor_id", 0);
+		return out;
+	}
+	sid = ids.get(0);
+	succ = Policy_Master[ID == sid];
+	out.put("detected", true);
+	out.put("reason", "linked successor " + succ.Policy_Number);
+	out.put("successor_id", sid);
+	return out;
+}
+
+
+// Apply rewrite links when exactly one successor is found.
+// Does not change AMS. Updates Creator lineage fields only.
+
+void thisapp.recon.applyRewriteLink(int policyID)
+{
+	info = thisapp.recon.detectRewrite(policyID);
+	if(info.get("detected") != true)
+	{
+		return;
+	}
+	sid = info.get("successor_id");
+	if(sid == 0)
+	{
+		old = Policy_Master[ID == policyID];
+		old.Is_Rewrite=true;
+		old.Last_Verdict="rewrite_detected";
+		return;
+	}
+	old = Policy_Master[ID == policyID];
+	succ = Policy_Master[ID == sid];
+	old.Is_Rewrite=true;
+	old.Successor_Policy_Number=succ.Policy_Number;
+	if(ifnull(old.Cancellation_Class, "") == "Rewrite" && thisapp.recon.normalizeStatus(old.Policy_Status) == "Cancelled")
+	{
+		old.Policy_Status="Rewritten";
+		old.Active=false;
+	}
+	succ.Rewrite_Of=old.ID;
+	q = Renewal_Queue[Policy == policyID && Dismissed == false && Queue_Status in {"Open", "In Progress", "Waiting Client", "Waiting Carrier", "Stale"}];
+	for each qr in q
+	{
+		qr.Queue_Status="Dismissed";
+		qr.Dismissed=true;
+		qr.Stale_Reason="rewrite_detected";
+		qr.Last_Touched_At=zoho.currenttime;
+	}
+}

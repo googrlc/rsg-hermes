@@ -1,0 +1,89 @@
+picklist_key,sort_order,value,used_on
+insured_type,1,Personal,Policy_Master.Insured_Type
+insured_type,2,Commercial,Policy_Master.Insured_Type
+billing_type,1,Direct Bill,Policy_Master.Billing_Type
+billing_type,2,Agency Bill,Policy_Master.Billing_Type
+billing_type,3,Direct Bill 100,Policy_Master.Billing_Type
+billing_type,4,Agency Bill 100,Policy_Master.Billing_Type
+policy_status,1,Active,Policy_Master.Policy_Status;Policy_Master.CRM_Status;Policy_Status_History;Policy_Audit
+policy_status,2,Up for Renewal,Policy_Master.Policy_Status
+policy_status,3,Renewing,Policy_Master.Policy_Status
+policy_status,4,Renewed,Policy_Master.Policy_Status
+policy_status,5,Rewritten,Policy_Master.Policy_Status
+policy_status,6,Expired,Policy_Master.Policy_Status
+policy_status,7,Cancelled,Policy_Master.Policy_Status
+policy_status,8,Flat Cancel,Policy_Master.Policy_Status
+policy_status,9,Pending Cancel,Policy_Master.Policy_Status
+policy_status,10,Non-Renewed,Policy_Master.Policy_Status
+policy_status,11,Lapsed,Policy_Master.Policy_Status
+cancellation_class,1,Non Pay,Policy_Master.Cancellation_Class;Policy_Status_History.Cancellation_Class
+cancellation_class,2,Rewrite,Policy_Master.Cancellation_Class
+cancellation_class,3,Insured Request,Policy_Master.Cancellation_Class
+cancellation_class,4,Underwriter,Policy_Master.Cancellation_Class
+cancellation_class,5,Other,Policy_Master.Cancellation_Class
+sync_owner,1,book_sync,Policy_Master.Sync_Owner
+sync_owner,2,rsg-import,Policy_Master.Sync_Owner
+sync_owner,3,manual,Policy_Master.Sync_Owner
+sync_status,1,Synced,Policy_Master.Sync_Status
+sync_status,2,Pending,Policy_Master.Sync_Status
+sync_status,3,Error,Policy_Master.Sync_Status
+sync_status,4,Skipped,Policy_Master.Sync_Status
+verdict,1,clean_match,Policy_Master.Last_Verdict;Policy_Audit.Verdict;Audit_Exceptions.Verdict
+verdict,2,stale_renewal_queue,Policy_Master.Last_Verdict
+verdict,3,stale_crm,Policy_Master.Last_Verdict
+verdict,4,duplicate_policy,Policy_Master.Last_Verdict
+verdict,5,pending_sync,Policy_Master.Last_Verdict
+verdict,6,rewrite_detected,Policy_Master.Last_Verdict
+verdict,7,status_mismatch,Policy_Master.Last_Verdict
+verdict,8,financial_discrepancy,Policy_Master.Last_Verdict
+verdict,9,missing_in_crm,Policy_Master.Last_Verdict
+verdict,10,missing_in_ams,Policy_Master.Last_Verdict
+verdict,11,cancel_reason_gap,Policy_Master.Last_Verdict
+verdict,12,lineage_orphan,Policy_Master.Last_Verdict
+policy_tier,1,A,Policy_Master.Policy_Tier
+policy_tier,2,B,Policy_Master.Policy_Tier
+policy_tier,3,C,Policy_Master.Policy_Tier
+source_system,1,AMS,Policy_Status_History.Source_System
+source_system,2,CRM,Policy_Status_History.Source_System
+source_system,3,Creator,Policy_Status_History.Source_System
+source_system,4,Hermes,Policy_Status_History.Source_System
+risk_status,1,SAFE,Renewal_Queue.Risk_Status
+risk_status,2,AT_RISK,Renewal_Queue.Risk_Status
+risk_status,3,CRITICAL,Renewal_Queue.Risk_Status
+risk_status,4,RENEWED,Renewal_Queue.Risk_Status
+risk_status,5,LAPSED,Renewal_Queue.Risk_Status
+queue_status,1,Open,Renewal_Queue.Queue_Status
+queue_status,2,In Progress,Renewal_Queue.Queue_Status
+queue_status,3,Waiting Client,Renewal_Queue.Queue_Status
+queue_status,4,Waiting Carrier,Renewal_Queue.Queue_Status
+queue_status,5,Completed,Renewal_Queue.Queue_Status
+queue_status,6,Dismissed,Renewal_Queue.Queue_Status
+queue_status,7,Stale,Renewal_Queue.Queue_Status
+cadence_bucket,1,90,Renewal_Queue.Cadence_Bucket
+cadence_bucket,2,60,Renewal_Queue.Cadence_Bucket
+cadence_bucket,3,30,Renewal_Queue.Cadence_Bucket
+cadence_bucket,4,Past Due,Renewal_Queue.Cadence_Bucket
+eligibility,1,eligible,Renewal_Queue.Eligibility
+eligibility,2,needs_verification,Renewal_Queue.Eligibility
+eligibility,3,excluded,Renewal_Queue.Eligibility
+run_type,1,scheduled_daily,Policy_Audit.Run_Type
+run_type,2,scheduled_tier,Policy_Audit.Run_Type
+run_type,3,manual,Policy_Audit.Run_Type
+run_type,4,on_edit,Policy_Audit.Run_Type
+severity,1,Low,Audit_Exceptions.Severity
+severity,2,Medium,Audit_Exceptions.Severity
+severity,3,High,Audit_Exceptions.Severity
+severity,4,Critical,Audit_Exceptions.Severity
+exception_status,1,Open,Audit_Exceptions.Status
+exception_status,2,In Progress,Audit_Exceptions.Status
+exception_status,3,Waiting,Audit_Exceptions.Status
+exception_status,4,Resolved,Audit_Exceptions.Status
+exception_status,5,Won't Fix,Audit_Exceptions.Status
+exception_status,6,Duplicate,Audit_Exceptions.Status
+resolution_class,1,Corrected CRM,Audit_Exceptions.Resolution_Class
+resolution_class,2,Corrected Creator,Audit_Exceptions.Resolution_Class
+resolution_class,3,Linked rewrite,Audit_Exceptions.Resolution_Class
+resolution_class,4,True cancel,Audit_Exceptions.Resolution_Class
+resolution_class,5,Duplicate merged,Audit_Exceptions.Resolution_Class
+resolution_class,6,Data lag,Audit_Exceptions.Resolution_Class
+resolution_class,7,Won't fix,Audit_Exceptions.Resolution_Class

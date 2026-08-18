@@ -1,0 +1,68 @@
+Form,Section,Display_Label,Deluge_Name,Data_Type,Length,Mandatory,Unique,Default_Value,Picklist_Key,Formula,Notes
+Policy_Master,A Identity,Policy Name,Name,Single Line,255,Y,N,,,,Auto: Policy_Number + " — " + Carrier
+Policy_Master,A Identity,Policy Number,Policy_Number,Single Line,100,Y,N,,,,AMS policy number. NOT DB-unique so duplicates can be recorded; agent flags duplicate_policy
+Policy_Master,A Identity,NowCerts Policy GUID,NowCerts_Policy_GUID,Single Line,36,N,Y,,,,AMS databaseId; unique when present. Optional so missing_in_ams CRM-only rows can exist
+Policy_Master,A Identity,Hermes Policy ID,Hermes_Policy_ID,Single Line,36,N,Y,,,,canonical_policies.id
+Policy_Master,A Identity,CRM Policy ID,CRM_Policy_ID,Single Line,50,N,Y,,,,Zoho CRM Policies record ID
+Policy_Master,A Identity,CRM Account ID,CRM_Account_ID,Single Line,50,N,N,,,,Zoho CRM Account ID
+Policy_Master,A Identity,CRM Deal ID,CRM_Deal_ID,Single Line,50,N,N,,,,Related Deal ID if any
+Policy_Master,A Identity,NowCerts Insured GUID,NowCerts_Insured_GUID,Single Line,36,N,N,,,,AMS insured databaseId
+Policy_Master,B Insured,Insured Name,Insured_Name,Single Line,255,N,N,,,,CommercialName or First+Last
+Policy_Master,B Insured,Insured Type,Insured_Type,Picklist,50,N,N,,insured_type,,Personal|Commercial
+Policy_Master,B Insured,FEIN,FEIN,Single Line,32,N,N,,,,Commercial only
+Policy_Master,B Insured,Email,Email,Email,100,N,N,,,,
+Policy_Master,B Insured,Phone,Phone,Phone,30,N,N,,,,
+Policy_Master,B Insured,Billing Street,Billing_Street,Single Line,255,N,N,,,,
+Policy_Master,B Insured,Billing City,Billing_City,Single Line,100,N,N,,,,
+Policy_Master,B Insured,Billing State,Billing_State,Single Line,50,N,N,,,,Mailing state
+Policy_Master,B Insured,Billing Code,Billing_Code,Single Line,20,N,N,,,,ZIP
+Policy_Master,B Insured,Risk State,Risk_State,Single Line,10,N,N,,,,Policy state not mailing
+Policy_Master,C Coverage,Carrier,Carrier,Single Line,150,N,N,,,,AMS CarrierName
+Policy_Master,C Coverage,Line of Business,Line_of_Business,Single Line,150,N,N,,,,
+Policy_Master,C Coverage,Business Type,Business_Type,Single Line,100,N,N,,,,
+Policy_Master,C Coverage,Billing Type,Billing_Type,Picklist,40,N,N,,billing_type,,
+Policy_Master,C Coverage,Policy Term Months,Policy_Term_Months,Number,3,N,N,,,,6 or 12 typical
+Policy_Master,C Coverage,Coverage Amount,Coverage_Amount,Currency,16.2,N,N,,,,
+Policy_Master,C Coverage,Deductible,Deductible,Currency,16.2,N,N,,,,
+Policy_Master,D Status,Policy Status,Policy_Status,Picklist,40,N,N,,policy_status,,Normalized
+Policy_Master,D Status,AMS Status Raw,AMS_Status_Raw,Single Line,80,N,N,,,,Unnormalized AMS string
+Policy_Master,D Status,CRM Status,CRM_Status,Picklist,40,N,N,,policy_status,,Last seen in CRM
+Policy_Master,D Status,Active,Active,Checkbox,,N,N,false,,,True only if Policy_Status = Active
+Policy_Master,D Status,Cancellation Date,Cancellation_Date,Date,,N,N,,,,Distinct from Expiration_Date
+Policy_Master,D Status,Cancellation Reason,Cancellation_Reason,Multi Line,2000,N,N,,,,AMS free text
+Policy_Master,D Status,Cancellation Class,Cancellation_Class,Picklist,40,N,N,,cancellation_class,,Required if cancelled
+Policy_Master,D Status,Reinstatement Date,Reinstatement_Date,Date,,N,N,,,,
+Policy_Master,E Dates,Effective Date,Effective_Date,Date,,N,N,,,,
+Policy_Master,E Dates,Expiration Date,Expiration_Date,Date,,N,N,,,,Do not overwrite with cancel date
+Policy_Master,E Dates,Bind Date,Bind_Date,Date,,N,N,,,,
+Policy_Master,E Dates,Last AMS Modified,Last_AMS_Modified,Date-Time,,N,N,,,,
+Policy_Master,E Dates,Last CRM Modified,Last_CRM_Modified,Date-Time,,N,N,,,,
+Policy_Master,E Dates,Last Synced,Last_Synced,Date-Time,,N,N,,,,
+Policy_Master,E Dates,Last Audit Date,Last_Audit_Date,Date-Time,,N,N,,,,
+Policy_Master,E Dates,Days To Expiration,Days_To_Expiration,Formula Number,,,N,,,Expiration_Date - zoho.currentdate,Formula
+Policy_Master,F Financials,Premium,Premium,Currency,16.2,N,N,,,,AMS totalPremium
+Policy_Master,F Financials,Current Term Premium,Current_Term_Premium,Currency,16.2,N,N,,,,
+Policy_Master,F Financials,Annualized Premium,Annualized_Premium,Currency,16.2,N,N,,,,
+Policy_Master,F Financials,Agency Commission,Agency_Commission,Currency,16.2,N,N,,,,
+Policy_Master,F Financials,Commission Rate,Commission_Rate,Decimal,5.4,N,N,,,,Percent points (15 = 15%)
+Policy_Master,F Financials,Agency Fee,Agency_Fee,Currency,16.2,N,N,,,,Shop fee ≠ commission
+Policy_Master,F Financials,CRM Premium,CRM_Premium,Currency,16.2,N,N,,,,Last CRM value
+Policy_Master,F Financials,Premium Delta,Premium_Delta,Formula Currency,,,N,,,Premium - CRM_Premium,Null-safe in formula
+Policy_Master,F Financials,Premium Delta Pct,Premium_Delta_Pct,Formula Decimal,,,N,,,((Premium-CRM_Premium)/CRM_Premium)*100,0 if CRM_Premium 0
+Policy_Master,G Lineage,Renewed Policy GUID,Renewed_Policy_GUID,Single Line,36,N,N,,,,Predecessor AMS GUID
+Policy_Master,G Lineage,Predecessor Policy Number,Predecessor_Policy_Number,Single Line,100,N,N,,,,
+Policy_Master,G Lineage,Successor Policy Number,Successor_Policy_Number,Single Line,100,N,N,,,,
+Policy_Master,G Lineage,Rewrite Of,Rewrite_Of,Lookup Policy_Master,,N,N,,,,Self-lookup
+Policy_Master,G Lineage,Is Rewrite,Is_Rewrite,Checkbox,,N,N,false,,,
+Policy_Master,G Lineage,Sync Owner,Sync_Owner,Picklist,40,N,N,manual,sync_owner,,
+Policy_Master,H Recon,Sync Status,Sync_Status,Picklist,20,N,N,,sync_status,,
+Policy_Master,H Recon,Last Verdict,Last_Verdict,Picklist,40,N,N,,verdict,,
+Policy_Master,H Recon,Last Confidence,Last_Confidence,Number,3,N,N,,,,0-100
+Policy_Master,H Recon,Policy Tier,Policy_Tier,Picklist,5,N,N,C,policy_tier,,A/B/C
+Policy_Master,H Recon,Assigned To,Assigned_To,Users,,N,N,,,,
+Policy_Master,H Recon,Notes,Notes,Multi Line,32000,N,N,,,,Never overwrite from AMS
+Policy_Master,H Recon,Approved To Push,Approved_To_Push,Checkbox,,N,N,false,,,Admin only
+Policy_Master,H Recon,Approved By,Approved_By,Users,,N,N,,,,Required with Approved_At
+Policy_Master,H Recon,Approved At,Approved_At,Date-Time,,N,N,,,,
+Policy_Master,H Recon,Run Recon On Save,Run_Recon_On_Save,Checkbox,,N,N,false,,,Transient; clear after run
+Policy_Master,H Recon,Pending Queue Jobs,Pending_Queue_Jobs,Number,5,N,N,0,,,Count of open sync jobs

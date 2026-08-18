@@ -1,0 +1,2 @@
+seed_id,Policy_Number,Insured_Name,Carrier,Line_of_Business,Expiration_Date,Effective_Date,Premium_Current,Premium_Renewal,Risk_Status,Queue_Status,Cadence_Bucket,Last_Touched_At,Stale_Flag,Eligibility,Dismissed
+S09Q,RSG-TEST-S09,Stale Renewal Household,Progressive,Home,2026-09-10,2025-09-10,1800.0,,CRITICAL,Open,30,2026-08-07T09:00:00,,eligible,

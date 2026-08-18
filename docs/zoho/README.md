@@ -14,6 +14,9 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |
 | `FIELD_CREATE_CHECKLIST.md` | Ordered create steps + uniqueness / pipeline rules |
 
+Creator (not CRM) reconciliation app for Zia AI: [`docs/zoho-creator/`](../zoho-creator/README.md).
+Upload `docs/zoho-creator/zia-upload/*.json` / `*.xlsx` / `*.csv` — Zia does not accept Markdown.
+
 ## How to use
 
 1. Create custom modules **Policies**, **Renewal_Events**, **Renewals**, **AMS_Write_Queue** (if not using Zoho Insurance vertical for Policies).

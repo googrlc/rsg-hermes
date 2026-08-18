@@ -1,0 +1,26 @@
+Form,Section,Display_Label,Deluge_Name,Data_Type,Length,Mandatory,Unique,Default_Value,Picklist_Key,Formula,Notes
+Policy_Audit,Core,Name,Name,Single Line,255,Y,N,,,,"Auto: Policy_Number + "" @ "" + Run_At"
+Policy_Audit,Core,Policy,Policy,Lookup Policy_Master,,Y,N,,,,
+Policy_Audit,Core,Policy Number,Policy_Number,Single Line,100,Y,N,,,,
+Policy_Audit,Core,Run ID,Run_ID,Single Line,40,Y,N,,,,UUID or yyyyMMddHHmmss batch
+Policy_Audit,Core,Run At,Run_At,Date-Time,,Y,N,,,,
+Policy_Audit,Core,Run Type,Run_Type,Picklist,30,Y,N,manual,run_type,,
+Policy_Audit,Result,Verdict,Verdict,Picklist,40,Y,N,,verdict,,
+Policy_Audit,Result,Confidence,Confidence,Number,3,Y,N,,,,0-100
+Policy_Audit,Snapshots,AMS Status,AMS_Status,Picklist,40,N,N,,policy_status,,
+Policy_Audit,Snapshots,CRM Status,CRM_Status,Picklist,40,N,N,,policy_status,,
+Policy_Audit,Snapshots,Creator Status,Creator_Status,Picklist,40,N,N,,policy_status,,
+Policy_Audit,Snapshots,AMS Premium,AMS_Premium,Currency,16.2,N,N,,,,
+Policy_Audit,Snapshots,CRM Premium,CRM_Premium,Currency,16.2,N,N,,,,
+Policy_Audit,Snapshots,Premium Delta,Premium_Delta,Currency,16.2,N,N,,,,
+Policy_Audit,Snapshots,Premium Delta Pct,Premium_Delta_Pct,Decimal,8.4,N,N,,,,
+Policy_Audit,Flags,Queue Stale,Queue_Stale,Checkbox,,N,N,false,,,
+Policy_Audit,Flags,Duplicate Count,Duplicate_Count,Number,5,N,N,1,,,
+Policy_Audit,Flags,Rewrite Linked,Rewrite_Linked,Checkbox,,N,N,false,,,
+Policy_Audit,Flags,Pending Queue Jobs,Pending_Queue_Jobs,Number,5,N,N,0,,,
+Policy_Audit,Text,Findings,Findings,Multi Line,32000,Y,N,,,,Facts only
+Policy_Audit,Text,Recommendation,Recommendation,Multi Line,32000,Y,N,,,,Next action
+Policy_Audit,Text,Recommended Payload,Recommended_Payload,Multi Line,32000,N,N,,,,JSON CRM draft; not executed
+Policy_Audit,Text,Score Breakdown,Score_Breakdown,Multi Line,32000,N,N,,,,S12 -10 ...
+Policy_Audit,Link,Exception Created,Exception_Created,Checkbox,,N,N,false,,,
+Policy_Audit,Link,Related Exception,Related_Exception,Lookup Audit_Exceptions,,N,N,,,,

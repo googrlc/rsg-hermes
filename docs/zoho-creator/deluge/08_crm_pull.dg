@@ -1,0 +1,139 @@
+// Zoho CRM read (Phase 4). Connection name: zoho_crm
+// Custom module API name may be "Policies" or "CustomModuleX" — confirm in
+// Settings → APIs → API Names after the CRM field pack is installed
+// (docs/zoho/fields_policies.csv).
+//
+// NEVER create Accounts. NEVER update CRM unless approval gate passes.
+
+void thisapp.recon.pullCRM(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return;
+	}
+	guid = ifnull(rec.NowCerts_Policy_GUID, "");
+	pnum = ifnull(rec.Policy_Number, "");
+	crmRow = null;
+	if(guid != "")
+	{
+		crit = "(NowCerts_Policy_GUID:equals:" + guid + ")";
+		resp = zoho.crm.searchRecords("Policies", crit, 1, 2);
+		if(resp.size() == 1)
+		{
+			crmRow = resp.get(0);
+		}
+		else if(resp.size() > 1)
+		{
+			rec.Sync_Status="Error";
+			rec.Notes=ifnull(rec.Notes, "") + "\n[recon] duplicate CRM Policies for GUID " + guid;
+			return;
+		}
+	}
+	if(crmRow == null && pnum != "")
+	{
+		crit2 = "(Policy_Number:equals:" + pnum + ")";
+		resp2 = zoho.crm.searchRecords("Policies", crit2, 1, 2);
+		if(resp2.size() == 1)
+		{
+			crmRow = resp2.get(0);
+		}
+		else if(resp2.size() > 1)
+		{
+			rec.Sync_Status="Error";
+			rec.Notes=ifnull(rec.Notes, "") + "\n[recon] duplicate CRM Policies for number " + pnum;
+			return;
+		}
+	}
+	if(crmRow == null)
+	{
+		return;
+	}
+	rec.CRM_Policy_ID=crmRow.get("id");
+	acct = crmRow.get("Account_Name");
+	if(acct != null && acct.get("id") != null)
+	{
+		rec.CRM_Account_ID=acct.get("id");
+	}
+	rec.CRM_Status=thisapp.recon.normalizeStatus(ifnull(crmRow.get("Policy_Status"), ""));
+	if(crmRow.get("Premium") != null)
+	{
+		rec.CRM_Premium=crmRow.get("Premium");
+	}
+	if(crmRow.get("Modified_Time") != null)
+	{
+		rec.Last_CRM_Modified=crmRow.get("Modified_Time").toTime("yyyy-MM-dd'T'HH:mm:ss");
+	}
+	rec.Last_Synced=zoho.currenttime;
+	if(ifnull(rec.Sync_Status, "") != "Pending")
+	{
+		rec.Sync_Status="Synced";
+	}
+}
+
+
+void thisapp.recon.pullCRMBatch()
+{
+	rows = Policy_Master[Active == true || Policy_Tier == "A" || Policy_Tier == "B"];
+	for each rec in rows
+	{
+		thisapp.recon.pullCRM(rec.ID);
+	}
+}
+
+
+// GATED WRITE — do not call from schedules.
+// Preconditions: Approved_To_Push, Approved_By, Approved_At within 24h,
+// latest Policy_Audit.Recommended_Payload non-empty.
+
+map thisapp.recon.pushCRMIfApproved(int policyID)
+{
+	out = Map();
+	out.put("ok", false);
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		out.put("error", "not found");
+		return out;
+	}
+	if(rec.Approved_To_Push != true || rec.Approved_By == null || rec.Approved_At == null)
+	{
+		out.put("error", "approval gate failed");
+		return out;
+	}
+	ageHours = (zoho.currenttime.toLong() - rec.Approved_At.toLong()) / 3600000;
+	if(ageHours > 24)
+	{
+		out.put("error", "approval older than 24h");
+		return out;
+	}
+	if(ifnull(rec.CRM_Policy_ID, "") == "")
+	{
+		out.put("error", "no CRM_Policy_ID — create drafts are human-only");
+		return out;
+	}
+	aud = Policy_Audit[Policy == policyID] sort by Run_At desc range from 0 to 0;
+	payloadText = ifnull(aud.Recommended_Payload, "");
+	if(payloadText == "")
+	{
+		out.put("error", "empty Recommended_Payload");
+		return out;
+	}
+	// Expected payload: JSON map of CRM API names → values. Example:
+	// {"Policy_Status":"Active","Premium":1200.00}
+	payload = payloadText.toMap();
+	resp = zoho.crm.updateRecord("Policies", rec.CRM_Policy_ID, payload);
+	rec.Approved_To_Push=false;
+	rec.Sync_Status="Pending";
+	thisapp.recon.writeStatusHistory(policyID, rec.Policy_Status, rec.Policy_Status, "Creator");
+	out.put("ok", true);
+	out.put("crm_response", resp);
+	return out;
+}
+
+
+void thisapp.recon.pullCRM_all_modified_since()
+{
+	// Optional: zoho.crm.getRecords with Modified_Time criteria.
+	// Implement after live API names are confirmed. Do not guess module names.
+}

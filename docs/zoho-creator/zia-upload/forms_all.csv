@@ -1,0 +1,148 @@
+Form,Section,Display_Label,Deluge_Name,Data_Type,Length,Mandatory,Unique,Default_Value,Picklist_Key,Formula,Notes,Source_File
+Policy_Master,A Identity,Policy Name,Name,Single Line,255,Y,N,,,,"Auto: Policy_Number + "" — "" + Carrier",forms_policy_master.csv
+Policy_Master,A Identity,Policy Number,Policy_Number,Single Line,100,Y,N,,,,AMS policy number. NOT DB-unique so duplicates can be recorded; agent flags duplicate_policy,forms_policy_master.csv
+Policy_Master,A Identity,NowCerts Policy GUID,NowCerts_Policy_GUID,Single Line,36,N,Y,,,,AMS databaseId; unique when present. Optional so missing_in_ams CRM-only rows can exist,forms_policy_master.csv
+Policy_Master,A Identity,Hermes Policy ID,Hermes_Policy_ID,Single Line,36,N,Y,,,,canonical_policies.id,forms_policy_master.csv
+Policy_Master,A Identity,CRM Policy ID,CRM_Policy_ID,Single Line,50,N,Y,,,,Zoho CRM Policies record ID,forms_policy_master.csv
+Policy_Master,A Identity,CRM Account ID,CRM_Account_ID,Single Line,50,N,N,,,,Zoho CRM Account ID,forms_policy_master.csv
+Policy_Master,A Identity,CRM Deal ID,CRM_Deal_ID,Single Line,50,N,N,,,,Related Deal ID if any,forms_policy_master.csv
+Policy_Master,A Identity,NowCerts Insured GUID,NowCerts_Insured_GUID,Single Line,36,N,N,,,,AMS insured databaseId,forms_policy_master.csv
+Policy_Master,B Insured,Insured Name,Insured_Name,Single Line,255,N,N,,,,CommercialName or First+Last,forms_policy_master.csv
+Policy_Master,B Insured,Insured Type,Insured_Type,Picklist,50,N,N,,insured_type,,Personal|Commercial,forms_policy_master.csv
+Policy_Master,B Insured,FEIN,FEIN,Single Line,32,N,N,,,,Commercial only,forms_policy_master.csv
+Policy_Master,B Insured,Email,Email,Email,100,N,N,,,,,forms_policy_master.csv
+Policy_Master,B Insured,Phone,Phone,Phone,30,N,N,,,,,forms_policy_master.csv
+Policy_Master,B Insured,Billing Street,Billing_Street,Single Line,255,N,N,,,,,forms_policy_master.csv
+Policy_Master,B Insured,Billing City,Billing_City,Single Line,100,N,N,,,,,forms_policy_master.csv
+Policy_Master,B Insured,Billing State,Billing_State,Single Line,50,N,N,,,,Mailing state,forms_policy_master.csv
+Policy_Master,B Insured,Billing Code,Billing_Code,Single Line,20,N,N,,,,ZIP,forms_policy_master.csv
+Policy_Master,B Insured,Risk State,Risk_State,Single Line,10,N,N,,,,Policy state not mailing,forms_policy_master.csv
+Policy_Master,C Coverage,Carrier,Carrier,Single Line,150,N,N,,,,AMS CarrierName,forms_policy_master.csv
+Policy_Master,C Coverage,Line of Business,Line_of_Business,Single Line,150,N,N,,,,,forms_policy_master.csv
+Policy_Master,C Coverage,Business Type,Business_Type,Single Line,100,N,N,,,,,forms_policy_master.csv
+Policy_Master,C Coverage,Billing Type,Billing_Type,Picklist,40,N,N,,billing_type,,,forms_policy_master.csv
+Policy_Master,C Coverage,Policy Term Months,Policy_Term_Months,Number,3,N,N,,,,6 or 12 typical,forms_policy_master.csv
+Policy_Master,C Coverage,Coverage Amount,Coverage_Amount,Currency,16.2,N,N,,,,,forms_policy_master.csv
+Policy_Master,C Coverage,Deductible,Deductible,Currency,16.2,N,N,,,,,forms_policy_master.csv
+Policy_Master,D Status,Policy Status,Policy_Status,Picklist,40,N,N,,policy_status,,Normalized,forms_policy_master.csv
+Policy_Master,D Status,AMS Status Raw,AMS_Status_Raw,Single Line,80,N,N,,,,Unnormalized AMS string,forms_policy_master.csv
+Policy_Master,D Status,CRM Status,CRM_Status,Picklist,40,N,N,,policy_status,,Last seen in CRM,forms_policy_master.csv
+Policy_Master,D Status,Active,Active,Checkbox,,N,N,false,,,True only if Policy_Status = Active,forms_policy_master.csv
+Policy_Master,D Status,Cancellation Date,Cancellation_Date,Date,,N,N,,,,Distinct from Expiration_Date,forms_policy_master.csv
+Policy_Master,D Status,Cancellation Reason,Cancellation_Reason,Multi Line,2000,N,N,,,,AMS free text,forms_policy_master.csv
+Policy_Master,D Status,Cancellation Class,Cancellation_Class,Picklist,40,N,N,,cancellation_class,,Required if cancelled,forms_policy_master.csv
+Policy_Master,D Status,Reinstatement Date,Reinstatement_Date,Date,,N,N,,,,,forms_policy_master.csv
+Policy_Master,E Dates,Effective Date,Effective_Date,Date,,N,N,,,,,forms_policy_master.csv
+Policy_Master,E Dates,Expiration Date,Expiration_Date,Date,,N,N,,,,Do not overwrite with cancel date,forms_policy_master.csv
+Policy_Master,E Dates,Bind Date,Bind_Date,Date,,N,N,,,,,forms_policy_master.csv
+Policy_Master,E Dates,Last AMS Modified,Last_AMS_Modified,Date-Time,,N,N,,,,,forms_policy_master.csv
+Policy_Master,E Dates,Last CRM Modified,Last_CRM_Modified,Date-Time,,N,N,,,,,forms_policy_master.csv
+Policy_Master,E Dates,Last Synced,Last_Synced,Date-Time,,N,N,,,,,forms_policy_master.csv
+Policy_Master,E Dates,Last Audit Date,Last_Audit_Date,Date-Time,,N,N,,,,,forms_policy_master.csv
+Policy_Master,E Dates,Days To Expiration,Days_To_Expiration,Formula Number,,,N,,,Expiration_Date - zoho.currentdate,Formula,forms_policy_master.csv
+Policy_Master,F Financials,Premium,Premium,Currency,16.2,N,N,,,,AMS totalPremium,forms_policy_master.csv
+Policy_Master,F Financials,Current Term Premium,Current_Term_Premium,Currency,16.2,N,N,,,,,forms_policy_master.csv
+Policy_Master,F Financials,Annualized Premium,Annualized_Premium,Currency,16.2,N,N,,,,,forms_policy_master.csv
+Policy_Master,F Financials,Agency Commission,Agency_Commission,Currency,16.2,N,N,,,,,forms_policy_master.csv
+Policy_Master,F Financials,Commission Rate,Commission_Rate,Decimal,5.4,N,N,,,,Percent points (15 = 15%),forms_policy_master.csv
+Policy_Master,F Financials,Agency Fee,Agency_Fee,Currency,16.2,N,N,,,,Shop fee ≠ commission,forms_policy_master.csv
+Policy_Master,F Financials,CRM Premium,CRM_Premium,Currency,16.2,N,N,,,,Last CRM value,forms_policy_master.csv
+Policy_Master,F Financials,Premium Delta,Premium_Delta,Formula Currency,,,N,,,Premium - CRM_Premium,Null-safe in formula,forms_policy_master.csv
+Policy_Master,F Financials,Premium Delta Pct,Premium_Delta_Pct,Formula Decimal,,,N,,,((Premium-CRM_Premium)/CRM_Premium)*100,0 if CRM_Premium 0,forms_policy_master.csv
+Policy_Master,G Lineage,Renewed Policy GUID,Renewed_Policy_GUID,Single Line,36,N,N,,,,Predecessor AMS GUID,forms_policy_master.csv
+Policy_Master,G Lineage,Predecessor Policy Number,Predecessor_Policy_Number,Single Line,100,N,N,,,,,forms_policy_master.csv
+Policy_Master,G Lineage,Successor Policy Number,Successor_Policy_Number,Single Line,100,N,N,,,,,forms_policy_master.csv
+Policy_Master,G Lineage,Rewrite Of,Rewrite_Of,Lookup Policy_Master,,N,N,,,,Self-lookup,forms_policy_master.csv
+Policy_Master,G Lineage,Is Rewrite,Is_Rewrite,Checkbox,,N,N,false,,,,forms_policy_master.csv
+Policy_Master,G Lineage,Sync Owner,Sync_Owner,Picklist,40,N,N,manual,sync_owner,,,forms_policy_master.csv
+Policy_Master,H Recon,Sync Status,Sync_Status,Picklist,20,N,N,,sync_status,,,forms_policy_master.csv
+Policy_Master,H Recon,Last Verdict,Last_Verdict,Picklist,40,N,N,,verdict,,,forms_policy_master.csv
+Policy_Master,H Recon,Last Confidence,Last_Confidence,Number,3,N,N,,,,0-100,forms_policy_master.csv
+Policy_Master,H Recon,Policy Tier,Policy_Tier,Picklist,5,N,N,C,policy_tier,,A/B/C,forms_policy_master.csv
+Policy_Master,H Recon,Assigned To,Assigned_To,Users,,N,N,,,,,forms_policy_master.csv
+Policy_Master,H Recon,Notes,Notes,Multi Line,32000,N,N,,,,Never overwrite from AMS,forms_policy_master.csv
+Policy_Master,H Recon,Approved To Push,Approved_To_Push,Checkbox,,N,N,false,,,Admin only,forms_policy_master.csv
+Policy_Master,H Recon,Approved By,Approved_By,Users,,N,N,,,,Required with Approved_At,forms_policy_master.csv
+Policy_Master,H Recon,Approved At,Approved_At,Date-Time,,N,N,,,,,forms_policy_master.csv
+Policy_Master,H Recon,Run Recon On Save,Run_Recon_On_Save,Checkbox,,N,N,false,,,Transient; clear after run,forms_policy_master.csv
+Policy_Master,H Recon,Pending Queue Jobs,Pending_Queue_Jobs,Number,5,N,N,0,,,Count of open sync jobs,forms_policy_master.csv
+Policy_Status_History,Core,Name,Name,Single Line,255,Y,N,,,,"Auto: Policy_Number + "" "" + Changed_At",forms_policy_status_history.csv
+Policy_Status_History,Core,Policy,Policy,Lookup Policy_Master,,Y,N,,,,,forms_policy_status_history.csv
+Policy_Status_History,Core,Policy Number,Policy_Number,Single Line,100,Y,N,,,,Snapshot,forms_policy_status_history.csv
+Policy_Status_History,Core,Source System,Source_System,Picklist,20,Y,N,,source_system,,AMS|CRM|Creator|Hermes,forms_policy_status_history.csv
+Policy_Status_History,Core,Old Status,Old_Status,Picklist,40,N,N,,policy_status,,Empty on first insert,forms_policy_status_history.csv
+Policy_Status_History,Core,New Status,New_Status,Picklist,40,Y,N,,policy_status,,,forms_policy_status_history.csv
+Policy_Status_History,Core,Old Active,Old_Active,Checkbox,,N,N,,,,,forms_policy_status_history.csv
+Policy_Status_History,Core,New Active,New_Active,Checkbox,,N,N,,,,,forms_policy_status_history.csv
+Policy_Status_History,Core,Changed At,Changed_At,Date-Time,,Y,N,,,,Default now,forms_policy_status_history.csv
+Policy_Status_History,Core,Changed By,Changed_By,Single Line,255,N,N,,,,User email or integration,forms_policy_status_history.csv
+Policy_Status_History,Core,Change Reason,Change_Reason,Multi Line,2000,N,N,,,,,forms_policy_status_history.csv
+Policy_Status_History,Core,Cancellation Class,Cancellation_Class,Picklist,40,N,N,,cancellation_class,,,forms_policy_status_history.csv
+Policy_Status_History,Core,Raw Payload,Raw_Payload,Multi Line,32000,N,N,,,,Admin only view,forms_policy_status_history.csv
+Renewal_Queue,Core,Name,Name,Single Line,255,Y,N,,,,"Auto: Policy_Number + "" x "" + Expiration_Date",forms_renewal_queue.csv
+Renewal_Queue,Core,Policy,Policy,Lookup Policy_Master,,Y,N,,,,Deluge: at most one Open row per policy,forms_renewal_queue.csv
+Renewal_Queue,Core,Policy Number,Policy_Number,Single Line,100,Y,N,,,,Snapshot,forms_renewal_queue.csv
+Renewal_Queue,Core,Insured Name,Insured_Name,Single Line,255,Y,N,,,,CSR may correct,forms_renewal_queue.csv
+Renewal_Queue,Core,Carrier,Carrier,Single Line,150,N,N,,,,Snapshot,forms_renewal_queue.csv
+Renewal_Queue,Core,Line of Business,Line_of_Business,Single Line,150,N,N,,,,,forms_renewal_queue.csv
+Renewal_Queue,Dates,Expiration Date,Expiration_Date,Date,,Y,N,,,,,forms_renewal_queue.csv
+Renewal_Queue,Dates,Effective Date,Effective_Date,Date,,N,N,,,,,forms_renewal_queue.csv
+Renewal_Queue,Money,Premium Current,Premium_Current,Currency,16.2,N,N,,,,,forms_renewal_queue.csv
+Renewal_Queue,Money,Premium Renewal,Premium_Renewal,Currency,16.2,N,N,,,,Human-entered; never invent,forms_renewal_queue.csv
+Renewal_Queue,Money,Increase Percent,Increase_Percent,Formula Decimal,,,N,,,if(Premium_Current==0,0,forms_renewal_queue.csv
+Renewal_Queue,Risk,Risk Status,Risk_Status,Picklist,20,Y,N,SAFE,risk_status,,SAFE|AT_RISK|CRITICAL|RENEWED|LAPSED,forms_renewal_queue.csv
+Renewal_Queue,Risk,Queue Status,Queue_Status,Picklist,30,Y,N,Open,queue_status,,,forms_renewal_queue.csv
+Renewal_Queue,Risk,Cadence Bucket,Cadence_Bucket,Picklist,20,N,N,,cadence_bucket,,90|60|30|Past Due,forms_renewal_queue.csv
+Renewal_Queue,Work,Last Contact Date,Last_Contact_Date,Date,,N,N,,,,,forms_renewal_queue.csv
+Renewal_Queue,Work,Last Touched At,Last_Touched_At,Date-Time,,Y,N,,,,Default now; not on form-open,forms_renewal_queue.csv
+Renewal_Queue,Work,Stale Flag,Stale_Flag,Checkbox,,N,N,false,,,Set by agent,forms_renewal_queue.csv
+Renewal_Queue,Work,Stale Reason,Stale_Reason,Multi Line,2000,N,N,,,,,forms_renewal_queue.csv
+Renewal_Queue,Work,Eligibility,Eligibility,Picklist,40,N,N,eligible,eligibility,,,forms_renewal_queue.csv
+Renewal_Queue,Work,Assigned To,Assigned_To,Users,,N,N,,,,Default Gretchen,forms_renewal_queue.csv
+Renewal_Queue,Work,Strategy Notes,Strategy_Notes,Multi Line,32000,N,N,,,,,forms_renewal_queue.csv
+Renewal_Queue,Work,Dismissed,Dismissed,Checkbox,,N,N,false,,,Soft-remove,forms_renewal_queue.csv
+Renewal_Queue,Work,Hermes Renewal ID,Hermes_Renewal_ID,Single Line,36,N,N,,,,project_85_renewals.id,forms_renewal_queue.csv
+Policy_Audit,Core,Name,Name,Single Line,255,Y,N,,,,"Auto: Policy_Number + "" @ "" + Run_At",forms_policy_audit.csv
+Policy_Audit,Core,Policy,Policy,Lookup Policy_Master,,Y,N,,,,,forms_policy_audit.csv
+Policy_Audit,Core,Policy Number,Policy_Number,Single Line,100,Y,N,,,,,forms_policy_audit.csv
+Policy_Audit,Core,Run ID,Run_ID,Single Line,40,Y,N,,,,UUID or yyyyMMddHHmmss batch,forms_policy_audit.csv
+Policy_Audit,Core,Run At,Run_At,Date-Time,,Y,N,,,,,forms_policy_audit.csv
+Policy_Audit,Core,Run Type,Run_Type,Picklist,30,Y,N,manual,run_type,,,forms_policy_audit.csv
+Policy_Audit,Result,Verdict,Verdict,Picklist,40,Y,N,,verdict,,,forms_policy_audit.csv
+Policy_Audit,Result,Confidence,Confidence,Number,3,Y,N,,,,0-100,forms_policy_audit.csv
+Policy_Audit,Snapshots,AMS Status,AMS_Status,Picklist,40,N,N,,policy_status,,,forms_policy_audit.csv
+Policy_Audit,Snapshots,CRM Status,CRM_Status,Picklist,40,N,N,,policy_status,,,forms_policy_audit.csv
+Policy_Audit,Snapshots,Creator Status,Creator_Status,Picklist,40,N,N,,policy_status,,,forms_policy_audit.csv
+Policy_Audit,Snapshots,AMS Premium,AMS_Premium,Currency,16.2,N,N,,,,,forms_policy_audit.csv
+Policy_Audit,Snapshots,CRM Premium,CRM_Premium,Currency,16.2,N,N,,,,,forms_policy_audit.csv
+Policy_Audit,Snapshots,Premium Delta,Premium_Delta,Currency,16.2,N,N,,,,,forms_policy_audit.csv
+Policy_Audit,Snapshots,Premium Delta Pct,Premium_Delta_Pct,Decimal,8.4,N,N,,,,,forms_policy_audit.csv
+Policy_Audit,Flags,Queue Stale,Queue_Stale,Checkbox,,N,N,false,,,,forms_policy_audit.csv
+Policy_Audit,Flags,Duplicate Count,Duplicate_Count,Number,5,N,N,1,,,,forms_policy_audit.csv
+Policy_Audit,Flags,Rewrite Linked,Rewrite_Linked,Checkbox,,N,N,false,,,,forms_policy_audit.csv
+Policy_Audit,Flags,Pending Queue Jobs,Pending_Queue_Jobs,Number,5,N,N,0,,,,forms_policy_audit.csv
+Policy_Audit,Text,Findings,Findings,Multi Line,32000,Y,N,,,,Facts only,forms_policy_audit.csv
+Policy_Audit,Text,Recommendation,Recommendation,Multi Line,32000,Y,N,,,,Next action,forms_policy_audit.csv
+Policy_Audit,Text,Recommended Payload,Recommended_Payload,Multi Line,32000,N,N,,,,JSON CRM draft; not executed,forms_policy_audit.csv
+Policy_Audit,Text,Score Breakdown,Score_Breakdown,Multi Line,32000,N,N,,,,S12 -10 ...,forms_policy_audit.csv
+Policy_Audit,Link,Exception Created,Exception_Created,Checkbox,,N,N,false,,,,forms_policy_audit.csv
+Policy_Audit,Link,Related Exception,Related_Exception,Lookup Audit_Exceptions,,N,N,,,,,forms_policy_audit.csv
+Audit_Exceptions,Core,Name,Name,Single Line,255,Y,N,,,,"Auto: Severity + "" — "" + Policy_Number + "" — "" + Verdict",forms_audit_exceptions.csv
+Audit_Exceptions,Core,Policy,Policy,Lookup Policy_Master,,Y,N,,,,,forms_audit_exceptions.csv
+Audit_Exceptions,Core,Policy Number,Policy_Number,Single Line,100,Y,N,,,,,forms_audit_exceptions.csv
+Audit_Exceptions,Core,Audit,Audit,Lookup Policy_Audit,,Y,N,,,,,forms_audit_exceptions.csv
+Audit_Exceptions,Core,Verdict,Verdict,Picklist,40,Y,N,,verdict,,,forms_audit_exceptions.csv
+Audit_Exceptions,Work,Severity,Severity,Picklist,20,Y,N,,severity,,,forms_audit_exceptions.csv
+Audit_Exceptions,Work,Status,Status,Picklist,20,Y,N,Open,exception_status,,,forms_audit_exceptions.csv
+Audit_Exceptions,SLA,SLA Hours,SLA_Hours,Number,5,Y,N,,,,From severity matrix,forms_audit_exceptions.csv
+Audit_Exceptions,SLA,SLA Due At,SLA_Due_At,Date-Time,,Y,N,,,,Opened_At + SLA_Hours,forms_audit_exceptions.csv
+Audit_Exceptions,SLA,SLA Breached,SLA_Breached,Checkbox,,N,N,false,,,Set by schedule,forms_audit_exceptions.csv
+Audit_Exceptions,Work,Owner,Owner,Users,,Y,N,,,,Low/Med Gretchen; High/Crit Lamar,forms_audit_exceptions.csv
+Audit_Exceptions,Time,Opened At,Opened_At,Date-Time,,Y,N,,,,,forms_audit_exceptions.csv
+Audit_Exceptions,Time,First Touched At,First_Touched_At,Date-Time,,N,N,,,,,forms_audit_exceptions.csv
+Audit_Exceptions,Time,Resolved At,Resolved_At,Date-Time,,N,N,,,,,forms_audit_exceptions.csv
+Audit_Exceptions,Close,Resolution Notes,Resolution_Notes,Multi Line,32000,N,N,,,,Required to resolve,forms_audit_exceptions.csv
+Audit_Exceptions,Close,Resolution Class,Resolution_Class,Picklist,40,N,N,,resolution_class,,Required to resolve,forms_audit_exceptions.csv
+Audit_Exceptions,Notify,Escalated To Lamar,Escalated_To_Lamar,Checkbox,,N,N,false,,,,forms_audit_exceptions.csv
+Audit_Exceptions,Notify,Notify Sent,Notify_Sent,Checkbox,,N,N,false,,,Idempotency,forms_audit_exceptions.csv
+Audit_Exceptions,Notify,Last Notify At,Last_Notify_At,Date-Time,,N,N,,,,,forms_audit_exceptions.csv

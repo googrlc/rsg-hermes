@@ -1,0 +1,1476 @@
+Install_Order,File_Name,Deluge_Code
+01,01_normalize_status.dg,"// thisapp.recon.normalizeStatus
+// Map any AMS/CRM spelling to the canonical Policy_Status picklist, or empty string.
+// Source: packages/rsg-hermes-core/hermes_core/canonical.py _STATUS_NORMALIZE
+
+string thisapp.recon.normalizeStatus(string raw)
+{
+	key = ifnull(raw, """").trim().toLowerCase();
+	if(key == """")
+	{
+		return """";
+	}
+	table = Map();
+	table.put(""active"", ""Active"");
+	table.put(""in force"", ""Active"");
+	table.put(""inforce"", ""Active"");
+	table.put(""bound"", ""Active"");
+	table.put(""up for renewal"", ""Up for Renewal"");
+	table.put(""renewal pending"", ""Up for Renewal"");
+	table.put(""renewing"", ""Renewing"");
+	table.put(""in renewal"", ""Renewing"");
+	table.put(""renewal"", ""Renewing"");
+	table.put(""renewed"", ""Renewed"");
+	table.put(""rewritten"", ""Rewritten"");
+	table.put(""expired"", ""Expired"");
+	table.put(""cancelled"", ""Cancelled"");
+	table.put(""canceled"", ""Cancelled"");
+	table.put(""flat cancel"", ""Flat Cancel"");
+	table.put(""flat-cancel"", ""Flat Cancel"");
+	table.put(""flat cancelled"", ""Flat Cancel"");
+	table.put(""pending cancel"", ""Pending Cancel"");
+	table.put(""pending cancellation"", ""Pending Cancel"");
+	table.put(""cxl pending"", ""Pending Cancel"");
+	table.put(""non-renewed"", ""Non-Renewed"");
+	table.put(""non renewed"", ""Non-Renewed"");
+	table.put(""nonrenewed"", ""Non-Renewed"");
+	table.put(""lapsed"", ""Lapsed"");
+	if(table.containKey(key))
+	{
+		return table.get(key);
+	}
+	return """";
+}
+
+
+// thisapp.recon.normalizeBilling
+// Source: hermes_core/canonical.py _BILLING_NORMALIZE
+
+string thisapp.recon.normalizeBilling(string raw)
+{
+	text = ifnull(raw, """").trim();
+	if(text == """")
+	{
+		return """";
+	}
+	key = text.toLowerCase().replaceAll(""_"", "" "").trim();
+	table = Map();
+	table.put(""direct bill"", ""Direct Bill"");
+	table.put(""direct"", ""Direct Bill"");
+	table.put(""db"", ""Direct Bill"");
+	table.put(""direct bill autopay"", ""Direct Bill"");
+	table.put(""db autopay"", ""Direct Bill"");
+	table.put(""agency bill"", ""Agency Bill"");
+	table.put(""agency"", ""Agency Bill"");
+	table.put(""ab"", ""Agency Bill"");
+	table.put(""agency bill autopay"", ""Agency Bill"");
+	table.put(""direct bill 100"", ""Direct Bill 100"");
+	table.put(""db 100"", ""Direct Bill 100"");
+	table.put(""db100"", ""Direct Bill 100"");
+	table.put(""agency bill 100"", ""Agency Bill 100"");
+	table.put(""ab 100"", ""Agency Bill 100"");
+	table.put(""ab100"", ""Agency Bill 100"");
+	if(table.containKey(key))
+	{
+		return table.get(key);
+	}
+	return text.replaceAll(""_"", "" "");
+}
+
+
+// True if normalized status is a cancel class used by cancel_reason_gap.
+
+bool thisapp.recon.isCancelStatus(string normalized)
+{
+	s = ifnull(normalized, """");
+	if(s == ""Cancelled"" || s == ""Flat Cancel"" || s == ""Pending Cancel"")
+	{
+		return true;
+	}
+	return false;
+}
+
+
+// Active checkbox must follow Policy_Status.
+
+bool thisapp.recon.isActiveStatus(string normalized)
+{
+	return ifnull(normalized, """") == ""Active"";
+}
+
+
+// Exclude statuses that must not be Active=true.
+
+bool thisapp.recon.isExcludeStatus(string normalized)
+{
+	s = ifnull(normalized, """");
+	if(s == ""Expired"" || s == ""Cancelled"" || s == ""Flat Cancel"" || s == ""Non-Renewed"" || s == ""Lapsed"")
+	{
+		return true;
+	}
+	return false;
+}
+
+
+// Policy tier: A / B / C. Never invent premium.
+
+string thisapp.recon.computeTier(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return ""C"";
+	}
+	ann = ifnull(rec.Annualized_Premium, ifnull(rec.Premium, 0));
+	prem = ifnull(rec.Premium, 0);
+	itype = ifnull(rec.Insured_Type, """");
+	if(ann >= 5000)
+	{
+		return ""A"";
+	}
+	if(itype == ""Commercial"" && prem >= 2500)
+	{
+		return ""A"";
+	}
+	days = 9999;
+	if(rec.Expiration_Date != null)
+	{
+		days = rec.Expiration_Date.getDayDiff(zoho.currentdate);
+		// getDayDiff is date2 - date1 in some accounts; use daysBetween if needed:
+		// days = daysBetween(zoho.currentdate, rec.Expiration_Date);
+	}
+	if(rec.Active == true || (days >= 0 && days <= 90))
+	{
+		return ""B"";
+	}
+	return ""C"";
+}
+"
+02,02_confidence_score.dg,"// thisapp.recon.score
+// Returns 0–100 integer. Also writes last breakdown into a Map returned via
+// thisapp.recon.scoreDetail for Policy_Audit.Score_Breakdown.
+// Spec section 7. Do not invent extra deductions.
+
+int thisapp.recon.score(int policyID)
+{
+	detail = thisapp.recon.scoreDetail(policyID);
+	return detail.get(""score"");
+}
+
+
+map thisapp.recon.scoreDetail(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	out = Map();
+	lines = List();
+	score = 100;
+	if(!rec.count())
+	{
+		out.put(""score"", 0);
+		out.put(""breakdown"", ""S0 -100 policy not found"");
+		return out;
+	}
+	status = thisapp.recon.normalizeStatus(ifnull(rec.Policy_Status, rec.AMS_Status_Raw));
+	crmStatus = thisapp.recon.normalizeStatus(ifnull(rec.CRM_Status, """"));
+	amsStatus = thisapp.recon.normalizeStatus(ifnull(rec.AMS_Status_Raw, rec.Policy_Status));
+	dup = thisapp.recon.duplicateCount(policyID);
+	prem = rec.Premium;
+	crmPrem = rec.CRM_Premium;
+	deltaAbs = 0.0;
+	deltaPct = 0.0;
+	hasDelta = false;
+	if(prem != null && crmPrem != null)
+	{
+		deltaAbs = prem - crmPrem;
+		if(deltaAbs < 0)
+		{
+			deltaAbs = deltaAbs * -1;
+		}
+		hasDelta = true;
+		if(crmPrem != 0)
+		{
+			deltaPct = (deltaAbs / crmPrem) * 100;
+		}
+	}
+	if(ifnull(rec.Policy_Number, """") == """")
+	{
+		score = score - 40;
+		lines.add(""S1 -40 Policy_Number blank"");
+	}
+	if(ifnull(rec.NowCerts_Policy_GUID, """") == """")
+	{
+		score = score - 25;
+		lines.add(""S2 -25 NowCerts_Policy_GUID blank"");
+	}
+	if(ifnull(rec.CRM_Policy_ID, """") == """")
+	{
+		score = score - 10;
+		lines.add(""S3 -10 CRM_Policy_ID blank"");
+	}
+	if(ifnull(rec.Insured_Name, """") == """")
+	{
+		score = score - 10;
+		lines.add(""S4 -10 Insured_Name blank"");
+	}
+	if(ifnull(rec.Carrier, """") == """")
+	{
+		score = score - 8;
+		lines.add(""S5 -8 Carrier blank"");
+	}
+	if(ifnull(rec.Line_of_Business, """") == """")
+	{
+		score = score - 5;
+		lines.add(""S6 -5 Line_of_Business blank"");
+	}
+	if(rec.Effective_Date == null)
+	{
+		score = score - 10;
+		lines.add(""S7 -10 Effective_Date blank"");
+	}
+	if(rec.Expiration_Date == null)
+	{
+		score = score - 10;
+		lines.add(""S7 -10 Expiration_Date blank"");
+	}
+	if(status == """")
+	{
+		score = score - 15;
+		lines.add(""S8 -15 Policy_Status blank or unnormalized"");
+	}
+	if(amsStatus != """" && crmStatus != """" && amsStatus != crmStatus)
+	{
+		score = score - 12;
+		lines.add(""S9 -12 AMS vs CRM status differ"");
+	}
+	if(amsStatus != """" && status != """" && amsStatus != status)
+	{
+		score = score - 12;
+		lines.add(""S10 -12 AMS vs Creator status differ"");
+	}
+	if(status == ""Active"" && prem == null)
+	{
+		score = score - 15;
+		lines.add(""S11 -15 Premium blank on Active policy"");
+	}
+	if(hasDelta && deltaAbs >= 25)
+	{
+		score = score - 10;
+		lines.add(""S12 -10 abs premium $ delta >= 25"");
+	}
+	if(hasDelta && crmPrem != 0 && deltaPct >= 1)
+	{
+		score = score - 8;
+		lines.add(""S13 -8 abs premium % delta >= 1"");
+	}
+	if(hasDelta && deltaAbs >= 500)
+	{
+		score = score - 15;
+		lines.add(""S14 -15 abs premium $ delta >= 500 extra"");
+	}
+	if(dup > 1)
+	{
+		score = score - 30;
+		lines.add(""S15 -30 Duplicate_Count > 1"");
+	}
+	if(thisapp.recon.isCancelStatus(status) && ifnull(rec.Cancellation_Class, """") == """")
+	{
+		score = score - 12;
+		lines.add(""S16 -12 Cancellation without class"");
+	}
+	if(rec.Is_Rewrite == true && rec.Rewrite_Of == null)
+	{
+		score = score - 15;
+		lines.add(""S17 -15 Rewrite detected but Rewrite_Of empty"");
+	}
+	if(thisapp.recon.lineageBroken(policyID))
+	{
+		score = score - 12;
+		lines.add(""S18 -12 Lineage pointer set but target missing"");
+	}
+	if(rec.Last_Synced != null)
+	{
+		ageHours = (zoho.currenttime.toLong() - rec.Last_Synced.toLong()) / 3600000;
+		if(ageHours > 48)
+		{
+			score = score - 8;
+			lines.add(""S19 -8 Last_Synced older than 48h"");
+		}
+		if(ageHours > 168)
+		{
+			score = score - 12;
+			lines.add(""S20 -12 Last_Synced older than 7 days extra"");
+		}
+	}
+	if(thisapp.recon.queueIsStale(policyID))
+	{
+		score = score - 10;
+		lines.add(""S21 -10 Renewal_Queue stale"");
+	}
+	if(ifnull(rec.Pending_Queue_Jobs, 0) > 0)
+	{
+		score = score - 8;
+		lines.add(""S22 -8 Pending_Queue_Jobs > 0"");
+	}
+	if(rec.Active == true && thisapp.recon.isExcludeStatus(status))
+	{
+		score = score - 20;
+		lines.add(""S23 -20 Active=true but status in EXCLUDE_STATUSES"");
+	}
+	if(rec.Active == false && status == ""Active"")
+	{
+		score = score - 15;
+		lines.add(""S24 -15 Active=false but status = Active"");
+	}
+	bt = ifnull(rec.Billing_Type, """");
+	if(status == ""Active"" && bt.contains(""Agency"") && rec.Agency_Fee == null)
+	{
+		score = score - 5;
+		lines.add(""S25 -5 Agency Bill Active missing Agency_Fee"");
+	}
+	if(score < 0)
+	{
+		score = 0;
+	}
+	if(score > 100)
+	{
+		score = 100;
+	}
+	out.put(""score"", score);
+	out.put(""breakdown"", lines.toString(""\n""));
+	out.put(""duplicate_count"", dup);
+	out.put(""delta_abs"", deltaAbs);
+	out.put(""delta_pct"", deltaPct);
+	return out;
+}
+
+
+int thisapp.recon.duplicateCount(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return 0;
+	}
+	n = 0;
+	num = ifnull(rec.Policy_Number, """");
+	guid = ifnull(rec.NowCerts_Policy_GUID, """");
+	if(num != """")
+	{
+		n = Policy_Master[Policy_Number == num].count();
+	}
+	g = 0;
+	if(guid != """")
+	{
+		g = Policy_Master[NowCerts_Policy_GUID == guid].count();
+	}
+	if(g > n)
+	{
+		return g;
+	}
+	return n;
+}
+
+
+bool thisapp.recon.lineageBroken(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return false;
+	}
+	if(ifnull(rec.Renewed_Policy_GUID, """") != """")
+	{
+		found = Policy_Master[NowCerts_Policy_GUID == rec.Renewed_Policy_GUID].count();
+		if(found == 0)
+		{
+			return true;
+		}
+	}
+	if(ifnull(rec.Successor_Policy_Number, """") != """")
+	{
+		found2 = Policy_Master[Policy_Number == rec.Successor_Policy_Number].count();
+		if(found2 == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+
+bool thisapp.recon.queueIsStale(int policyID)
+{
+	q = Renewal_Queue[Policy == policyID && Dismissed == false && Queue_Status in {""Open"", ""In Progress"", ""Waiting Client"", ""Waiting Carrier"", ""Stale""}];
+	if(!q.count())
+	{
+		return false;
+	}
+	row = q.getAll().get(0);
+	stale = thisapp.recon.evaluateQueueStale(row.get(""ID""));
+	return stale.get(""stale"");
+}
+"
+03,03_verdict_engine.dg,"// thisapp.recon.verdict
+// First-match-wins matrix. Spec section 6.1. Do not add verdict types.
+
+string thisapp.recon.verdict(int policyID)
+{
+	detail = thisapp.recon.verdictDetail(policyID);
+	return detail.get(""verdict"");
+}
+
+
+map thisapp.recon.verdictDetail(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	out = Map();
+	findings = List();
+	if(!rec.count())
+	{
+		out.put(""verdict"", ""missing_in_ams"");
+		out.put(""findings"", ""Policy_Master row not found"");
+		out.put(""recommendation"", ""Do not invent a policy. Re-run after a valid ID."");
+		return out;
+	}
+	status = thisapp.recon.normalizeStatus(ifnull(rec.Policy_Status, rec.AMS_Status_Raw));
+	crmStatus = thisapp.recon.normalizeStatus(ifnull(rec.CRM_Status, """"));
+	amsStatus = thisapp.recon.normalizeStatus(ifnull(rec.AMS_Status_Raw, rec.Policy_Status));
+	dup = thisapp.recon.duplicateCount(policyID);
+	prem = rec.Premium;
+	crmPrem = rec.CRM_Premium;
+	deltaAbs = 0.0;
+	deltaPct = 0.0;
+	hasBothPrem = false;
+	if(prem != null && crmPrem != null)
+	{
+		hasBothPrem = true;
+		deltaAbs = prem - crmPrem;
+		if(deltaAbs < 0)
+		{
+			deltaAbs = deltaAbs * -1;
+		}
+		if(crmPrem != 0)
+		{
+			deltaPct = (deltaAbs / crmPrem) * 100;
+		}
+	}
+	rewriteHeuristic = thisapp.recon.detectRewrite(policyID);
+
+	// 1 duplicate_policy
+	if(dup > 1)
+	{
+		findings.add(""Duplicate_Count="" + dup + "" for Policy_Number or NowCerts_Policy_GUID."");
+		return thisapp.recon._pack(""duplicate_policy"", findings);
+	}
+
+	// 2 pending_sync
+	if(ifnull(rec.Sync_Status, """") == ""Pending"" || ifnull(rec.Pending_Queue_Jobs, 0) > 0)
+	{
+		findings.add(""Sync_Status="" + ifnull(rec.Sync_Status, """") + "" Pending_Queue_Jobs="" + ifnull(rec.Pending_Queue_Jobs, 0));
+		return thisapp.recon._pack(""pending_sync"", findings);
+	}
+
+	// 3 rewrite_detected
+	if(rec.Is_Rewrite == true || ifnull(rec.Cancellation_Class, """") == ""Rewrite"" || rewriteHeuristic.get(""detected"") == true)
+	{
+		findings.add(""Is_Rewrite="" + rec.Is_Rewrite + "" class="" + ifnull(rec.Cancellation_Class, """") + "" heuristic="" + rewriteHeuristic.get(""reason""));
+		return thisapp.recon._pack(""rewrite_detected"", findings);
+	}
+
+	// 4 status_mismatch
+	mismatch = false;
+	if(amsStatus != """" && crmStatus != """" && amsStatus != crmStatus)
+	{
+		mismatch = true;
+		findings.add(""AMS status "" + amsStatus + "" != CRM status "" + crmStatus);
+	}
+	if(crmStatus != """" && status != """" && crmStatus != status)
+	{
+		mismatch = true;
+		findings.add(""CRM status "" + crmStatus + "" != Creator status "" + status);
+	}
+	if(mismatch)
+	{
+		return thisapp.recon._pack(""status_mismatch"", findings);
+	}
+
+	// 5 financial_discrepancy (hybrid $25 or 1%)
+	if(hasBothPrem && crmPrem != 0 && (deltaAbs >= 25 || deltaPct >= 1))
+	{
+		findings.add(""Premium AMS="" + prem + "" CRM="" + crmPrem + "" abs$="" + deltaAbs + "" abs%="" + deltaPct);
+		return thisapp.recon._pack(""financial_discrepancy"", findings);
+	}
+	if(hasBothPrem && crmPrem == 0 && prem != 0 && deltaAbs >= 25)
+	{
+		findings.add(""CRM premium 0; AMS premium "" + prem + "" abs$="" + deltaAbs);
+		return thisapp.recon._pack(""financial_discrepancy"", findings);
+	}
+
+	// 6 missing_in_crm
+	syncedAgeOk = false;
+	if(rec.Last_Synced != null)
+	{
+		ageHours = (zoho.currenttime.toLong() - rec.Last_Synced.toLong()) / 3600000;
+		if(ageHours > 24)
+		{
+			syncedAgeOk = true;
+		}
+	}
+	else
+	{
+		syncedAgeOk = true;
+	}
+	if(ifnull(rec.NowCerts_Policy_GUID, """") != """" && ifnull(rec.CRM_Policy_ID, """") == """" && syncedAgeOk)
+	{
+		findings.add(""AMS GUID present; CRM_Policy_ID empty; Last_Synced older than 24h or blank."");
+		return thisapp.recon._pack(""missing_in_crm"", findings);
+	}
+
+	// 7 missing_in_ams
+	if(ifnull(rec.CRM_Policy_ID, """") != """" && ifnull(rec.NowCerts_Policy_GUID, """") == """")
+	{
+		findings.add(""CRM_Policy_ID present; NowCerts_Policy_GUID empty. Do not tombstone."");
+		return thisapp.recon._pack(""missing_in_ams"", findings);
+	}
+
+	// 8 stale_renewal_queue
+	qstale = thisapp.recon.evaluateQueueStaleFromPolicy(policyID);
+	if(qstale.get(""stale"") == true)
+	{
+		findings.add(qstale.get(""reason""));
+		return thisapp.recon._pack(""stale_renewal_queue"", findings);
+	}
+
+	// 9 stale_crm — v1: CRM clock more than 1 hour behind AMS is enough
+	// when status/premium already matched (else a higher verdict fired).
+	if(rec.Last_AMS_Modified != null && rec.Last_CRM_Modified != null)
+	{
+		if(rec.Last_CRM_Modified < rec.Last_AMS_Modified.addHour(-1))
+		{
+			findings.add(""Last_CRM_Modified < Last_AMS_Modified - 1h. Trust AMS; draft CRM refresh."");
+			return thisapp.recon._pack(""stale_crm"", findings);
+		}
+	}
+
+	// 10 cancel_reason_gap
+	if(thisapp.recon.isCancelStatus(status) && ifnull(rec.Cancellation_Class, """") == """")
+	{
+		findings.add(""Cancelled-class status without Cancellation_Class."");
+		return thisapp.recon._pack(""cancel_reason_gap"", findings);
+	}
+
+	// 11 lineage_orphan
+	if(thisapp.recon.lineageBroken(policyID))
+	{
+		findings.add(""Renewed_Policy_GUID or Successor_Policy_Number does not resolve."");
+		return thisapp.recon._pack(""lineage_orphan"", findings);
+	}
+
+	// 12 clean_match
+	findings.add(""AMS, CRM, Creator, and renewal queue checks passed."");
+	return thisapp.recon._pack(""clean_match"", findings);
+}
+
+
+map thisapp.recon._pack(string verdict, list findings)
+{
+	out = Map();
+	out.put(""verdict"", verdict);
+	out.put(""findings"", findings.toString(""\n""));
+	out.put(""recommendation"", thisapp.recon.recommendation(verdict));
+	return out;
+}
+
+
+string thisapp.recon.recommendation(string verdict)
+{
+	table = Map();
+	table.put(""duplicate_policy"", ""Merge duplicate Policy_Master rows; keep the row with NowCerts_Policy_GUID + latest Last_AMS_Modified. Do not delete until Lamar confirms."");
+	table.put(""pending_sync"", ""Do not edit AMS-owned fields. Wait for sync or inspect outbound queue."");
+	table.put(""rewrite_detected"", ""Link Rewrite_Of / Successor. Move old Renewal_Queue to Completed or Dismissed. Open replacement coverage task if insured still needs a policy."");
+	table.put(""status_mismatch"", ""Trust AMS status. Draft CRM Policy_Status update. Do not execute without approval."");
+	table.put(""financial_discrepancy"", ""Trust AMS premium. Draft CRM premium update. If delta > $500 or Policy_Tier A, assign Lamar."");
+	table.put(""missing_in_crm"", ""Draft CRM Policy create from Policy_Master. Link Account by NowCerts_Insured_GUID. Never create a new Account from this agent."");
+	table.put(""missing_in_ams"", ""Do not tombstone. Flag for human: confirm live NowCerts. Historical false tombstones existed in the book mirror."");
+	table.put(""stale_renewal_queue"", ""Assign Gretchen; Cadence_Bucket 30/Past Due is same-day. Update Last_Touched_At after real contact, not after opening the record."");
+	table.put(""stale_crm"", ""Draft CRM field refresh from AMS snapshot on Policy_Master."");
+	table.put(""cancel_reason_gap"", ""Gretchen classifies Cancellation_Class: Non Pay, Rewrite, Insured Request, Underwriter, or Other."");
+	table.put(""lineage_orphan"", ""Search Policy_Number / GUID; link or clear the broken pointer. Do not invent a GUID."");
+	table.put(""clean_match"", ""No action. Stamp Last_Audit_Date."");
+	if(table.containKey(verdict))
+	{
+		return table.get(verdict);
+	}
+	return ""Unknown verdict — stop. Do not invent a handling path."";
+}
+
+
+string thisapp.recon.severityFor(string verdict, int policyID, int confidence)
+{
+	rec = Policy_Master[ID == policyID];
+	sev = ""Medium"";
+	if(verdict == ""duplicate_policy"")
+	{
+		sev = ""High"";
+	}
+	else if(verdict == ""pending_sync"")
+	{
+		sev = ""Low"";
+	}
+	else if(verdict == ""rewrite_detected"")
+	{
+		sev = ""Medium"";
+	}
+	else if(verdict == ""status_mismatch"")
+	{
+		sev = ""Medium"";
+		amsStatus = thisapp.recon.normalizeStatus(ifnull(rec.AMS_Status_Raw, rec.Policy_Status));
+		crmStatus = thisapp.recon.normalizeStatus(ifnull(rec.CRM_Status, """"));
+		if((amsStatus == ""Active"" && thisapp.recon.isCancelStatus(crmStatus)) || (crmStatus == ""Active"" && thisapp.recon.isCancelStatus(amsStatus)))
+		{
+			sev = ""High"";
+		}
+	}
+	else if(verdict == ""financial_discrepancy"")
+	{
+		sev = ""Medium"";
+		if(rec.Premium != null && rec.CRM_Premium != null)
+		{
+			d = rec.Premium - rec.CRM_Premium;
+			if(d < 0)
+			{
+				d = d * -1;
+			}
+			if(d >= 500 || rec.Policy_Tier == ""A"")
+			{
+				sev = ""High"";
+			}
+		}
+	}
+	else if(verdict == ""missing_in_crm"")
+	{
+		sev = ""Medium"";
+		if(rec.Policy_Tier == ""A"" || ifnull(rec.Premium, 0) >= 5000)
+		{
+			sev = ""High"";
+		}
+	}
+	else if(verdict == ""missing_in_ams"")
+	{
+		sev = ""High"";
+	}
+	else if(verdict == ""stale_renewal_queue"")
+	{
+		sev = ""Medium"";
+		q = Renewal_Queue[Policy == policyID && Dismissed == false];
+		if(q.count())
+		{
+			row = q.getAll().get(0);
+			if(row.get(""Cadence_Bucket"") == ""Past Due"" || row.get(""Risk_Status"") == ""CRITICAL"")
+			{
+				sev = ""Critical"";
+			}
+		}
+	}
+	else if(verdict == ""stale_crm"")
+	{
+		sev = ""Low"";
+	}
+	else if(verdict == ""cancel_reason_gap"")
+	{
+		sev = ""Medium"";
+	}
+	else if(verdict == ""lineage_orphan"")
+	{
+		sev = ""Medium"";
+	}
+	else if(verdict == ""clean_match"")
+	{
+		return """";
+	}
+	if(confidence < 50)
+	{
+		if(sev == ""Low"")
+		{
+			sev = ""Medium"";
+		}
+		else if(sev == ""Medium"")
+		{
+			sev = ""High"";
+		}
+		else if(sev == ""High"")
+		{
+			sev = ""Critical"";
+		}
+	}
+	return sev;
+}
+"
+04,04_rewrite_detection.dg,"// thisapp.recon.detectRewrite
+// Heuristic spec section 8.2. Never invent a successor policy.
+
+map thisapp.recon.detectRewrite(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	out = Map();
+	out.put(""detected"", false);
+	out.put(""reason"", """");
+	out.put(""successor_id"", 0);
+	if(!rec.count())
+	{
+		out.put(""reason"", ""policy not found"");
+		return out;
+	}
+	status = thisapp.recon.normalizeStatus(ifnull(rec.Policy_Status, rec.AMS_Status_Raw));
+	cancelLike = thisapp.recon.isCancelStatus(status) || status == ""Non-Renewed"" || status == ""Rewritten"";
+	if(!cancelLike && ifnull(rec.Cancellation_Class, """") != ""Rewrite"")
+	{
+		out.put(""reason"", ""not a cancel/rewrite candidate"");
+		return out;
+	}
+	insured = ifnull(rec.NowCerts_Insured_GUID, """");
+	lob = ifnull(rec.Line_of_Business, """");
+	if(insured == """" || lob == """")
+	{
+		out.put(""reason"", ""missing NowCerts_Insured_GUID or Line_of_Business — cannot heuristic-match"");
+		return out;
+	}
+	anchor = rec.Cancellation_Date;
+	if(anchor == null)
+	{
+		anchor = rec.Expiration_Date;
+	}
+	if(anchor == null)
+	{
+		out.put(""reason"", ""no Cancellation_Date or Expiration_Date"");
+		return out;
+	}
+	start = anchor.addDay(-60);
+	end = anchor.addDay(60);
+	cands = Policy_Master[NowCerts_Insured_GUID == insured && Line_of_Business == lob && ID != policyID && Effective_Date >= start && Effective_Date <= end];
+	ids = List();
+	for each row in cands
+	{
+		st = thisapp.recon.normalizeStatus(ifnull(row.Policy_Status, row.AMS_Status_Raw));
+		if(st == ""Active"" || st == ""Up for Renewal"" || st == ""Renewing"")
+		{
+			if(ifnull(row.NowCerts_Policy_GUID, """") != ifnull(rec.NowCerts_Policy_GUID, """"))
+			{
+				ids.add(row.ID);
+			}
+		}
+	}
+	n = ids.size();
+	if(n == 0)
+	{
+		if(ifnull(rec.Cancellation_Class, """") == ""Rewrite"" || rec.Is_Rewrite == true)
+		{
+			out.put(""detected"", true);
+			out.put(""reason"", ""classed as rewrite but no successor found in 60-day window"");
+		}
+		else
+		{
+			out.put(""reason"", ""no successor in 60-day window"");
+		}
+		return out;
+	}
+	if(n > 1)
+	{
+		out.put(""detected"", true);
+		out.put(""reason"", ""multiple successor candidates ("" + n + ""); human must pick"");
+		out.put(""successor_id"", 0);
+		return out;
+	}
+	sid = ids.get(0);
+	succ = Policy_Master[ID == sid];
+	out.put(""detected"", true);
+	out.put(""reason"", ""linked successor "" + succ.Policy_Number);
+	out.put(""successor_id"", sid);
+	return out;
+}
+
+
+// Apply rewrite links when exactly one successor is found.
+// Does not change AMS. Updates Creator lineage fields only.
+
+void thisapp.recon.applyRewriteLink(int policyID)
+{
+	info = thisapp.recon.detectRewrite(policyID);
+	if(info.get(""detected"") != true)
+	{
+		return;
+	}
+	sid = info.get(""successor_id"");
+	if(sid == 0)
+	{
+		old = Policy_Master[ID == policyID];
+		old.Is_Rewrite=true;
+		old.Last_Verdict=""rewrite_detected"";
+		return;
+	}
+	old = Policy_Master[ID == policyID];
+	succ = Policy_Master[ID == sid];
+	old.Is_Rewrite=true;
+	old.Successor_Policy_Number=succ.Policy_Number;
+	if(ifnull(old.Cancellation_Class, """") == ""Rewrite"" && thisapp.recon.normalizeStatus(old.Policy_Status) == ""Cancelled"")
+	{
+		old.Policy_Status=""Rewritten"";
+		old.Active=false;
+	}
+	succ.Rewrite_Of=old.ID;
+	q = Renewal_Queue[Policy == policyID && Dismissed == false && Queue_Status in {""Open"", ""In Progress"", ""Waiting Client"", ""Waiting Carrier"", ""Stale""}];
+	for each qr in q
+	{
+		qr.Queue_Status=""Dismissed"";
+		qr.Dismissed=true;
+		qr.Stale_Reason=""rewrite_detected"";
+		qr.Last_Touched_At=zoho.currenttime;
+	}
+}
+"
+05,05_status_history_hook.dg,"// thisapp.recon.writeStatusHistory
+// Called from Policy_Master on add / on edit when Policy_Status or Active changes.
+
+int thisapp.recon.writeStatusHistory(int policyID, string oldStatus, string newStatus, string source)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return 0;
+	}
+	oldA = false;
+	newA = rec.Active;
+	if(thisapp.recon.isActiveStatus(oldStatus))
+	{
+		oldA = true;
+	}
+	stamp = zoho.currenttime;
+	nm = rec.Policy_Number + "" "" + stamp;
+	row = insert into Policy_Status_History
+	[
+		Name=nm
+		Policy=policyID
+		Policy_Number=rec.Policy_Number
+		Source_System=ifnull(source, ""Creator"")
+		Old_Status=oldStatus
+		New_Status=newStatus
+		Old_Active=oldA
+		New_Active=newA
+		Changed_At=stamp
+		Changed_By=zoho.loginuser
+		Cancellation_Class=rec.Cancellation_Class
+	];
+	return row;
+}
+
+
+// Form workflow snippet (On Edit, Policy_Master):
+//
+// oldS = old.Policy_Status;
+// newS = input.Policy_Status;
+// if(oldS != newS || old.Active != input.Active)
+// {
+//     thisapp.recon.writeStatusHistory(input.ID, oldS, newS, ""Creator"");
+// }
+"
+06,06_exception_sla.dg,"// Exception upsert + SLA. Spec sections 6.3, 9.3, 11.
+
+int thisapp.recon.slaHours(string severity)
+{
+	if(severity == ""Critical"")
+	{
+		return 4;
+	}
+	if(severity == ""High"")
+	{
+		return 24;
+	}
+	if(severity == ""Medium"")
+	{
+		return 72;
+	}
+	return 120;
+}
+
+
+int thisapp.recon.upsertException(int auditID)
+{
+	aud = Policy_Audit[ID == auditID];
+	if(!aud.count())
+	{
+		return 0;
+	}
+	verdict = aud.Verdict;
+	if(verdict == ""clean_match"")
+	{
+		thisapp.recon.maybeAutoClose(aud.Policy, verdict);
+		return 0;
+	}
+	conf = ifnull(aud.Confidence, 0);
+	sev = thisapp.recon.severityFor(verdict, aud.Policy, conf);
+	hours = thisapp.recon.slaHours(sev);
+	opened = zoho.currenttime;
+	due = opened.addHour(hours);
+	existing = Audit_Exceptions[Policy == aud.Policy && Verdict == verdict && Status in {""Open"", ""In Progress"", ""Waiting""}];
+	nm = sev + "" — "" + aud.Policy_Number + "" — "" + verdict;
+	if(existing.count())
+	{
+		ex = existing;
+		ex.Audit=auditID;
+		ex.Severity=sev;
+		ex.Name=nm;
+		if(thisapp.recon.severityRank(sev) > thisapp.recon.severityRank(ex.Severity))
+		{
+			ex.SLA_Hours=hours;
+			ex.SLA_Due_At=due;
+		}
+		aud.Exception_Created=true;
+		aud.Related_Exception=ex.ID;
+		return ex.ID;
+	}
+	ownerEmail = thisapp.recon.defaultOwner(sev);
+	row = insert into Audit_Exceptions
+	[
+		Name=nm
+		Policy=aud.Policy
+		Policy_Number=aud.Policy_Number
+		Audit=auditID
+		Verdict=verdict
+		Severity=sev
+		Status=""Open""
+		SLA_Hours=hours
+		SLA_Due_At=due
+		SLA_Breached=false
+		Owner=ownerEmail
+		Opened_At=opened
+		Notify_Sent=false
+	];
+	aud.Exception_Created=true;
+	aud.Related_Exception=row;
+	return row;
+}
+
+
+int thisapp.recon.severityRank(string sev)
+{
+	if(sev == ""Critical"")
+	{
+		return 4;
+	}
+	if(sev == ""High"")
+	{
+		return 3;
+	}
+	if(sev == ""Medium"")
+	{
+		return 2;
+	}
+	return 1;
+}
+
+
+// Assign by role label. Replace with actual Creator user emails in production.
+
+string thisapp.recon.defaultOwner(string severity)
+{
+	if(severity == ""High"" || severity == ""Critical"")
+	{
+		return ""lamar"";
+	}
+	return ""gretchen"";
+}
+
+
+void thisapp.recon.maybeAutoClose(int policyID, string newVerdict)
+{
+	if(newVerdict != ""clean_match"")
+	{
+		return;
+	}
+	openRows = Audit_Exceptions[Policy == policyID && Status in {""Open"", ""In Progress"", ""Waiting""}];
+	for each ex in openRows
+	{
+		if(ex.Verdict == ""pending_sync"" || ex.Verdict == ""stale_crm"")
+		{
+			ex.Status=""Resolved"";
+			ex.Resolution_Class=""Data lag"";
+			ex.Resolution_Notes=""Auto-closed: subsequent audit was clean_match."";
+			ex.Resolved_At=zoho.currenttime;
+		}
+	}
+}
+
+
+// Hourly SLA sweep.
+
+void thisapp.recon.slaSweep()
+{
+	openRows = Audit_Exceptions[Status in {""Open"", ""In Progress"", ""Waiting""} && SLA_Breached == false];
+	for each ex in openRows
+	{
+		if(ex.SLA_Due_At != null && zoho.currenttime > ex.SLA_Due_At)
+		{
+			ex.SLA_Breached=true;
+			thisapp.recon.notifyException(ex.ID, ""SLA_Breached"");
+		}
+	}
+}
+
+
+void thisapp.recon.notifyException(int exceptionID, string eventName)
+{
+	ex = Audit_Exceptions[ID == exceptionID];
+	if(!ex.count())
+	{
+		return;
+	}
+	if(eventName != ""SLA_Breached"")
+	{
+		if(ex.Notify_Sent == true && ex.Last_Notify_At != null)
+		{
+			ageHours = (zoho.currenttime.toLong() - ex.Last_Notify_At.toLong()) / 3600000;
+			if(ex.Severity == ""Critical"" && ageHours < 24)
+			{
+				return;
+			}
+		}
+	}
+	subj = ""[RSG Recon] "" + eventName + "" "" + ex.Severity + "" "" + ex.Policy_Number + "" "" + ex.Verdict;
+	body = ""Policy: "" + ex.Policy_Number + ""\nVerdict: "" + ex.Verdict + ""\nSeverity: "" + ex.Severity + ""\nDue: "" + ex.SLA_Due_At;
+	// Replace with actual user emails after install.
+	sendmail
+	[
+		from: zoho.adminuserid
+		to: zoho.adminuserid
+		subject: subj
+		message: body
+	]
+	ex.Notify_Sent=true;
+	ex.Last_Notify_At=zoho.currenttime;
+	if(ex.Severity == ""High"" || ex.Severity == ""Critical"")
+	{
+		ex.Escalated_To_Lamar=true;
+	}
+}
+"
+07,07_scheduled_daily_recon.dg,"// Orchestrator: one policy + daily batch. Spec section 9.
+
+int thisapp.recon.runOne(int policyID, string runType, string runID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return 0;
+	}
+	if(ifnull(runID, """") == """")
+	{
+		runID = zoho.currenttime.toString(""yyyyMMddHHmmss"");
+	}
+	if(ifnull(runType, """") == """")
+	{
+		runType = ""manual"";
+	}
+	norm = thisapp.recon.normalizeStatus(ifnull(rec.AMS_Status_Raw, rec.Policy_Status));
+	if(norm != """" && rec.Policy_Status != norm)
+	{
+		rec.Policy_Status=norm;
+		rec.Active=thisapp.recon.isActiveStatus(norm);
+	}
+	bt = thisapp.recon.normalizeBilling(ifnull(rec.Billing_Type, """"));
+	if(bt != """")
+	{
+		rec.Billing_Type=bt;
+	}
+	rec.Policy_Tier=thisapp.recon.computeTier(policyID);
+	rw = thisapp.recon.detectRewrite(policyID);
+	if(rw.get(""detected"") == true && rw.get(""successor_id"") != 0)
+	{
+		thisapp.recon.applyRewriteLink(policyID);
+	}
+	thisapp.recon.refreshQueueDerived(policyID);
+	scoreMap = thisapp.recon.scoreDetail(policyID);
+	vmap = thisapp.recon.verdictDetail(policyID);
+	verdict = vmap.get(""verdict"");
+	score = scoreMap.get(""score"");
+	stamp = zoho.currenttime;
+	qstale = thisapp.recon.evaluateQueueStaleFromPolicy(policyID);
+	prem = rec.Premium;
+	crmPrem = rec.CRM_Premium;
+	delta = null;
+	deltaPct = null;
+	if(prem != null && crmPrem != null)
+	{
+		delta = prem - crmPrem;
+		if(crmPrem != 0)
+		{
+			dabs = delta;
+			if(dabs < 0)
+			{
+				dabs = dabs * -1;
+			}
+			deltaPct = (dabs / crmPrem) * 100;
+		}
+	}
+	nm = rec.Policy_Number + "" @ "" + stamp;
+	aud = insert into Policy_Audit
+	[
+		Name=nm
+		Policy=policyID
+		Policy_Number=rec.Policy_Number
+		Run_ID=runID
+		Run_At=stamp
+		Run_Type=runType
+		Verdict=verdict
+		Confidence=score
+		AMS_Status=thisapp.recon.normalizeStatus(ifnull(rec.AMS_Status_Raw, rec.Policy_Status))
+		CRM_Status=thisapp.recon.normalizeStatus(ifnull(rec.CRM_Status, """"))
+		Creator_Status=thisapp.recon.normalizeStatus(ifnull(rec.Policy_Status, """"))
+		AMS_Premium=prem
+		CRM_Premium=crmPrem
+		Premium_Delta=delta
+		Premium_Delta_Pct=deltaPct
+		Queue_Stale=qstale.get(""stale"")
+		Duplicate_Count=scoreMap.get(""duplicate_count"")
+		Rewrite_Linked=if(rec.Rewrite_Of != null, true, false)
+		Pending_Queue_Jobs=ifnull(rec.Pending_Queue_Jobs, 0)
+		Findings=vmap.get(""findings"")
+		Recommendation=vmap.get(""recommendation"")
+		Score_Breakdown=scoreMap.get(""breakdown"")
+		Exception_Created=false
+	];
+	rec.Last_Verdict=verdict;
+	rec.Last_Confidence=score;
+	rec.Last_Audit_Date=stamp;
+	rec.Run_Recon_On_Save=false;
+	thisapp.recon.upsertException(aud);
+	if(verdict != ""clean_match"")
+	{
+		ex = Audit_Exceptions[Audit == aud && Status == ""Open""];
+		if(ex.count() && (ex.Severity == ""Critical"" || (ex.Severity == ""High"" && verdict == ""missing_in_ams"")))
+		{
+			thisapp.recon.notifyException(ex.ID, ""New exception"");
+		}
+	}
+	return aud;
+}
+
+
+void thisapp.recon.runDaily()
+{
+	runID = ""daily-"" + zoho.currenttime.toString(""yyyyMMddHHmmss"");
+	windowDate = zoho.currentdate.addDay(120);
+	targets = Policy_Master[Policy_Tier == ""A"" || Policy_Tier == ""B"" || Active == true || Expiration_Date <= windowDate || Last_Verdict != ""clean_match"" || Last_Audit_Date == null];
+	for each rec in targets
+	{
+		thisapp.recon.runOne(rec.ID, ""scheduled_daily"", runID);
+	}
+	thisapp.recon.slaSweep();
+}
+
+
+void thisapp.recon.runWeeklyTierC()
+{
+	runID = ""tierc-"" + zoho.currenttime.toString(""yyyyMMddHHmmss"");
+	targets = Policy_Master[Policy_Tier == ""C""];
+	for each rec in targets
+	{
+		thisapp.recon.runOne(rec.ID, ""scheduled_tier"", runID);
+	}
+}
+
+
+void thisapp.recon.refreshQueueDerived(int policyID)
+{
+	q = Renewal_Queue[Policy == policyID && Dismissed == false];
+	if(!q.count())
+	{
+		return;
+	}
+	for each row in q
+	{
+		row.Cadence_Bucket=thisapp.recon.cadenceBucket(row.Expiration_Date);
+		row.Risk_Status=thisapp.recon.classifyRisk(row.ID);
+		st = thisapp.recon.evaluateQueueStale(row.ID);
+		row.Stale_Flag=st.get(""stale"");
+		row.Stale_Reason=st.get(""reason"");
+		if(st.get(""stale"") == true && row.Queue_Status == ""Open"")
+		{
+			row.Queue_Status=""Stale"";
+		}
+	}
+}
+
+
+string thisapp.recon.cadenceBucket(date exp)
+{
+	if(exp == null)
+	{
+		return """";
+	}
+	days = daysBetween(zoho.currentdate, exp);
+	if(days < 0)
+	{
+		return ""Past Due"";
+	}
+	if(days <= 30)
+	{
+		return ""30"";
+	}
+	if(days <= 60)
+	{
+		return ""60"";
+	}
+	if(days <= 90)
+	{
+		return ""90"";
+	}
+	return """";
+}
+
+
+string thisapp.recon.classifyRisk(int queueID)
+{
+	row = Renewal_Queue[ID == queueID];
+	if(!row.count())
+	{
+		return ""SAFE"";
+	}
+	cur = ifnull(row.Premium_Current, 0);
+	ren = row.Premium_Renewal;
+	if(ren != null && cur > 0)
+	{
+		inc = ((ren - cur) / cur) * 100;
+		if(inc > 15)
+		{
+			return ""CRITICAL"";
+		}
+		if(inc >= 5)
+		{
+			return ""AT_RISK"";
+		}
+	}
+	if(row.Expiration_Date == null)
+	{
+		return ""SAFE"";
+	}
+	days = daysBetween(zoho.currentdate, row.Expiration_Date);
+	if(days <= 30)
+	{
+		return ""CRITICAL"";
+	}
+	if(days <= 90)
+	{
+		return ""AT_RISK"";
+	}
+	return ""SAFE"";
+}
+
+
+map thisapp.recon.evaluateQueueStale(int queueID)
+{
+	out = Map();
+	out.put(""stale"", false);
+	out.put(""reason"", """");
+	row = Renewal_Queue[ID == queueID];
+	if(!row.count())
+	{
+		return out;
+	}
+	pol = Policy_Master[ID == row.Policy];
+	pstat = thisapp.recon.normalizeStatus(ifnull(pol.Policy_Status, """"));
+	openish = {""Open"", ""In Progress"", ""Waiting Client"", ""Waiting Carrier"", ""Stale""};
+	if(pstat == ""Cancelled"" || pstat == ""Flat Cancel"" || pstat == ""Rewritten"" || pstat == ""Renewed"" || pstat == ""Non-Renewed"")
+	{
+		if(openish.contains(row.Queue_Status))
+		{
+			out.put(""stale"", true);
+			out.put(""reason"", ""Policy_Status="" + pstat + "" but queue still "" + row.Queue_Status);
+			return out;
+		}
+	}
+	if(pol.Expiration_Date != null && row.Expiration_Date != null && pol.Expiration_Date != row.Expiration_Date)
+	{
+		out.put(""stale"", true);
+		out.put(""reason"", ""Queue Expiration_Date != Policy_Master Expiration_Date"");
+		return out;
+	}
+	ageDays = 0;
+	if(row.Last_Touched_At != null)
+	{
+		ageDays = daysBetween(row.Last_Touched_At.toDate(), zoho.currentdate);
+	}
+	else
+	{
+		ageDays = 999;
+	}
+	bucket = ifnull(row.Cadence_Bucket, thisapp.recon.cadenceBucket(row.Expiration_Date));
+	qstat = ifnull(row.Queue_Status, """");
+	if((bucket == ""30"" || bucket == ""Past Due"") && (qstat == ""Open"" || qstat == ""In Progress"") && ageDays > 7)
+	{
+		out.put(""stale"", true);
+		out.put(""reason"", ""Cadence "" + bucket + "" untouched "" + ageDays + "" days"");
+		return out;
+	}
+	if(bucket == ""60"" && qstat == ""Open"" && ageDays > 14)
+	{
+		out.put(""stale"", true);
+		out.put(""reason"", ""Cadence 60 Open untouched "" + ageDays + "" days"");
+		return out;
+	}
+	return out;
+}
+
+
+map thisapp.recon.evaluateQueueStaleFromPolicy(int policyID)
+{
+	q = Renewal_Queue[Policy == policyID && Dismissed == false];
+	out = Map();
+	out.put(""stale"", false);
+	out.put(""reason"", """");
+	if(!q.count())
+	{
+		return out;
+	}
+	return thisapp.recon.evaluateQueueStale(q.ID);
+}
+"
+08,08_crm_pull.dg,"// Zoho CRM read (Phase 4). Connection name: zoho_crm
+// Custom module API name may be ""Policies"" or ""CustomModuleX"" — confirm in
+// Settings → APIs → API Names after the CRM field pack is installed
+// (docs/zoho/fields_policies.csv).
+//
+// NEVER create Accounts. NEVER update CRM unless approval gate passes.
+
+void thisapp.recon.pullCRM(int policyID)
+{
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		return;
+	}
+	guid = ifnull(rec.NowCerts_Policy_GUID, """");
+	pnum = ifnull(rec.Policy_Number, """");
+	crmRow = null;
+	if(guid != """")
+	{
+		crit = ""(NowCerts_Policy_GUID:equals:"" + guid + "")"";
+		resp = zoho.crm.searchRecords(""Policies"", crit, 1, 2);
+		if(resp.size() == 1)
+		{
+			crmRow = resp.get(0);
+		}
+		else if(resp.size() > 1)
+		{
+			rec.Sync_Status=""Error"";
+			rec.Notes=ifnull(rec.Notes, """") + ""\n[recon] duplicate CRM Policies for GUID "" + guid;
+			return;
+		}
+	}
+	if(crmRow == null && pnum != """")
+	{
+		crit2 = ""(Policy_Number:equals:"" + pnum + "")"";
+		resp2 = zoho.crm.searchRecords(""Policies"", crit2, 1, 2);
+		if(resp2.size() == 1)
+		{
+			crmRow = resp2.get(0);
+		}
+		else if(resp2.size() > 1)
+		{
+			rec.Sync_Status=""Error"";
+			rec.Notes=ifnull(rec.Notes, """") + ""\n[recon] duplicate CRM Policies for number "" + pnum;
+			return;
+		}
+	}
+	if(crmRow == null)
+	{
+		return;
+	}
+	rec.CRM_Policy_ID=crmRow.get(""id"");
+	acct = crmRow.get(""Account_Name"");
+	if(acct != null && acct.get(""id"") != null)
+	{
+		rec.CRM_Account_ID=acct.get(""id"");
+	}
+	rec.CRM_Status=thisapp.recon.normalizeStatus(ifnull(crmRow.get(""Policy_Status""), """"));
+	if(crmRow.get(""Premium"") != null)
+	{
+		rec.CRM_Premium=crmRow.get(""Premium"");
+	}
+	if(crmRow.get(""Modified_Time"") != null)
+	{
+		rec.Last_CRM_Modified=crmRow.get(""Modified_Time"").toTime(""yyyy-MM-dd'T'HH:mm:ss"");
+	}
+	rec.Last_Synced=zoho.currenttime;
+	if(ifnull(rec.Sync_Status, """") != ""Pending"")
+	{
+		rec.Sync_Status=""Synced"";
+	}
+}
+
+
+void thisapp.recon.pullCRMBatch()
+{
+	rows = Policy_Master[Active == true || Policy_Tier == ""A"" || Policy_Tier == ""B""];
+	for each rec in rows
+	{
+		thisapp.recon.pullCRM(rec.ID);
+	}
+}
+
+
+// GATED WRITE — do not call from schedules.
+// Preconditions: Approved_To_Push, Approved_By, Approved_At within 24h,
+// latest Policy_Audit.Recommended_Payload non-empty.
+
+map thisapp.recon.pushCRMIfApproved(int policyID)
+{
+	out = Map();
+	out.put(""ok"", false);
+	rec = Policy_Master[ID == policyID];
+	if(!rec.count())
+	{
+		out.put(""error"", ""not found"");
+		return out;
+	}
+	if(rec.Approved_To_Push != true || rec.Approved_By == null || rec.Approved_At == null)
+	{
+		out.put(""error"", ""approval gate failed"");
+		return out;
+	}
+	ageHours = (zoho.currenttime.toLong() - rec.Approved_At.toLong()) / 3600000;
+	if(ageHours > 24)
+	{
+		out.put(""error"", ""approval older than 24h"");
+		return out;
+	}
+	if(ifnull(rec.CRM_Policy_ID, """") == """")
+	{
+		out.put(""error"", ""no CRM_Policy_ID — create drafts are human-only"");
+		return out;
+	}
+	aud = Policy_Audit[Policy == policyID] sort by Run_At desc range from 0 to 0;
+	payloadText = ifnull(aud.Recommended_Payload, """");
+	if(payloadText == """")
+	{
+		out.put(""error"", ""empty Recommended_Payload"");
+		return out;
+	}
+	// Expected payload: JSON map of CRM API names → values. Example:
+	// {""Policy_Status"":""Active"",""Premium"":1200.00}
+	payload = payloadText.toMap();
+	resp = zoho.crm.updateRecord(""Policies"", rec.CRM_Policy_ID, payload);
+	rec.Approved_To_Push=false;
+	rec.Sync_Status=""Pending"";
+	thisapp.recon.writeStatusHistory(policyID, rec.Policy_Status, rec.Policy_Status, ""Creator"");
+	out.put(""ok"", true);
+	out.put(""crm_response"", resp);
+	return out;
+}
+
+
+void thisapp.recon.pullCRM_all_modified_since()
+{
+	// Optional: zoho.crm.getRecords with Modified_Time criteria.
+	// Implement after live API names are confirmed. Do not guess module names.
+}
+"

@@ -1,0 +1,13 @@
+Order,Verdict,Severity
+1,duplicate_policy,High
+2,pending_sync,Low (High if pending > 72h)
+3,rewrite_detected,Medium
+4,status_mismatch,Medium (High if Active vs Cancelled)
+5,financial_discrepancy,Medium (High if |delta|>=500 or Tier A)
+6,missing_in_crm,Medium (High if Tier A or premium>=5000)
+7,missing_in_ams,High
+8,stale_renewal_queue,Medium (Critical if Past Due or CRITICAL risk)
+9,stale_crm,Low
+10,cancel_reason_gap,Medium
+11,lineage_orphan,Medium
+12,clean_match,(no exception)

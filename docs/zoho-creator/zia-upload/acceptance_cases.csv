@@ -1,0 +1,15 @@
+Seed_ID,Expected_Verdict,Expected_Confidence,Policy_Number
+S01,clean_match,100,RSG-TEST-S01
+S02,duplicate_policy,70,RSG-TEST-S02
+S02b,duplicate_policy,70,RSG-TEST-S02
+S03,pending_sync,92,RSG-TEST-S03
+S04b,clean_match,100,RSG-TEST-S04B
+S04,rewrite_detected,100,RSG-TEST-S04
+S05,status_mismatch,88,RSG-TEST-S05
+S06,financial_discrepancy,82,RSG-TEST-S06
+S07,missing_in_crm,90,RSG-TEST-S07
+S08,missing_in_ams,75,RSG-TEST-S08
+S09,stale_renewal_queue,90,RSG-TEST-S09
+S10,stale_crm,100,RSG-TEST-S10
+S11,cancel_reason_gap,88,RSG-TEST-S11
+S12,lineage_orphan,88,RSG-TEST-S12
