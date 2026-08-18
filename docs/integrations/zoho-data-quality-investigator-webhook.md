@@ -71,23 +71,14 @@ If your org uses a different naming convention, update the Deluge file according
 
 ## Part 3 — Deluge function
 
-1. **Setup** → **Developer Space** → **Functions** → **New Function**.
-2. **Display name:** `trigger_cursor_policy_investigation`
-3. **Category:** `automation` (or any category — note the full name for the workflow step)
-4. **Arguments** (add each as **string**):
+1. **Setup** → **Developer Space** → **Functions** → edit `trigger_cursor_policy_investigation`.
+2. **One argument only:** `renewalId` (string).
+3. Paste the full function from [`docs/zoho/deluge/trigger_policy_investigation.deluge`](../zoho/deluge/trigger_policy_investigation.deluge).
+4. Save and validate.
 
-| Argument | Required | Workflow merge field (Renewals) |
-|---|---|---|
-| `policyNumber` | Yes | `${Renewals.Policy_Number}` |
-| `clientName` | No | `${Renewals.Client_Name}` |
-| `lineOfBusiness` | No | `${Renewals.Line_of_Business}` |
-| `recordId` | No | `${Renewals.id}` |
-| `sourceModule` | No | literal `Renewals` |
+The function **loads the Renewal record by ID** inside Deluge (`zoho.crm.getRecordById`) so you do not map `Policy_Number` etc. on the button — custom buttons often pass `${Renewals.Policy_Number}` literally instead of resolving it.
 
-5. Paste the function body from [`docs/zoho/deluge/trigger_policy_investigation.deluge`](../zoho/deluge/trigger_policy_investigation.deluge) (or paste the whole file if your org expects the `string automation....` wrapper).
-6. Save.
-
-The function POSTs JSON to Cursor with `Authorization: Bearer <key>`.
+If your module API name is not `Renewals`, change `moduleApi` in the script (check **Setup → APIs → Modules**).
 
 ---
 
@@ -105,8 +96,19 @@ Best when ops works from the renewal worklist.
 4. **When:** **Record action** → **Button** (or **On a record action** if your org uses Blueprint/custom button).
    - Button label: `Investigate data quality`
 5. **Condition (optional):** `Policy_Number` is not empty.
-6. **Instant action:** **Function** → `automation.trigger_cursor_policy_investigation` (name matches your category).
-   - Map arguments from the table in Part 3.
+6. **Instant action:** **Function** → `automation.trigger_cursor_policy_investigation`
+   - Map `renewalId` → **Record Id** (use merge-field picker)
+
+### Custom button (recommended)
+
+**Setup → Customization → Modules and Fields → Renewals → Links and Buttons**
+
+| Setting | Value |
+|---|---|
+| Action | Function → `automation.trigger_cursor_policy_investigation` |
+| Argument `renewalId` | **Record Id** from merge-field picker (do not type `${Renewals...}` by hand) |
+
+Remove the other four arguments if you still have them on the old function version.
 7. Save and activate.
 
 Add the button to the Renewals layout: **Setup** → **Customization** → **Modules and Fields** → **Renewals** → **Layouts** → drag the workflow button onto the layout.
@@ -145,7 +147,8 @@ API names must match your org. See `docs/zoho/fields_renewals.csv` and `fields_p
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Nothing in Cursor | Missing `Authorization: Bearer` | Use Deluge `invokeurl` with headers — native Zoho webhook UI often cannot set Bearer |
+| Policy shows as `${Renewals.Policy_Number}` | Merge field not resolved on button | Use **one-arg** function; map **Record Id** only via picker |
+| `No number after minus sign in JSON` | Invalid JSON body from Map | Update to latest Deluge (explicit `jsonBody` string) |
 | `401` from Cursor | Wrong or expired webhook key | Regenerate key in Cursor; update CRM variable |
 | Zoho function error | CRM variables unset | Fill `cursor_dqi_webhook_url` and `cursor_dqi_webhook_key` |
 | Agent run but no data | MCP not connected on automation | Cursor Settings → MCP → Supabase + Hermes |

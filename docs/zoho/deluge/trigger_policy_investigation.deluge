@@ -1,21 +1,20 @@
-// Trigger Cursor "RSG Data Quality Investigator" from a Zoho CRM workflow.
+// Trigger Cursor "RSG Data Quality Investigator" from a Zoho CRM custom button.
 //
-// Function arguments (map from workflow field merge syntax):
-//   policyNumber  (string, required) — ${Renewals.Policy_Number} or ${Policies.Policy_Number}
-//   clientName    (string, optional) — ${Renewals.Client_Name} or ${Policies.Account Name}
-//   lineOfBusiness(string, optional) — ${Renewals.Line_of_Business} or ${Policies.Line_of_Business}
-//   recordId      (string, optional) — ${Renewals.id} or ${Policies.id}
-//   sourceModule  (string, optional) — literal "Renewals" or "Policies"
+// ONE argument only — custom buttons resolve Record Id reliably; field merge
+// syntax like ${Renewals.Policy_Number} is often passed through literally.
 //
-// CRM Variables (Setup → Developer Space → CRM Variables):
+// Button argument mapping:
+//   renewalId  → pick "Record Id" from merge-field picker (Renewals module)
+//
+// CRM Variables:
 //   cursor_dqi_webhook_url
-//   cursor_dqi_webhook_key   (token only — no "Bearer " prefix)
+//   cursor_dqi_webhook_key
 
-string standalone.trigger_cursor_policy_investigation(String policyNumber, String clientName, String lineOfBusiness, String recordId, String sourceModule)
+string automation.trigger_cursor_policy_investigation(String renewalId)
 {
 	webhookUrl = zoho.crm.getOrgVariable("cursor_dqi_webhook_url");
 	webhookKey = zoho.crm.getOrgVariable("cursor_dqi_webhook_key");
-	out = "";
+	moduleApi = "Renewals";
 
 	if(webhookUrl == null || webhookUrl == "")
 	{
@@ -25,30 +24,42 @@ string standalone.trigger_cursor_policy_investigation(String policyNumber, Strin
 	{
 		return "ERROR: cursor_dqi_webhook_key CRM variable is not set";
 	}
-	pn = ifnull(policyNumber, "").trim();
-	if(pn == "")
+	rid = ifnull(renewalId, "").trim();
+	if(rid == "" || rid.startsWith("${"))
 	{
-		return "ERROR: Policy_Number is empty";
+		return "ERROR: renewalId is empty or merge field did not resolve — map Record Id from the merge-field picker, not typed ${...} text";
 	}
 
-	payload = Map();
-	payload.put("policy_number", pn);
-	cn = ifnull(clientName, "").trim();
+	rec = zoho.crm.getRecordById(moduleApi, rid);
+	if(rec == null || rec.isEmpty())
+	{
+		return "ERROR: could not load " + moduleApi + " record " + rid;
+	}
+
+	pn = ifnull(rec.get("Policy_Number"), "").trim();
+	if(pn == "")
+	{
+		return "ERROR: Policy_Number is empty on renewal " + rid;
+	}
+	cn = ifnull(rec.get("Client_Name"), "").trim();
+	lob = ifnull(rec.get("Line_of_Business"), "").trim();
+
+	// Build JSON explicitly — Map body can produce invalid JSON for Cursor.
+	pnEsc = pn.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
+	cnEsc = cn.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
+	lobEsc = lob.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
+	ridEsc = rid.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
+
+	jsonBody = "{\"policy_number\":\"" + pnEsc + "\"";
 	if(cn != "")
 	{
-		payload.put("client_name", cn);
+		jsonBody = jsonBody + ",\"client_name\":\"" + cnEsc + "\"";
 	}
-	lob = ifnull(lineOfBusiness, "").trim();
 	if(lob != "")
 	{
-		payload.put("line_of_business", lob);
+		jsonBody = jsonBody + ",\"line_of_business\":\"" + lobEsc + "\"";
 	}
-	payload.put("source", "zoho_" + ifnull(sourceModule, "crm").toLowerCase().replaceAll(" ", "_"));
-	rid = ifnull(recordId, "").trim();
-	if(rid != "")
-	{
-		payload.put("zoho_record_id", rid);
-	}
+	jsonBody = jsonBody + ",\"source\":\"zoho_renewals\",\"zoho_record_id\":\"" + ridEsc + "\"}";
 
 	headers = Map();
 	headers.put("Content-Type", "application/json");
@@ -59,7 +70,7 @@ string standalone.trigger_cursor_policy_investigation(String policyNumber, Strin
 		url :webhookUrl
 		type :POST
 		headers:headers
-		body:payload
+		body:jsonBody
 	];
 
 	return "Triggered Cursor DQ investigation for policy " + pn + " — response: " + response;
