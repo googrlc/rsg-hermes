@@ -80,7 +80,7 @@ Use as a subset of Policy Status or a separate Renewal Status field:
 
 ### 1e. Other Hermes vocab
 
-Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_Type, Insured_Type, Win_Likelihood, Deal_Status, Policy_Status (full normalize set), Billing_Type, Risk_Status, Eligibility, Branch, Segment, queue enums.
+Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_Type, Insured_Type, Win_Likelihood, Deal_Status, Policy_Status (full normalize set), Billing_Type, Risk_Status, Eligibility, Branch, Segment, queue enums, **Desk_Stage**, **Disposition**, **Recommended_Action**, **Window_Bucket**.
 
 ## 2. Create fields (CSV order)
 
@@ -110,7 +110,7 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Deals → Accounts
 - [ ] Policies → Accounts
 - [ ] Renewal_Events → Accounts, Policies
-- [ ] Renewals → Policies, Accounts, Renewal_Events (optional)
+- [ ] Renewals → Policies, Accounts, Renewal_Events (`Related_Renewal_Event`), Deals (`Related_Deal`)
 - [ ] AMS_Write_Queue → Accounts / Deals / Policies / Renewals (optional convenience)
 
 ## 4. Approval & AMS write rules (Zoho Blueprint / Approval)
@@ -130,7 +130,19 @@ For each row: create field → set length → set picklist → mark mandatory/un
 ## 5. Formulas
 
 - [ ] `Renewals.Increase_Percent` = `((Premium_Renewal - Premium_Current) / Premium_Current) * 100` (null-safe when Premium_Current = 0 → 0)
+- [ ] `Renewals.Days_To_Expiration` = `Datecomp(${Expiration_Date}, Today)` (signed days; negative = past due)
 - [ ] Optional: Deal Probability default from Stage (see pipeline tables above)
+
+`Window_Bucket` is a **picklist written by Hermes** (`hermes --sync-zoho-renewals`), not a formula — personal LOB always buckets as `personal`.
+
+## 5b. Creator Renewals Desk (after fields exist)
+
+- [ ] Import the Creator app from [`docs/zoho/creator-renewals-desk/INSTALL.md`](creator-renewals-desk/INSTALL.md)
+- [ ] Bind reports to CRM modules Policies / Renewal_Events / Renewals / AMS_Write_Queue
+- [ ] Publish to Gretchen and Lamar
+- [ ] Confirm `hermes --sync-zoho-renewals` then `--sync-zoho-ams-queue` are on cron after `--renewal-refresh`
+
+Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch dates, `Related_Deal`) must **not** be overwritten by book sync. Hermes sets `Desk_Stage=Identified` only on create.
 
 ## 6. Sync direction smoke tests
 

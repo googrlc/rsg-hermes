@@ -74,6 +74,8 @@ hermes --renewal-refresh         # refresh renewal pipeline state from the book
 hermes --renewal-classify        # classify upcoming renewals into cadence buckets
 hermes --renewal-executor        # execute queued, approved renewal actions
 hermes --run-renewal-executor-worker
+hermes --sync-zoho-renewals      # upsert Zoho Renewal_Events + Renewals (Creator desk)
+hermes --sync-zoho-ams-queue     # mirror approved Zoho AMS_Write_Queue → outbound_sync_queue
 
 # Revenue Sentinel (reads Supabase since July 2026)
 hermes --revenue-sentinel                # proactive briefing → Slack

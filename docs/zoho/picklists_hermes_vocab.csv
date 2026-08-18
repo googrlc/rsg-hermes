@@ -84,3 +84,26 @@ renewal_queue_action,3,client_follow_up,AMS_Write_Queue.Payload.action,renewal e
 renewal_queue_action,4,update_ams,AMS_Write_Queue.Payload.action,renewal executor
 sync_owner,1,book_sync,Policies.Sync_Owner,canonical_policy_ownership
 sync_owner,2,rsg-import,Policies.Sync_Owner,canonical_policy_ownership
+desk_stage,1,Identified,Renewals.Desk_Stage,hermes/renewals/desk.py DESK_STAGES
+desk_stage,2,Outreach Sent,Renewals.Desk_Stage,hermes/renewals/desk.py DESK_STAGES
+desk_stage,3,Quote Requested,Renewals.Desk_Stage,hermes/renewals/desk.py DESK_STAGES
+desk_stage,4,Proposal Sent,Renewals.Desk_Stage,hermes/renewals/desk.py DESK_STAGES
+desk_stage,5,Negotiating,Renewals.Desk_Stage,hermes/renewals/desk.py DESK_STAGES
+desk_stage,6,Closed,Renewals.Desk_Stage,hermes/renewals/desk.py DESK_STAGES
+desk_disposition,1,renewed,Renewals.Disposition,hermes/renewals/config.py DISPOSITION_*
+desk_disposition,2,rewritten,Renewals.Disposition,hermes/renewals/config.py DISPOSITION_*
+desk_disposition,3,lost_price,Renewals.Disposition,hermes/renewals/config.py DISPOSITION_*
+desk_disposition,4,lost_coverage,Renewals.Disposition,hermes/renewals/config.py DISPOSITION_*
+desk_disposition,5,lost_no_response,Renewals.Disposition,hermes/renewals/config.py DISPOSITION_*
+desk_disposition,6,do_not_renew,Renewals.Disposition,hermes/renewals/config.py DISPOSITION_*
+recommended_action,1,RETAIN_AS_IS,Renewals.Recommended_Action,renewal-review skill
+recommended_action,2,RETAIN_WITH_NEGOTIATION,Renewals.Recommended_Action,renewal-review skill
+recommended_action,3,REMARKET_SAMPLE,Renewals.Recommended_Action,renewal-review skill
+recommended_action,4,REMARKET_FULL,Renewals.Recommended_Action,renewal-review skill
+recommended_action,5,ESCALATE_HUMAN,Renewals.Recommended_Action,renewal-review skill
+recommended_action,6,MOVE_TO_AT_RISK_LIST,Renewals.Recommended_Action,renewal-review skill
+window_bucket,1,90,Renewals.Window_Bucket,hermes/renewals/desk.py window_bucket
+window_bucket,2,60,Renewals.Window_Bucket,hermes/renewals/desk.py window_bucket
+window_bucket,3,30,Renewals.Window_Bucket,hermes/renewals/desk.py window_bucket
+window_bucket,4,personal,Renewals.Window_Bucket,hermes/renewals/desk.py window_bucket
+window_bucket,5,past_due,Renewals.Window_Bucket,hermes/renewals/desk.py window_bucket
