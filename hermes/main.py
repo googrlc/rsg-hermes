@@ -116,6 +116,34 @@ def main() -> int:
         help="Preview renewal eligibility (eligible/needs_verification/excluded counts) without writing",
     )
     parser.add_argument(
+        "--sync-zoho-renewals",
+        action="store_true",
+        help="Upsert Zoho Renewal_Events + Renewals from Supabase after --renewal-refresh "
+             "(feeds the Creator Renewals Desk). Captures Creator field edits as portal_overrides.",
+    )
+    parser.add_argument(
+        "--sync-zoho-renewals-dry-run",
+        action="store_true",
+        help="Preview Zoho renewals upsert counts without writing CRM or overrides",
+    )
+    parser.add_argument(
+        "--sync-zoho-renewals-limit",
+        type=int,
+        default=None,
+        help="Cap candidate/projection rows processed this run",
+    )
+    parser.add_argument(
+        "--sync-zoho-ams-queue",
+        action="store_true",
+        help="Mirror approved Zoho AMS_Write_Queue renewal jobs into outbound_sync_queue "
+             "for the existing renewal executor",
+    )
+    parser.add_argument(
+        "--sync-zoho-ams-queue-dry-run",
+        action="store_true",
+        help="Preview Zoho AMS_Write_Queue → outbound_sync_queue mirror without inserting",
+    )
+    parser.add_argument(
         "--agency-snapshot",
         action="store_true",
         help="Compute and write today's agency_snapshots row (book size + trailing-12mo retention) "
@@ -943,6 +971,53 @@ def main() -> int:
             print(f"  {s['branch']}: {s['policy_number']} {s['event_date']} seg={s['segment']} "
                   f"queue={s['in_working_queue']} risk={s['risk_status']}")
         return 0
+
+    if args.sync_zoho_renewals or args.sync_zoho_renewals_dry_run:
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.zoho_client import ZohoClientError
+        from hermes.sync.zoho_renewals import run_zoho_renewals_sync
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            zoho_result = run_zoho_renewals_sync(
+                supa=supa,
+                dry_run=args.sync_zoho_renewals_dry_run,
+                limit=args.sync_zoho_renewals_limit,
+            )
+        except ZohoClientError as e:
+            print(f"Zoho connection failed: {e}", file=sys.stderr)
+            return 2
+        print(zoho_result.message)
+        for err in zoho_result.errors[:50]:
+            print(f"- {err}")
+        return 0 if zoho_result.ok else 1
+
+    if args.sync_zoho_ams_queue or args.sync_zoho_ams_queue_dry_run:
+        from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError
+        from hermes_integrations.zoho_client import ZohoClientError
+        from hermes.sync.zoho_ams_queue import run_zoho_ams_queue_mirror
+
+        try:
+            supa = SupabaseClient()
+        except SupabaseClientError as e:
+            print(f"Supabase connection failed: {e}", file=sys.stderr)
+            return 2
+        try:
+            mirror = run_zoho_ams_queue_mirror(
+                supa=supa,
+                dry_run=args.sync_zoho_ams_queue_dry_run,
+            )
+        except ZohoClientError as e:
+            print(f"Zoho connection failed: {e}", file=sys.stderr)
+            return 2
+        print(mirror.message)
+        for err in mirror.errors[:50]:
+            print(f"- {err}")
+        return 0 if mirror.ok else 1
 
     if args.agency_snapshot or args.agency_snapshot_dry_run:
         from hermes_integrations.supabase_client import SupabaseClient, SupabaseClientError

@@ -330,23 +330,71 @@ class ZohoClient:
         """GET /{module}/search?criteria=… — returns matching records (possibly empty)."""
         if not criteria:
             return []
+        return self.list_records(module, criteria=criteria)
+
+    def list_records(
+        self,
+        module: str,
+        *,
+        criteria: str | None = None,
+        page: int = 1,
+        per_page: int = 200,
+        fields: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """One page of CRM records. Search when ``criteria`` is set, else list."""
+        params: dict[str, Any] = {"page": page, "per_page": min(200, max(1, per_page))}
+        if fields:
+            params["fields"] = fields
+        path = f"{module}/search" if criteria else module
+        if criteria:
+            params["criteria"] = criteria
         try:
-            body = self._get(
-                f"{module}/search",
-                params={"criteria": criteria},
-            )
+            body = self._get(path, params=params)
         except ZohoClientError as exc:
-            # Zoho returns 400/204-ish shapes for "no records"; treat empty as [].
             msg = str(exc).lower()
             if "204" in msg or "no records" in msg or " no data" in msg:
                 return []
-            # Some orgs return 400 INVALID_QUERY when nothing matches — caller
-            # already gets an empty list from 204; re-raise real failures.
             raise
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list):
             return []
         return [row for row in data if isinstance(row, dict)]
+
+    def iter_records(
+        self,
+        module: str,
+        *,
+        criteria: str | None = None,
+        per_page: int = 200,
+        max_pages: int = 50,
+        fields: str | None = None,
+    ):
+        """Yield CRM records across pages. Stops on a short page or empty page."""
+        for page in range(1, max_pages + 1):
+            rows = self.list_records(
+                module, criteria=criteria, page=page, per_page=per_page, fields=fields
+            )
+            if not rows:
+                return
+            yield from rows
+            if len(rows) < per_page:
+                return
+
+    def get_record(self, module: str, record_id: str) -> dict[str, Any] | None:
+        """GET /{module}/{id}. Missing record → None."""
+        try:
+            body = self._get(f"{module}/{record_id}")
+        except ZohoClientError as exc:
+            msg = str(exc).lower()
+            if "204" in msg or "404" in msg or "no records" in msg:
+                return None
+            raise
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return None
 
     def _find_first(self, module: str, criteria: str) -> dict[str, Any] | None:
         rows = self.search_records(module, criteria)
