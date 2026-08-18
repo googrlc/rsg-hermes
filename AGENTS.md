@@ -94,8 +94,8 @@ pushback, or renewal dismissals.
 > steps for approval.
 
 **Saved Cursor Automation:** Repo spec at
-`.cursor/automations/data-quality-investigator.md` — setup steps in
+`.cursor/automations/data-quality-investigator.md` — setup in
 `.cursor/automations/README.md`. Create at [cursor.com/automations/new](https://cursor.com/automations/new)
-with **Webhook** trigger + **rsg-hermes** environment + Hermes/Supabase MCP.
-POST `{"policy_number":"...","client_name":"...","line_of_business":"..."}` or
-plain text `990414352, Steven Prak, Auto`.
+with **rsg-hermes** environment + Hermes/Supabase MCP. **Do not enable Send to
+Slack** — results appear in the Cursor agent run (`cursor.com/agents`). Trigger
+manually or via webhook (`scripts/trigger_policy_investigation.sh`).

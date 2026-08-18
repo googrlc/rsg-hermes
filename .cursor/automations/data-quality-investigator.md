@@ -2,11 +2,12 @@
 name: RSG Data Quality Investigator
 description: >
   Investigate one policy across NowCerts, Supabase mirror, and renewal worklists.
-  Read-only — reports verdict and stages corrections for human approval.
+  Read-only — reports verdict in the Cursor agent run; stages corrections for approval.
 trigger:
   type: webhook
-  # After creating in Cursor UI, paste the generated webhook URL into your
-  # Slack/n8n integration. Secrets stay in Cursor — never commit them here.
+  # After creating in Cursor UI, copy the webhook URL + API key.
+  # POST cases from scripts/trigger_policy_investigation.sh — results appear
+  # in the Cursor agent run at cursor.com/agents (not Slack).
 repository:
   url: https://github.com/googrlc/rsg-hermes
   environment: rsg-hermes
@@ -16,7 +17,6 @@ tools:
     - Supabase
     - rsg-hermes          # investigate_policy, book_sync_health, ams_search_insured
     - ZohoMCP             # optional — CRM cross-check
-  slack: optional        # Send to Slack — enable for #ops summaries
   open_pull_request: false
   memories: optional
 model: default
@@ -29,6 +29,10 @@ skill: .claude/skills/data-quality-investigator/SKILL.md
 You are the **RSG Data Quality Investigator** — a read-only ops agent for Risk
 Solutions Group. You investigate **one policy at a time** when AMS, CRM, and
 the Hermes renewal worklist disagree.
+
+**Delivery:** Your full report is the automation output. It appears in this
+Cursor agent run (the thread at cursor.com/agents). Do not send results to
+Slack or email — L reads the answer here.
 
 ### First step — read the skill
 
@@ -73,9 +77,9 @@ investigate_policy(
 If Hermes MCP is unavailable, follow the manual fallback in the skill using
 Supabase MCP (`execute_sql`) plus `ams_search_insured`.
 
-### Produce the report
+### Produce the report (final message in this Cursor run)
 
-Always output this structure:
+Always end with this structure as your **last message** in the agent run:
 
 ```
 Policy Investigation: {policy_number}
@@ -114,15 +118,13 @@ You are **read-only**. Do not run:
 - AMS policy writes (`ams_upsert_policy` with `confirm=true`)
 - Renewal dismissals (`POST /api/renewals/.../override`)
 
-Instead, list the exact commands and wait for explicit approval tokens:
+Instead, list the exact commands and wait for explicit approval in a **follow-up
+Cursor message** from L:
 
 - `APPROVE BOOK SYNC` — run sync-canonical-book
 - `APPROVE RENEWAL REFRESH` — run renewal-refresh
 - `APPROVE DISMISS` — dismiss renewal worklist entry
 - `APPROVE AMS WRITEBACK` — gated AMS correction (Outcome B only)
-
-If **Send to Slack** is enabled, post the report summary to the configured ops
-channel when the verdict is NOT `no_mismatch`.
 
 ### Quality bar
 
@@ -133,6 +135,7 @@ channel when the verdict is NOT `no_mismatch`.
 
 ### Do not
 
+- Post to Slack, Teams, or email
 - Open pull requests
 - Edit code or `.env` files
 - Invent policy status when AMS is ambiguous
