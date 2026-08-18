@@ -18,9 +18,9 @@ Use these when creating automations at [cursor.com/automations/new](https://curs
 
 2. **Name:** `RSG Data Quality Investigator`
 
-3. **Trigger:** pick one:
-   - **Manual** — you paste a case in Cursor Agents when you need it
-   - **Webhook** — scripts or other systems POST a case; the run still appears in Cursor
+3. **Trigger:** **Manual** (recommended for now)
+   - You paste a case when you run the automation; report appears in that agent thread
+   - Webhook is optional later for scripted triggers — see [Invoke via webhook](#invoke-via-webhook-optional) below
 
 4. **Repository:** `googrlc/rsg-hermes`  
    - **Environment:** `rsg-hermes`  
@@ -37,13 +37,21 @@ Use these when creating automations at [cursor.com/automations/new](https://curs
 
 7. **Save & activate.**
 
-### How you get results
+### How you get results (manual trigger)
 
-| How you start it | Where the answer appears |
+| Step | Action |
 |---|---|
-| Run automation manually in Cursor | This agent thread |
-| Webhook POST (see below) | New run at `cursor.com/agents/<run-id>` — open from Automations dashboard or email notification if enabled |
-| `@` the agent in Cursor with a policy case | This chat |
+| 1 | Open [cursor.com/agents](https://cursor.com/agents) or **Cursor → Agents** |
+| 2 | **Automations** → **RSG Data Quality Investigator** → **Run** |
+| 3 | Paste a policy case (see formats below) |
+| 4 | Read the report in that run's thread when it finishes |
+
+**Example input:**
+```
+Investigate policy 990414352 for Steven Prak, Personal Auto
+```
+
+Policy number is required. Client name and LOB are optional but help with duplicates.
 
 ### Invoke via webhook (optional)
 

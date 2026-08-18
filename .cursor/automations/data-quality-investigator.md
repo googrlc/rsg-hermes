@@ -4,10 +4,10 @@ description: >
   Investigate one policy across NowCerts, Supabase mirror, and renewal worklists.
   Read-only — reports verdict in the Cursor agent run; stages corrections for approval.
 trigger:
-  type: webhook
-  # After creating in Cursor UI, copy the webhook URL + API key.
-  # POST cases from scripts/trigger_policy_investigation.sh — results appear
-  # in the Cursor agent run at cursor.com/agents (not Slack).
+  type: manual
+  # Run from Cursor Agents → Automations → RSG Data Quality Investigator → Run.
+  # Paste a policy case when prompted; the report appears in that agent thread.
+  # Webhook optional later — see README.md and scripts/trigger_policy_investigation.sh
 repository:
   url: https://github.com/googrlc/rsg-hermes
   environment: rsg-hermes
