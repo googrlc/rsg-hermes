@@ -39,6 +39,7 @@ effects. Do not fold commissions into this app.
 | [`deluge/ams_enqueue.dg`](deluge/ams_enqueue.dg) | AMS action buttons | Four executor actions only; structured payload |
 | [`deluge/dismiss.dg`](deluge/dismiss.dg) | Dismiss button | `Dismissed=true`; never delete |
 | [`deluge/approve.dg`](deluge/approve.dg) | AMS pending Approve | Sets Approved_By / Approved_At / Status=`queued` |
+| [`deluge/cursor_api.dg`](deluge/cursor_api.dg) | Custom API **Cursor** | Standalone Map function the Custom API can associate |
 | [`deluge/window_bucket.dg`](deluge/window_bucket.dg) | On Expiration / LOB edit | Same buckets as `hermes/renewals/desk.py` |
 
 Python is the tested source of truth for stage/window/action rules

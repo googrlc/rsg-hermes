@@ -66,3 +66,16 @@ def test_install_opens_existing_app():
     assert "Not a new app. Not a duplicate." in install
     assert "ZIA_PASTE_PROMPT.md" in install
     assert "deluge/approve.dg" in install
+    assert "deluge/cursor_api.dg" in install
+
+
+def test_cursor_api_function_never_calls_nowcerts():
+    body = (DESK / "deluge" / "cursor_api.dg").read_text()
+    compact = body.replace(" ", "").lower()
+    assert 'op=="ping"' in compact
+    assert "zoho.crm.createRecord" in body
+    assert "zoho.crm.updateRecord" in body
+    assert "expected_result is required" in body
+    assert "cannot skip desk stages" in body
+    assert "insert_policy" not in compact
+    assert "nowcerts.com" not in compact

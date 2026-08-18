@@ -72,6 +72,7 @@ only (same users as `agency_crm_users` emails).
 | Custom button: Dismiss | [`deluge/dismiss.dg`](deluge/dismiss.dg) |
 | AMS pending report — custom button Approve | [`deluge/approve.dg`](deluge/approve.dg) |
 | Renewals — on create/edit of Expiration_Date or Line_of_Business | [`deluge/window_bucket.dg`](deluge/window_bucket.dg) |
+| Standalone function `cursor_api` (Custom API **Cursor**) | [`deluge/cursor_api.dg`](deluge/cursor_api.dg) |
 
 Creator custom buttons on an integration form call `zoho.crm.createRecord` /
 `updateRecord` against CRM, not Creator tables.
@@ -82,6 +83,23 @@ and optional note. Deluge builds `Payload` JSON — operators never type JSON.
 On Approve (AMS report): set `Approved_By` = `zoho.loginuserid`, `Approved_At`
 = `zoho.currenttime`, `Status` = `queued`. Hermes `--sync-zoho-ams-queue` then
 mirrors into `outbound_sync_queue`. **Do not call NowCerts from Deluge.**
+
+## Custom API Cursor (standalone function)
+
+The Custom API wizard lists **no functions** until a standalone Deluge
+function exists in **this** app. Create it before associating:
+
+1. Stay in **Renewals Desk** (`renewals-desk`) Edit. Not a new app.
+2. Workflows → Functions → New Function.
+3. Function name `cursor_api`, display name `Cursor`, return type **Map**.
+4. Arguments (all string): `action`, `id`, `expected_result`, `note`,
+   `policy_number`, `desk_stage`, `disposition`, `producer_confirmed`.
+5. Paste the body from [`deluge/cursor_api.dg`](deluge/cursor_api.dg). Save.
+6. Return to Microservices → Custom APIs → Cursor and associate `cursor_api`.
+
+`action`: `ping`, `request_terms`, `prepare_options`, `client_follow_up`,
+`update_ams`, `approve`, `dismiss`, `set_stage`. AMS enqueue still writes
+`needs_approval` only. Hermes drains NowCerts.
 
 ## Users
 
