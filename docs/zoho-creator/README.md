@@ -16,19 +16,20 @@ This app is an **operations reconciliation workspace**. It does **not** replace:
 | **Supabase / Hermes** | Ops/analytics mirror, queues, KPIs, renewal state |
 | **Zoho Creator (this app)** | Compare those systems, score confidence, queue exceptions |
 
-## What to upload to Zia (one file)
+## What to attach in Zia (PRD / BRD / RFP / diagrams)
 
-Use **one** of these — they are the same spec in Zia-accepted formats:
+Zia’s requirements attach slots take standard PRD, BRD, RFP, and process diagrams. Use these four PDFs:
 
-| File | Format | Use when |
-|------|--------|----------|
-| `ZIA_UPLOAD.xlsx` | Excel | Best default. Sheets for forms, picklists, Deluge, seeds |
-| `ZIA_UPLOAD.json` | JSON | Full spec + Deluge + seeds in one object |
-| `ZIA_UPLOAD.csv` | CSV | Same content as rows (`Section,Item,Field,Value`) if Excel/JSON is blocked |
+| Slot | File |
+|------|------|
+| PRD | `docs/zoho-creator/PRD_RSG_Policy_Reconciliation.pdf` |
+| BRD | `docs/zoho-creator/BRD_RSG_Policy_Reconciliation.pdf` |
+| RFP | `docs/zoho-creator/RFP_RSG_Policy_Reconciliation.pdf` |
+| Process diagrams | `docs/zoho-creator/PROCESS_DIAGRAMS_RSG_Policy_Reconciliation.pdf` |
 
-Copies also live in `zia-upload/` with the same names.
+Then upload `ZIA_UPLOAD.xlsx` as the field/Deluge appendix.
 
-Do **not** upload Markdown. Zia only accepts `.xls .xlsx .xlsm .csv .tsv .ods .mdb .accdb .ds .json .numbers` (max 2 GB; over 100 MB must be CSV).
+Spreadsheet fallback: `ZIA_REQUIREMENTS.xlsx`.
 
 Rebuild those generated files after editing sources:
 

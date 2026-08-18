@@ -3,10 +3,15 @@
 You are building a Zoho Creator application for Risk Solutions Group (RSG)
 called **RSG Policy Reconciliation**.
 
-Zia file upload accepts only: .xls .xlsx .xlsm .csv .tsv .ods .mdb .accdb
-.ds .json .numbers (max 2 GB; over 100 MB must be CSV). Do **not** wait for
-Markdown. Upload **one** file: `ZIA_UPLOAD.xlsx` (or `ZIA_UPLOAD.json` /
-`ZIA_UPLOAD.csv`). That file is the full specification.
+Zia can attach PRD, BRD, RFP, and process diagrams. Attach these four PDFs:
+
+- `PRD_RSG_Policy_Reconciliation.pdf`
+- `BRD_RSG_Policy_Reconciliation.pdf`
+- `RFP_RSG_Policy_Reconciliation.pdf`
+- `PROCESS_DIAGRAMS_RSG_Policy_Reconciliation.pdf`
+
+Also upload `ZIA_UPLOAD.xlsx` as the field dictionary and Deluge appendix.
+Do not invent fields or verdicts. Build **Phase 1 only**, then stop.
 
 Read those uploads as the only source of truth (`zia_prompt`,
 `specification_markdown`, `forms`, `picklists`, `deluge`, `sample_records`).

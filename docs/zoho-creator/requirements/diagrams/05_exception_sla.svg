@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="430" viewBox="0 0 780 430">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#c45c26"/>
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="white"/>
+  <text x="24" y="32" font-family="Calibri, Arial" font-size="18" fill="#0f3d5e" font-weight="bold">5. Exception and SLA</text>
+  
+    <rect x="40" y="80" width="200" height="70" rx="8" fill="#0f3d5e"/>
+    <text x="140.0" y="101.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="140.0" dy="0">Verdict ≠ clean_match</tspan><tspan x="140.0" dy="1.2em">or score &lt; 80</tspan><tspan x="140.0" dy="1.2em">or $/% delta</tspan></text>
+    <rect x="300" y="80" width="200" height="70" rx="8" fill="#1f6f8b"/>
+    <text x="400.0" y="108.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="400.0" dy="0">Severity matrix</tspan><tspan x="400.0" dy="1.2em">+ bump if score&lt;50</tspan></text>
+    <rect x="560" y="80" width="180" height="70" rx="8" fill="#c45c26"/>
+    <text x="650.0" y="108.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="650.0" dy="0">SLA hours</tspan><tspan x="650.0" dy="1.2em">4 / 24 / 72 / 120</tspan></text>
+    <rect x="40" y="220" width="200" height="70" rx="8" fill="#0f3d5e"/>
+    <text x="140.0" y="248.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="140.0" dy="0">Upsert same</tspan><tspan x="140.0" dy="1.2em">policy+verdict</tspan></text>
+    <rect x="300" y="220" width="200" height="70" rx="8" fill="#1f6f8b"/>
+    <text x="400.0" y="248.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="400.0" dy="0">Owner: Low/Med Gretchen</tspan><tspan x="400.0" dy="1.2em">High/Crit Lamar</tspan></text>
+    <rect x="560" y="220" width="180" height="70" rx="8" fill="#c45c26"/>
+    <text x="650.0" y="248.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="650.0" dy="0">Hourly SLA sweep</tspan><tspan x="650.0" dy="1.2em">notify on breach</tspan></text>
+    <rect x="300" y="340" width="200" height="64" rx="8" fill="#2f855a"/>
+    <text x="400.0" y="358.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="400.0" dy="0">Auto-close only if</tspan><tspan x="400.0" dy="1.2em">was pending_sync</tspan><tspan x="400.0" dy="1.2em">or stale_crm</tspan></text><line x1="240" y1="115" x2="300" y2="115" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="500" y1="115" x2="560" y2="115" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="140" y1="150" x2="140" y2="220" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="240" y1="255" x2="300" y2="255" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="500" y1="255" x2="560" y2="255" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="400" y1="290" x2="400" y2="340" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/>
+</svg>

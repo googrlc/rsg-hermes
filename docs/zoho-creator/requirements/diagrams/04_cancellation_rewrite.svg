@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="400" viewBox="0 0 760 400">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#c45c26"/>
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="white"/>
+  <text x="24" y="32" font-family="Calibri, Arial" font-size="18" fill="#0f3d5e" font-weight="bold">4. Cancellation and rewrite</text>
+  
+    <rect x="40" y="70" width="180" height="64" rx="8" fill="#0f3d5e"/>
+    <text x="130.0" y="102.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="130.0" dy="0">Status in cancel set</tspan></text>
+    <rect x="280" y="70" width="200" height="64" rx="8" fill="#c45c26"/>
+    <text x="380.0" y="95.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="380.0" dy="0">Cancellation_Class</tspan><tspan x="380.0" dy="1.2em">required</tspan></text>
+    <rect x="540" y="40" width="180" height="50" rx="8" fill="#4a5560"/>
+    <text x="630.0" y="58.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="630.0" dy="0">Non Pay</tspan><tspan x="630.0" dy="1.2em">reinstatement</tspan></text>
+    <rect x="540" y="100" width="180" height="50" rx="8" fill="#4a5560"/>
+    <text x="630.0" y="118.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="630.0" dy="0">Insured Request</tspan><tspan x="630.0" dy="1.2em">replacement task</tspan></text>
+    <rect x="540" y="160" width="180" height="50" rx="8" fill="#4a5560"/>
+    <text x="630.0" y="178.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="630.0" dy="0">Underwriter</tspan><tspan x="630.0" dy="1.2em">Lamar if commercial</tspan></text>
+    <rect x="280" y="200" width="200" height="64" rx="8" fill="#1f6f8b"/>
+    <text x="380.0" y="218.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="380.0" dy="0">Rewrite?</tspan><tspan x="380.0" dy="1.2em">same insured+LOB</tspan><tspan x="380.0" dy="1.2em">±60 days</tspan></text>
+    <rect x="40" y="300" width="180" height="64" rx="8" fill="#2f855a"/>
+    <text x="130.0" y="325.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="130.0" dy="0">One successor</tspan><tspan x="130.0" dy="1.2em">link Rewrite_Of</tspan></text>
+    <rect x="280" y="300" width="200" height="64" rx="8" fill="#9b2c2c"/>
+    <text x="380.0" y="325.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="380.0" dy="0">Many successors</tspan><tspan x="380.0" dy="1.2em">High exception</tspan></text>
+    <rect x="540" y="300" width="180" height="64" rx="8" fill="#4a5560"/>
+    <text x="630.0" y="318.0" text-anchor="middle" fill="white" font-family="Calibri, Arial" font-size="13"><tspan x="630.0" dy="0">None found</tspan><tspan x="630.0" dy="1.2em">still class Rewrite</tspan><tspan x="630.0" dy="1.2em">if human said so</tspan></text><line x1="220" y1="102" x2="280" y2="102" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="480" y1="90" x2="540" y2="65" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="380" y1="134" x2="380" y2="200" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="380" y1="264" x2="130" y2="300" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="380" y1="264" x2="380" y2="300" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/><line x1="380" y1="264" x2="630" y2="300" stroke="#c45c26" stroke-width="2" marker-end="url(#arrow)"/>
+</svg>
