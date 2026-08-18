@@ -69,4 +69,5 @@ Correctable fields (portal overlay, keyed by policy number): `Client_Name`,
 ## Install
 
 See [`INSTALL.md`](INSTALL.md). Zia paste for the existing `renewals-desk`
-app: [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md).
+app: [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md). Live MCP inventory:
+[`LIVE_INVENTORY.md`](LIVE_INVENTORY.md).
