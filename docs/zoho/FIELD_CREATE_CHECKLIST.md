@@ -137,9 +137,14 @@ For each row: create field → set length → set picklist → mark mandatory/un
 
 ## 5b. Creator Renewals Desk (after fields exist)
 
-- [ ] Import the Creator app from [`docs/zoho/creator-renewals-desk/INSTALL.md`](creator-renewals-desk/INSTALL.md)
+- [ ] Open **existing** Creator app **Renewals Desk** (`renewals-desk`) in Edit —
+      not a new app, not a duplicate. Workspace `lamar_risksolutionsgroup668`.
+- [ ] Add CRM integrations: Accounts, Deals, Policies, Renewal_Events, Renewals,
+      AMS_Write_Queue, Tasks
+- [ ] Paste [`creator-renewals-desk/ZIA_PASTE_PROMPT.md`](creator-renewals-desk/ZIA_PASTE_PROMPT.md)
+      into Zia inside that app, **or** follow [`creator-renewals-desk/INSTALL.md`](creator-renewals-desk/INSTALL.md)
 - [ ] Bind reports to CRM modules Policies / Renewal_Events / Renewals / AMS_Write_Queue
-- [ ] Publish to Gretchen and Lamar
+- [ ] Publish to Gretchen and Lamar (development first; production only when asked)
 - [ ] Confirm `hermes --sync-zoho-renewals` then `--sync-zoho-ams-queue` are on cron after `--renewal-refresh`
 
 Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch dates, `Related_Deal`) must **not** be overwritten by book sync. Hermes sets `Desk_Stage=Identified` only on create.

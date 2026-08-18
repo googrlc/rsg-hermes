@@ -1,7 +1,12 @@
 # Install — Creator Renewals Desk
 
-This environment cannot click through the Zoho Creator IDE. Assemble the app
-in the org from these files after the CRM field pack is live.
+The empty app **already exists** in workspace `lamar_risksolutionsgroup668`:
+link name `renewals-desk`, development environment. Fill **that** app. Do not
+create a new Creator application and do not duplicate this one.
+
+Preferred fill: open Edit mode → add CRM integrations → paste
+[`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md) into Zia / Build Agent in this
+app. Fallback: click through the steps below and paste pages / Deluge by hand.
 
 ## Prerequisites
 
@@ -17,11 +22,11 @@ in the org from these files after the CRM field pack is live.
 5. OAuth scopes on the Hermes Zoho client include CRM modules used here
    (`ZohoCRM.modules.ALL` or the custom-module equivalents).
 
-## Create the Creator application
+## Open the existing Creator application
 
-1. Zoho Creator → **New application** → **From scratch**.
-2. Name: **Renewals Desk**. Link to the same Zoho org as CRM.
-3. Add **Integrations → Zoho CRM** for modules:
+1. Zoho Creator → **Renewals Desk** (`renewals-desk`) → Edit (development).
+   Not a new app. Not a duplicate.
+2. Add **Integrations → Zoho CRM** for modules:
    - Accounts
    - Deals
    - Policies
@@ -29,8 +34,10 @@ in the org from these files after the CRM field pack is live.
    - Renewals
    - AMS_Write_Queue
    - Tasks (for the five default desk tasks)
-4. Do **not** create Creator forms that duplicate Policies / Renewals as the
+3. Do **not** create Creator forms that duplicate Policies / Renewals as the
    system of record. Integration reports against CRM are the worklist.
+4. Either paste [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md) into Zia in this
+   app, or continue with Pages / Reports / Workflows below.
 
 ## Pages
 
@@ -58,6 +65,7 @@ only (same users as `agency_crm_users` emails).
 | Renewals — on create, and Card page load | [`deluge/task_seed.dg`](deluge/task_seed.dg) |
 | Custom buttons on Card: Request terms / Prepare options / Follow up / Update AMS | [`deluge/ams_enqueue.dg`](deluge/ams_enqueue.dg) |
 | Custom button: Dismiss | [`deluge/dismiss.dg`](deluge/dismiss.dg) |
+| AMS pending report — custom button Approve | [`deluge/approve.dg`](deluge/approve.dg) |
 | Renewals — on create/edit of Expiration_Date or Line_of_Business | [`deluge/window_bucket.dg`](deluge/window_bucket.dg) |
 
 Creator custom buttons on an integration form call `zoho.crm.createRecord` /

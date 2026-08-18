@@ -14,6 +14,7 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |
 | `FIELD_CREATE_CHECKLIST.md` | Ordered create steps + uniqueness / pipeline rules |
 | [`creator-renewals-desk/`](creator-renewals-desk/) | Zoho Creator **Renewals Desk** — Gretchen's live workstation over these modules |
+| [`creator-renewals-desk/ZIA_PASTE_PROMPT.md`](creator-renewals-desk/ZIA_PASTE_PROMPT.md) | Paste into Zia **inside** existing `renewals-desk` (not a new app) |
 
 ## How to use
 

@@ -38,6 +38,7 @@ effects. Do not fold commissions into this app.
 | [`deluge/task_seed.dg`](deluge/task_seed.dg) | On card open / Renewal create | Seed the five default tasks once |
 | [`deluge/ams_enqueue.dg`](deluge/ams_enqueue.dg) | AMS action buttons | Four executor actions only; structured payload |
 | [`deluge/dismiss.dg`](deluge/dismiss.dg) | Dismiss button | `Dismissed=true`; never delete |
+| [`deluge/approve.dg`](deluge/approve.dg) | AMS pending Approve | Sets Approved_By / Approved_At / Status=`queued` |
 | [`deluge/window_bucket.dg`](deluge/window_bucket.dg) | On Expiration / LOB edit | Same buckets as `hermes/renewals/desk.py` |
 
 Python is the tested source of truth for stage/window/action rules
@@ -67,4 +68,5 @@ Correctable fields (portal overlay, keyed by policy number): `Client_Name`,
 
 ## Install
 
-See [`INSTALL.md`](INSTALL.md).
+See [`INSTALL.md`](INSTALL.md). Zia paste for the existing `renewals-desk`
+app: [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md).

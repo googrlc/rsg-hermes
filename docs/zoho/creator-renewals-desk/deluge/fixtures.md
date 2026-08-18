@@ -47,6 +47,13 @@ action, renewal_id, policy_number, expected_result, zoho_queue_name
 
 `expected_result` empty → refuse. Payload is built by Deluge, never typed.
 
+## Approve (`approve.dg`)
+
+Sets `Approved_By` = `zoho.loginuserid`, `Approved_At` = now, `Status` =
+`queued`. Refuses non-renewal `Object_Type` and rows that are not
+`needs_approval` (or `queued` with empty `Approved_By`). Does not call
+NowCerts.
+
 ## Dismiss
 
 Sets `Dismissed` true. Does not delete the Renewal or Renewal_Event.

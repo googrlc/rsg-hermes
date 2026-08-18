@@ -1,0 +1,22 @@
+// Renewals Desk — Approve AMS_Write_Queue row.
+// Custom button on AMS pending report. Does NOT call NowCerts.
+// Hermes --sync-zoho-ams-queue mirrors Status=queued + Approved_By/At
+// into outbound_sync_queue. Approved_By must be zoho.loginuserid, never a robot.
+
+if(input.get("Object_Type") != "renewal")
+{
+	return "approve is only for object_type=renewal";
+}
+status = ifnull(input.get("Status"), "");
+approvedBy = ifnull(input.get("Approved_By"), "");
+awaiting = (status == "needs_approval") || (status == "queued" && approvedBy == "");
+if(!awaiting)
+{
+	return "row is not awaiting approval";
+}
+upd = Map();
+upd.put("Approved_By", zoho.loginuserid);
+upd.put("Approved_At", zoho.currenttime);
+upd.put("Status", "queued");
+resp = zoho.crm.updateRecord("AMS_Write_Queue", input.get("id"), upd);
+return resp;
