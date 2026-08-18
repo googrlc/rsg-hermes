@@ -1,5 +1,6 @@
 // Paste into Creator starting at the MAP line (line 1 of the editor must be MAP).
 // Namespace: desk. Function: cursor_api. Existing renewals-desk app only.
+// CRM record ids are BIGINT; Custom API args are STRING — convert with toLong().
 
 MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING note, STRING policy_number, STRING desk_stage, STRING disposition, STRING producer_confirmed)
 {
@@ -27,7 +28,8 @@ MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING not
 			err.put("error", "id is required");
 			return err;
 		}
-		rec = zoho.crm.getRecordById("AMS_Write_Queue", id);
+		recordId = id.toLong();
+		rec = zoho.crm.getRecordById("AMS_Write_Queue", recordId);
 		if(rec == null || rec.get("id") == null)
 		{
 			err.put("error", "AMS_Write_Queue row not found");
@@ -50,7 +52,7 @@ MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING not
 		upd.put("Approved_By", zoho.loginuserid);
 		upd.put("Approved_At", zoho.currenttime);
 		upd.put("Status", "queued");
-		resp = zoho.crm.updateRecord("AMS_Write_Queue", id, upd);
+		resp = zoho.crm.updateRecord("AMS_Write_Queue", recordId, upd);
 		ok.put("result", resp);
 		return ok;
 	}
@@ -61,7 +63,8 @@ MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING not
 			err.put("error", "id is required");
 			return err;
 		}
-		rec = zoho.crm.getRecordById("Renewals", id);
+		recordId = id.toLong();
+		rec = zoho.crm.getRecordById("Renewals", recordId);
 		if(rec == null || rec.get("id") == null)
 		{
 			err.put("error", "Renewals row not found");
@@ -75,18 +78,17 @@ MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING not
 		}
 		upd = Map();
 		upd.put("Dismissed", true);
-		zoho.crm.updateRecord("Renewals", id, upd);
+		zoho.crm.updateRecord("Renewals", recordId, upd);
 		eventLookup = rec.get("Related_Renewal_Event");
-		eventId = null;
-		if(eventLookup != null && eventLookup != "")
+		if(eventLookup != null)
 		{
-			eventId = ifnull(eventLookup.get("id"), eventLookup);
-		}
-		if(eventId != null && eventId != "")
-		{
-			ev = Map();
-			ev.put("Eligibility", "excluded");
-			zoho.crm.updateRecord("Renewal_Events", eventId, ev);
+			rawEventId = eventLookup.get("id");
+			if(rawEventId != null && rawEventId != "")
+			{
+				ev = Map();
+				ev.put("Eligibility", "excluded");
+				zoho.crm.updateRecord("Renewal_Events", rawEventId.toString().toLong(), ev);
+			}
 		}
 		ok.put("result", "dismissed");
 		ok.put("policy_number", pn);
@@ -99,7 +101,8 @@ MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING not
 			err.put("error", "id is required");
 			return err;
 		}
-		rec = zoho.crm.getRecordById("Renewals", id);
+		recordId = id.toLong();
+		rec = zoho.crm.getRecordById("Renewals", recordId);
 		if(rec == null || rec.get("id") == null)
 		{
 			err.put("error", "Renewals row not found");
@@ -142,7 +145,7 @@ MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING not
 		{
 			upd.put("Disposition", disposition);
 		}
-		resp = zoho.crm.updateRecord("Renewals", id, upd);
+		resp = zoho.crm.updateRecord("Renewals", recordId, upd);
 		ok.put("result", resp);
 		ok.put("Desk_Stage", proposed);
 		return ok;
@@ -164,7 +167,8 @@ MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING not
 		err.put("error", "id is required");
 		return err;
 	}
-	rec = zoho.crm.getRecordById("Renewals", id);
+	recordId = id.toLong();
+	rec = zoho.crm.getRecordById("Renewals", recordId);
 	if(rec == null || rec.get("id") == null)
 	{
 		err.put("error", "Renewals row not found");
@@ -186,13 +190,13 @@ MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING not
 	row = Map();
 	row.put("Name", pn + " " + op);
 	row.put("Object_Type", "renewal");
-	row.put("Action", queueAction);
 	row.put("Object_ID", pn);
 	row.put("Destination", "nowcerts");
+	row.put("Action", queueAction);
 	row.put("Payload", payload.toString());
 	row.put("Status", "needs_approval");
 	row.put("Attempt_Count", 0);
-	row.put("Related_Renewal", id);
+	row.put("Related_Renewal", recordId);
 	resp = zoho.crm.createRecord("AMS_Write_Queue", row);
 	ok.put("result", resp);
 	ok.put("Status", "needs_approval");
