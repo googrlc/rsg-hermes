@@ -18,8 +18,18 @@ First run waits on `accounts.zoho.com` until you sign in (Lamar). The profile
 is stored in `.pw-profile/` (gitignored). Later runs reuse it.
 
 The live IDE uses **Design / Workflow / Settings as buttons**, not tabs.
-Dismiss **Upgrade later from Setup** if the Creator 5 modal is covering the
-builder. Smart Chat is the bottom bar (`Ctrl+Space`).
+**Do not use Ctrl+Space Smart Chat** — that is Zoho Cliq (contacts/channels),
+not Creator Zia. Creator form AI is **+ → Form → Using Zia**.
+
+Create path that worked in the live app:
+
+1. **+** next to the app name (header).
+2. **Form** → **Using an Integrated Datasource** → **Zoho CRM** → one module.
+3. **Page** → **Blank** → name Desk / Card.
+4. Page builder **Report** widget (raw HTML snippets fail Deluge validation).
+
+Custom CRM modules (`Policies`, `Renewals`, …) may not appear on the System
+Zoho CRM connection. See `docs/zoho/creator-renewals-desk/LIVE_INVENTORY.md`.
 
 Optional: attach to Chrome you started with remote debugging:
 
@@ -32,10 +42,10 @@ ZOHO_CDP=http://127.0.0.1:9222 npm run build-desk
 ## What it builds
 
 1. Open existing app Edit (development).
-2. Add Zoho CRM integrations: Accounts, Deals, Policies, Renewal_Events,
-   Renewals, AMS_Write_Queue, Tasks.
-3. Pages Desk + Card from `docs/zoho/creator-renewals-desk/pages/`.
-4. Paste `ZIA_PASTE_PROMPT.md` into Zia if the chat is visible.
+2. **+ → Form → Zoho CRM** for modules the System connection exposes
+   (Accounts and Deals are live). Custom modules may be missing from the picker.
+3. **+ → Page → Blank** for Desk and Card if they are not already there.
+4. Does **not** paste into Cliq Smart Chat.
 
 Never publishes production. Never calls NowCerts.
 

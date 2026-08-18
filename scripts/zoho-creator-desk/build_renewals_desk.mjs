@@ -199,6 +199,7 @@ async function addCrmIntegrations(page) {
   if (!formHit) return;
 
   const crmHit = await clickFirst(page, [
+    "text=Using an Integrated Datasource",
     "text=Zoho CRM",
     "text=Import from Zoho CRM",
     "text=Other Zoho apps",
@@ -275,44 +276,10 @@ async function createHtmlPage(page, displayName, htmlPath) {
 }
 
 async function pasteZia(page) {
-  console.log("Smart Chat / Zia");
-  const opened =
-    (await evalClick(page, ["Here is your Smart Chat (Ctrl+Space)."])) ||
-    (await clickFirst(page, [
-      page.getByText(/Here is your Smart Chat/i),
-      page.getByPlaceholder(/smart chat|ask|message|zia/i),
-    ]));
-  if (!opened) {
-    await page.keyboard.press("Control+Space").catch(() => {});
-  }
-  await sleep(800);
-  await shot(page, "zia_open");
-  await dumpUi(page, "zia_open");
-
-  const short = [
-    "Work only in this existing Renewals Desk app (renewals-desk). Do not create a new application.",
-    "Do not create native forms that duplicate CRM modules.",
-    "Add Zoho CRM integrations for: Accounts, Deals, Policies, Renewal_Events, Renewals, AMS_Write_Queue, Tasks.",
-    "Create pages Desk (home) and Card.",
-    "Create CRM reports: Worklist (Renewals, Dismissed false), Needs verification (Renewal_Events Eligibility=needs_verification), AMS pending, AMS failed, Open tasks.",
-    "Hermes is the only NowCerts writer. Do not call NowCerts from Creator.",
-  ].join(" ");
-
-  const box = page.locator("textarea:visible, [contenteditable='true']:visible, input[type='text']:visible").last();
-  await box.click({ timeout: 8000 }).catch(() => {});
-  await page.keyboard.insertText(short);
-  await page.keyboard.press("Enter");
-  await sleep(5000);
-  await shot(page, "zia_short_sent");
-
-  const long = readDoc("ZIA_PASTE_PROMPT.md").slice(0, 6000);
-  await box.click().catch(() => {});
-  await page.keyboard.insertText("\n\nFull spec:\n" + long);
-  await clickFirst(page, ["button:has-text('Send')", "[aria-label='Send']", "button[type='submit']"]);
-  await page.keyboard.press("Enter");
-  await sleep(12000);
-  await shot(page, "zia_long_sent");
-  await dumpUi(page, "zia_long_sent");
+  // Ctrl+Space is Zoho Cliq (contacts/channels), not Creator Zia.
+  // Creator form AI is + → Form → Using Zia. Do not paste the spec pack here.
+  console.log("skip Cliq Smart Chat; Creator Zia is + Form Using Zia");
+  await shot(page, "zia_skipped_cliq");
 }
 
 async function main() {

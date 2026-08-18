@@ -4,9 +4,11 @@ The empty app **already exists** in workspace `lamar_risksolutionsgroup668`:
 link name `renewals-desk`, development environment. Fill **that** app. Do not
 create a new Creator application and do not duplicate this one.
 
-Preferred fill: open Edit mode → add CRM integrations → paste
-[`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md) into Zia / Build Agent in this
-app. Fallback: click through the steps below and paste pages / Deluge by hand.
+Preferred fill: open Edit mode → **+ → Form → Using an Integrated Datasource
+→ Zoho CRM** (one module per form). Pages: **+ → Page → Blank**. Do **not**
+paste [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md) into Cliq Smart Chat
+(`Ctrl+Space`); that searches contacts/channels. Creator Zia for forms is
+**+ → Form → Using Zia**. Fallback: click through below and paste Deluge by hand.
 
 **Playwright (logged-in browser):** from the repo root, `scripts/zoho-creator-desk`
 (`npm install && npm run build-desk`). See that folder's README. It opens the
@@ -35,18 +37,16 @@ session. Do not create a second application to work around that.
 
 1. Zoho Creator → **Renewals Desk** (`renewals-desk`) → Edit (development).
    Not a new app. Not a duplicate.
-2. Add **Integrations → Zoho CRM** for modules:
-   - Accounts
-   - Deals
-   - Policies
-   - Renewal_Events
-   - Renewals
-   - AMS_Write_Queue
-   - Tasks (for the five default desk tasks)
+2. **+** next to the app name → **Form** → **Using an Integrated Datasource**
+   → **Zoho CRM**. One module per form. Live today: Accounts, Deals. Custom
+   modules Policies / Renewal_Events / Renewals / AMS_Write_Queue (and Tasks)
+   did not appear in the System connection module picker — see
+   [`LIVE_INVENTORY.md`](LIVE_INVENTORY.md).
 3. Do **not** create Creator forms that duplicate Policies / Renewals as the
    system of record. Integration reports against CRM are the worklist.
-4. Either paste [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md) into Zia in this
-   app, or continue with Pages / Reports / Workflows below.
+4. Pages: **+ → Page → Blank** named `Desk` and `Card`. Embed CRM reports with
+   the page-builder **Report** widget. Raw HTML snippets in this builder
+   validate as Deluge and reject the files in `pages/`.
 
 ## Pages
 
