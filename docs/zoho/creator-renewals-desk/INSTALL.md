@@ -8,6 +8,10 @@ Preferred fill: open Edit mode → add CRM integrations → paste
 [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md) into Zia / Build Agent in this
 app. Fallback: click through the steps below and paste pages / Deluge by hand.
 
+**Playwright (logged-in browser):** from the repo root, `scripts/zoho-creator-desk`
+(`npm install && npm run build-desk`). See that folder's README. It opens the
+existing `renewals-desk` app only.
+
 Creator MCP in Cursor can inventory the live app (see
 [`LIVE_INVENTORY.md`](LIVE_INVENTORY.md)) but cannot create pages, reports,
 CRM integrations, or workflows. The builder requires a logged-in Creator IDE

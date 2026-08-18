@@ -1,0 +1,13 @@
+{
+  "name": "zoho-creator-desk-playwright",
+  "private": true,
+  "type": "module",
+  "description": "Playwright builder for the existing Zoho Creator Renewals Desk app (not a new app).",
+  "scripts": {
+    "build-desk": "node build_renewals_desk.mjs",
+    "open-desk": "node build_renewals_desk.mjs --step=open"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.1"
+  }
+}

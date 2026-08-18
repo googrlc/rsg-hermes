@@ -41,21 +41,28 @@ Workflow API accepts these module API names (INVALID_MODULE would mean missing):
 | Piece | Live |
 |---|---|
 | Pages Desk / Card | missing (`getPages` 3920 No pages available) |
-| Forms / CRM integration forms | missing (`getForms` 3910 No forms available) |
-| Reports Worklist, Needs verification, AMS pending/failed, Open tasks | missing (`getReports` 3930 No reports available) |
-| Sections / Chat Agent | empty (`getChatAgentMetadata` zia → 3001 Component cannot be Found) |
-| Deluge (stage, window, tasks, enqueue, approve, dismiss) | missing |
-| CRM integrations inside Creator | missing (`is_connection_referenced`: false) |
+| Native form | `Renewals_Desk` (type 1) — do **not** treat as a second book |
+| Native report | `All_Renewals_Desks` (type 1) |
+| CRM integration forms (Accounts, Deals, Policies, Renewal_Events, Renewals, AMS_Write_Queue, Tasks) | missing |
+| Reports Worklist, Needs verification, AMS pending/failed, Open tasks | missing |
+| Sections | one section `Renewals_Desks` with the native form + report |
+| Deluge (stage, window, tasks, enqueue, approve, dismiss) | missing from pages/reports; `cursor_api` exists as Custom API |
+| CRM integrations inside Creator | missing |
 
-Re-checked after the IDE attempt: still one app (`renewals-desk`), still empty, no duplicate created.
+Re-checked 18-Aug-2026 via Creator MCP (`environment: development`): still one
+app (`renewals-desk`), no Desk/Card pages, no CRM integration forms. A native
+`Renewals_Desk` form is present from the original app create — add CRM
+integrations; do not add more native book forms.
 
 ## IDE fill blocker
 
-Creator metadata MCP is authenticated (this inventory). The Creator **builder** is a browser session. Cloud computer-use reached
-
-`https://creator.zoho.com/appbuilder/lamar_risksolutionsgroup668/renewals-desk/edit`
-
-and was redirected to `accounts.zoho.com` sign-in. Zia / CRM-integration create is not available through the records MCP. 1Password MCP is down in this environment, so no stored Zoho password was used.
+Creator metadata MCP is authenticated (this inventory) but cannot create
+pages, reports, CRM integrations, or workflows. The builder is a logged-in
+browser session. Playwright (`scripts/zoho-creator-desk`) reuses a Chrome
+profile already signed in as LC. A **Upgrade to Creator 5** modal
+(`Upgrade later from Setup`) can sit on top of Design / Smart Chat and must
+be dismissed before Zia or the `+` menu will accept clicks. Never publish
+production from this fill.
 
 ## Custom API Cursor (live)
 
