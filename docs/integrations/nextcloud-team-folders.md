@@ -102,22 +102,23 @@ GET /api/document-registry/search?account_name=ABC%20Roofing&document_type=Decla
 MCP: `document_registry_upload` / `document_registry_search`. Legacy
 `file_to_nextcloud` still files into the older client-tree endpoint.
 
-## Remaining: point Hermes at the mount
+## Remaining: Zoho Document_Registry module
 
-The mount is live. Hermes still files into the personal `Clients/` tree until
-`NEXTCLOUD_BASE_PATH=Agency Documents` is set on the Hermes API container
-(Elestio env / 1Password). That is not a secret. Do not restart production
-without an explicit go-ahead.
+`NEXTCLOUD_BASE_PATH=Agency Documents` is **set** on the Hermes API, intake-worker, and scheduler containers (applied 2026-08-20). Legacy filing now prefixes the Team Folder. Registry uploads skip a second prefix when that env is set.
 
-Status / dry-run:
+`HERMES_WRITE_TO_ZOHO` was already `1`. Zoho OAuth on the box currently returns `invalid_client`, so `scripts/zoho_document_registry_setup.py --apply` could not create the CRM module. After rotating `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` / `ZOHO_REFRESH_TOKEN` (scopes `settings.modules.CREATE` + `settings.fields.CREATE`):
+
+```bash
+python scripts/zoho_document_registry_setup.py --apply
+```
+
+Then mark `Nextcloud_File_URL` required on the Document_Registry layout.
+
+Team Folder status (idempotent):
 
 ```bash
 python scripts/nextcloud_team_folders_setup.py
 ```
-
-`--apply` is idempotent. Optional ACL subgroups already exist. Enabling
-advanced permissions on subfolders still needs the Nextcloud admin UI or
-`occ groupfolders:permissions` on the Nextcloud box.
 
 ## What this repo will not do
 
