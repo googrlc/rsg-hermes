@@ -1,0 +1,11 @@
+// Accounts custom button — Open Nextcloud.
+// Prefer Nextcloud_Folder_Link (single-line text). Do not use Nextcloud_Folder_URL
+// (Website) — Zoho canonicalizes commas and Nextcloud login then 404s.
+
+rec = zoho.crm.getRecordById("Accounts", input.get("id"));
+url = trim(ifnull(rec.get("Nextcloud_Folder_Link"), ""));
+if(url == "")
+{
+	return "No Nextcloud folder link on this account";
+}
+openUrl(url, "new window");

@@ -443,12 +443,19 @@ class ZohoClient:
             "Billing_City": _pick(account_data, "city", "Billing_City"),
             "Billing_State": _pick(account_data, "state", "Billing_State"),
             "Billing_Code": _pick(account_data, "zip", "Billing_Code", "postal_code"),
-            "Nextcloud_Folder_URL": _pick(
+            "Nextcloud_Folder_Link": _pick(
                 account_data,
+                "nextcloud_folder_link",
+                "Nextcloud_Folder_Link",
                 "nextcloud_folder_url",
                 "Nextcloud_Folder_URL",
                 "Nextcloud_Folder_URL__s",
                 "nextcloud_folder",
+            ),
+            "Nextcloud_File_ID": _pick(
+                account_data,
+                "nextcloud_file_id",
+                "Nextcloud_File_ID",
             ),
             "NowCerts_Insured_GUID": _pick(
                 account_data,
@@ -458,11 +465,16 @@ class ZohoClient:
                 "insured_id",
             ),
         }
-        folder_url = mapping.get("Nextcloud_Folder_URL")
+        folder_url = mapping.get("Nextcloud_Folder_Link")
         if folder_url is not None and not is_http_url(folder_url):
-            mapping.pop("Nextcloud_Folder_URL", None)
+            mapping.pop("Nextcloud_Folder_Link", None)
         elif folder_url:
-            mapping["Nextcloud_Folder_URL"] = rewrite_stale_files_app_url(str(folder_url))
+            mapping["Nextcloud_Folder_Link"] = rewrite_stale_files_app_url(str(folder_url))
+        file_id = mapping.get("Nextcloud_File_ID")
+        if file_id is not None and not str(file_id).strip().isdigit():
+            mapping.pop("Nextcloud_File_ID", None)
+        elif file_id:
+            mapping["Nextcloud_File_ID"] = str(file_id).strip()
         return {k: v for k, v in mapping.items() if _present(v)}
 
     def _map_contact(self, contact_data: dict[str, Any], account_id: str) -> dict[str, Any]:

@@ -257,6 +257,7 @@ def commit_intake(
     # 3. Nextcloud client folder tree (best-effort).
     folder = None
     folder_url = None
+    folder_fileid = None
     deal_folder_url = None
     pdf_url = None
     nc = nextcloud
@@ -268,7 +269,20 @@ def commit_intake(
     try:
         if nc.is_configured() and name:
             folder = nc.ensure_client_folders(str(name))
-            folder_url = _nextcloud_http_url(nc, "browser_dir_url", folder)
+            # Prefer /f/{id} (Zoho text field). MagicMock tests auto-create
+            # open_dir_url and return a non-http stub — fall back to dir=.
+            folder_url = _nextcloud_http_url(nc, "open_dir_url", folder)
+            if not folder_url:
+                folder_url = _nextcloud_http_url(nc, "browser_dir_url", folder)
+            get_fid = getattr(nc, "get_fileid", None)
+            if callable(get_fid):
+                try:
+                    maybe_fid = get_fid(folder)
+                except Exception:
+                    maybe_fid = None
+                text_fid = str(maybe_fid or "").strip()
+                if text_fid.isdigit():
+                    folder_fileid = text_fid
             deal_folder_url = _nextcloud_http_url(nc, "client_category_url", str(name), "Quotes")
             # PDF-of-record: source intake PDF lands in Clients/{name}/Intake/.
             if source_pdf:
@@ -288,6 +302,7 @@ def commit_intake(
     except Exception:
         folder = None
         folder_url = None
+        folder_fileid = None
         deal_folder_url = None
         pdf_url = None
 
@@ -306,6 +321,7 @@ def commit_intake(
             client_identifier=cid,
             nextcloud_folder=folder,
             nextcloud_folder_url=folder_url,
+            nextcloud_file_id=folder_fileid,
             deal_primary_folder_url=deal_folder_url,
             document_url=pdf_url,
             nowcerts_insured_guid=gateway_ams.get("insured_database_id"),
@@ -325,6 +341,7 @@ def commit_intake(
         "insured_preview": insured_payload,
         "nextcloud_folder": folder,
         "nextcloud_folder_url": folder_url,
+        "nextcloud_file_id": folder_fileid,
         "intake_pdf_path": pdf_path,
         "prospect_type": ptype,
         "insured_type": itype,
@@ -345,6 +362,7 @@ def _build_zoho_payload(
     source_pdf_name: str | None,
     source: str | None,
     nextcloud_folder_url: str | None = None,
+    nextcloud_file_id: str | None = None,
     deal_primary_folder_url: str | None = None,
     document_url: str | None = None,
 ) -> dict[str, Any]:
@@ -374,6 +392,8 @@ def _build_zoho_payload(
         payload["nextcloud_folder"] = nextcloud_folder
     if nextcloud_folder_url and not payload.get("nextcloud_folder_url"):
         payload["nextcloud_folder_url"] = nextcloud_folder_url
+    if nextcloud_file_id and not payload.get("nextcloud_file_id"):
+        payload["nextcloud_file_id"] = nextcloud_file_id
     if deal_primary_folder_url and not payload.get("deal_primary_folder_url"):
         payload["deal_primary_folder_url"] = deal_primary_folder_url
     if document_url and not payload.get("document_url"):
@@ -403,6 +423,7 @@ def _write_zoho_after_commit(
     source_pdf_name: str | None,
     source: str | None,
     nextcloud_folder_url: str | None = None,
+    nextcloud_file_id: str | None = None,
     deal_primary_folder_url: str | None = None,
     document_url: str | None = None,
 ) -> dict[str, Any]:
@@ -420,6 +441,7 @@ def _write_zoho_after_commit(
             client_identifier=client_identifier,
             nextcloud_folder=nextcloud_folder,
             nextcloud_folder_url=nextcloud_folder_url,
+            nextcloud_file_id=nextcloud_file_id,
             deal_primary_folder_url=deal_primary_folder_url,
             document_url=document_url,
             nowcerts_insured_guid=nowcerts_insured_guid,

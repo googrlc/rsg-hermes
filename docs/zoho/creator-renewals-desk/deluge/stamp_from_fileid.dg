@@ -1,0 +1,16 @@
+// CRM / Creator workflow: when Nextcloud_File_ID is updated, fill Nextcloud_Folder_Link.
+// Host matches live Nextcloud; keep in sync with NEXTCLOUD_URL. Do not write
+// Nextcloud_Folder_URL.
+
+host = "https://nextcloud-x6wle-u69864.vm.elestio.app";
+fid = trim(ifnull(input.Nextcloud_File_ID, input.fileid));
+accountId = ifnull(input.get("id"), input.account_id);
+if(fid == "")
+{
+	return "no file id";
+}
+url = host + "/f/" + fid;
+row = Map();
+row.put("Nextcloud_Folder_Link", url);
+resp = zoho.crm.updateRecord("Accounts", accountId, row);
+return resp;

@@ -41,13 +41,15 @@ CLIENT_CATEGORIES = (
     "Claims",
 )
 
-# PROPFIND body — ask only for the props list_dir surfaces (keeps the response small).
+# PROPFIND body — list_dir props plus oc:fileid for stable /f/{id} permalinks.
 _PROPFIND_BODY = (
     '<?xml version="1.0" encoding="utf-8"?>'
-    '<d:propfind xmlns:d="DAV:"><d:prop>'
+    '<d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop>'
     "<d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:displayname/>"
+    "<oc:fileid/>"
     "</d:prop></d:propfind>"
 )
+_DAV_NS = {"d": "DAV:", "oc": "http://owncloud.org/ns"}
 DEFAULT_CATEGORY = "Renewal Reviews"
 QUOTES_CATEGORY = "Quotes"
 
@@ -94,6 +96,23 @@ def rewrite_stale_files_app_url(url: str) -> str:
     elif "/apps/files/files" not in new_path:
         new_path = "/apps/files/files"
     return urlunparse(parsed._replace(path=new_path, query="&".join(parts)))
+
+
+def fileid_open_url(base_url: str | None, fileid: str | int | None) -> str | None:
+    """Stable Nextcloud permalink ``{host}/f/{fileid}``. Zoho will not mangle it."""
+    base = str(base_url or "").strip().rstrip("/")
+    fid = str(fileid or "").strip()
+    if not base or not fid.isdigit():
+        return None
+    return f"{base}/f/{fid}"
+
+
+def _oc_fileid(prop) -> str | None:
+    if prop is None:
+        return None
+    el = prop.find("oc:fileid", _DAV_NS)
+    text = (el.text or "").strip() if el is not None else ""
+    return text if text.isdigit() else None
 
 
 class NextcloudClient:
@@ -205,6 +224,48 @@ class NextcloudClient:
             base = f"{base}/{_sanitize_segment(category)}"
         return self.browser_dir_url(base)
 
+    def fileid_url(self, fileid: str | int | None) -> str | None:
+        """Human-facing ``/f/{id}`` permalink for a Nextcloud file or folder."""
+        return fileid_open_url(self.url, fileid)
+
+    def get_fileid(self, rel_path: str) -> str | None:
+        """Return ``oc:fileid`` for a path via Depth-0 PROPFIND, or None if missing."""
+        self._require_configured()
+        import xml.etree.ElementTree as ET
+
+        resp = self.session.request(
+            "PROPFIND",
+            self._dav_url(rel_path),
+            headers={"Depth": "0", "Content-Type": "application/xml"},
+            data=_PROPFIND_BODY,
+            verify=self.verify_tls,
+            timeout=30,
+        )
+        if resp.status_code == 404:
+            return None
+        if resp.status_code not in (207, 200):
+            raise NextcloudError(
+                f"PROPFIND {rel_path} failed: {resp.status_code} {resp.text[:200]}"
+            )
+        try:
+            root = ET.fromstring(resp.content)
+        except ET.ParseError as exc:  # noqa: BLE001
+            raise NextcloudError(f"PROPFIND {rel_path}: bad XML ({exc})") from exc
+        for resp_el in root.findall("d:response", _DAV_NS):
+            prop = resp_el.find("d:propstat/d:prop", _DAV_NS)
+            fid = _oc_fileid(prop)
+            if fid:
+                return fid
+        return None
+
+    def open_dir_url(self, rel_dir: str) -> str | None:
+        """Prefer a stable ``/f/{id}`` folder link; fall back to the Files-app dir URL."""
+        try:
+            fid = self.get_fileid(rel_dir)
+        except NextcloudError:
+            fid = None
+        return self.fileid_url(fid) or self.browser_dir_url(rel_dir)
+
     # -- Talk (chat) --------------------------------------------------------
 
     def post_talk_message(self, token: str, message: str) -> None:
@@ -307,10 +368,9 @@ class NextcloudClient:
         except ET.ParseError as exc:  # noqa: BLE001
             raise NextcloudError(f"PROPFIND {rel_path}: bad XML ({exc})")
 
-        ns = {"d": "DAV:"}
         out: list[dict[str, Any]] = []
-        for resp_el in root.findall("d:response", ns):
-            href_el = resp_el.find("d:href", ns)
+        for resp_el in root.findall("d:response", _DAV_NS):
+            href_el = resp_el.find("d:href", _DAV_NS)
             if href_el is None or not href_el.text:
                 continue
             href = unquote(href_el.text)
@@ -320,18 +380,19 @@ class NextcloudClient:
             dav_path = "/" + dav_path.split("/", 1)[-1].strip("/") if "/" in dav_path else "/"
             if dav_path.rstrip("/") == self_dav.rstrip("/"):
                 continue  # the folder itself
-            prop = resp_el.find("d:propstat/d:prop", ns)
-            is_dir = prop is not None and prop.find("d:resourcetype/d:collection", ns) is not None
+            prop = resp_el.find("d:propstat/d:prop", _DAV_NS)
+            is_dir = prop is not None and prop.find("d:resourcetype/d:collection", _DAV_NS) is not None
             name = href.rstrip("/").rsplit("/", 1)[-1]
             child_full = dav_path.strip("/")
             child_rel = child_full[len(parent_rel):].strip("/") if parent_rel and child_full.startswith(parent_rel) else name
             rel_out = f"{rel_path.strip('/')}/{child_rel}".strip("/")
-            size_el = prop.find("d:getcontentlength", ns) if prop is not None else None
-            mod_el = prop.find("d:getlastmodified", ns) if prop is not None else None
+            size_el = prop.find("d:getcontentlength", _DAV_NS) if prop is not None else None
+            mod_el = prop.find("d:getlastmodified", _DAV_NS) if prop is not None else None
             out.append({
                 "name": name,
                 "path": rel_out,
                 "is_dir": bool(is_dir),
+                "fileid": _oc_fileid(prop),
                 "size": int(size_el.text) if (size_el is not None and (size_el.text or "").isdigit()) else None,
                 "modified": mod_el.text if mod_el is not None else None,
             })
@@ -376,8 +437,14 @@ class NextcloudClient:
         if not overwrite and self.path_exists(rel):
             raise NextcloudError(f"Refusing to overwrite existing file: {rel}")
         stored = self.put_file(rel, content, content_type=content_type)
+        fid = None
+        try:
+            fid = self.get_fileid(stored)
+        except NextcloudError:
+            fid = None
         return {
             "path": stored,
             "url": self._dav_url(rel),
-            "browser_url": self.browser_file_url(stored),
+            "fileid": fid,
+            "browser_url": self.fileid_url(fid) if fid else self.browser_file_url(stored),
         }

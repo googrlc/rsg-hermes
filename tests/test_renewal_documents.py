@@ -91,7 +91,7 @@ def test_nextcloud_file_document_puts_and_makes_dirs():
     res = nc.file_document(content=b"data", filename="f.pdf", client="Acme LLC", category="Renewal Reviews")
     assert res["path"] == "Clients/Acme LLC/Renewal Reviews/f.pdf"
     assert sess.put.call_count == 1
-    assert sess.request.call_count == 3          # MKCOL for each of 3 ancestor dirs
+    assert sess.request.call_count >= 3          # MKCOL ancestors; optional fileid PROPFIND
     put_url = sess.put.call_args[0][0]
     assert "Acme%20LLC" in put_url               # spaces URL-encoded
 

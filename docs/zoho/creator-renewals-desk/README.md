@@ -39,6 +39,9 @@ effects. Do not fold commissions into this app.
 | [`deluge/ams_enqueue.dg`](deluge/ams_enqueue.dg) | AMS action buttons | Four executor actions only; structured payload |
 | [`deluge/dismiss.dg`](deluge/dismiss.dg) | Dismiss button | `Dismissed=true`; never delete |
 | [`deluge/window_bucket.dg`](deluge/window_bucket.dg) | On Expiration / LOB edit | Same buckets as `hermes/renewals/desk.py` |
+| [`deluge/stamp_nextcloud_link.dg`](deluge/stamp_nextcloud_link.dg) | Stamp Account Nextcloud permalink | Writes `Nextcloud_Folder_Link` + `Nextcloud_File_ID`; never the Website URL field |
+| [`deluge/stamp_from_fileid.dg`](deluge/stamp_from_fileid.dg) | When File ID is set | Concat `{host}/f/{id}` into `Nextcloud_Folder_Link` |
+| [`deluge/open_nextcloud.dg`](deluge/open_nextcloud.dg) | Accounts **Open Nextcloud** button | `openUrl` on the text link |
 
 Python is the tested source of truth for stage/window/action rules
 ([`hermes/renewals/desk.py`](../../../hermes/renewals/desk.py)). Deluge copies

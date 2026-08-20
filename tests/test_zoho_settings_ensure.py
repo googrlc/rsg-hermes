@@ -127,7 +127,25 @@ def test_process_module_posts_missing_account_url_and_patches_layout(capsys):
     assert posted[3]["fields"][0]["data_type"] == "website"
     assert posted[3]["fields"][0]["field_label"] == "Nextcloud Folder URL"
     out = capsys.readouterr().out
-    assert "create URL field: Nextcloud Folder URL" in out
+    assert "create field: Nextcloud Folder URL" in out
+    assert "create field: Nextcloud Folder Link" in out
+    posts = [c for c in client.calls if c[0] == "POST"]
+    assert [c[3]["fields"][0]["data_type"] for c in posts] == ["website", "text", "text"]
+
+
+def test_process_module_creates_text_link_when_website_exists(capsys):
+    client = FakeSettingsClient()
+    client.fields_by_module["Accounts"] = [
+        {"id": "old", "api_name": "Nextcloud_Folder_URL", "field_label": "Nextcloud Folder URL"}
+    ]
+    process_module(client, "Accounts", apply=True, present={"Accounts"})
+    posts = [c for c in client.calls if c[0] == "POST"]
+    assert [c[3]["fields"][0]["field_label"] for c in posts] == [
+        "Nextcloud Folder Link",
+        "Nextcloud File ID",
+    ]
+    assert all(c[3]["fields"][0]["data_type"] == "text" for c in posts)
+    assert "create field: Nextcloud Folder Link" in capsys.readouterr().out
 
 
 def test_process_module_skips_claims_when_absent(capsys):
@@ -148,5 +166,5 @@ def test_process_module_policies_already_on_layout(capsys):
     process_module(client, "Policies", apply=True, present={"Policies"})
     assert not any(c[0] == "POST" for c in client.calls)
     assert not any(c[0] == "PATCH" for c in client.calls)
-    assert "URL fields already exist" in capsys.readouterr().out
+    assert "document fields already exist" in capsys.readouterr().out
     assert DOCUMENT_URL_FIELDS["Policies"]

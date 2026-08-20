@@ -20,8 +20,8 @@ from hermes_integrations.zoho_document_fields import (
     DOCUMENT_URL_FIELDS,
     DOCUMENTS_SECTION,
     existing_field_index,
+    field_create_payload,
     missing_document_fields,
-    website_create_payload,
 )
 
 CRM_HOST_RE = re.compile(r"^(?:crmplus\.|crm\.)zoho\.[a-z.]+$", re.I)
@@ -184,9 +184,13 @@ def list_fields(client: SettingsClient, module: str) -> list[dict[str, Any]]:
     return list(payload.get("fields") or [])
 
 
-def create_website_field(client: SettingsClient, module: str, spec: dict[str, str]) -> dict[str, Any]:
-    body = {"fields": [website_create_payload(spec)]}
+def create_field(client: SettingsClient, module: str, spec: dict[str, str]) -> dict[str, Any]:
+    body = {"fields": [field_create_payload(spec)]}
     return client.request("POST", "/settings/fields", query={"module": module}, body=body)
+
+
+def create_website_field(client: SettingsClient, module: str, spec: dict[str, str]) -> dict[str, Any]:
+    return create_field(client, module, spec)
 
 
 def standard_layout(client: SettingsClient, module: str) -> dict[str, Any] | None:
@@ -300,16 +304,17 @@ def process_module(client: SettingsClient, module: str, *, apply: bool, present:
     missing = missing_document_fields(module, fields)
     if missing:
         for spec in missing:
-            print(f"  create URL field: {spec['field_label']} ({spec['api_name']})")
+            kind = spec.get("data_type") or "website"
+            print(f"  create field: {spec['field_label']} ({spec['api_name']}, {kind})")
             if apply:
-                result = create_website_field(client, module, spec)
+                result = create_field(client, module, spec)
                 print(f"  POST response: {json.dumps(result)[:800]}")
             else:
                 print("  (dry-run — pass --apply to POST /settings/fields)")
         if apply:
             fields = list_fields(client, module)
     else:
-        print("  URL fields already exist")
+        print("  document fields already exist")
 
     specs = DOCUMENT_URL_FIELDS[module]
     ids = field_ids_for_specs(fields, specs)

@@ -155,7 +155,12 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
-def map_insured_to_account(ins: dict[str, Any], *, nextcloud_url: str | None = None) -> dict[str, Any]:
+def map_insured_to_account(
+    ins: dict[str, Any],
+    *,
+    nextcloud_url: str | None = None,
+    nextcloud_file_id: str | None = None,
+) -> dict[str, Any]:
     """Momentum insured → Zoho Account fields (snake_case keys for create_or_update_account)."""
     return {
         "account_name": _insured_name(ins),
@@ -170,6 +175,7 @@ def map_insured_to_account(ins: dict[str, Any], *, nextcloud_url: str | None = N
         "zip": _s(ins.get("zipCode") or ins.get("ZipCode") or ins.get("zip")),
         "nowcerts_insured_guid": _insured_guid(ins),
         "nextcloud_folder_url": nextcloud_url,
+        "nextcloud_file_id": nextcloud_file_id,
     }
 
 
@@ -229,21 +235,40 @@ def map_renewal_to_zoho(
     return {k: v for k, v in payload.items() if v is not None}
 
 
-def nextcloud_folder_url(nc: Any, client_name: str) -> tuple[str | None, str | None]:
-    """Ensure Clients/{name}/… and return (rel_path, browser_url)."""
+def nextcloud_folder_url(nc: Any, client_name: str) -> tuple[str | None, str | None, str | None]:
+    """Ensure Clients/{name}/… and return (rel_path, open_url, fileid)."""
     if nc is None or not getattr(nc, "is_configured", lambda: False)():
-        return None, None
+        return None, None, None
     folder = nc.ensure_client_folders(client_name)
     url = None
-    browser = getattr(nc, "browser_dir_url", None)
-    if callable(browser):
+    fid = None
+    opener = getattr(nc, "open_dir_url", None)
+    if callable(opener):
         try:
-            maybe = browser(folder)
+            maybe = opener(folder)
         except Exception:
             maybe = None
         if isinstance(maybe, str) and maybe.lower().startswith(("http://", "https://")):
             url = maybe
-    return folder, url
+    if not url:
+        browser = getattr(nc, "browser_dir_url", None)
+        if callable(browser):
+            try:
+                maybe = browser(folder)
+            except Exception:
+                maybe = None
+            if isinstance(maybe, str) and maybe.lower().startswith(("http://", "https://")):
+                url = maybe
+    get_fid = getattr(nc, "get_fileid", None)
+    if callable(get_fid):
+        try:
+            maybe_fid = get_fid(folder)
+        except Exception:
+            maybe_fid = None
+        text_fid = str(maybe_fid or "").strip()
+        if text_fid.isdigit():
+            fid = text_fid
+    return folder, url, fid
 
 
 # ── Report / counters ─────────────────────────────────────────────────────
@@ -421,11 +446,12 @@ def run_backfill(args: argparse.Namespace) -> int:
 
                 # Nextcloud folder URL (best-effort)
                 folder_url = None
+                folder_fileid = None
                 policies_folder_url = None
                 renewal_folder_url = None
                 if nc is not None and not dry_run:
                     try:
-                        _folder, folder_url = nextcloud_folder_url(nc, name)
+                        _folder, folder_url, folder_fileid = nextcloud_folder_url(nc, name)
                         cat_url = getattr(nc, "client_category_url", None)
                         if callable(cat_url):
                             maybe_p = cat_url(name, "Policies")
@@ -445,7 +471,9 @@ def run_backfill(args: argparse.Namespace) -> int:
                             error=str(exc),
                         )
 
-                account_data = map_insured_to_account(ins, nextcloud_url=folder_url)
+                account_data = map_insured_to_account(
+                    ins, nextcloud_url=folder_url, nextcloud_file_id=folder_fileid
+                )
 
                 # Step 2: Account upsert
                 account_id: str | None = None

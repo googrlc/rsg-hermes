@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hermes_integrations.zoho_document_fields import (
     DOCUMENT_URL_FIELDS,
+    field_create_payload,
     is_http_url,
     missing_document_fields,
     normalize_api_name,
@@ -19,12 +20,19 @@ def test_normalize_strips_zoho_suffixes():
 
 def test_missing_when_module_empty():
     missing = missing_document_fields("Accounts", [])
-    assert [s["api_name"] for s in missing] == ["Nextcloud_Folder_URL"]
+    assert [s["api_name"] for s in missing] == [
+        "Nextcloud_Folder_URL",
+        "Nextcloud_Folder_Link",
+        "Nextcloud_File_ID",
+    ]
 
 
-def test_existing_suffix_counts_as_present():
+def test_existing_website_field_still_needs_text_link():
     fields = [{"api_name": "Nextcloud_Folder_URL__s", "id": "1", "field_label": "Nextcloud Folder URL"}]
-    assert missing_document_fields("Accounts", fields) == []
+    assert [s["api_name"] for s in missing_document_fields("Accounts", fields)] == [
+        "Nextcloud_Folder_Link",
+        "Nextcloud_File_ID",
+    ]
 
 
 def test_existing_label_counts_as_present():
@@ -39,6 +47,15 @@ def test_website_payload_is_url_field():
     assert payload["data_type"] == "website"
     assert payload["field_label"] == "Document URL"
     assert payload["length"] == 450
+    assert len(payload["tooltip"]["value"]) <= 32
+
+
+def test_text_link_payload_is_single_line():
+    spec = DOCUMENT_URL_FIELDS["Accounts"][1]
+    payload = field_create_payload(spec)
+    assert spec["api_name"] == "Nextcloud_Folder_Link"
+    assert payload["data_type"] == "text"
+    assert payload["length"] == 255
     assert len(payload["tooltip"]["value"]) <= 32
 
 

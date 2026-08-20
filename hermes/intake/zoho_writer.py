@@ -55,11 +55,23 @@ def _account_block(payload: dict[str, Any]) -> dict[str, Any]:
     account = dict(payload.get("account") or {})
     # Nextcloud URL may sit on the account or the commit result. A folder path
     # is not a Zoho website field — only stamp http(s) Files-app links.
-    url = account.get("nextcloud_folder_url") or payload.get("nextcloud_folder_url")
+    url = (
+        account.get("nextcloud_folder_link")
+        or account.get("nextcloud_folder_url")
+        or payload.get("nextcloud_folder_url")
+        or payload.get("nextcloud_folder_link")
+    )
     if url and is_http_url(url):
         account["nextcloud_folder_url"] = url
+        account["nextcloud_folder_link"] = url
     else:
         account.pop("nextcloud_folder_url", None)
+        account.pop("nextcloud_folder_link", None)
+    fid = account.get("nextcloud_file_id") or payload.get("nextcloud_file_id")
+    if fid and str(fid).strip().isdigit():
+        account["nextcloud_file_id"] = str(fid).strip()
+    else:
+        account.pop("nextcloud_file_id", None)
     # AMS GUID may already be stamped by the gateway AMS-first path.
     guid = (
         account.get("nowcerts_insured_guid")
@@ -356,10 +368,12 @@ def write_intake_to_zoho(
                         "account_name": account.get("account_name"),
                         "nowcerts_insured_guid": account.get("nowcerts_insured_guid"),
                         "nextcloud_folder_url": folder_url,
+                        "nextcloud_file_id": intake_payload.get("nextcloud_file_id")
+                        or account.get("nextcloud_file_id"),
                     }
                 )
                 log.info(
-                    "write_intake_to_zoho: stamped Nextcloud_Folder_URL on %s",
+                    "write_intake_to_zoho: stamped Nextcloud_Folder_Link on %s",
                     result["zoho_account_id"],
                 )
             except Exception as exc:  # noqa: BLE001

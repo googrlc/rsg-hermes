@@ -8,7 +8,7 @@ Zoho Policy  CA123456
   Document URL  →  Nextcloud / Clients / ABC Trucking / Policies / Progressive Policy 2026.pdf
 
 Zoho Account  ABC Trucking
-  Nextcloud Folder URL  →  Nextcloud / Clients / ABC Trucking
+  Nextcloud Folder Link  →  Nextcloud /f/{fileid}  (stable permalink)
 ```
 
 Do not attach the PDF to the Zoho record. Do not copy it into SharePoint or
@@ -18,7 +18,7 @@ Outlook. NowCerts stays the AMS (who is insured, what is in force).
 
 | Module | Fields | Zoho type |
 |---|---|---|
-| **Accounts** | Nextcloud Folder URL | URL / Website |
+| **Accounts** | Nextcloud Folder Link, Nextcloud File ID | Single Line (text). Legacy Website `Nextcloud Folder URL` stays but is not stamped. |
 | **Policies** | Primary Folder URL, Document URL | URL / Website |
 | **Deals** | Primary Folder URL, Document URL | URL / Website |
 | **Renewals** | Primary Folder URL, Document URL | URL / Website |
@@ -31,9 +31,12 @@ Field definitions: `fields_accounts.csv`, `fields_policies.csv`,
 
 ## 1. Create the URL fields (this is the actual connect)
 
-Two ways to create the fields. Both send the same Settings API payloads
-(Website / URL, length 450, Documents section on the Standard layout).
-Claims and Certificates are skipped until those custom modules exist.
+Two ways to create the fields. Both send the same Settings API payloads.
+Accounts uses **single-line text** for `Nextcloud Folder Link` and
+`Nextcloud File ID` (Website fields mangle commas). Other modules still
+use Website / URL, length 450. All land in a Documents section on the
+Standard layout. Claims and Certificates are skipped until those custom
+modules exist.
 
 ### A. Playwright (log into CRM in a browser)
 
@@ -85,7 +88,7 @@ Either path will:
 Zoho CRM → Setup → Customization → Modules and Fields → pick the module →
 **New Field** → type **URL** (sometimes labeled Website):
 
-- Label exactly `Nextcloud Folder URL` on Accounts
+- Label exactly `Nextcloud Folder Link` and `Nextcloud File ID` on Accounts (Single Line). Leave the legacy Website `Nextcloud Folder URL` in place; do not stamp it.
 - Label exactly `Primary Folder URL` and `Document URL` on the others
 - Length 450
 - Then drag them onto the layout (a Documents section is fine)
@@ -119,31 +122,36 @@ Once the fields exist, these paths fill them:
 
 | When | Field | Value |
 |---|---|---|
-| Intake (`HERMES_WRITE_TO_ZOHO=1`) | Account `Nextcloud_Folder_URL` | `https://{nextcloud}/apps/files/files?dir=/Clients/{name}` |
+| Intake (`HERMES_WRITE_TO_ZOHO=1`) | Account `Nextcloud_Folder_Link` | `https://{nextcloud}/f/{fileid}` (falls back to Files-app `dir=` if fileid is missing) |
+| Intake | Account `Nextcloud_File_ID` | Nextcloud `oc:fileid` digits (text, not integer — ids exceed Zoho's 9-digit cap) |
 | Intake | Deal `Primary_Folder_URL` | `…/Clients/{name}/Quotes` |
-| Book backfill | Account folder URL, Policy `Primary_Folder_URL` (`…/Policies`), Renewal `Primary_Folder_URL` (`…/Renewal Reviews`) | same Files-app links |
+| Book backfill | Account folder link + file id, Policy `Primary_Folder_URL` (`…/Policies`), Renewal `Primary_Folder_URL` (`…/Renewal Reviews`) | same |
 | Quote / proposal / renewal PDF file | Hermes stores the file in Nextcloud; stamp `Document_URL` onto the Zoho row when that writer already has the record id | `…/apps/files/files?dir=/…&scrollto={filename}` |
 
 Hermes will **not** write a relative path like `Clients/ABC Trucking` into
 a URL field — Zoho would not open it. It also skips Zoho file attachments
-when a Nextcloud folder URL is present.
+when a Nextcloud folder URL is present. It does **not** write the locked
+Website field `Nextcloud_Folder_URL`.
 
-Nextcloud 34 serves folders at `/apps/files/files?dir=/…`. Hermes stamps
-that form. Do not pre-encode commas (`Berrios%2C%20Edwin`): Zoho website
-fields and the Nextcloud login redirect both encode the URL again, which
-turns `%2C` into `%252C` and the Files app shows **Folder not found** even
-though `Clients/Berrios, Edwin` exists. If a click 404s, open Files →
-Clients → the client name, or paste:
+The clickable Account link is a **text** field storing `/f/{fileid}`. Zoho
+Website fields canonicalize commas (`Berrios, Edwin` → `%2C`); Nextcloud
+login then encodes again (`%252C`) and the Files app shows **Folder not found**.
+`/f/{id}` has no comma, so Zoho cannot mangle it.
 
-`https://{nextcloud}/apps/files/files?dir=/Clients/{name}`
+Paste this Deluge on an Accounts custom button named **Open Nextcloud**:
 
-with the comma and space left as-is.
+`docs/zoho/creator-renewals-desk/deluge/open_nextcloud.dg`
+
+To stamp from Creator or a CRM workflow, use
+`docs/zoho/creator-renewals-desk/deluge/stamp_nextcloud_link.dg`.
+When `Nextcloud_File_ID` is set, `stamp_from_fileid.dg` concatenates
+`{NEXTCLOUD_HOST}/f/{id}` into `Nextcloud_Folder_Link`.
 
 ## 4. How you know it connected
 
 1. Open an Account in Zoho.
-2. Click **Nextcloud Folder URL**.
-3. The browser opens Nextcloud on that client's folder.
+2. Click the **Open Nextcloud** button (or copy **Nextcloud Folder Link**).
+3. The browser opens Nextcloud on that client's folder (`/f/{fileid}`).
 4. Open a Policy, click **Document URL** (after a PDF has been filed) or
    **Primary Folder URL** (after backfill / folder create).
 
