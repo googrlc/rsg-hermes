@@ -1,0 +1,11 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Certificates,Certificate Name,Name,Single Line,255,Y,N,N,,,,Z-only,,"Holder + date or number"
+Certificates,Certificate Number,Certificate_Number,Single Line,100,N,Y,N,,,Z-only,,
+Certificates,Account Name,Account_Name,Lookup (Accounts),,N,N,N,,,Z-only,,
+Certificates,Policy,Policy,Lookup (Policies),,N,N,N,,,Z-only,,
+Certificates,Holder Name,Holder_Name,Single Line,255,N,N,N,,,Z-only,,Certificate holder
+Certificates,Issue Date,Issue_Date,Date,,N,N,N,,,Z-only,,
+Certificates,Primary Folder URL,Primary_Folder_URL,URL,450,N,N,N,,,Hermes stamp,,Nextcloud Clients/{name}/COIs (certificate file class)
+Certificates,Document URL,Document_URL,URL,450,N,N,N,,,Hermes stamp,,Specific COI PDF in Nextcloud — issued in NowCerts; filed copy lives once
+Certificates,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
+Certificates,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

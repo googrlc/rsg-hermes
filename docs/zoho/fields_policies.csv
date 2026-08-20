@@ -23,5 +23,7 @@ Policies,Renewed Policy GUID,Renewed_Policy_GUID,Single Line,36,N,N,N,,,AMS→Z 
 Policies,Risk State,Risk_State,Single Line,10,N,N,N,,,AMS→Z,state,Policy state not mailing address
 Policies,Sync Owner,Sync_Owner,Picklist,40,N,N,N,book_sync,picklists_hermes_vocab.csv:sync_owner,System,sync_owner,Who may tombstone
 Policies,Last Synced,Last_Synced,DateTime,,N,N,N,,,System,synced_at,
+Policies,Primary Folder URL,Primary_Folder_URL,URL,450,N,N,N,,,Hermes stamp,,Nextcloud Policies folder for this account (Files app https link)
+Policies,Document URL,Document_URL,URL,450,N,N,N,,,Hermes stamp,,Specific policy PDF in Nextcloud — never attach the file to Zoho
 Policies,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
 Policies,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

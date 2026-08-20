@@ -1,0 +1,26 @@
+// Stamp a stable Nextcloud /f/{fileid} permalink onto a Zoho Account.
+// Parameters: account_id (CRM Accounts id), fileid (oc:fileid digits),
+// optional url (full https). Prefer url when provided; else concat host + /f/ + fileid.
+// Writes the text fields Nextcloud_Folder_Link / Nextcloud_File_ID.
+// Does NOT write the locked Website field Nextcloud_Folder_URL.
+
+host = "https://nextcloud-x6wle-u69864.vm.elestio.app";
+accountId = trim(ifnull(input.account_id, ""));
+fileId = trim(ifnull(input.fileid, ""));
+url = trim(ifnull(input.url, ""));
+if(url == "" && fileId != "")
+{
+	url = host + "/f/" + fileId;
+}
+if(accountId == "" || url == "")
+{
+	return "account_id and url or fileid are required";
+}
+row = Map();
+row.put("Nextcloud_Folder_Link", url);
+if(fileId != "")
+{
+	row.put("Nextcloud_File_ID", fileId);
+}
+resp = zoho.crm.updateRecord("Accounts", accountId, row);
+return resp;

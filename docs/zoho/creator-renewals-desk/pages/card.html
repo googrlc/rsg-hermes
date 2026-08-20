@@ -1,0 +1,72 @@
+<!--
+  Creator Page: Card (one renewal).
+  Opened with CRM Renewals record id. Lookups: Policy, Account,
+  Related_Renewal_Event, Related_Deal.
+-->
+<article class="card" data-renewal-id="{{RENEWAL_ID}}">
+  <header>
+    <p class="kicker"><span data-field="Line_of_Business"></span> · <span data-field="Carrier"></span></p>
+    <h1 data-field="Client_Name">Client</h1>
+    <p class="meta">
+      Policy <strong data-field="Policy_Number"></strong>
+      · x-date <strong data-field="Expiration_Date"></strong>
+      · <span data-field="Days_To_Expiration"></span> days
+      · <span data-field="Window_Bucket"></span>
+      · risk <strong data-field="Risk_Status"></strong>
+    </p>
+    <p class="money">
+      Current <span data-field="Premium_Current"></span>
+      → renewal <span data-field="Premium_Renewal"></span>
+      (<span data-field="Increase_Percent"></span>%)
+    </p>
+  </header>
+
+  <section>
+    <h2>Desk</h2>
+    <p>Stage never skips. Closed requires Disposition. Producer confirms any
+    backward move.</p>
+    <ul>
+      <li>Desk Stage — Identified → Outreach Sent → Quote Requested → Proposal Sent → Negotiating → Closed</li>
+      <li>Disposition — on Closed only (renewed / rewritten / lost_price / lost_coverage / lost_no_response / do_not_renew)</li>
+      <li>Recommended Action — RETAIN_AS_IS / RETAIN_WITH_NEGOTIATION / REMARKET_SAMPLE / REMARKET_FULL / ESCALATE_HUMAN / MOVE_TO_AT_RISK_LIST</li>
+      <li>Strategy Notes, Last Contact Date</li>
+    </ul>
+    <!-- Bind to CRM Renewals edit form (correctable fields only). -->
+  </section>
+
+  <section>
+    <h2>Related</h2>
+    <ul>
+      <li>Policy — number, status, effective, carrier, LOB</li>
+      <li>Account — name, NowCerts insured GUID</li>
+      <li>Renewal Event — eligibility, lineage, segment</li>
+      <li>Deal — Renewals pipeline (90 / 60 / 30 day stages)</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Tasks</h2>
+    <ol>
+      <li>Pull renewal declaration &amp; review exposures</li>
+      <li>Request renewal terms from carrier</li>
+      <li>Prepare renewal options / comparison</li>
+      <li>Send renewal review to client</li>
+      <li>Update AMS (NowCerts) &amp; file worksheet</li>
+    </ol>
+    <p>Seeded once per renewal by <code>task_seed.dg</code>. Gretchen completes
+    them here; Creator never emails the client.</p>
+  </section>
+
+  <section>
+    <h2>AMS actions</h2>
+    <p>Each button opens a short form: expected result (required) + note.
+    Deluge writes AMS_Write_Queue. Hermes drains after approval.</p>
+    <p>
+      <button type="button" data-action="request_terms">Request terms</button>
+      <button type="button" data-action="prepare_options">Prepare options</button>
+      <button type="button" data-action="client_follow_up">Client follow-up</button>
+      <button type="button" data-action="update_ams">Update AMS</button>
+    </p>
+    <p><button type="button" data-action="dismiss">Dismiss from worklist</button></p>
+  </section>
+</article>

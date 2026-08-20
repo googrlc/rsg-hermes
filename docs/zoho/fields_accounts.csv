@@ -16,5 +16,8 @@ Accounts,Billing Street,Billing_Street,Single Line,255,N,N,N,,,AMS→Z / Z→AMS
 Accounts,Billing City,Billing_City,Single Line,100,N,N,N,,,AMS→Z / Z→AMS,city,Pushable
 Accounts,Billing State,Billing_State,Single Line,50,N,N,N,,,AMS→Z / Z→AMS,state,Pushable
 Accounts,Billing Code,Billing_Code,Single Line,20,N,N,N,,,AMS→Z / Z→AMS,zip,AMS zipCode; pushable Zip
+Accounts,Nextcloud Folder URL,Nextcloud_Folder_URL,URL,450,N,N,N,,,Legacy,nextcloud_folder_url,LOCKED Website field. Zoho encodes commas and Nextcloud 404s. Do not stamp. Replaced by Nextcloud_Folder_Link.
+Accounts,Nextcloud Folder Link,Nextcloud_Folder_Link,Single Line,255,N,N,N,,,Hermes stamp,nextcloud_folder_url,Stable Nextcloud permalink https://{host}/f/{fileid}. Text so Zoho cannot canonicalize commas.
+Accounts,Nextcloud File ID,Nextcloud_File_ID,Single Line,32,N,N,N,,,Hermes stamp,nextcloud_file_id,Nextcloud oc:fileid digits as text (ids exceed Zoho integer 9-digit cap).
 Accounts,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,System field
 Accounts,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,System field

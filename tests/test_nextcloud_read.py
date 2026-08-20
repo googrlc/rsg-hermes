@@ -99,3 +99,86 @@ def test_read_file_404_raises():
         assert "Not found" in str(exc)
     else:
         raise AssertionError("expected NextcloudError")
+
+
+def test_browser_urls_are_files_app_links_not_webdav():
+    c = _client(_FakeSession())
+    folder = c.client_category_url("ABC Trucking", "Policies")
+    assert folder == "https://nc.example/apps/files/files?dir=/Clients/ABC Trucking/Policies"
+    file_url = c.browser_file_url("Clients/ABC Trucking/Policies/Progressive Policy 2026.pdf")
+    assert file_url.endswith("scrollto=Progressive Policy 2026.pdf")
+    assert "/remote.php/" not in (folder or "")
+
+
+def test_browser_url_keeps_comma_so_zoho_does_not_double_encode():
+    from hermes_integrations.nextcloud_client import rewrite_stale_files_app_url
+
+    c = _client(_FakeSession())
+    folder = c.client_category_url("Berrios, Edwin")
+    assert folder == "https://nc.example/apps/files/files?dir=/Clients/Berrios, Edwin"
+    assert "%2C" not in folder
+    stale = "https://nextcloud.example/apps/files/?dir=/Clients/Berrios%2C%20Edwin"
+    assert rewrite_stale_files_app_url(stale) == (
+        "https://nextcloud.example/apps/files/files?dir=/Clients/Berrios, Edwin"
+    )
+
+
+_FILEID_PROP = b"""<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/root/Clients/Berrios,%20Edwin/</d:href>
+    <d:propstat><d:prop>
+      <d:resourcetype><d:collection/></d:resourcetype>
+      <oc:fileid>1842</oc:fileid>
+    </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"""
+
+
+def test_fileid_open_url_is_stable_permalink():
+    from hermes_integrations.nextcloud_client import fileid_open_url
+
+    assert fileid_open_url("https://nc.example/", "1842") == "https://nc.example/f/1842"
+    assert fileid_open_url("https://nc.example", 1842) == "https://nc.example/f/1842"
+    assert fileid_open_url("https://nc.example", "abc") is None
+    assert fileid_open_url("", "1842") is None
+
+
+def test_get_fileid_parses_oc_fileid():
+    c = _client(_FakeSession(propfind=_Resp(207, _FILEID_PROP)))
+    assert c.get_fileid("Clients/Berrios, Edwin") == "1842"
+    assert c.fileid_url("1842") == "https://nc.example/f/1842"
+
+
+def test_open_dir_url_prefers_fileid_permalink():
+    c = _client(_FakeSession(propfind=_Resp(207, _FILEID_PROP)))
+    assert c.open_dir_url("Clients/Berrios, Edwin") == "https://nc.example/f/1842"
+
+
+def test_open_dir_url_falls_back_to_files_app_when_fileid_missing():
+    c = _client(_FakeSession(propfind=_Resp(404, b"")))
+    assert c.open_dir_url("Clients/Nobody") == "https://nc.example/apps/files/files?dir=/Clients/Nobody"
+
+
+def test_list_dir_includes_fileid_when_present():
+    xml = b"""<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/root/Clients/Acme%20Trucking/</d:href>
+    <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype>
+      <oc:fileid>10</oc:fileid></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/root/Clients/Acme%20Trucking/COIs/</d:href>
+    <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype>
+      <oc:fileid>11</oc:fileid></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"""
+    c = _client(_FakeSession(propfind=_Resp(207, xml)))
+    out = c.list_dir("Clients/Acme Trucking")
+    assert out[0]["name"] == "COIs"
+    assert out[0]["fileid"] == "11"
+
+

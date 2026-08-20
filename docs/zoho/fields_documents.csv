@@ -1,0 +1,11 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Filed_Documents,Filed Document Name,Name,Single Line,255,Y,N,N,,,,Z-only,,Filename or short title — the file lives in Nextcloud
+Filed_Documents,Document Type,Document_Type,Picklist,40,N,N,N,,,Z-only / Hermes stamp,,"Policy|Quote|Proposal|COI|Claim|Correspondence|Intake|Renewal Review — maps to Nextcloud subfolder"
+Filed_Documents,Nextcloud File Link,Nextcloud_File_Link,Single Line,255,N,N,N,,,Hermes stamp,,Stable /f/{fileid} permalink. Text not Website — Zoho Website mangles commas.
+Filed_Documents,Nextcloud File ID,Nextcloud_File_ID,Single Line,32,N,N,N,,,Hermes stamp,,Nextcloud oc:fileid digits
+Filed_Documents,Account,Account,Lookup (Accounts),,N,N,N,,,Z-only / Hermes stamp,,Related list on Account: Nextcloud Files
+Filed_Documents,Policy,Policy,Lookup (Policies),,N,N,N,,,Z-only / Hermes stamp,,Related list on Policy: Nextcloud Files
+Filed_Documents,Deal,Deal,Lookup (Deals),,N,N,N,,,Z-only / Hermes stamp,,Related list on Deal: Nextcloud Files
+Filed_Documents,Renewal,Renewal,Lookup (Renewals),,N,N,N,,,Z-only / Hermes stamp,,Related list on Renewal: Nextcloud Files
+Filed_Documents,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
+Filed_Documents,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

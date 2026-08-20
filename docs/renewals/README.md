@@ -10,7 +10,10 @@ contract wins.
   escalations → compute the scoreboard. **Hermes never talks to a client.**
 - **The cockpit = the workstation.** Renewals are worked in the Command Center
   (`/command-center/`), which reads the canonical book from Supabase and stages
-  approved instructions for the executor.
+  approved instructions for the executor. The **Zoho Creator Renewals Desk**
+  (`docs/zoho/creator-renewals-desk/`) is the Zoho-native desk over CRM Renewals;
+  Hermes upserts those modules via `--sync-zoho-renewals` and mirrors approved
+  AMS_Write_Queue rows via `--sync-zoho-ams-queue`.
 - **Gretchen = the only hands that touch clients.** Hermes drafts; she sends.
 - **Slack = the notification wire only.** Morning doorbell DM to Gretchen,
   🚨 escalations and 📋 handoffs to `#lamar-alerts`, Monday digest. No

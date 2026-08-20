@@ -50,15 +50,28 @@ def _is_restricted_fact(fact: dict[str, Any]) -> bool:
 
 
 def _account_block(payload: dict[str, Any]) -> dict[str, Any]:
+    from hermes_integrations.zoho_document_fields import is_http_url
+
     account = dict(payload.get("account") or {})
-    # Nextcloud URL may sit on the account, the commit result, or the top level.
+    # Nextcloud URL may sit on the account or the commit result. A folder path
+    # is not a Zoho website field — only stamp http(s) Files-app links.
     url = (
-        account.get("nextcloud_folder_url")
+        account.get("nextcloud_folder_link")
+        or account.get("nextcloud_folder_url")
         or payload.get("nextcloud_folder_url")
-        or payload.get("nextcloud_folder")
+        or payload.get("nextcloud_folder_link")
     )
-    if url and not account.get("nextcloud_folder_url"):
+    if url and is_http_url(url):
         account["nextcloud_folder_url"] = url
+        account["nextcloud_folder_link"] = url
+    else:
+        account.pop("nextcloud_folder_url", None)
+        account.pop("nextcloud_folder_link", None)
+    fid = account.get("nextcloud_file_id") or payload.get("nextcloud_file_id")
+    if fid and str(fid).strip().isdigit():
+        account["nextcloud_file_id"] = str(fid).strip()
+    else:
+        account.pop("nextcloud_file_id", None)
     # AMS GUID may already be stamped by the gateway AMS-first path.
     guid = (
         account.get("nowcerts_insured_guid")
@@ -176,6 +189,10 @@ def _deal_from_opportunity(
     if not deal.get("producer_email"):
         # Prefer an explicit email; fall back to nothing (Owner stays unset).
         deal["producer_email"] = opp.get("producer_email") or opp.get("owner_email")
+    if not deal.get("primary_folder_url"):
+        deal["primary_folder_url"] = payload.get("deal_primary_folder_url")
+    if not deal.get("document_url"):
+        deal["document_url"] = payload.get("document_url")
     return deal
 
 
@@ -303,21 +320,31 @@ def write_intake_to_zoho(
             log.exception("write_intake_to_zoho: %s", msg)
             result["errors"].append(msg)
 
-    # 5. PDF attachments
+    # 5. PDF attachments — only if Nextcloud did not produce a clickable URL.
+    # Zoho is not a second document library.
+    from hermes_integrations.zoho_document_fields import is_http_url
+
+    folder_url = account.get("nextcloud_folder_url") or intake_payload.get("nextcloud_folder_url")
     temp_pdfs = list(intake_payload.get("_zoho_temp_pdfs") or [])
     try:
-        for pdf_path in _pdf_paths(intake_payload):
-            try:
-                att = zoho.upload_attachment("Accounts", account_id, pdf_path)
-                log.info(
-                    "write_intake_to_zoho: attachment %s file=%s",
-                    att.get("id"),
-                    os.path.basename(pdf_path),
-                )
-            except Exception as exc:  # noqa: BLE001
-                msg = f"attachment {pdf_path!r} failed: {exc}"
-                log.exception("write_intake_to_zoho: %s", msg)
-                result["errors"].append(msg)
+        if is_http_url(folder_url):
+            log.info(
+                "write_intake_to_zoho: skipping Zoho attachments; files live at %s",
+                folder_url,
+            )
+        else:
+            for pdf_path in _pdf_paths(intake_payload):
+                try:
+                    att = zoho.upload_attachment("Accounts", account_id, pdf_path)
+                    log.info(
+                        "write_intake_to_zoho: attachment %s file=%s",
+                        att.get("id"),
+                        os.path.basename(pdf_path),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    msg = f"attachment {pdf_path!r} failed: {exc}"
+                    log.exception("write_intake_to_zoho: %s", msg)
+                    result["errors"].append(msg)
     finally:
         # Clean any temp files we created from source_pdf bytes.
         for path in list(intake_payload.get("_zoho_temp_pdfs") or []) + temp_pdfs:
@@ -330,21 +357,29 @@ def write_intake_to_zoho(
     # 6. Nextcloud folder URL — already mapped in step 1 when present on the
     # account block. If the commit only produced the URL after the first write
     # (stashed on the payload top-level), stamp it now.
-    folder_url = intake_payload.get("nextcloud_folder_url") or intake_payload.get("nextcloud_folder")
+    folder_url = intake_payload.get("nextcloud_folder_url")
     if folder_url and result["zoho_account_id"] and not account.get("nextcloud_folder_url"):
-        try:
-            zoho.create_or_update_account(
-                {
-                    "account_name": account.get("account_name"),
-                    "nowcerts_insured_guid": account.get("nowcerts_insured_guid"),
-                    "nextcloud_folder_url": folder_url,
-                }
-            )
-            log.info("write_intake_to_zoho: stamped Nextcloud_Folder_URL on %s", result["zoho_account_id"])
-        except Exception as exc:  # noqa: BLE001
-            msg = f"nextcloud url stamp failed: {exc}"
-            log.exception("write_intake_to_zoho: %s", msg)
-            result["errors"].append(msg)
+        from hermes_integrations.zoho_document_fields import is_http_url
+
+        if is_http_url(folder_url):
+            try:
+                zoho.create_or_update_account(
+                    {
+                        "account_name": account.get("account_name"),
+                        "nowcerts_insured_guid": account.get("nowcerts_insured_guid"),
+                        "nextcloud_folder_url": folder_url,
+                        "nextcloud_file_id": intake_payload.get("nextcloud_file_id")
+                        or account.get("nextcloud_file_id"),
+                    }
+                )
+                log.info(
+                    "write_intake_to_zoho: stamped Nextcloud_Folder_Link on %s",
+                    result["zoho_account_id"],
+                )
+            except Exception as exc:  # noqa: BLE001
+                msg = f"nextcloud url stamp failed: {exc}"
+                log.exception("write_intake_to_zoho: %s", msg)
+                result["errors"].append(msg)
 
     log.info(
         "write_intake_to_zoho: done account=%s contacts=%d deals=%d errors=%d",

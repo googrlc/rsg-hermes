@@ -6,7 +6,7 @@ Use with the CSVs in this folder. Labels and UUIDs for seeded NowCerts picklists
 
 - [ ] Zoho CRM org with API access
 - [ ] Decide: custom module **Policies** vs Zoho Insurance Policy module
-- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`
+- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`, `Filed_Documents`
 - [ ] Create Users matching `agency_crm_users` emails (for Deal Owner / Approved By)
 
 ## 1. Picklists & pipelines (do first)
@@ -80,7 +80,7 @@ Use as a subset of Policy Status or a separate Renewal Status field:
 
 ### 1e. Other Hermes vocab
 
-Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_Type, Insured_Type, Win_Likelihood, Deal_Status, Policy_Status (full normalize set), Billing_Type, Risk_Status, Eligibility, Branch, Segment, queue enums.
+Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_Type, Insured_Type, Win_Likelihood, Deal_Status, Policy_Status (full normalize set), Billing_Type, Risk_Status, Eligibility, Branch, Segment, queue enums, **Desk_Stage**, **Disposition**, **Recommended_Action**, **Window_Bucket**.
 
 ## 2. Create fields (CSV order)
 
@@ -92,6 +92,7 @@ Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_
 | 4 | `fields_renewal_events.csv` | Renewal_Events | `Hermes_Candidate_ID` |
 | 5 | `fields_renewals.csv` | Renewals | `Hermes_Renewal_ID` |
 | 6 | `fields_ams_write_queue.csv` | AMS_Write_Queue | `Queue_ID` |
+| 7 | `fields_documents.csv` | Filed_Documents | — |
 
 For each row: create field → set length → set picklist → mark mandatory/unique → set External ID where flagged.
 
@@ -110,8 +111,9 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Deals → Accounts
 - [ ] Policies → Accounts
 - [ ] Renewal_Events → Accounts, Policies
-- [ ] Renewals → Policies, Accounts, Renewal_Events (optional)
+- [ ] Renewals → Policies, Accounts, Renewal_Events (`Related_Renewal_Event`), Deals (`Related_Deal`)
 - [ ] AMS_Write_Queue → Accounts / Deals / Policies / Renewals (optional convenience)
+- [ ] Filed_Documents → Accounts, Policies, Deals, Renewals (related list **Nextcloud Files**)
 
 ## 4. Approval & AMS write rules (Zoho Blueprint / Approval)
 
@@ -130,7 +132,19 @@ For each row: create field → set length → set picklist → mark mandatory/un
 ## 5. Formulas
 
 - [ ] `Renewals.Increase_Percent` = `((Premium_Renewal - Premium_Current) / Premium_Current) * 100` (null-safe when Premium_Current = 0 → 0)
+- [ ] `Renewals.Days_To_Expiration` = `Datecomp(${Expiration_Date}, Today)` (signed days; negative = past due)
 - [ ] Optional: Deal Probability default from Stage (see pipeline tables above)
+
+`Window_Bucket` is a **picklist written by Hermes** (`hermes --sync-zoho-renewals`), not a formula — personal LOB always buckets as `personal`.
+
+## 5b. Creator Renewals Desk (after fields exist)
+
+- [ ] Import the Creator app from [`docs/zoho/creator-renewals-desk/INSTALL.md`](creator-renewals-desk/INSTALL.md)
+- [ ] Bind reports to CRM modules Policies / Renewal_Events / Renewals / AMS_Write_Queue
+- [ ] Publish to Gretchen and Lamar
+- [ ] Confirm `hermes --sync-zoho-renewals` then `--sync-zoho-ams-queue` are on cron after `--renewal-refresh`
+
+Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch dates, `Related_Deal`) must **not** be overwritten by book sync. Hermes sets `Desk_Stage=Identified` only on create.
 
 ## 6. Sync direction smoke tests
 
@@ -141,6 +155,19 @@ For each row: create field → set length → set picklist → mark mandatory/un
 | Edit Account phone | Override + queue `client` update |
 | Nightly book sync | Policies upsert by GUID; lineage preserved |
 | Dismiss renewal | `Dismissed=true` or Eligibility=`excluded`; row not hard-deleted |
+
+## 6b. Document links (do not attach files)
+
+See [`CONNECT_NEXTCLOUD_URLS.md`](CONNECT_NEXTCLOUD_URLS.md). Nextcloud is the file store. Zoho holds https URLs.
+
+- [ ] Run `python scripts/playwright_zoho_document_url_fields.py --apply` (headed login) **or** `python scripts/ensure_zoho_document_url_fields.py --apply` (needs `ZohoCRM.settings.ALL`)
+- [ ] Accounts: `Nextcloud_Folder_Link` + `Nextcloud_File_ID` on the Standard layout (leave legacy `Nextcloud_Folder_URL` unused)
+- [ ] Policies / Deals / Renewals: `Primary_Folder_URL` + `Document_URL`
+- [ ] Optional: create modules Claims and Certificates, then re-run the script
+- [x] Confirm **Open Nextcloud** (or paste `Nextcloud Folder Link`) opens `/f/{fileid}` for a comma name like Berrios, Edwin (`15700` → `/f/15700`; login `redirect_url=/f/15700`, no `%252C`)
+- [x] Custom module **Filed Documents** with related list **Nextcloud Files** on Account / Policy / Deal / Renewal
+- [ ] Hide **Attachments** on those layouts (Setup → Related Lists — API cannot uncheck it)
+- [ ] Do **not** use Zoho attachments as the document library
 
 ## 7. Do not create as editable user fields
 

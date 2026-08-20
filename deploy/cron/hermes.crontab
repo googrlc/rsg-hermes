@@ -55,11 +55,21 @@ CRON_TZ=America/New_York
 # via the centralized eligibility engine, then projects ELIGIBLE events -> project_85_renewals.
 # Supabase-only, no AMS/client writes, idempotent. Dependency: canonical_policies freshness.
 30 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --renewal-refresh >> /root/hermes-cron.log 2>&1
-# Quotes → opportunities pipeline — daily 2:35am ET. Pulls NowCerts quote rows
+# Zoho CRM upsert for the Creator Renewals Desk — daily 2:35am ET (after renewal-refresh).
+# Upserts Renewal_Events from renewal_candidates and Renewals from project_85_renewals.
+# Captures Creator correctable-field edits as portal_overrides so the next refresh
+# does not clobber the desk. Requires ZOHO_* creds. Dry-run:
+# hermes --sync-zoho-renewals-dry-run
+35 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-zoho-renewals >> /root/hermes-cron.log 2>&1
+# Zoho AMS_Write_Queue → outbound_sync_queue — daily 2:40am ET. Mirrors Creator-approved
+# renewal jobs so the existing renewal executor is still the only NowCerts writer.
+# Idempotent on payload.zoho_queue_id. Dry-run: hermes --sync-zoho-ams-queue-dry-run
+40 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-zoho-ams-queue >> /root/hermes-cron.log 2>&1
+# Quotes → opportunities pipeline — daily 2:45am ET. Pulls NowCerts quote rows
 # (Policy with isQuote=true) into the `opportunities` pipeline. Idempotent per
 # client+LOB; never resets a human-advanced stage; additive. Full pull each run
 # (safe — re-runs just backfill NowCerts ids on existing rows, no duplicates).
-35 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-quotes >> /root/hermes-cron.log 2>&1
+45 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --sync-quotes >> /root/hermes-cron.log 2>&1
 # RETIRED 2026-07-23 — EspoCRM decommissioned. --email-triage was removed from the CLI in
 # commit 967e8c5 ("remove ... --email-triage (dead Espo jobs)"); the current image errors with
 # "unrecognized arguments: --email-triage". Outlook->intake now runs in the rsg-hermes-intake-worker

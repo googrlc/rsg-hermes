@@ -17,6 +17,9 @@ from typing import Any
 
 import requests
 
+from hermes_integrations.nextcloud_client import rewrite_stale_files_app_url
+from hermes_integrations.zoho_document_fields import is_http_url
+
 log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30.0
@@ -330,23 +333,71 @@ class ZohoClient:
         """GET /{module}/search?criteria=… — returns matching records (possibly empty)."""
         if not criteria:
             return []
+        return self.list_records(module, criteria=criteria)
+
+    def list_records(
+        self,
+        module: str,
+        *,
+        criteria: str | None = None,
+        page: int = 1,
+        per_page: int = 200,
+        fields: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """One page of CRM records. Search when ``criteria`` is set, else list."""
+        params: dict[str, Any] = {"page": page, "per_page": min(200, max(1, per_page))}
+        if fields:
+            params["fields"] = fields
+        path = f"{module}/search" if criteria else module
+        if criteria:
+            params["criteria"] = criteria
         try:
-            body = self._get(
-                f"{module}/search",
-                params={"criteria": criteria},
-            )
+            body = self._get(path, params=params)
         except ZohoClientError as exc:
-            # Zoho returns 400/204-ish shapes for "no records"; treat empty as [].
             msg = str(exc).lower()
             if "204" in msg or "no records" in msg or " no data" in msg:
                 return []
-            # Some orgs return 400 INVALID_QUERY when nothing matches — caller
-            # already gets an empty list from 204; re-raise real failures.
             raise
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list):
             return []
         return [row for row in data if isinstance(row, dict)]
+
+    def iter_records(
+        self,
+        module: str,
+        *,
+        criteria: str | None = None,
+        per_page: int = 200,
+        max_pages: int = 50,
+        fields: str | None = None,
+    ):
+        """Yield CRM records across pages. Stops on a short page or empty page."""
+        for page in range(1, max_pages + 1):
+            rows = self.list_records(
+                module, criteria=criteria, page=page, per_page=per_page, fields=fields
+            )
+            if not rows:
+                return
+            yield from rows
+            if len(rows) < per_page:
+                return
+
+    def get_record(self, module: str, record_id: str) -> dict[str, Any] | None:
+        """GET /{module}/{id}. Missing record → None."""
+        try:
+            body = self._get(f"{module}/{record_id}")
+        except ZohoClientError as exc:
+            msg = str(exc).lower()
+            if "204" in msg or "404" in msg or "no records" in msg:
+                return None
+            raise
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return None
 
     def _find_first(self, module: str, criteria: str) -> dict[str, Any] | None:
         rows = self.search_records(module, criteria)
@@ -392,8 +443,19 @@ class ZohoClient:
             "Billing_City": _pick(account_data, "city", "Billing_City"),
             "Billing_State": _pick(account_data, "state", "Billing_State"),
             "Billing_Code": _pick(account_data, "zip", "Billing_Code", "postal_code"),
-            "Nextcloud_Folder_URL": _pick(
-                account_data, "nextcloud_folder_url", "Nextcloud_Folder_URL", "nextcloud_folder"
+            "Nextcloud_Folder_Link": _pick(
+                account_data,
+                "nextcloud_folder_link",
+                "Nextcloud_Folder_Link",
+                "nextcloud_folder_url",
+                "Nextcloud_Folder_URL",
+                "Nextcloud_Folder_URL__s",
+                "nextcloud_folder",
+            ),
+            "Nextcloud_File_ID": _pick(
+                account_data,
+                "nextcloud_file_id",
+                "Nextcloud_File_ID",
             ),
             "NowCerts_Insured_GUID": _pick(
                 account_data,
@@ -403,6 +465,16 @@ class ZohoClient:
                 "insured_id",
             ),
         }
+        folder_url = mapping.get("Nextcloud_Folder_Link")
+        if folder_url is not None and not is_http_url(folder_url):
+            mapping.pop("Nextcloud_Folder_Link", None)
+        elif folder_url:
+            mapping["Nextcloud_Folder_Link"] = rewrite_stale_files_app_url(str(folder_url))
+        file_id = mapping.get("Nextcloud_File_ID")
+        if file_id is not None and not str(file_id).strip().isdigit():
+            mapping.pop("Nextcloud_File_ID", None)
+        elif file_id:
+            mapping["Nextcloud_File_ID"] = str(file_id).strip()
         return {k: v for k, v in mapping.items() if _present(v)}
 
     def _map_contact(self, contact_data: dict[str, Any], account_id: str) -> dict[str, Any]:
@@ -471,6 +543,14 @@ class ZohoClient:
             "Expiration_Date": _pick(deal_data, "x_date", "Expiration_Date", "expiration_date"),
             "Intake_Source": _pick(deal_data, "source", "Intake_Source", "lead_source"),
             "Description": _pick(deal_data, "description", "Description"),
+            "Document_URL": _pick(deal_data, "document_url", "Document_URL", "Document_URL__s"),
+            "Primary_Folder_URL": _pick(
+                deal_data,
+                "primary_folder_url",
+                "Primary_Folder_URL",
+                "Primary_Folder_URL__s",
+                "nextcloud_folder_url",
+            ),
             "Account_Name": {"id": str(account_id)} if account_id else None,
             "NowCerts_Opportunity_ID": _pick(
                 deal_data,
@@ -491,6 +571,12 @@ class ZohoClient:
         # Deal_Name is required — synthesize from LOB if needed.
         if not mapping.get("Deal_Name") and mapping.get("Line_of_Business"):
             mapping["Deal_Name"] = str(mapping["Line_of_Business"])
+        for url_key in ("Document_URL", "Primary_Folder_URL"):
+            value = mapping.get(url_key)
+            if value is not None and not is_http_url(value):
+                mapping.pop(url_key, None)
+            elif value:
+                mapping[url_key] = rewrite_stale_files_app_url(str(value))
         return {k: v for k, v in mapping.items() if _present(v)}
 
     # ── Public write methods ──────────────────────────────────────────────
