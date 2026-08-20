@@ -21,6 +21,7 @@ import json
 import sys
 from typing import Any
 
+from hermes.desk.live import LAYOUT_IDS
 from hermes.desk.setup import Phase1Plan, matching_department, plan_phase1
 from hermes.desk.spec import DEPARTMENT
 from hermes_integrations.zoho_desk_client import ZohoDeskClient, ZohoDeskClientError
@@ -79,19 +80,36 @@ def apply_plan(client: ZohoDeskClient, plan: Phase1Plan) -> dict[str, Any]:
         created.append({"kind": "department", "name": plan.department_name, "id": department_id})
     for item in plan.fields:
         payload = dict(item.payload)
+        allowed = payload.pop("_allowedValues", None)
+        mandatory = payload.pop("_isMandatory", None)
         try:
             body = client.create_field(payload, module="tickets")
         except ZohoDeskClientError as exc:
             errors.append({"kind": "field", "name": item.name, "error": str(exc)[:400]})
             continue
+        field_id = str(body.get("id") or "")
         created.append(
             {
                 "kind": "field",
                 "name": item.name,
-                "id": str(body.get("id") or ""),
+                "id": field_id,
                 "apiName": str(body.get("apiName") or ""),
             }
         )
+        layout_id = LAYOUT_IDS.get("General Service")
+        patch: dict[str, Any] = {}
+        if allowed:
+            patch["allowedValues"] = list(allowed)
+            patch["sortBy"] = "userDefined"
+        if mandatory:
+            patch["isMandatory"] = True
+        if patch and field_id and layout_id:
+            try:
+                client.patch_layout_field(layout_id, field_id, patch)
+            except ZohoDeskClientError as exc:
+                errors.append(
+                    {"kind": "field-layout", "name": item.name, "error": str(exc)[:400]}
+                )
     for item in plan.teams:
         payload = dict(item.payload)
         if department_id:

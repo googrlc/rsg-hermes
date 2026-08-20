@@ -16,13 +16,13 @@ DESK_TYPES = {
     "Text": "Text",
     "Email": "Email",
     "Phone": "Phone",
-    "Picklist": "PickList",
+    "Picklist": "Picklist",
     "Date": "Date",
-    "DateTime": "Date Time",
+    "DateTime": "DateTime",
     "Boolean": "Boolean",
     "Number": "Number",
     "Decimal": "Decimal",
-    "URL": "Website",
+    "URL": "URL",
     "Textarea": "Textarea",
 }
 
@@ -59,19 +59,21 @@ def field_payload(spec: Field) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "displayLabel": spec.label,
         "type": desk_type,
-        "isMandatory": spec.mandatory,
         "showToHelpCenter": False,
         "isEncryptedField": spec.sensitive,
     }
-    if spec.length and desk_type in {"Text", "Number", "Decimal", "Email", "Phone", "Website"}:
+    if spec.length and desk_type in {"Text", "Number", "Decimal", "Email", "Phone", "URL"}:
         payload["maxLength"] = str(spec.length)
     if spec.picklist_values:
-        payload["allowedValues"] = [{"value": value} for value in spec.picklist_values]
+        payload["_allowedValues"] = list(spec.picklist_values)
+        payload["_isMandatory"] = spec.mandatory
+    elif spec.mandatory:
+        payload["_isMandatory"] = True
     if spec.notes:
         payload["toolTip"] = spec.notes
         payload["toolTipType"] = "icon"
     # Desk encrypts Text/Number/Decimal/Email/Phone/URL only — not Date.
-    if spec.sensitive and desk_type not in {"Text", "Number", "Decimal", "Email", "Phone", "Website"}:
+    if spec.sensitive and desk_type not in {"Text", "Number", "Decimal", "Email", "Phone", "URL"}:
         payload.pop("isEncryptedField", None)
     return payload
 

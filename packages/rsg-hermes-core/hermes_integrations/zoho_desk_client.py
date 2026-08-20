@@ -272,6 +272,14 @@ class ZohoDeskClient:
         want = str(department_id)
         return [row for row in rows if str(row.get("departmentId") or "") == want]
 
+    def patch_layout_field(
+        self, layout_id: str, field_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        body = self._request(
+            "PATCH", f"layouts/{layout_id}/fields/{field_id}", json_body=payload
+        )
+        return body if isinstance(body, dict) else {}
+
     def clone_field_to_layouts(
         self, layout_id: str, field_id: str, layout_ids: list[str]
     ) -> dict[str, Any]:

@@ -16,9 +16,10 @@ def test_field_payload_maps_desk_types_and_marks_sensitive():
 
     pick = next(f for f in SHARED_FIELDS if f.api_name == "cf_request_category")
     p = field_payload(pick)
-    assert p["type"] == "PickList"
-    assert {"value": "Certificate Request"} in p["allowedValues"]
-    assert p["isMandatory"] is True
+    assert p["type"] == "Picklist"
+    assert "isMandatory" not in p
+    assert "Certificate Request" in p["_allowedValues"]
+    assert p["_isMandatory"] is True
 
     from hermes.desk.fields import AUTO_DRIVER_FIELDS
 
@@ -30,9 +31,9 @@ def test_field_payload_maps_desk_types_and_marks_sensitive():
     assert field_payload(license_no)["isEncryptedField"] is True
 
     url = next(f for f in SHARED_FIELDS if f.api_name == "cf_document_folder_link")
-    assert field_payload(url)["type"] == "Website"
+    assert field_payload(url)["type"] == "URL"
     dt = next(f for f in SHARED_FIELDS if f.api_name == "cf_last_sync_date")
-    assert field_payload(dt)["type"] == "Date Time"
+    assert field_payload(dt)["type"] == "DateTime"
     assert set(DESK_TYPES) >= {"Picklist", "URL", "DateTime", "Boolean"}
 
 
