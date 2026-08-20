@@ -69,6 +69,43 @@ def test_install_opens_existing_app():
     assert "deluge/cursor_api.dg" in install
 
 
+PALETTE = {
+    "#F6F7F9",
+    "#FFFFFF",
+    "#F9FAFB",
+    "#1F2937",
+    "#5B6472",
+    "#D9DEE7",
+    "#E8F0FE",
+    "#DCEAF7",
+    "#245A86",
+    "#E3F0E7",
+    "#2F6B4F",
+    "#FFF1D6",
+    "#8A5A12",
+    "#FBE4E6",
+    "#9B3A43",
+}
+
+
+def test_desk_palette_tokens():
+    css = (DESK / "pages" / "desk.css").read_text().upper()
+    html = (DESK / "pages" / "desk.html").read_text().upper()
+    for token in PALETTE:
+        assert token in css, token
+        assert token in html, token
+    desk = (DESK / "pages" / "desk.html").read_text()
+    assert 'scope="col">Type</th>' in desk
+    assert 'type-pill commercial' in desk
+    assert 'type-pill personal' in desk
+    assert "In review" in desk
+    assert "Contacted" in desk
+    assert "Nearing deadline" in desk
+    assert "Overdue" in desk
+    assert "status-pill attention" in desk
+    assert "status-pill overdue" in desk
+
+
 def test_cursor_api_function_never_calls_nowcerts():
     body = (DESK / "deluge" / "cursor_api.dg").read_text()
     compact = body.replace(" ", "").lower()

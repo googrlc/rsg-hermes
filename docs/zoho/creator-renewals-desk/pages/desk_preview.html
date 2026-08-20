@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Renewals Desk — palette preview</title>
+  <link rel="stylesheet" href="desk.css">
+  <style>
+    html, body { margin: 0; background: #F6F7F9; min-height: 100%; }
+  </style>
+</head>
+<body>
+<!-- Preview shell. Markup matches pages/desk.html. -->
+<section class="desk">
+  <header>
+    <h1>Renewals Desk</h1>
+    <p class="sub">Work the book. Hermes writes the AMS. Gretchen talks to the client.</p>
+  </header>
+
+  <div class="kpi-strip" role="navigation">
+    <a class="kpi" href="#"><span class="label">90 days</span><span class="value">12</span></a>
+    <a class="kpi" href="#"><span class="label">60 days</span><span class="value">7</span></a>
+    <a class="kpi" href="#"><span class="label">30 days</span><span class="value">4</span></a>
+    <a class="kpi" href="#"><span class="label">Personal</span><span class="value">9</span></a>
+    <a class="kpi recon" href="#"><span class="label">Needs verification</span><span class="value">2</span></a>
+    <a class="kpi ams" href="#"><span class="label">Pending AMS</span><span class="value">1</span></a>
+  </div>
+
+  <div class="type-filters" role="group" aria-label="Account type">
+    <button type="button" aria-pressed="true">All</button>
+    <button type="button" class="commercial" aria-pressed="false">Commercial</button>
+    <button type="button" class="personal" aria-pressed="false">Personal</button>
+  </div>
+
+  <div class="worklist">
+    <h2>Worklist</h2>
+    <p>Type is Commercial or Personal. Status is separate. Blue is never “healthy” and green is never “done.”</p>
+    <table class="worklist-table">
+      <thead>
+        <tr>
+          <th class="type-col" scope="col">Type</th>
+          <th scope="col">Insured</th>
+          <th scope="col">Renewal</th>
+          <th scope="col">Carrier</th>
+          <th scope="col">Due</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="row-commercial">
+          <td><span class="type-pill commercial"><span aria-hidden="true">🏢</span> Commercial</span></td>
+          <td class="insured">Acme Trucking LLC</td>
+          <td>BOP + Auto</td>
+          <td class="muted">Travelers</td>
+          <td>Sep 15</td>
+          <td><span class="status-pill">In review</span></td>
+        </tr>
+        <tr class="row-personal">
+          <td><span class="type-pill personal"><span aria-hidden="true">🏠</span> Personal</span></td>
+          <td class="insured">James Wilson</td>
+          <td>Home + Auto</td>
+          <td class="muted">Safeco</td>
+          <td>Sep 18</td>
+          <td><span class="status-pill">Contacted</span></td>
+        </tr>
+        <tr class="row-commercial">
+          <td><span class="type-pill commercial"><span aria-hidden="true">🏢</span> Commercial</span></td>
+          <td class="insured">Acme Trucking LLC</td>
+          <td>Workers Comp</td>
+          <td class="muted">Travelers</td>
+          <td>Sep 8</td>
+          <td><span class="status-pill attention">Nearing deadline</span></td>
+        </tr>
+        <tr class="row-personal" aria-selected="true">
+          <td><span class="type-pill personal"><span aria-hidden="true">🏠</span> Personal</span></td>
+          <td class="insured">James Wilson</td>
+          <td>Umbrella</td>
+          <td class="muted">Safeco</td>
+          <td>Aug 12</td>
+          <td><span class="status-pill overdue">Overdue</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+</body>
+</html>

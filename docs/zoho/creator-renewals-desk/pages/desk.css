@@ -1,0 +1,304 @@
+/* Renewals Desk workstation palette.
+   Blue = Commercial only. Sage = Personal only.
+   Amber = attention soon. Rose = overdue / blocked.
+   Status is never encoded in blue/green. */
+
+:root {
+  --desk-bg: #f6f7f9;
+  --desk-row: #ffffff;
+  --desk-zebra: #f9fafb;
+  --desk-text: #1f2937;
+  --desk-muted: #5b6472;
+  --desk-border: #d9dee7;
+  --desk-selected: #e8f0fe;
+  --commercial-bg: #dceaf7;
+  --commercial-text: #245a86;
+  --personal-bg: #e3f0e7;
+  --personal-text: #2f6b4f;
+  --attention-bg: #fff1d6;
+  --attention-text: #8a5a12;
+  --overdue-bg: #fbe4e6;
+  --overdue-text: #9b3a43;
+  --desk-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.desk,
+.renewal-card {
+  font-family: var(--desk-sans);
+  color: var(--desk-text);
+  background: var(--desk-bg);
+}
+
+.desk {
+  min-height: 100%;
+  padding: 20px 22px 40px;
+}
+
+.desk > header h1 {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+}
+
+.desk > header .sub,
+.desk .empty-hint,
+.worklist > p {
+  color: var(--desk-muted);
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 8px;
+  margin: 16px 0 18px;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--desk-row);
+  border: 1px solid var(--desk-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: var(--desk-text);
+}
+
+.kpi .label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--desk-muted);
+}
+
+.kpi .value {
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.kpi.risk .value { color: var(--attention-text); }
+.kpi.recon .value,
+.kpi.ams .value { color: var(--overdue-text); }
+
+.type-filters {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.type-filters button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-row);
+  color: var(--desk-text);
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.type-filters button[aria-pressed="true"] {
+  outline: 2px solid var(--desk-text);
+  outline-offset: 1px;
+}
+
+.type-filters button.commercial[aria-pressed="true"] {
+  background: var(--commercial-bg);
+  color: var(--commercial-text);
+  outline-color: var(--commercial-text);
+}
+
+.type-filters button.personal[aria-pressed="true"] {
+  background: var(--personal-bg);
+  color: var(--personal-text);
+  outline-color: var(--personal-text);
+}
+
+.worklist {
+  background: var(--desk-row);
+  border: 1px solid var(--desk-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.worklist > h2 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0;
+  padding: 14px 16px 0;
+}
+
+.worklist > p {
+  padding: 4px 16px 10px;
+}
+
+.worklist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.worklist-table th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--desk-muted);
+  font-weight: 650;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--desk-border);
+  background: var(--desk-bg);
+}
+
+.worklist-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--desk-border);
+  vertical-align: middle;
+}
+
+.worklist-table tbody tr {
+  background: var(--desk-row);
+}
+
+.worklist-table tbody tr:nth-child(even) {
+  background: var(--desk-zebra);
+}
+
+.worklist-table tbody tr:hover {
+  background: #f3f6fa;
+}
+
+.worklist-table tbody tr[aria-selected="true"] {
+  background: var(--desk-selected);
+}
+
+.worklist-table tbody tr.row-commercial {
+  box-shadow: inset 4px 0 0 var(--commercial-text);
+}
+
+.worklist-table tbody tr.row-personal {
+  box-shadow: inset 4px 0 0 var(--personal-text);
+}
+
+.worklist-table .insured {
+  font-weight: 650;
+  color: var(--desk-text);
+}
+
+.worklist-table .muted {
+  color: var(--desk-muted);
+}
+
+.type-col {
+  width: 148px;
+}
+
+.type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 9px 3px 7px;
+  white-space: nowrap;
+}
+
+.type-pill svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.type-pill.commercial {
+  background: var(--commercial-bg);
+  color: var(--commercial-text);
+}
+
+.type-pill.personal {
+  background: var(--personal-bg);
+  color: var(--personal-text);
+}
+
+.status-pill {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 650;
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: var(--desk-text);
+  background: var(--desk-bg);
+  border: 1px solid var(--desk-border);
+}
+
+.status-pill.attention {
+  background: var(--attention-bg);
+  color: var(--attention-text);
+  border-color: transparent;
+}
+
+.status-pill.overdue {
+  background: var(--overdue-bg);
+  color: var(--overdue-text);
+  border-color: transparent;
+}
+
+.renewal-card {
+  padding: 20px 22px 36px;
+}
+
+.renewal-card > header .kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--desk-muted);
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+
+.renewal-card h1 {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+
+.renewal-card .meta,
+.renewal-card .money {
+  color: var(--desk-muted);
+  font-size: 13.5px;
+}
+
+.renewal-card .meta strong,
+.renewal-card .money span[data-field] {
+  color: var(--desk-text);
+}
+
+.renewal-card section {
+  background: var(--desk-row);
+  border: 1px solid var(--desk-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 12px;
+}
+
+.renewal-card section h2 {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.renewal-card button {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  margin: 4px 6px 4px 0;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-row);
+  color: var(--desk-text);
+  cursor: pointer;
+}

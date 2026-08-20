@@ -26,7 +26,11 @@ effects. Do not fold commissions into this app.
 | Surface | File | CRM source |
 |---|---|---|
 | Desk home | [`pages/desk.html`](pages/desk.html) | Renewals worklist + KPI counts |
+| Desk palette / CSS | [`pages/desk.css`](pages/desk.css) | Copy into Catalyst `renewals/src` |
+| Desk preview | [`pages/desk_preview.html`](pages/desk_preview.html) | Open locally to review Commercial/Personal colors |
 | Renewal card | [`pages/card.html`](pages/card.html) | One Renewal + Policy + Account + Event + Deal |
+
+Palette: muted blue (`#DCEAF7` / `#245A86`) is **Commercial only**; muted sage (`#E3F0E7` / `#2F6B4F`) is **Personal only**. Amber is attention; rose is overdue. Status is a separate column.
 | Needs verification | [`reports.md`](reports.md) | Renewal_Events.Eligibility = needs_verification |
 | AMS approval | [`reports.md`](reports.md) | AMS_Write_Queue awaiting Approved_By / failed |
 
