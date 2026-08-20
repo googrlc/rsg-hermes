@@ -211,11 +211,16 @@ def _clone_fields_to_layouts(client: ZohoDeskClient) -> list[dict[str, str]]:
             if not fid or fid in seen:
                 continue
             seen.add(fid)
-            try:
-                client.patch_layout_field(DEFAULT_LAYOUT_ID, fid, {"isMandatory": bool(spec.mandatory)})
-                client.clone_field_to_layouts(DEFAULT_LAYOUT_ID, fid, targets)
-            except ZohoDeskClientError as exc:
-                errors.append({"kind": "clone", "name": spec.label, "error": str(exc)[:400]})
+            for target in targets:
+                try:
+                    client.patch_layout_field(DEFAULT_LAYOUT_ID, fid, {"isMandatory": bool(spec.mandatory)})
+                    client.clone_field_to_layouts(DEFAULT_LAYOUT_ID, fid, [target])
+                except ZohoDeskClientError as exc:
+                    if "FieldAlreadyExists" in str(exc):
+                        continue
+                    errors.append(
+                        {"kind": "clone", "name": f"{spec.label} -> {target}", "error": str(exc)[:400]}
+                    )
     return errors
 
 
