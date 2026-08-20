@@ -25,7 +25,9 @@ def test_field_payload_maps_desk_types_and_marks_sensitive():
     dob = next(f for f in AUTO_DRIVER_FIELDS if f.api_name == "cf_driver_dob")
     d = field_payload(dob)
     assert d["type"] == "Date"
-    assert d["isEncryptedField"] is True
+    assert "isEncryptedField" not in d
+    license_no = next(f for f in AUTO_DRIVER_FIELDS if f.api_name == "cf_license_number")
+    assert field_payload(license_no)["isEncryptedField"] is True
 
     url = next(f for f in SHARED_FIELDS if f.api_name == "cf_document_folder_link")
     assert field_payload(url)["type"] == "Website"

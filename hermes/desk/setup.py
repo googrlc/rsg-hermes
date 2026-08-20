@@ -70,6 +70,9 @@ def field_payload(spec: Field) -> dict[str, Any]:
     if spec.notes:
         payload["toolTip"] = spec.notes
         payload["toolTipType"] = "icon"
+    # Desk encrypts Text/Number/Decimal/Email/Phone/URL only — not Date.
+    if spec.sensitive and desk_type not in {"Text", "Number", "Decimal", "Email", "Phone", "Website"}:
+        payload.pop("isEncryptedField", None)
     return payload
 
 

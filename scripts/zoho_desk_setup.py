@@ -71,13 +71,19 @@ def build_plan(client: ZohoDeskClient) -> Phase1Plan:
 
 def apply_plan(client: ZohoDeskClient, plan: Phase1Plan) -> dict[str, Any]:
     created: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
     department_id = plan.existing_department_id
     if plan.create_department:
         body = client.create_department(plan.create_department.payload)
         department_id = str(body.get("id") or department_id or "")
         created.append({"kind": "department", "name": plan.department_name, "id": department_id})
     for item in plan.fields:
-        body = client.create_field(item.payload, module="tickets")
+        payload = dict(item.payload)
+        try:
+            body = client.create_field(payload, module="tickets")
+        except ZohoDeskClientError as exc:
+            errors.append({"kind": "field", "name": item.name, "error": str(exc)[:400]})
+            continue
         created.append(
             {
                 "kind": "field",
@@ -90,9 +96,19 @@ def apply_plan(client: ZohoDeskClient, plan: Phase1Plan) -> dict[str, Any]:
         payload = dict(item.payload)
         if department_id:
             payload["departmentId"] = department_id
-        body = client.create_team(payload)
+        try:
+            body = client.create_team(payload)
+        except ZohoDeskClientError as exc:
+            errors.append({"kind": "team", "name": item.name, "error": str(exc)[:400]})
+            continue
         created.append({"kind": "team", "name": item.name, "id": str(body.get("id") or "")})
-    return {"org_id": client.org_id, "department_id": department_id, "created": created, "skipped": plan.skipped}
+    return {
+        "org_id": client.org_id,
+        "department_id": department_id,
+        "created": created,
+        "skipped": plan.skipped,
+        "errors": errors,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

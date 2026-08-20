@@ -236,9 +236,10 @@ class ZohoDeskClient:
         if isinstance(body, list):
             return [row for row in body if isinstance(row, dict)]
         if isinstance(body, dict):
-            data = body.get("data")
-            if isinstance(data, list):
-                return [row for row in data if isinstance(row, dict)]
+            for key in ("data", "teams", "fields"):
+                data = body.get(key)
+                if isinstance(data, list):
+                    return [row for row in data if isinstance(row, dict)]
             if body.get("id") or body.get("name") or body.get("displayLabel"):
                 return [body]
         return []
@@ -264,10 +265,22 @@ class ZohoDeskClient:
         return body if isinstance(body, dict) else {}
 
     def list_teams(self, *, department_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"limit": limit}
-        if department_id:
-            params["departmentId"] = department_id
-        return self._rows(self._request("GET", "teams", params=params))
+        # GET /teams accepts only from/limit — filter department client-side.
+        rows = self._rows(self._request("GET", "teams", params={"limit": limit}))
+        if not department_id:
+            return rows
+        want = str(department_id)
+        return [row for row in rows if str(row.get("departmentId") or "") == want]
+
+    def clone_field_to_layouts(
+        self, layout_id: str, field_id: str, layout_ids: list[str]
+    ) -> dict[str, Any]:
+        body = self._request(
+            "POST",
+            f"layouts/{layout_id}/fields/{field_id}/cloneFieldsInLayout",
+            json_body={"layoutIds": layout_ids},
+        )
+        return body if isinstance(body, dict) else {}
 
     def create_team(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = self._request("POST", "teams", json_body=payload)

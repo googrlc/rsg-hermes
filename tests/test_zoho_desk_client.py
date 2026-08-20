@@ -44,3 +44,8 @@ def test_accepts_desk_overrides_and_shared_zoho_oauth():
         assert client.org_id == "123"
         assert client.api_base == "https://desk.zoho.com/api/v1"
         assert client.client_id == "cid"
+
+
+def test_rows_reads_teams_list_payload():
+    rows = ZohoDeskClient._rows({"teams": [{"id": "1", "name": "Certificates"}]})
+    assert rows == [{"id": "1", "name": "Certificates"}]
