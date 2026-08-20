@@ -51,35 +51,45 @@ cannot be removed (`SystemPickListValueCannotRemoved`).
 
 Language was removed from General Service.
 
-## Native field stand-ins (until `cf_*` exists)
+## Phase 1 applied (fields and teams)
 
-| Spec field | Use this native field |
+`--apply` created the spec fields and 11 teams in org `935382122`. Billing
+**Due Date** is the native Due Date field (not a second custom date).
+
+CRM Plus allows **20 Boolean fields**. The first 20 flags are Boolean; the
+rest are Yes/No picklists (default No). Field type cannot be changed later.
+
+Custom fields are on General Service and cloned onto the four launch layouts.
+Certificate Request includes holder name/address and AMS Client ID.
+
+### Teams
+
+| Team | ID |
 |---|---|
-| Request Category | Classification |
-| Source | Channel |
-| Required-By Date | Due Date |
-| Account / client | Account Name + Contact Name |
+| Service Intake | `1435573000000456002` |
+| Certificates | `1435573000000464542` |
+| Commercial Auto Service | `1435573000000467001` |
+| Commercial Lines Service | `1435573000000452002` |
+| Personal Lines Service | `1435573000000468001` |
+| Claims Support | `1435573000000469001` |
+| Billing and Retention | `1435573000000464548` |
+| Renewals | `1435573000000470001` |
+| New Business Support | `1435573000000467007` |
+| Compliance | `1435573000000456008` |
+| Management Escalations | `1435573000000471001` |
 
-## Status — cannot change via Desk MCP
+## Status — cannot change via API
 
-Still: Open, On Hold, Escalated, Closed. Default Open. The layout APIs return
-`StatusFieldCannotModified` / `InvalidAllowedValuesInField`. Add New, Triaged,
+Still: Open, On Hold, Escalated, Closed. Default Open. Add New, Triaged,
 Information Needed, and the rest from `SETUP_CHECKLIST.md` in Desk Setup UI
 (Setup → Customization → Status).
 
-## What the Desk MCP cannot create
+## Still in Setup UI
 
-These stay in Setup (or `python scripts/zoho_desk_setup.py --apply` once a
-refresh token has `Desk.fields.CREATE`, `Desk.settings.CREATE`, and related
-scopes):
-
-- Custom fields (`cf_ams_client_id`, policy number, holder name, VIN, driver
-  DOB, and the rest of the CSVs)
-- Teams (Service Intake, Certificates, …)
 - Custom statuses
 - Blueprints
 - Workflows AUT-01 … AUT-14
 - Email templates / views / knowledge base
+- Optional rename RSG → Agency Service
 
-Do not invent those objects. Field **type** cannot be changed after create —
-use the CSVs.
+Do not invent those objects. Field **type** cannot be changed after create.

@@ -43,6 +43,7 @@ from hermes.desk.live import (
     LAYOUT_IDS,
     NATIVE_BRIDGES,
     ORG_ID,
+    TEAM_IDS,
 )
 from hermes.desk.titles import case_title
 
@@ -394,6 +395,8 @@ def test_docs_pack_covers_the_build_sequence():
     assert NATIVE_BRIDGES["cf_request_category"] == "classification"
     assert LAYOUT_CLASSIFICATION_DEFAULTS["Certificate Request"] == "Certificate Request"
     assert LAYOUT_CLASSIFICATION_DEFAULTS["Billing and Cancellation"] == "Billing and Payments"
+    assert len(TEAM_IDS) == 11
+    assert TEAM_IDS["Certificates"]
     assert (DOCS / "automations.md").is_file()
     assert (DOCS / "blueprints.md").is_file()
     assert (DOCS / "email_templates.md").is_file()

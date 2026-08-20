@@ -17,11 +17,11 @@ Live portal inventory and IDs: `LIVE.md`.
 
 - [x] One department in use: live name **RSG** (`1435573000000006907`). Treat as Agency Service. Do not create a second department.
 - [ ] Optional: rename department RSG → Agency Service in Setup
-- [ ] Create teams: Service Intake, Certificates, Commercial Auto Service, Commercial Lines Service, Personal Lines Service, Claims Support, Billing and Retention, Renewals, New Business Support, Compliance, Management Escalations
-- [ ] Create shared ticket fields from `fields_shared.csv`
+- [x] Create teams: Service Intake, Certificates, Commercial Auto Service, Commercial Lines Service, Personal Lines Service, Claims Support, Billing and Retention, Renewals, New Business Support, Compliance, Management Escalations
+- [x] Create shared ticket fields from `fields_shared.csv` (billing Due Date uses native Due Date)
 - [x] Native picklists: Classification (12 RSG categories), Priority (Urgent + Normal), Channel (Portal, Internal, Slack, AMS, CRM)
 - [ ] Create statuses: New, Triaged, Information Needed, Ready for Processing, In Progress, Submitted to Carrier, Waiting on Carrier, Waiting on Client, Pending Internal Approval, Ready for Delivery, Delivered, Monitoring, Resolved, Closed, Cancelled, Duplicate
-- [x] General Service layout (`1435573000000074011`) — native subject/status/priority/contact/account/classification. Custom `cf_*` fields still missing.
+- [x] General Service layout (`1435573000000074011`) — native fields plus `cf_*` from Phase 1 apply. Billing Due Date is native Due Date.
 - [ ] Connect one service email channel to the RSG department
 - [ ] Create essential views from `views.csv` (at least Unassigned New Tickets, My Open Cases, Urgent and High Priority, Waiting on Client, Waiting on Carrier)
 
@@ -34,10 +34,10 @@ Launch first:
 3. Billing, Cancellation, and Reinstatement
 4. General Policy Changes
 
-- [x] Certificate layout cloned (`1435573000000460002`) — add `fields_certificate.csv` then Blueprint (`blueprints.md`)
-- [x] Auto/Driver layout cloned (`1435573000000453002`) — add `fields_auto_driver.csv`; sensitive DOB / license fields restricted
-- [x] General Policy Change layout cloned (`1435573000000463001`) — add `fields_policy_change.csv` + Blueprint
-- [x] Billing and Cancellation layout cloned (`1435573000000464001`) — add `fields_billing.csv` and `fields_cancellation.csv` + Blueprint
+- [x] Certificate layout cloned (`1435573000000460002`) with `fields_certificate.csv` — Blueprint still needed (`blueprints.md`)
+- [x] Auto/Driver layout cloned (`1435573000000453002`) with `fields_auto_driver.csv`; license number is encrypted; DOB is Date (not encryptable)
+- [x] General Policy Change layout cloned (`1435573000000463001`) with `fields_policy_change.csv` — Blueprint still needed
+- [x] Billing and Cancellation layout cloned (`1435573000000464001`) with billing/cancellation fields — Blueprint still needed
 - [ ] Email templates (`email_templates.md`)
 - [ ] Workflows AUT-01 … AUT-10 (`automations.md`)
 - [ ] Required-by reminders (AUT-09)

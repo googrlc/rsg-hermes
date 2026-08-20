@@ -1,11 +1,11 @@
 """Live Zoho Desk identifiers for the RSG CRM Plus portal.
 
-These IDs were read from the Desk MCP on 2026-08-20. Send them as strings —
-they exceed JavaScript safe-integer range. Do not create a second department:
-the live department is named RSG and is treated as Agency Service.
+These IDs were read from the Desk MCP and Phase 1 apply on 2026-08-20.
+Send them as strings — they exceed JavaScript safe-integer range. Do not
+create a second department: the live department is named RSG and is treated
+as Agency Service.
 
-Custom fields, teams, statuses, Blueprints, and workflows are not in this
-module because the Desk MCP cannot create them. See ``docs/zoho-desk/LIVE.md``.
+See ``docs/zoho-desk/LIVE.md``.
 """
 
 from __future__ import annotations
@@ -53,6 +53,23 @@ LAYOUT_CLASSIFICATION_DEFAULTS = {
 
 # Native Status cannot be extended via the Desk layout APIs.
 LIVE_STATUSES = ("Open", "On Hold", "Escalated", "Closed")
+
+# CRM Plus allows 20 Boolean fields. Remaining flags are Yes/No picklists.
+BOOLEAN_FIELD_LIMIT = 20
+
+TEAM_IDS = {
+    "Service Intake": "1435573000000456002",
+    "Certificates": "1435573000000464542",
+    "Commercial Auto Service": "1435573000000467001",
+    "Commercial Lines Service": "1435573000000452002",
+    "Personal Lines Service": "1435573000000468001",
+    "Claims Support": "1435573000000469001",
+    "Billing and Retention": "1435573000000464548",
+    "Renewals": "1435573000000470001",
+    "New Business Support": "1435573000000467007",
+    "Compliance": "1435573000000456008",
+    "Management Escalations": "1435573000000471001",
+}
 
 PROFILE_IDS = {
     "Support Administrator": "1435573000000008343",
