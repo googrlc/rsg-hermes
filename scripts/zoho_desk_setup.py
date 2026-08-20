@@ -212,6 +212,7 @@ def _clone_fields_to_layouts(client: ZohoDeskClient) -> list[dict[str, str]]:
                 continue
             seen.add(fid)
             try:
+                client.patch_layout_field(DEFAULT_LAYOUT_ID, fid, {"isMandatory": bool(spec.mandatory)})
                 client.clone_field_to_layouts(DEFAULT_LAYOUT_ID, fid, targets)
             except ZohoDeskClientError as exc:
                 errors.append({"kind": "clone", "name": spec.label, "error": str(exc)[:400]})
@@ -226,7 +227,12 @@ def _patch_request_category(client: ZohoDeskClient) -> None:
     client.patch_layout_field(
         DEFAULT_LAYOUT_ID,
         fid,
-        {"allowedValues": list(CATEGORIES), "sortBy": "userDefined", "isMandatory": True},
+        {
+            "allowedValues": list(CATEGORIES),
+            "defaultValue": "General Service",
+            "sortBy": "userDefined",
+            "isMandatory": True,
+        },
     )
 
 
