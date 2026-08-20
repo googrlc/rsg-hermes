@@ -1,0 +1,16 @@
+Layout,Display_Label,API_Name,Data_Type,Length,Mandatory,Picklist_Values,Section,Sensitive,Notes
+Auto or Driver Change,Effective Date Requested,cf_effective_date_requested,Date,,Y,,Transaction,N,
+Auto or Driver Change,Transaction Type,cf_transaction_type,Picklist,100,Y,Add vehicle | Remove vehicle | Replace vehicle | Add driver | Remove driver | Change garaging | Change use | General endorsement | Location change | Exposure change | Payroll or sales change | Mortgagee or loss payee | Other,Transaction,N,
+Auto or Driver Change,VIN,cf_vin,Text,17,N,,Vehicle,N,Required for vehicle add/remove/replace.
+Auto or Driver Change,Year,cf_vehicle_year,Number,9,N,,Vehicle,N,
+Auto or Driver Change,Make,cf_vehicle_make,Text,64,N,,Vehicle,N,
+Auto or Driver Change,Model,cf_vehicle_model,Text,64,N,,Vehicle,N,
+Auto or Driver Change,Stated Value or Cost New,cf_stated_value,Decimal,16,N,,Vehicle,N,
+Auto or Driver Change,Garaging Address,cf_garaging_address,Textarea,4000,N,,Vehicle,N,
+Auto or Driver Change,Vehicle Use,cf_vehicle_use,Text,255,N,,Vehicle,N,
+Auto or Driver Change,Radius,cf_radius,Text,32,N,,Vehicle,N,
+Auto or Driver Change,Driver Name,cf_driver_name,Text,255,N,,Driver,N,Required for driver add/remove.
+Auto or Driver Change,Date of Birth,cf_driver_dob,Date,,N,,Driver,Y,Store only under approved access and retention controls.
+Auto or Driver Change,License Number,cf_license_number,Text,32,N,,Driver,Y,Store only under approved access and retention controls.
+Auto or Driver Change,License State,cf_license_state,Text,2,N,,Driver,N,
+Auto or Driver Change,Supporting Documents Received,cf_supporting_documents_received,Boolean,,N,,Transaction,N,

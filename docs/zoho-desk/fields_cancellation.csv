@@ -1,0 +1,13 @@
+Layout,Display_Label,API_Name,Data_Type,Length,Mandatory,Picklist_Values,Section,Sensitive,Notes
+Cancellation or Nonrenewal,Reason,cf_cancel_reason,Textarea,4000,Y,,Cancellation,N,
+Cancellation or Nonrenewal,Request Initiated By,cf_request_initiated_by,Picklist,100,N,Client | Carrier | Finance company | Agency | Producer,Cancellation,N,
+Cancellation or Nonrenewal,Requested Effective Date,cf_requested_effective_date,Date,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Signed Request Received,cf_signed_request_received,Boolean,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Finance Company Involved,cf_finance_company_involved,Boolean,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Return Premium Expected,cf_return_premium_expected,Boolean,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Replacement Coverage Required,cf_replacement_coverage_required,Boolean,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Management Review Required,cf_management_review_required,Boolean,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Proof Sent to Client,cf_proof_sent_to_client,Boolean,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Cancellation Warning Received,cf_cancellation_warning_received,Boolean,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Cancellation Date,cf_cancellation_date,Date,,N,,Cancellation,N,
+Cancellation or Nonrenewal,Documented Disposition,cf_documented_disposition,Textarea,4000,N,,Cancellation,N,

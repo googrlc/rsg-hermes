@@ -1,0 +1,20 @@
+View,Purpose
+Unassigned New Tickets,AUT-01 — New must not sit in an unmonitored queue
+My Open Cases,Owner worklist
+My Follow-Ups Due Today,Waiting-state follow-up (AUT-05 / AUT-06)
+Urgent and High Priority,Priority model — recorded urgency reason required
+Waiting on Client,AUT-05
+Waiting on Carrier,AUT-06
+Certificates Due,Certificate required-by date
+Cancellation Risk,AUT-04 cancellation warning
+Reinstatements Pending,Billing / cancellation blueprint monitoring
+"Changes Submitted, Not Issued",Policy-change Monitoring stage
+Renewal Intake Incomplete,"Single renewal case, stage incomplete"
+Claims Needing Follow-Up,Claims blueprint follow-up
+Cases Missing Policy Number,Identification quality
+Cases Missing AMS Client ID,Identification quality
+"Resolved, Not Posted to AMS",AUT-14 / AUT-10
+Integration Failures,CF-05
+Reopened Cases,AUT-11
+Cases Over Internal Target,Required-by / SLA aging
+Management Escalations,Escalation team queue

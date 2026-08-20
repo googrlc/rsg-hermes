@@ -1,0 +1,11 @@
+Layout,Display_Label,API_Name,Data_Type,Length,Mandatory,Picklist_Values,Section,Sensitive,Notes
+Claims Assistance,Claim Number,cf_claim_number,Text,64,N,,Claim,N,Carrier/AMS claim record remains authoritative.
+Claims Assistance,Date of Loss,cf_date_of_loss,Date,,N,,Claim,N,
+Claims Assistance,Type of Loss,cf_type_of_loss,Text,255,N,,Claim,N,
+Claims Assistance,Claim Status,cf_claim_status,Text,255,N,,Claim,N,
+Claims Assistance,Adjuster Name,cf_adjuster_name,Text,255,N,,Claim,N,
+Claims Assistance,Adjuster Email,cf_adjuster_email,Email,100,N,,Claim,N,
+Claims Assistance,Adjuster Phone,cf_adjuster_phone,Phone,30,N,,Claim,N,
+Claims Assistance,Urgent Safety Issue,cf_urgent_safety_issue,Boolean,,N,,Claim,N,
+Claims Assistance,Litigation Involved,cf_litigation_involved,Boolean,,N,,Claim,N,
+Claims Assistance,Client Requested Assistance,cf_client_requested_assistance,Textarea,4000,N,,Claim,N,

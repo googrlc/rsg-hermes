@@ -1,0 +1,15 @@
+Layout,Display_Label,API_Name,Data_Type,Length,Mandatory,Picklist_Values,Section,Sensitive,Notes
+Certificate Request,Certificate Holder Name,cf_holder_name,Text,255,Y,,Certificate,N,
+Certificate Request,Certificate Holder Address,cf_holder_address,Textarea,4000,Y,,Certificate,N,
+Certificate Request,Holder Email,cf_holder_email,Email,100,N,,Certificate,N,
+Certificate Request,Description of Operations,cf_description_of_operations,Textarea,4000,N,,Certificate,N,
+Certificate Request,Additional Insured Requested,cf_additional_insured_requested,Boolean,,N,,Certificate,N,
+Certificate Request,Waiver of Subrogation Requested,cf_waiver_of_subrogation_requested,Boolean,,N,,Certificate,N,
+Certificate Request,Primary and Noncontributory Requested,cf_pnc_requested,Boolean,,N,,Certificate,N,
+Certificate Request,Special Wording Requested,cf_special_wording_requested,Boolean,,N,,Certificate,N,
+Certificate Request,Special Wording Text,cf_special_wording_text,Textarea,4000,N,,Certificate,N,Quote requested wording exactly.
+Certificate Request,Contract Attached,cf_contract_attached,Boolean,,N,,Certificate,N,
+Certificate Request,Delivery Method,cf_delivery_method,Picklist,100,N,Email | Portal | Fax | Mail | In person,Certificate,N,
+Certificate Request,Coverage Verified,cf_coverage_verified,Boolean,,N,,Certificate,N,
+Certificate Request,Wording Reviewed,cf_wording_reviewed,Boolean,,N,,Certificate,N,
+Certificate Request,Additional Interest Reviewed,cf_additional_interest_reviewed,Boolean,,N,,Certificate,N,

@@ -1,0 +1,11 @@
+Layout,Display_Label,API_Name,Data_Type,Length,Mandatory,Picklist_Values,Section,Sensitive,Notes
+General Policy Change,Effective Date Requested,cf_effective_date_requested,Date,,Y,,Change,N,
+General Policy Change,Change Type,cf_change_type,Picklist,100,Y,Add vehicle | Remove vehicle | Replace vehicle | Add driver | Remove driver | Change garaging | Change use | General endorsement | Location change | Exposure change | Payroll or sales change | Mortgagee or loss payee | Other,Change,N,
+General Policy Change,Change Description,cf_change_description,Textarea,4000,Y,,Change,N,
+General Policy Change,Location Involved,cf_location_involved,Text,255,N,,Change,N,
+General Policy Change,Exposure Change,cf_exposure_change,Textarea,4000,N,,Change,N,
+General Policy Change,Payroll or Sales Change,cf_payroll_or_sales_change,Textarea,4000,N,,Change,N,
+General Policy Change,Mortgagee or Loss Payee,cf_mortgagee_or_loss_payee,Text,255,N,,Change,N,
+General Policy Change,Supporting Documents,cf_supporting_documents,Boolean,,N,,Change,N,
+General Policy Change,Estimated Premium Impact,cf_estimated_premium_impact,Decimal,16,N,,Change,N,
+General Policy Change,Insured Approval Received,cf_insured_approval_received,Boolean,,N,,Change,N,

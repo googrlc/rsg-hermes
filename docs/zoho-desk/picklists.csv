@@ -1,0 +1,108 @@
+List_Key,Order,Value
+request_category,0,Certificate Request
+request_category,1,Policy Change
+request_category,2,Billing and Payments
+request_category,3,Claims Assistance
+request_category,4,Renewals
+request_category,5,Policy Documents
+request_category,6,Cancellations and Reinstatements
+request_category,7,New Business Support
+request_category,8,Carrier and Underwriting
+request_category,9,Licensing and Compliance
+request_category,10,General Service
+request_category,11,Internal Operations
+request_subtype,0,Add vehicle
+request_subtype,1,Remove vehicle
+request_subtype,2,Replace vehicle
+request_subtype,3,Add driver
+request_subtype,4,Remove driver
+request_subtype,5,Change garaging
+request_subtype,6,Change use
+request_subtype,7,General endorsement
+request_subtype,8,Location change
+request_subtype,9,Exposure change
+request_subtype,10,Payroll or sales change
+request_subtype,11,Mortgagee or loss payee
+request_subtype,12,Other
+service_tier,0,Standard
+service_tier,1,Priority
+service_tier,2,VIP
+source,0,Email
+source,1,Phone
+source,2,Portal
+source,3,Internal
+source,4,Slack
+source,5,AMS
+source,6,CRM
+priority,0,Urgent
+priority,1,High
+priority,2,Normal
+priority,3,Low
+urgency_reason,0,Cancellation or lapse imminent
+urgency_reason,1,Proof of insurance blocking active work
+urgency_reason,2,Vehicle or driver needs coverage before operation
+urgency_reason,3,Active claim has an immediate service problem
+urgency_reason,4,Binding or effective-date issue
+urgency_reason,5,Regulatory or contractual deadline imminent
+urgency_reason,6,Time-sensitive certificate
+urgency_reason,7,Reinstatement request
+urgency_reason,8,Material policy correction
+urgency_reason,9,Carrier follow-up affecting coverage
+urgency_reason,10,Client escalation
+urgency_reason,11,Not urgent
+business_impact,0,Coverage at risk
+business_impact,1,Work blocked
+business_impact,2,Billing
+business_impact,3,Informational
+waiting_on,0,None
+waiting_on,1,Client
+waiting_on,2,Carrier
+waiting_on,3,Internal
+waiting_on,4,Finance company
+waiting_on,5,Producer
+approval_status,0,Not required
+approval_status,1,Pending
+approval_status,2,Approved
+approval_status,3,Returned
+integration_status,0,Not synced
+integration_status,1,Pending
+integration_status,2,Synced
+integration_status,3,Failed
+resolution_type,0,Completed
+resolution_type,1,Unable to complete
+resolution_type,2,Duplicate
+resolution_type,3,Cancelled
+resolution_type,4,Referred to sales
+resolution_type,5,Referred to carrier
+delivery_method,0,Email
+delivery_method,1,Portal
+delivery_method,2,Fax
+delivery_method,3,Mail
+delivery_method,4,In person
+billing_type,0,Direct bill
+billing_type,1,Agency bill
+billing_type,2,Premium finance
+line_of_business,0,Commercial Auto
+line_of_business,1,Personal Auto
+line_of_business,2,General Liability
+line_of_business,3,BOP
+line_of_business,4,Workers Compensation
+line_of_business,5,Property
+line_of_business,6,Inland Marine
+line_of_business,7,Umbrella
+line_of_business,8,Umbrella Personal
+line_of_business,9,Home
+line_of_business,10,Renters
+line_of_business,11,Dwelling Fire
+line_of_business,12,Boat
+line_of_business,13,Other
+client_decision,0,Pending
+client_decision,1,Renew as is
+client_decision,2,Remarket
+client_decision,3,Nonrenew
+client_decision,4,Rewrite
+request_initiated_by,0,Client
+request_initiated_by,1,Carrier
+request_initiated_by,2,Finance company
+request_initiated_by,3,Agency
+request_initiated_by,4,Producer

@@ -1,0 +1,49 @@
+Layout,Display_Label,API_Name,Data_Type,Length,Mandatory,Picklist_Values,Section,Sensitive,Notes
+General Service (primary),AMS Client ID,cf_ams_client_id,Text,255,N,,Identification,N,NowCerts insured GUID
+General Service (primary),CRM Account ID,cf_crm_account_id,Text,255,N,,Identification,N,Zoho CRM Account id
+General Service (primary),Policy Number,cf_policy_number,Text,64,N,,Identification,N,
+General Service (primary),Carrier,cf_carrier,Text,255,N,,Identification,N,
+General Service (primary),Line of Business,cf_line_of_business,Picklist,100,N,Commercial Auto | Personal Auto | General Liability | BOP | Workers Compensation | Property | Inland Marine | Umbrella | Umbrella Personal | Home | Renters | Dwelling Fire | Boat | Other,Identification,N,
+General Service (primary),Producer,cf_producer,Text,255,N,,Identification,N,
+General Service (primary),Service Owner,cf_service_owner,Text,255,N,,Identification,N,
+General Service (primary),Agency Location,cf_agency_location,Text,255,N,,Identification,N,
+General Service (primary),Request Category,cf_request_category,Picklist,100,Y,Certificate Request | Policy Change | Billing and Payments | Claims Assistance | Renewals | Policy Documents | Cancellations and Reinstatements | New Business Support | Carrier and Underwriting | Licensing and Compliance | General Service | Internal Operations,Classification,N,
+General Service (primary),Request Subtype,cf_request_subtype,Picklist,100,N,Add vehicle | Remove vehicle | Replace vehicle | Add driver | Remove driver | Change garaging | Change use | General endorsement | Location change | Exposure change | Payroll or sales change | Mortgagee or loss payee | Other,Classification,N,
+General Service (primary),Service Tier,cf_service_tier,Picklist,100,N,Standard | Priority | VIP,Classification,N,
+General Service (primary),Source,cf_source,Picklist,100,N,Email | Phone | Portal | Internal | Slack | AMS | CRM,Classification,N,
+General Service (primary),Urgency Reason,cf_urgency_reason,Picklist,100,N,Cancellation or lapse imminent | Proof of insurance blocking active work | Vehicle or driver needs coverage before operation | Active claim has an immediate service problem | Binding or effective-date issue | Regulatory or contractual deadline imminent | Time-sensitive certificate | Reinstatement request | Material policy correction | Carrier follow-up affecting coverage | Client escalation | Not urgent,Classification,N,Required when Priority is Urgent. Keywords such as ASAP do not auto-escalate.
+General Service (primary),Business Impact,cf_business_impact,Picklist,100,N,Coverage at risk | Work blocked | Billing | Informational,Classification,N,
+General Service (primary),Regulatory or Cancellation Deadline,cf_regulatory_deadline,Date,,N,,Classification,N,
+General Service (primary),Required-By Date,cf_required_by_date,Date,,N,,Classification,N,
+General Service (primary),External Party Involved,cf_external_party_involved,Boolean,,N,,Classification,N,
+General Service (primary),Carrier Action Required,cf_carrier_action_required,Boolean,,N,,Classification,N,
+General Service (primary),Client Action Required,cf_client_action_required,Boolean,,N,,Classification,N,
+General Service (primary),Current Stage,cf_current_stage,Text,255,N,,Workflow,N,
+General Service (primary),Waiting On,cf_waiting_on,Picklist,100,N,None | Client | Carrier | Internal | Finance company | Producer,Workflow,N,
+General Service (primary),Missing Information,cf_missing_information,Textarea,4000,N,,Workflow,N,Required when status is Information Needed or Waiting on Client.
+General Service (primary),Next Action,cf_next_action,Text,255,N,,Workflow,N,
+General Service (primary),Next Follow-Up Date,cf_next_follow_up_date,Date,,N,,Workflow,N,Required for Waiting on Client / Waiting on Carrier.
+General Service (primary),Last Client Contact Date,cf_last_client_contact_date,DateTime,,N,,Workflow,N,
+General Service (primary),Last Carrier Contact Date,cf_last_carrier_contact_date,DateTime,,N,,Workflow,N,
+General Service (primary),Approval Required,cf_approval_required,Boolean,,N,,Workflow,N,
+General Service (primary),Approval Status,cf_approval_status,Picklist,100,N,Not required | Pending | Approved | Returned,Workflow,N,
+General Service (primary),Escalation Reason,cf_escalation_reason,Text,255,N,,Workflow,N,
+General Service (primary),Reopened Reason,cf_reopened_reason,Text,255,N,,Workflow,N,Required when a resolved ticket is reopened.
+General Service (primary),Reopen Count,cf_reopen_count,Number,9,N,,Workflow,N,
+General Service (primary),Resolution Type,cf_resolution_type,Picklist,100,N,Completed | Unable to complete | Duplicate | Cancelled | Referred to sales | Referred to carrier,Workflow,N,
+General Service (primary),Root Cause,cf_root_cause,Text,255,N,,Workflow,N,
+General Service (primary),Cancellation Reason,cf_cancellation_reason,Text,255,N,,Workflow,N,Required when status is Cancelled.
+General Service (primary),Related Ticket Number,cf_related_ticket_number,Text,255,N,,Workflow,N,Required when status is Duplicate.
+General Service (primary),Sales Opportunity,cf_sales_opportunity,Boolean,,N,,Workflow,N,AUT-13 CRM handoff flag.
+General Service (primary),AMS Activity Posted,cf_ams_activity_posted,Boolean,,N,,Workflow,N,
+General Service (primary),Final Documents Stored,cf_final_documents_stored,Boolean,,N,,Workflow,N,
+General Service (primary),Customer Confirmation Sent,cf_customer_confirmation_sent,Boolean,,N,,Workflow,N,
+General Service (primary),AMS Record ID,cf_ams_record_id,Text,255,N,,Integration,N,
+General Service (primary),CRM Record ID,cf_crm_record_id,Text,255,N,,Integration,N,
+General Service (primary),Supabase Record ID,cf_supabase_record_id,Text,255,N,,Integration,N,
+General Service (primary),Document Folder Link,cf_document_folder_link,URL,255,N,,Integration,N,
+General Service (primary),Integration Status,cf_integration_status,Picklist,100,N,Not synced | Pending | Synced | Failed,Integration,N,
+General Service (primary),Last Sync Date,cf_last_sync_date,DateTime,,N,,Integration,N,
+General Service (primary),Integration Error,cf_integration_error,Textarea,4000,N,,Integration,N,
+General Service (primary),Original Source ID,cf_original_source_id,Text,255,N,,Integration,N,
+General Service (primary),Parent Ticket ID,cf_parent_ticket_id,Text,255,N,,Integration,N,
