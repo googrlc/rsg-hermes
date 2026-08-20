@@ -8,10 +8,10 @@ Auth reuses the Zoho CRM OAuth client when the refresh token has Desk scopes,
 or ``ZOHO_DESK_*`` overrides when Desk is a separate client.
 
 Environment:
-  ZOHO_DESK_ORG_ID          required for API calls (Desk orgId header)
   ZOHO_CLIENT_ID            or ZOHO_DESK_CLIENT_ID
   ZOHO_CLIENT_SECRET        or ZOHO_DESK_CLIENT_SECRET
   ZOHO_REFRESH_TOKEN        or ZOHO_DESK_REFRESH_TOKEN
+  ZOHO_DESK_ORG_ID          optional; listed from GET /organizations when omitted
   ZOHO_DATA_CENTER          default com  (desk.zoho.{dc})
 """
 
@@ -111,10 +111,10 @@ class ZohoDeskClient:
         self._token: str | None = None
         self._token_expires_at: float = 0.0
         self._auth_lock = threading.Lock()
-        if not self.org_id or not self.client_id or not self.client_secret or not self.refresh_token:
+        if not self.client_id or not self.client_secret or not self.refresh_token:
             raise ZohoDeskClientError(
-                "ZOHO_DESK_ORG_ID plus ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET / "
-                "ZOHO_REFRESH_TOKEN (or ZOHO_DESK_* overrides) must be set."
+                "ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET / ZOHO_REFRESH_TOKEN "
+                "(or ZOHO_DESK_* overrides) must be set."
             )
 
     def _authenticate(self) -> str:
@@ -155,12 +155,14 @@ class ZohoDeskClient:
             return self._authenticate()
 
     def _headers(self) -> dict[str, str]:
-        return {
+        headers = {
             "Authorization": f"Zoho-oauthtoken {self._ensure_token()}",
-            "orgId": self.org_id,
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+        if self.org_id:
+            headers["orgId"] = self.org_id
+        return headers
 
     def _request(
         self,
@@ -228,6 +230,48 @@ class ZohoDeskClient:
                     f"Zoho Desk {method} {path}: non-JSON response: {resp.text[:300]}"
                 ) from exc
         raise ZohoDeskClientError(f"Zoho Desk {method} {path}: retry budget exhausted") from last
+
+    @staticmethod
+    def _rows(body: Any) -> list[dict[str, Any]]:
+        if isinstance(body, list):
+            return [row for row in body if isinstance(row, dict)]
+        if isinstance(body, dict):
+            data = body.get("data")
+            if isinstance(data, list):
+                return [row for row in data if isinstance(row, dict)]
+            if body.get("id") or body.get("name") or body.get("displayLabel"):
+                return [body]
+        return []
+
+    def list_organizations(self) -> list[dict[str, Any]]:
+        return self._rows(self._request("GET", "organizations"))
+
+    def list_agents(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        return self._rows(self._request("GET", "agents", params={"limit": limit}))
+
+    def list_departments(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        return self._rows(self._request("GET", "departments", params={"limit": limit, "isEnabled": True}))
+
+    def create_department(self, payload: dict[str, Any]) -> dict[str, Any]:
+        body = self._request("POST", "departments", json_body=payload)
+        return body if isinstance(body, dict) else {}
+
+    def list_organization_fields(self, module: str = "tickets") -> list[dict[str, Any]]:
+        return self._rows(self._request("GET", "organizationFields", params={"module": module}))
+
+    def create_field(self, payload: dict[str, Any], *, module: str = "tickets") -> dict[str, Any]:
+        body = self._request("POST", "fields", json_body=payload, params={"module": module})
+        return body if isinstance(body, dict) else {}
+
+    def list_teams(self, *, department_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
+        if department_id:
+            params["departmentId"] = department_id
+        return self._rows(self._request("GET", "teams", params=params))
+
+    def create_team(self, payload: dict[str, Any]) -> dict[str, Any]:
+        body = self._request("POST", "teams", json_body=payload)
+        return body if isinstance(body, dict) else {}
 
     def list_tickets(self, *, limit: int = 50, status: str | None = None) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": limit}

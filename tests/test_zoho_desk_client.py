@@ -13,8 +13,21 @@ from hermes_integrations.zoho_desk_client import ZohoDeskClient, ZohoDeskClientE
 def test_raises_without_credentials():
     reset_client()
     with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(ZohoDeskClientError, match="ZOHO_DESK_ORG_ID"):
+        with pytest.raises(ZohoDeskClientError, match="ZOHO_CLIENT_ID"):
             ZohoDeskClient()
+
+
+def test_oauth_without_org_id_is_allowed_for_org_discovery():
+    reset_client()
+    env = {
+        "ZOHO_CLIENT_ID": "cid",
+        "ZOHO_CLIENT_SECRET": "secret",
+        "ZOHO_REFRESH_TOKEN": "refresh",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        client = ZohoDeskClient()
+        assert client.org_id == ""
+        assert client.client_id == "cid"
 
 
 def test_accepts_desk_overrides_and_shared_zoho_oauth():
