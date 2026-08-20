@@ -2,8 +2,9 @@
 
 Short design note bridging today's **NowCerts → Supabase** book sync to the
 target **Zoho CRM** system of record. Assumes the committed architecture in
-`README.md`: Zoho is CRM SOR, NowCerts is AMS SOR, Supabase is the operations
-layer.
+`README.md`: Zoho CRM is sales SOR, Zoho Desk is the case/workflow layer
+(see [`docs/zoho-desk/`](zoho-desk/README.md)), NowCerts is AMS SOR, Supabase
+is the operations layer.
 
 **Status:** draft — implementation is partial (`HERMES_WRITE_TO_ZOHO` on intake
 commit, `scripts/backfill_zoho_from_momentum.py` for one-shot backfill).
@@ -16,7 +17,7 @@ commit, `scripts/backfill_zoho_from_momentum.py` for one-shot backfill).
 |---|---|---|
 | Insured / client identity (CRM) | **Zoho CRM** (`Accounts`, `Contacts`) | `canonical_clients` (NowCerts-sourced book) |
 | Pipeline / opportunities | **Zoho CRM** (`Deals`) | `opportunities` (intake + legacy rows) |
-| Service cases / tasks | **Zoho CRM** (target) | `agency_crm_cases` / `agency_crm_tasks` (legacy tail) |
+| Service cases / tasks | **Zoho Desk** (target) | `agency_crm_cases` / `agency_crm_tasks` (legacy tail until Desk is live) |
 | Policies / in-force book | **NowCerts** (AMS) | `canonical_policies` |
 | Renewal watchlist (Project 85) | **Supabase** (ops state) + Zoho `Renewals` (target) | `project_85_renewals` |
 | Outbound AMS writes | **NowCerts** | `outbound_sync_queue` → executors |

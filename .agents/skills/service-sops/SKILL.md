@@ -23,18 +23,24 @@ write queue. Hermes will draft the record, ask Gretchen for an approval
 token (APPROVE ALL, APPROVE CRM ONLY, APPROVE TASKS ONLY), and only then
 execute the write. Never skip this step.
 
-## Service requests are Cases (standard workflow, live 2026-07-10)
+## Service requests are Cases
 
 Service requests — COI, add/remove vehicle, add driver, endorsement, cert
 holder add, mortgagee change, lienholder update, auto ID card, billing/payment,
-cancellation, renewal review, claim/FNOL — are logged as **Cases** in the CRM,
-one Case per request, tied to the client's Account.
+cancellation, renewal review, claim/FNOL — are **one case per request**.
 
-- **Service Request Type** (the Case `type` field): pick the matching one of the
+**Target system:** Zoho Desk (department Agency Service). Desk owns the work;
+Momentum owns the policy record; Zoho CRM owns any sales opportunity that
+spins off the ticket. Operator pack and rules: `docs/zoho-desk/` and the
+`desk-case-management` skill.
+
+**Until Desk Phase 1 is live**, cases still sit in the legacy
+`agency_crm_cases` / `agency_crm_tasks` tables. Do not invent a third case
+database.
+
+- **Service Request Type** (the Case `type` / Desk request category): pick the matching one of the
   14 options; use `Other` only when nothing fits.
-- **Status flow:** New → In Progress → Pending (waiting on client/carrier) →
-  Closed (or Cancelled). Keep it current — status is how anyone sees where the
-  request stands.
+- **Status flow (Desk):** New → Triaged → Information Needed / Ready for Processing → In Progress → Waiting on Client or Carrier → Resolved → Closed. Keep it current — status is how anyone sees where the request stands.
 - **Do NOT double-enter into NowCerts.** Every Case (and every client-linked
   Task) reaches the NowCerts task ledger through the approval-gated
   `outbound_sync_queue`, drained by the casework executor on the Hermes
@@ -47,10 +53,9 @@ one Case per request, tied to the client's Account.
   when tied to a client (Account / insured GUID `momentum_client_id`). Internal
   auto-generated tasks (syncSource=Hermes) are NOT written back.
 
-Governance: **NowCerts (the AMS) is the system of record.** the CRM is where the
-work happens; data flows UP to NowCerts through narrow additive channels only.
-(Full detail: the `rsg-ams-source-of-truth-governance` memory + the Service
-Request SOP artifact.)
+Governance: **NowCerts (the AMS) is the policy system of record.** Desk is
+where the work happens; data flows UP to NowCerts through narrow additive
+channels only.
 
 ## A. Customer service (general)
 

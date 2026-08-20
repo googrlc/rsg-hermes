@@ -22,11 +22,13 @@ This repository supports the Hermes AI operations environment for Risk Solutions
 Hermes is a single Python 3.11+ app (`rsg-hermes`) with a shared path package
 `rsg-hermes-core` under `packages/`. Two entrypoints: the `hermes` CLI and the
 `hermes-api` FastAPI backend (which also serves the Command Center operations
-UI at `/command-center/`). **Zoho CRM** is the CRM system of record; **NowCerts**
+UI at `/command-center/`). **Zoho CRM** is the CRM system of record; **Zoho Desk** is the
+case/workflow layer (`docs/zoho-desk/`, `hermes/desk/`); **NowCerts**
 is the AMS system of record; **Supabase** is the operations/analytics layer
 (canonical book mirror, queues, KPIs, renewal state). The custom Command Center
 CRM (Supabase-backed pipeline/cases) is decommissioned — see `README.md` for the
-full command catalog and Docker layout.
+full command catalog and Docker layout. Desk owns the work; Momentum owns the
+policy record; CRM owns the sales opportunity.
 
 - **Virtualenv.** The dev environment lives in `.venv` (gitignored). Activate it
   before running anything: `source .venv/bin/activate`. The startup update
