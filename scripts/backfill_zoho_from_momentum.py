@@ -40,7 +40,6 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 log = logging.getLogger("backfill_zoho")
 
@@ -174,12 +173,17 @@ def map_insured_to_account(ins: dict[str, Any], *, nextcloud_url: str | None = N
     }
 
 
-def map_policy_to_zoho(pol: dict[str, Any], *, account_id: str) -> dict[str, Any]:
+def map_policy_to_zoho(
+    pol: dict[str, Any],
+    *,
+    account_id: str,
+    primary_folder_url: str | None = None,
+) -> dict[str, Any]:
     """Momentum policy → Zoho Policies module fields."""
     number = _policy_number(pol)
     guid = _policy_guid(pol)
     lob = _policy_lob(pol)
-    return {
+    payload = {
         # Zoho custom modules usually require Name — use the policy number.
         "Name": number or guid or "Policy",
         "Policy_Number": number,
@@ -192,7 +196,9 @@ def map_policy_to_zoho(pol: dict[str, Any], *, account_id: str) -> dict[str, Any
         "Billing_Type": _s(pol.get("billingType") or pol.get("BillingType")),
         "NowCerts_Policy_GUID": guid,
         "Account_Name": {"id": account_id},
+        "Primary_Folder_URL": primary_folder_url,
     }
+    return {k: v for k, v in payload.items() if v is not None}
 
 
 def map_renewal_to_zoho(
@@ -201,12 +207,13 @@ def map_renewal_to_zoho(
     account_id: str,
     account_name: str | None,
     risk_status: str = "Upcoming",
+    primary_folder_url: str | None = None,
 ) -> dict[str, Any]:
     """Momentum expiring policy → Zoho Renewals module fields."""
     number = _policy_number(pol)
     exp = _policy_date(pol, "expirationDate", "ExpirationDate")
     name = f"{account_name or 'Client'} — {number or 'policy'} renewal"
-    return {
+    payload = {
         "Name": name[:100],
         "Policy_Number": number,
         "Client_Name": account_name,
@@ -217,7 +224,9 @@ def map_renewal_to_zoho(
         "Line_of_Business": _policy_lob(pol),
         "NowCerts_Policy_GUID": _policy_guid(pol),
         "Account_Name": {"id": account_id},
+        "Primary_Folder_URL": primary_folder_url,
     }
+    return {k: v for k, v in payload.items() if v is not None}
 
 
 def nextcloud_folder_url(nc: Any, client_name: str) -> tuple[str | None, str | None]:
@@ -225,11 +234,15 @@ def nextcloud_folder_url(nc: Any, client_name: str) -> tuple[str | None, str | N
     if nc is None or not getattr(nc, "is_configured", lambda: False)():
         return None, None
     folder = nc.ensure_client_folders(client_name)
-    base = (getattr(nc, "url", "") or "").rstrip("/")
-    if not base or not folder:
-        return folder, None
-    # Human-facing Files app deep link (not the WebDAV URL).
-    url = f"{base}/apps/files/?dir=/{quote(folder.strip('/'))}"
+    url = None
+    browser = getattr(nc, "browser_dir_url", None)
+    if callable(browser):
+        try:
+            maybe = browser(folder)
+        except Exception:
+            maybe = None
+        if isinstance(maybe, str) and maybe.lower().startswith(("http://", "https://")):
+            url = maybe
     return folder, url
 
 
@@ -408,9 +421,19 @@ def run_backfill(args: argparse.Namespace) -> int:
 
                 # Nextcloud folder URL (best-effort)
                 folder_url = None
+                policies_folder_url = None
+                renewal_folder_url = None
                 if nc is not None and not dry_run:
                     try:
                         _folder, folder_url = nextcloud_folder_url(nc, name)
+                        cat_url = getattr(nc, "client_category_url", None)
+                        if callable(cat_url):
+                            maybe_p = cat_url(name, "Policies")
+                            maybe_r = cat_url(name, "Renewal Reviews")
+                            if isinstance(maybe_p, str) and maybe_p.lower().startswith("http"):
+                                policies_folder_url = maybe_p
+                            if isinstance(maybe_r, str) and maybe_r.lower().startswith("http"):
+                                renewal_folder_url = maybe_r
                     except Exception as exc:  # noqa: BLE001
                         log.warning("Nextcloud folder failed for %s: %s", name, exc)
                         _row(
@@ -497,7 +520,11 @@ def run_backfill(args: argparse.Namespace) -> int:
                                     error="policy missing number and GUID",
                                 )
                             else:
-                                payload = map_policy_to_zoho(pol, account_id=account_id)
+                                payload = map_policy_to_zoho(
+                                    pol,
+                                    account_id=account_id,
+                                    primary_folder_url=policies_folder_url,
+                                )
                                 match_value = pguid or pnum
                                 match_field = "NowCerts_Policy_GUID" if pguid else "Policy_Number"
                                 if dry_run:
@@ -562,6 +589,7 @@ def run_backfill(args: argparse.Namespace) -> int:
                             account_id=account_id,
                             account_name=name,
                             risk_status=risk,
+                            primary_folder_url=renewal_folder_url,
                         )
                         match_field = "NowCerts_Policy_GUID"
                         match_value = pguid or pnum

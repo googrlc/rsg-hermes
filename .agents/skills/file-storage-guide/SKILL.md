@@ -20,12 +20,12 @@ do I put this?" and "where is that file?"
 
 | What | Where |
 |---|---|
-| Client documents (policies, apps, quotes) | Nextcloud (the agency's file source of truth) — the client's folder under the Personal/Commercial lane |
+| Client documents (policies, apps, quotes, claims, loss runs) | Nextcloud — the client's folder. Once. Zoho stores a link, not a copy. |
+| Bound policy facts (number, carrier, dates, premium) | NowCerts, mirrored to Zoho Policies |
+| CRM records (accounts, contacts, opportunities, tasks, notes) | Zoho — plus **Nextcloud Folder URL** / **Document URL** / **Primary Folder URL** |
+| Certificates of Insurance | Issued in NowCerts; filed copy in Nextcloud `COIs`; Zoho Certificate row holds the link |
 | Internal SOPs | Nextcloud |
 | Templates (emails, forms, checklists) | Nextcloud |
-| Certificates of Insurance | NowCerts |
-| CRM records (accounts, contacts, opportunities, tasks, notes) | the CRM |
-| Bound policy data (insureds, premiums, policy details) | NowCerts (mirrored to Supabase `canonical_policies`) |
 | Daily assistant / commands | Hermes |
 | Automations and workflows | Hermes scheduler + `outbound_sync_queue` (n8n was never deployed and is not in docker-compose) |
 | Analytics, snapshots, commission ledger | Supabase |

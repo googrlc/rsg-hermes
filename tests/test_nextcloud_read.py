@@ -99,3 +99,13 @@ def test_read_file_404_raises():
         assert "Not found" in str(exc)
     else:
         raise AssertionError("expected NextcloudError")
+
+
+def test_browser_urls_are_files_app_links_not_webdav():
+    c = _client(_FakeSession())
+    folder = c.client_category_url("ABC Trucking", "Policies")
+    assert folder == "https://nc.example/apps/files/?dir=/Clients/ABC%20Trucking/Policies"
+    file_url = c.browser_file_url("Clients/ABC Trucking/Policies/Progressive Policy 2026.pdf")
+    assert file_url.endswith("scrollto=Progressive%20Policy%202026.pdf")
+    assert "/remote.php/" not in (folder or "")
+

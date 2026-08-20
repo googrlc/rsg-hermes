@@ -17,6 +17,8 @@ from typing import Any
 
 import requests
 
+from hermes_integrations.zoho_document_fields import is_http_url
+
 log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30.0
@@ -441,7 +443,11 @@ class ZohoClient:
             "Billing_State": _pick(account_data, "state", "Billing_State"),
             "Billing_Code": _pick(account_data, "zip", "Billing_Code", "postal_code"),
             "Nextcloud_Folder_URL": _pick(
-                account_data, "nextcloud_folder_url", "Nextcloud_Folder_URL", "nextcloud_folder"
+                account_data,
+                "nextcloud_folder_url",
+                "Nextcloud_Folder_URL",
+                "Nextcloud_Folder_URL__s",
+                "nextcloud_folder",
             ),
             "NowCerts_Insured_GUID": _pick(
                 account_data,
@@ -451,6 +457,9 @@ class ZohoClient:
                 "insured_id",
             ),
         }
+        folder_url = mapping.get("Nextcloud_Folder_URL")
+        if folder_url is not None and not is_http_url(folder_url):
+            mapping.pop("Nextcloud_Folder_URL", None)
         return {k: v for k, v in mapping.items() if _present(v)}
 
     def _map_contact(self, contact_data: dict[str, Any], account_id: str) -> dict[str, Any]:
@@ -519,6 +528,14 @@ class ZohoClient:
             "Expiration_Date": _pick(deal_data, "x_date", "Expiration_Date", "expiration_date"),
             "Intake_Source": _pick(deal_data, "source", "Intake_Source", "lead_source"),
             "Description": _pick(deal_data, "description", "Description"),
+            "Document_URL": _pick(deal_data, "document_url", "Document_URL", "Document_URL__s"),
+            "Primary_Folder_URL": _pick(
+                deal_data,
+                "primary_folder_url",
+                "Primary_Folder_URL",
+                "Primary_Folder_URL__s",
+                "nextcloud_folder_url",
+            ),
             "Account_Name": {"id": str(account_id)} if account_id else None,
             "NowCerts_Opportunity_ID": _pick(
                 deal_data,
@@ -539,6 +556,9 @@ class ZohoClient:
         # Deal_Name is required — synthesize from LOB if needed.
         if not mapping.get("Deal_Name") and mapping.get("Line_of_Business"):
             mapping["Deal_Name"] = str(mapping["Line_of_Business"])
+        for url_key in ("Document_URL", "Primary_Folder_URL"):
+            if mapping.get(url_key) is not None and not is_http_url(mapping.get(url_key)):
+                mapping.pop(url_key, None)
         return {k: v for k, v in mapping.items() if _present(v)}
 
     # ── Public write methods ──────────────────────────────────────────────

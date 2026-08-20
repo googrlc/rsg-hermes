@@ -26,5 +26,7 @@ Renewals,Window Bucket,Window_Bucket,Picklist,20,N,N,N,,picklists_hermes_vocab.c
 Renewals,Touch Early,Touch_Early,Date,,N,N,N,,,Z-only,,"T-90 / T-45 / T-40 stamp only; no auto-send"
 Renewals,Touch Mid,Touch_Mid,Date,,N,N,N,,,Z-only,,"T-60 stamp only; no auto-send"
 Renewals,Touch Decision,Touch_Decision,Date,,N,N,N,,,Z-only,,"T-30 / T-15 stamp only; no auto-send"
+Renewals,Primary Folder URL,Primary_Folder_URL,URL,450,N,N,N,,,Hermes stamp,,Nextcloud Renewal Reviews folder (Files app https link)
+Renewals,Document URL,Document_URL,URL,450,N,N,N,,,Hermes stamp,,Specific worksheet or marketing PDF in Nextcloud
 Renewals,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
 Renewals,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

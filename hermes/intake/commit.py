@@ -48,6 +48,23 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 INTAKE_ACTION_CREATE_INSURED = "create_insured"
+
+
+def _nextcloud_http_url(nc: Any, method: str, *args: Any) -> str | None:
+    """Call a Nextcloud URL helper and keep only a real http(s) string."""
+    fn = getattr(nc, method, None)
+    if not callable(fn):
+        return None
+    try:
+        value = fn(*args)
+    except Exception:
+        return None
+    text = str(value or "").strip()
+    if text.lower().startswith(("http://", "https://")):
+        return text
+    return None
+
+
 DEFAULT_ASSIGNEE = "gretchen"
 
 # Opt-in: stage the NowCerts prospect create on intake commit. See the module
@@ -239,6 +256,9 @@ def commit_intake(
 
     # 3. Nextcloud client folder tree (best-effort).
     folder = None
+    folder_url = None
+    deal_folder_url = None
+    pdf_url = None
     nc = nextcloud
     if nc is None:
         from hermes_integrations.nextcloud_client import NextcloudClient
@@ -248,6 +268,8 @@ def commit_intake(
     try:
         if nc.is_configured() and name:
             folder = nc.ensure_client_folders(str(name))
+            folder_url = _nextcloud_http_url(nc, "browser_dir_url", folder)
+            deal_folder_url = _nextcloud_http_url(nc, "client_category_url", str(name), "Quotes")
             # PDF-of-record: source intake PDF lands in Clients/{name}/Intake/.
             if source_pdf:
                 from hermes_integrations.nextcloud_client import _sanitize_segment
@@ -259,11 +281,15 @@ def commit_intake(
                 try:
                     nc.ensure_dirs(f"Clients/{_sanitize_segment(str(name))}/Intake")
                     pdf_path = nc.put_file(rel, source_pdf, content_type="application/pdf")
+                    pdf_url = _nextcloud_http_url(nc, "browser_file_url", pdf_path)
                 except Exception:
                     log.exception("intake commit: failed to file source PDF for %s", name)
                     pdf_path = None
     except Exception:
         folder = None
+        folder_url = None
+        deal_folder_url = None
+        pdf_url = None
 
     # 4. Zoho CRM mirror (opt-in, best-effort). Runs AFTER Supabase opportunity
     # inserts and Nextcloud folder creation so the Account can carry the folder
@@ -279,6 +305,9 @@ def commit_intake(
             intake_payload=intake_payload,
             client_identifier=cid,
             nextcloud_folder=folder,
+            nextcloud_folder_url=folder_url,
+            deal_primary_folder_url=deal_folder_url,
+            document_url=pdf_url,
             nowcerts_insured_guid=gateway_ams.get("insured_database_id"),
             source_pdf=source_pdf,
             source_pdf_name=source_pdf_name,
@@ -295,6 +324,7 @@ def commit_intake(
         "nowcerts_insured_guid": gateway_ams.get("insured_database_id"),
         "insured_preview": insured_payload,
         "nextcloud_folder": folder,
+        "nextcloud_folder_url": folder_url,
         "intake_pdf_path": pdf_path,
         "prospect_type": ptype,
         "insured_type": itype,
@@ -314,6 +344,9 @@ def _build_zoho_payload(
     source_pdf: "bytes | None",
     source_pdf_name: str | None,
     source: str | None,
+    nextcloud_folder_url: str | None = None,
+    deal_primary_folder_url: str | None = None,
+    document_url: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the payload ``write_intake_to_zoho`` expects.
 
@@ -337,8 +370,14 @@ def _build_zoho_payload(
             if s.get("line_of_business")
         ]
     payload["client_identifier"] = client_identifier
-    if nextcloud_folder and not payload.get("nextcloud_folder_url") and not payload.get("nextcloud_folder"):
+    if nextcloud_folder and not payload.get("nextcloud_folder"):
         payload["nextcloud_folder"] = nextcloud_folder
+    if nextcloud_folder_url and not payload.get("nextcloud_folder_url"):
+        payload["nextcloud_folder_url"] = nextcloud_folder_url
+    if deal_primary_folder_url and not payload.get("deal_primary_folder_url"):
+        payload["deal_primary_folder_url"] = deal_primary_folder_url
+    if document_url and not payload.get("document_url"):
+        payload["document_url"] = document_url
     if nowcerts_insured_guid and not payload.get("nowcerts_insured_guid"):
         payload["nowcerts_insured_guid"] = nowcerts_insured_guid
     if source_pdf is not None:
@@ -363,6 +402,9 @@ def _write_zoho_after_commit(
     source_pdf: "bytes | None",
     source_pdf_name: str | None,
     source: str | None,
+    nextcloud_folder_url: str | None = None,
+    deal_primary_folder_url: str | None = None,
+    document_url: str | None = None,
 ) -> dict[str, Any]:
     """Mirror the intake to Zoho and stamp Zoho ids onto the opportunity rows.
 
@@ -377,6 +419,9 @@ def _write_zoho_after_commit(
             intake_payload=intake_payload,
             client_identifier=client_identifier,
             nextcloud_folder=nextcloud_folder,
+            nextcloud_folder_url=nextcloud_folder_url,
+            deal_primary_folder_url=deal_primary_folder_url,
+            document_url=document_url,
             nowcerts_insured_guid=nowcerts_insured_guid,
             source_pdf=source_pdf,
             source_pdf_name=source_pdf_name,

@@ -26,7 +26,16 @@ if TYPE_CHECKING:
     import requests
 
 # The confirmed per-client document categories.
-CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Quotes", "Correspondence", "Intake")
+CLIENT_CATEGORIES = (
+    "Renewal Reviews",
+    "COIs",
+    "Policies",
+    "Proposals",
+    "Quotes",
+    "Correspondence",
+    "Intake",
+    "Claims",
+)
 
 # PROPFIND body — ask only for the props list_dir surfaces (keeps the response small).
 _PROPFIND_BODY = (
@@ -124,6 +133,34 @@ class NextcloudClient:
             # 201 created; 405 already exists; 301/302 also treated as present.
             if resp.status_code not in (201, 405, 301, 302):
                 raise NextcloudError(f"MKCOL {acc} failed: {resp.status_code} {resp.text[:200]}")
+
+    def browser_dir_url(self, rel_dir: str) -> str | None:
+        """Human-facing Files app folder link (not WebDAV)."""
+        base = self.url.rstrip("/")
+        if not base or not rel_dir:
+            return None
+        path = self._rel_with_base(rel_dir).strip("/")
+        return f"{base}/apps/files/?dir=/{quote(path, safe='/')}"
+
+    def browser_file_url(self, rel_path: str) -> str | None:
+        """Human-facing Files app link that opens the folder and highlights the file."""
+        rel = (rel_path or "").strip("/")
+        if not rel:
+            return None
+        parts = rel.split("/")
+        folder = "/".join(parts[:-1])
+        fname = parts[-1]
+        dir_url = self.browser_dir_url(folder) if folder else self.browser_dir_url("/")
+        if not dir_url:
+            return None
+        return f"{dir_url}&scrollto={quote(fname)}"
+
+    def client_category_url(self, client: str, category: str | None = None) -> str | None:
+        """Browser URL for the client folder, or one document-class subfolder."""
+        base = f"Clients/{_sanitize_segment(client)}"
+        if category:
+            base = f"{base}/{_sanitize_segment(category)}"
+        return self.browser_dir_url(base)
 
     # -- Talk (chat) --------------------------------------------------------
 
@@ -296,4 +333,8 @@ class NextcloudClient:
         if not overwrite and self.path_exists(rel):
             raise NextcloudError(f"Refusing to overwrite existing file: {rel}")
         stored = self.put_file(rel, content, content_type=content_type)
-        return {"path": stored, "url": self._dav_url(rel)}
+        return {
+            "path": stored,
+            "url": self._dav_url(rel),
+            "browser_url": self.browser_file_url(stored),
+        }

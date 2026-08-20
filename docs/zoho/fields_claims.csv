@@ -1,0 +1,12 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Claims,Claim Name,Name,Single Line,255,Y,N,N,,,,Z-only,,"Account + Claim_Number"
+Claims,Claim Number,Claim_Number,Single Line,100,Y,Y,N,,,Z-only,,Natural key
+Claims,Account Name,Account_Name,Lookup (Accounts),,N,N,N,,,Z-only,,
+Claims,Policy,Policy,Lookup (Policies),,N,N,N,,,Z-only,,
+Claims,Date of Loss,Date_of_Loss,Date,,N,N,N,,,Z-only,,
+Claims,Status,Status,Picklist,40,N,N,N,,,Z-only,,"Open|Closed|Pending"
+Claims,Reserve,Reserve,Currency,16.2,N,N,N,,,Z-only,,
+Claims,Primary Folder URL,Primary_Folder_URL,URL,450,N,N,N,,,Hermes stamp,,Nextcloud Clients/{name}/Claims or Claims/Claim-YYYY-NNN
+Claims,Document URL,Document_URL,URL,450,N,N,N,,,Hermes stamp,,Specific claim PDF in Nextcloud — never attach the file to Zoho
+Claims,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
+Claims,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

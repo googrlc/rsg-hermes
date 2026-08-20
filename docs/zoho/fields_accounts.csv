@@ -16,5 +16,6 @@ Accounts,Billing Street,Billing_Street,Single Line,255,N,N,N,,,AMS→Z / Z→AMS
 Accounts,Billing City,Billing_City,Single Line,100,N,N,N,,,AMS→Z / Z→AMS,city,Pushable
 Accounts,Billing State,Billing_State,Single Line,50,N,N,N,,,AMS→Z / Z→AMS,state,Pushable
 Accounts,Billing Code,Billing_Code,Single Line,20,N,N,N,,,AMS→Z / Z→AMS,zip,AMS zipCode; pushable Zip
+Accounts,Nextcloud Folder URL,Nextcloud_Folder_URL,URL,450,N,N,N,,,Hermes stamp,nextcloud_folder_url,Client master folder in Nextcloud (Files app https link). Create with scripts/ensure_zoho_document_url_fields.py
 Accounts,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,System field
 Accounts,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,System field

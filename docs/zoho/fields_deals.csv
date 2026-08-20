@@ -43,6 +43,8 @@ Deals,Description,Description,Multi Line,32000,N,N,N,,,Z-only,description,
 Deals,Intake Source,Intake_Source,Single Line,80,N,N,N,,,Z-only,source,
 Deals,Sync Source,Sync_Source,Single Line,80,N,N,N,,,System,sync_source,nowcerts_quote_sync|nowcerts-opportunity-sync|crm
 Deals,Last AMS Sync,Last_AMS_Sync,DateTime,,N,N,N,,,System,synced_at,
+Deals,Primary Folder URL,Primary_Folder_URL,URL,450,N,N,N,,,Hermes stamp,nextcloud_folder_url,Nextcloud Quotes/Submissions folder (Files app https link)
+Deals,Document URL,Document_URL,URL,450,N,N,N,,,Hermes stamp,document_url,Specific quote or proposal PDF in Nextcloud — never attach the file to Zoho
 Deals,Created By Hermes,Created_By_Hermes,Single Line,100,N,N,N,,,System,created_by,
 Deals,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
 Deals,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

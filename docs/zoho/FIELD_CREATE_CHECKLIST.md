@@ -154,6 +154,17 @@ Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch date
 | Nightly book sync | Policies upsert by GUID; lineage preserved |
 | Dismiss renewal | `Dismissed=true` or Eligibility=`excluded`; row not hard-deleted |
 
+## 6b. Document links (do not attach files)
+
+See [`CONNECT_NEXTCLOUD_URLS.md`](CONNECT_NEXTCLOUD_URLS.md). Nextcloud is the file store. Zoho holds https URLs.
+
+- [ ] Run `python scripts/ensure_zoho_document_url_fields.py --apply` (needs `ZohoCRM.settings.ALL`)
+- [ ] Accounts: `Nextcloud_Folder_URL` on the Standard layout
+- [ ] Policies / Deals / Renewals: `Primary_Folder_URL` + `Document_URL`
+- [ ] Optional: create modules Claims and Certificates, then re-run the script
+- [ ] Confirm a click on Account → Nextcloud Folder URL opens the client folder
+- [ ] Do **not** use Zoho attachments as the document library
+
 ## 7. Do not create as editable user fields
 
 - Policy `raw_payload`

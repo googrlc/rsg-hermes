@@ -153,6 +153,55 @@ def test_zoho_write_runs_after_supabase_when_enabled(monkeypatch):
     assert all(s["zoho_deal_ids"] == ["z-deal-1", "z-deal-2"] for s in zoho_stamps)
 
 
+def test_zoho_payload_gets_https_folder_url_not_a_relative_path(monkeypatch):
+    """Zoho URL fields need a Files-app link. The relative path stays operational-only."""
+    monkeypatch.setenv(ic.ENV_WRITE_TO_ZOHO, "1")
+    supa = _router_supa()
+    nc = MagicMock()
+    nc.is_configured.return_value = True
+    nc.ensure_client_folders.return_value = "Clients/Acme Plumbing LLC"
+    nc.browser_dir_url.return_value = "https://nc.example/apps/files/?dir=/Clients/Acme%20Plumbing%20LLC"
+    nc.client_category_url.return_value = (
+        "https://nc.example/apps/files/?dir=/Clients/Acme%20Plumbing%20LLC/Quotes"
+    )
+
+    zoho_calls: list[dict] = []
+
+    def _fake_zoho(intake_payload, approved_by=None, **kwargs):
+        zoho_calls.append(intake_payload)
+        return {"zoho_account_id": "z-acc-1", "zoho_deal_ids": [], "zoho_contact_ids": [], "errors": []}
+
+    monkeypatch.setattr("hermes.intake.zoho_writer.write_intake_to_zoho", _fake_zoho)
+    out = ic.commit_intake(
+        supa,
+        account={"account_name": "Acme Plumbing LLC", "insured_type": "Commercial"},
+        opportunities_spec=[{"line_of_business": "GL"}],
+        approved_by="lamar",
+        nextcloud=nc,
+    )
+    payload = zoho_calls[0]
+    assert payload["nextcloud_folder"] == "Clients/Acme Plumbing LLC"
+    assert payload["nextcloud_folder_url"].startswith("https://")
+    assert payload["deal_primary_folder_url"].endswith("/Quotes")
+    assert out["nextcloud_folder_url"].startswith("https://")
+
+
+def test_account_block_drops_relative_nextcloud_path():
+    from hermes.intake.zoho_writer import _account_block
+
+    dropped = _account_block(
+        {"account": {"account_name": "Acme"}, "nextcloud_folder": "Clients/Acme"}
+    )
+    assert "nextcloud_folder_url" not in dropped
+    kept = _account_block(
+        {
+            "account": {"account_name": "Acme"},
+            "nextcloud_folder_url": "https://nc.example/apps/files/?dir=/Clients/Acme",
+        }
+    )
+    assert kept["nextcloud_folder_url"].startswith("https://")
+
+
 def test_zoho_write_failure_does_not_break_supabase_commit(monkeypatch):
     monkeypatch.setenv(ic.ENV_WRITE_TO_ZOHO, "true")
     supa = _router_supa()
