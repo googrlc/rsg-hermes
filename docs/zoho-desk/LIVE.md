@@ -86,7 +86,7 @@ Information Needed, and the rest from `SETUP_CHECKLIST.md` in Desk Setup UI
 
 ## Still in Setup UI
 
-- CRM Account **Create Service Request** button (View Page + each list row). Deluge: `crm_account_button.md`. Connection `zohodesk`.
+- CRM Account **Create Service Request** button (View Page + each list row). Deluge: `crm_account_button.md`. Connection `zohodesk`. Live OAuth is Desk-only, so paste the button in CRM Setup until a token has `ZohoCRM.settings.custom_buttons`.
 - Custom statuses
 - Blueprints
 - Workflows AUT-01 … AUT-14

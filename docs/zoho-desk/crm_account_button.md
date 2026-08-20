@@ -61,9 +61,17 @@ Setup → Customization → Modules and Fields → **Accounts** → **Links & Bu
 locations in the table above.
 
 CRM REST cannot create custom buttons with the current Desk-scoped OAuth
-token (`settings.custom_buttons` is a different scope). A custom **link** with
-the same label is the API fallback (`scripts/zoho_crm_account_desk_button.py`);
-it opens the Desk new-ticket form instead of creating the ticket.
+token. A live token refresh returns only:
+
+`Desk.fields.CREATE Desk.teams.CREATE Desk.settings.ALL Desk.basic.READ`
+
+That is enough for Desk field/team apply, not for CRM Setup objects
+(`ZohoCRM.settings.custom_buttons`, `ZohoCRM.settings.custom_links`).
+Paste the Deluge in CRM Setup (steps above). A custom **link** with the
+same label is the API fallback
+(`scripts/zoho_crm_account_desk_button.py --apply`) once a token has
+`ZohoCRM.settings.custom_links.CREATE` and `ZohoCRM.settings.profiles.READ`;
+the link only opens the Desk new-ticket form, it does not create the ticket.
 
 ## Deluge (paste)
 

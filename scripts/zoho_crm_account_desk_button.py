@@ -34,6 +34,8 @@ from hermes.desk.crm_button import (
 )
 from hermes_integrations.zoho_client import ZohoClient, ZohoClientError
 
+import requests
+
 
 def _summarize(body: Any, *, limit: int = 800) -> str:
     try:
@@ -42,8 +44,38 @@ def _summarize(body: Any, *, limit: int = 800) -> str:
         return str(body)[:limit]
 
 
+def _crm_call(
+    client: ZohoClient,
+    method: str,
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    json_body: Any = None,
+) -> Any:
+    """One-shot CRM call. Do not re-auth on OAUTH_SCOPE_MISMATCH — that burns the token."""
+    token = client._ensure_token()
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    resp = requests.request(
+        method,
+        url,
+        headers=headers,
+        params=params,
+        json=json_body,
+        timeout=client.timeout,
+    )
+    if not resp.ok:
+        raise ZohoClientError(f"Zoho {method} {url} failed {resp.status_code}: {resp.text[:500]}")
+    if not resp.content:
+        return {}
+    return resp.json()
+
+
 def _profile_ids(client: ZohoClient) -> list[dict[str, str]]:
-    body = client._get("https://www.zohoapis.com/crm/v8/settings/profiles")
+    body = _crm_call(client, "GET", "https://www.zohoapis.com/crm/v8/settings/profiles")
     rows = body.get("profiles") if isinstance(body, dict) else None
     if not isinstance(rows, list):
         return []
@@ -58,7 +90,9 @@ def _profile_ids(client: ZohoClient) -> list[dict[str, str]]:
 
 
 def _existing_links(client: ZohoClient) -> list[dict[str, Any]]:
-    body = client._get(
+    body = _crm_call(
+        client,
+        "GET",
         "https://www.zohoapis.com/crm/v8/settings/custom_links",
         params={"module": MODULE},
     )
@@ -67,7 +101,9 @@ def _existing_links(client: ZohoClient) -> list[dict[str, Any]]:
 
 
 def _existing_buttons(client: ZohoClient) -> Any:
-    return client._get(
+    return _crm_call(
+        client,
+        "GET",
         "https://www.zohoapis.com/crm/v8/settings/custom_buttons",
         params={"module": MODULE},
     )
@@ -85,7 +121,8 @@ def _create_link(client: ZohoClient, profiles: list[dict[str, str]]) -> Any:
             }
         ]
     }
-    return client._request(
+    return _crm_call(
+        client,
         "POST",
         "https://www.zohoapis.com/crm/v8/settings/custom_links",
         params={"module": MODULE},
@@ -113,7 +150,8 @@ def _button_payloads(profiles: list[dict[str, str]]) -> list[dict[str, Any]]:
 
 
 def _create_buttons(client: ZohoClient, profiles: list[dict[str, str]]) -> Any:
-    return client._request(
+    return _crm_call(
+        client,
         "POST",
         "https://www.zohoapis.com/crm/v8/settings/custom_buttons",
         params={"module": MODULE},
@@ -149,12 +187,15 @@ def main() -> int:
 
     results: dict[str, Any] = {"apply": args.apply}
 
+    # Profiles and custom links first. Custom-buttons 401 is a scope miss —
+    # hitting it first used to re-auth in a loop and lock the refresh token.
+    profiles: list[dict[str, str]] = []
     try:
-        results["buttons_get"] = _existing_buttons(client)
-        print("GET custom_buttons:", _summarize(results["buttons_get"]))
+        profiles = _profile_ids(client)
+        print(f"Internal CRM profiles: {len(profiles)}")
     except ZohoClientError as exc:
-        results["buttons_get_error"] = str(exc)[:400]
-        print("GET custom_buttons failed:", results["buttons_get_error"])
+        results["profiles_error"] = str(exc)[:400]
+        print("GET profiles failed:", results["profiles_error"])
 
     try:
         results["links"] = _existing_links(client)
@@ -164,13 +205,24 @@ def main() -> int:
         results["links_error"] = str(exc)[:400]
         print("GET custom_links failed:", results["links_error"])
 
-    profiles: list[dict[str, str]] = []
     try:
-        profiles = _profile_ids(client)
-        print(f"Internal CRM profiles: {len(profiles)}")
+        results["functions"] = _crm_call(
+            client,
+            "GET",
+            "https://www.zohoapis.com/crm/v2/settings/functions",
+            params={"type": "org"},
+        )
+        print("GET functions:", _summarize(results["functions"]))
     except ZohoClientError as exc:
-        results["profiles_error"] = str(exc)[:400]
-        print("GET profiles failed:", results["profiles_error"])
+        results["functions_error"] = str(exc)[:400]
+        print("GET functions failed:", results["functions_error"])
+
+    try:
+        results["buttons_get"] = _existing_buttons(client)
+        print("GET custom_buttons:", _summarize(results["buttons_get"]))
+    except ZohoClientError as exc:
+        results["buttons_get_error"] = str(exc)[:400]
+        print("GET custom_buttons failed:", results["buttons_get_error"])
 
     if not args.apply:
         print("Dry-run. Pass --apply to create the custom link/button.")
