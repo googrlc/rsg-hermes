@@ -96,13 +96,15 @@ Add claims and renewals after those run cleanly.
 | CF-02 titles | `hermes/desk/titles.py` |
 | CF-01 matching | `hermes/desk/matching.py` |
 | CF-06 one renewal case | `hermes/desk/renewals.py` |
+| CF-07 CRM Account service-request button | `hermes/desk/crm_button.py` |
 
 Related docs:
 
 - `automations.md` — workflow rules AUT-01 … AUT-14
 - `blueprints.md` — four Blueprints and transition requirements
 - `email_templates.md` — reusable client templates
-- `custom_functions.md` — Deluge / Hermes functions CF-01 … CF-06
+- `custom_functions.md` — Deluge / Hermes functions CF-01 … CF-07
+- `crm_account_button.md` — CRM Account **Create Service Request** button
 - `docs/zoho/` — Zoho CRM field-create pack (sales, not service)
 - `docs/zoho-supabase-sync-design.md` — CRM ↔ Supabase sync
 

@@ -81,3 +81,12 @@ three unrelated tickets for 90 / 60 / 30 days.
 
 Identity: `REN|{policy_number}|{expiration_date}`. Python:
 `hermes.desk.renewals.renewal_identity`.
+
+## CF-07 CRM Account Create Service Request button
+
+CRM custom button on every Account (View Page + list-view row). Creates a
+Desk ticket in department RSG / General Service / Service Intake, stamps
+`cf_crm_account_id`, channel CRM. Does not write to Momentum.
+
+Python: `hermes.desk.crm_button` / `hermes.desk.service_request`.
+Paste steps and Deluge: `crm_account_button.md`.

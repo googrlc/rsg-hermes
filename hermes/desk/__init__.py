@@ -16,14 +16,17 @@ from hermes.desk.renewals import renewal_identity
 from hermes.desk.routing import TicketSnapshot, apply_event
 from hermes.desk.spec import DEPARTMENT, LAUNCH_WORKFLOWS, SYSTEMS_OF_RECORD
 from hermes.desk.titles import case_title
+from hermes.desk.crm_button import BUTTON_NAME, build_ticket_payload
 
 __all__ = [
     "BLUEPRINTS",
+    "BUTTON_NAME",
     "DEPARTMENT",
     "LAUNCH_WORKFLOWS",
     "SYSTEMS_OF_RECORD",
     "TicketSnapshot",
     "apply_event",
+    "build_ticket_payload",
     "can_transition",
     "case_title",
     "classify_request",

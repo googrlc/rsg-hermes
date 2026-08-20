@@ -66,6 +66,10 @@ policy expiration; 90/60/30 are stages on that case.
 
 Example: `Certificate | ABC Trucking LLC | CA123456 | Holder request`
 
+From a CRM Account, use **Create Service Request** (View Page and each list
+row). Spec: `docs/zoho-desk/crm_account_button.md`. That opens a Desk ticket
+and stamps `cf_crm_account_id`. It does not write to Momentum.
+
 ## Sensitive data
 
 Driver DOB and license number are Desk fields marked Sensitive. Store them

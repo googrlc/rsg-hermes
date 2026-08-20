@@ -48,6 +48,7 @@ Claims and Renewals layouts wait until the four launch workflows run cleanly.
 ## Phase 3 — Integration
 
 - [ ] Contact and account synchronization with Zoho CRM
+- [ ] CRM Account button **Create Service Request** (View Page + list-view row). Spec: `crm_account_button.md`. Connection name `zohodesk`.
 - [ ] AMS client and policy lookup (CF-01)
 - [ ] CRM opportunity handoff (AUT-13) — keep the service ticket open
 - [ ] Document-folder linking (CF-03) — store the link, do not copy files

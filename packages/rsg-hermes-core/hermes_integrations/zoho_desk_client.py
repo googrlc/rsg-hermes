@@ -318,3 +318,39 @@ class ZohoDeskClient:
         body = self._request("GET", "tickets/search", params={"limit": limit, "q": query})
         data = body.get("data") if isinstance(body, dict) else None
         return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+
+    def search_contacts(
+        self, *, email: str | None = None, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
+        if email:
+            params["email"] = email
+        try:
+            body = self._request("GET", "contacts/search", params=params)
+        except ZohoDeskClientError as exc:
+            if "204" in str(exc) or "no data" in str(exc).lower():
+                return []
+            raise
+        return self._rows(body)
+
+    def search_accounts(
+        self, *, account_name: str | None = None, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
+        if account_name:
+            params["accountName"] = account_name
+        try:
+            body = self._request("GET", "accounts/search", params=params)
+        except ZohoDeskClientError as exc:
+            if "204" in str(exc) or "no data" in str(exc).lower():
+                return []
+            raise
+        return self._rows(body)
+
+    def create_contact(self, payload: dict[str, Any]) -> dict[str, Any]:
+        body = self._request("POST", "contacts", json_body=payload)
+        return body if isinstance(body, dict) else {}
+
+    def create_account(self, payload: dict[str, Any]) -> dict[str, Any]:
+        body = self._request("POST", "accounts", json_body=payload)
+        return body if isinstance(body, dict) else {}

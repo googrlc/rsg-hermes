@@ -446,6 +446,7 @@ CUSTOM_FUNCTIONS = (
     "CF-04 Post AMS activity",
     "CF-05 Integration error handler",
     "CF-06 Renewal case generation",
+    "CF-07 CRM Account Create Service Request button",
 )
 
 AUTOMATION_IDS = tuple(f"AUT-{n:02d}" for n in range(1, 15))

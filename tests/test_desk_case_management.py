@@ -68,6 +68,7 @@ def test_operating_model_keeps_systems_separate():
     assert AUTOMATION_IDS == tuple(item.automation_id for item in AUTOMATIONS)
     assert len(PHASES) == 4
     assert "CF-06 Renewal case generation" in CUSTOM_FUNCTIONS
+    assert "CF-07 CRM Account Create Service Request button" in CUSTOM_FUNCTIONS
     assert "ticket_number" in EMAIL_TEMPLATE_REQUIRED_TOKENS
     assert "Agency codes" in KNOWLEDGE_BASE_INTERNAL
     assert len(OPERATIONAL_VIEWS) >= 18
