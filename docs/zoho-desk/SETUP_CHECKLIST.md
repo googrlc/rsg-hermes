@@ -3,23 +3,26 @@
 Use with the CSVs in this folder and the rules in `hermes/desk/`. Check items
 off in the Desk admin UI (Setup). Field types cannot be changed after create.
 
+Live portal inventory and IDs: `LIVE.md`.
+
 ## 0. Prerequisites
 
-- [ ] Zoho Desk org with Tickets, Knowledge Base, and workflow access
+- [x] Zoho Desk org with Tickets access (CRM Plus portal `rsg10761`, org `935382122`)
 - [ ] Decide the single service mailbox that will open tickets
-- [ ] Confirm Momentum remains policy SOR and Zoho CRM remains sales SOR
-- [ ] Confirm Nextcloud (or SharePoint) is the document repository
-- [ ] OAuth client with Desk ticket scopes **only when** API integration starts (`ZOHO_DESK_ORG_ID`)
+- [x] Confirm Momentum remains policy SOR and Zoho CRM remains sales SOR
+- [x] Confirm Nextcloud (or SharePoint) is the document repository
+- [ ] OAuth client with Desk ticket **and** field-create scopes when API apply starts (`ZOHO_DESK_ORG_ID=935382122`)
 
 ## Phase 1 — Foundation
 
-- [ ] Create department **Agency Service** (do not create a department per queue)
+- [x] One department in use: live name **RSG** (`1435573000000006907`). Treat as Agency Service. Do not create a second department.
+- [ ] Optional: rename department RSG → Agency Service in Setup
 - [ ] Create teams: Service Intake, Certificates, Commercial Auto Service, Commercial Lines Service, Personal Lines Service, Claims Support, Billing and Retention, Renewals, New Business Support, Compliance, Management Escalations
 - [ ] Create shared ticket fields from `fields_shared.csv`
-- [ ] Create picklists from `picklists.csv`
+- [x] Native picklists: Classification (12 RSG categories), Priority (Urgent + Normal), Channel (Portal, Internal, Slack, AMS, CRM)
 - [ ] Create statuses: New, Triaged, Information Needed, Ready for Processing, In Progress, Submitted to Carrier, Waiting on Carrier, Waiting on Client, Pending Internal Approval, Ready for Delivery, Delivered, Monitoring, Resolved, Closed, Cancelled, Duplicate
-- [ ] Build the General Service layout (shared fields + native subject/status/priority/contact/account)
-- [ ] Connect one service email channel to Agency Service
+- [x] General Service layout (`1435573000000074011`) — native subject/status/priority/contact/account/classification. Custom `cf_*` fields still missing.
+- [ ] Connect one service email channel to the RSG department
 - [ ] Create essential views from `views.csv` (at least Unassigned New Tickets, My Open Cases, Urgent and High Priority, Waiting on Client, Waiting on Carrier)
 
 ## Phase 2 — High-volume workflows (launch four)
@@ -31,10 +34,10 @@ Launch first:
 3. Billing, Cancellation, and Reinstatement
 4. General Policy Changes
 
-- [ ] Certificate layout (`fields_certificate.csv`) + Blueprint (`blueprints.md`)
-- [ ] Auto/Driver layout (`fields_auto_driver.csv`) — sensitive DOB / license fields restricted
-- [ ] General Policy Change layout (`fields_policy_change.csv`) + Blueprint
-- [ ] Billing layout (`fields_billing.csv`) and Cancellation layout (`fields_cancellation.csv`) + Blueprint
+- [x] Certificate layout cloned (`1435573000000460002`) — add `fields_certificate.csv` then Blueprint (`blueprints.md`)
+- [x] Auto/Driver layout cloned (`1435573000000453002`) — add `fields_auto_driver.csv`; sensitive DOB / license fields restricted
+- [x] General Policy Change layout cloned (`1435573000000463001`) — add `fields_policy_change.csv` + Blueprint
+- [x] Billing and Cancellation layout cloned (`1435573000000464001`) — add `fields_billing.csv` and `fields_cancellation.csv` + Blueprint
 - [ ] Email templates (`email_templates.md`)
 - [ ] Workflows AUT-01 … AUT-10 (`automations.md`)
 - [ ] Required-by reminders (AUT-09)

@@ -7,10 +7,12 @@ future Desk API jobs apply one operating model.
 **Desk owns the work. Momentum owns the policy record. Zoho CRM owns the
 sales opportunity. Documents remain in the approved repository.**
 
-This pack does **not** push configuration into the Zoho account. Desk
-administration (departments, layouts, Blueprints, workflows) is done in
-Setup. Hermes can later read and update Tickets, Contacts, and Accounts
-through the Desk API (`hermes_integrations.zoho_desk_client`).
+Live portal IDs and what the Desk MCP already applied: `LIVE.md`.
+
+Hermes can later read and update Tickets, Contacts, and Accounts through the
+Desk API (`hermes_integrations.zoho_desk_client`). Custom fields, teams,
+statuses, Blueprints, and workflows still need Setup (or
+`scripts/zoho_desk_setup.py --apply` with Desk field-create scopes).
 
 ## Systems of record
 
@@ -25,7 +27,9 @@ through the Desk API (`hermes_integrations.zoho_desk_client`).
 
 ## Department and queues
 
-Start with **one** department: **Agency Service**.
+Start with **one** department: **Agency Service**. The live portal already
+has department **RSG** — treat that as Agency Service and do not create
+another.
 
 Too many departments fragment customer histories and complicate automation.
 Create another department only when it needs a truly separate email address,
@@ -130,6 +134,9 @@ Do not let keywords such as “ASAP” automatically make every ticket Urgent.
 
 ## Desk API (later)
 
-When a refresh token has Desk scopes and `ZOHO_DESK_ORG_ID` is set, Hermes can
-fetch and edit Tickets, Contacts, and Accounts. Layouts, Blueprints, and
-departments stay in the Desk admin UI until a dedicated admin tool exists.
+When a refresh token has Desk scopes and `ZOHO_DESK_ORG_ID` is set (`935382122`
+for the RSG portal), Hermes can fetch and edit Tickets, Contacts, and
+Accounts. Layouts for the four launch workflows already exist in the live
+org (`LIVE.md`). Blueprints, custom fields, teams, and statuses stay in the
+Desk admin UI until a token with field-create scopes can run
+`scripts/zoho_desk_setup.py --apply`.

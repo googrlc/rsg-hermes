@@ -21,8 +21,11 @@ Executable rules: `hermes/desk/`. Operator pack: `docs/zoho-desk/`.
 
 ## Department
 
-One department: **Agency Service**. Queues are ticket fields and teams, not
-extra departments.
+One department: **Agency Service**. The live portal already has department
+**RSG** — treat that as Agency Service and do not create another. Queues are
+ticket fields and teams, not extra departments.
+
+Live IDs: `docs/zoho-desk/LIVE.md` and `hermes/desk/live.py`.
 
 ## Launch workflows (first)
 

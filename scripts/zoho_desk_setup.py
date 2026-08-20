@@ -21,7 +21,7 @@ import json
 import sys
 from typing import Any
 
-from hermes.desk.setup import Phase1Plan, plan_phase1
+from hermes.desk.setup import Phase1Plan, matching_department, plan_phase1
 from hermes.desk.spec import DEPARTMENT
 from hermes_integrations.zoho_desk_client import ZohoDeskClient, ZohoDeskClientError
 
@@ -58,10 +58,7 @@ def build_plan(client: ZohoDeskClient) -> Phase1Plan:
             raise ZohoDeskClientError("Desk organization listing returned no id")
     departments = client.list_departments()
     fields = client.list_organization_fields("tickets")
-    existing = next(
-        (row for row in departments if str(row.get("name") or "") == DEPARTMENT),
-        None,
-    )
+    existing = matching_department(departments, DEPARTMENT)
     dept_id = str(existing["id"]) if existing and existing.get("id") else None
     teams = client.list_teams(department_id=dept_id) if dept_id else client.list_teams()
     return plan_phase1(

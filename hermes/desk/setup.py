@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hermes.desk.fields import ALL_FIELDS, Field
-from hermes.desk.spec import DEPARTMENT, TEAMS
+from hermes.desk.spec import DEPARTMENT, DEPARTMENT_ALIASES, TEAMS
 
 DESK_TYPES = {
     "Text": "Text",
@@ -73,12 +73,17 @@ def field_payload(spec: Field) -> dict[str, Any]:
     return payload
 
 
-def _by_label(rows: list[dict[str, Any]], label: str) -> dict[str, Any] | None:
-    needle = label.strip().lower()
-    for row in rows:
-        for key in ("name", "displayLabel", "layoutDisplayName"):
+def matching_department(
+    departments: list[dict[str, Any]],
+    department_name: str = DEPARTMENT,
+) -> dict[str, Any] | None:
+    """Return the live department, including the RSG alias for Agency Service."""
+    aliases = {department_name.strip().lower()}
+    aliases.update(alias.strip().lower() for alias in DEPARTMENT_ALIASES)
+    for row in departments:
+        for key in ("name", "displayLabel"):
             value = str(row.get(key) or "").strip().lower()
-            if value == needle:
+            if value in aliases:
                 return row
     return None
 
@@ -92,10 +97,11 @@ def plan_phase1(
     department_name: str = DEPARTMENT,
 ) -> Phase1Plan:
     plan = Phase1Plan(department_name=department_name)
-    existing = _by_label(departments, department_name)
+    existing = matching_department(departments, department_name)
     if existing and existing.get("id"):
         plan.existing_department_id = str(existing["id"])
-        plan.skipped.append(f"department:{department_name}")
+        live_name = str(existing.get("name") or department_name)
+        plan.skipped.append(f"department:{live_name}")
     else:
         if not agent_ids:
             raise ValueError(

@@ -53,6 +53,18 @@ def test_plan_skips_existing_and_creates_the_rest():
     assert "field:AMS Client ID" in plan.skipped
 
 
+def test_plan_treats_live_rsg_department_as_agency_service():
+    plan = plan_phase1(
+        departments=[{"id": "1435573000000006907", "name": "RSG"}],
+        fields=[],
+        teams=[],
+        agent_ids=["agent-1"],
+    )
+    assert plan.create_department is None
+    assert plan.existing_department_id == "1435573000000006907"
+    assert "department:RSG" in plan.skipped
+
+
 def test_plan_creates_department_when_missing():
     plan = plan_phase1(
         departments=[],

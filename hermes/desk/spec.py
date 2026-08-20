@@ -17,6 +17,10 @@ from dataclasses import dataclass
 
 DEPARTMENT = "Agency Service"
 
+# The live CRM Plus portal already has one department named RSG. Treat it as
+# Agency Service — never create a second department for queues.
+DEPARTMENT_ALIASES = (DEPARTMENT, "RSG")
+
 SYSTEMS_OF_RECORD = {
     "ams": "Momentum / NowCerts — clients, policies, coverages, transactions, carriers, documents of record",
     "crm": "Zoho CRM — leads, prospects, opportunities, referral partners, new-business pipeline",

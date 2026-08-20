@@ -26,6 +26,7 @@ from hermes.desk.spec import (
     AUTOMATIONS,
     CUSTOM_FUNCTIONS,
     DEPARTMENT,
+    DEPARTMENT_ALIASES,
     EMAIL_TEMPLATE_REQUIRED_TOKENS,
     EMAIL_TEMPLATES,
     KNOWLEDGE_BASE_INTERNAL,
@@ -36,6 +37,13 @@ from hermes.desk.spec import (
     SYSTEMS_OF_RECORD,
     TEAMS,
 )
+from hermes.desk.live import (
+    DEPARTMENT_ID,
+    LAYOUT_CLASSIFICATION_DEFAULTS,
+    LAYOUT_IDS,
+    NATIVE_BRIDGES,
+    ORG_ID,
+)
 from hermes.desk.titles import case_title
 
 DOCS = Path("docs/zoho-desk")
@@ -43,6 +51,7 @@ DOCS = Path("docs/zoho-desk")
 
 def test_operating_model_keeps_systems_separate():
     assert DEPARTMENT == "Agency Service"
+    assert "RSG" in DEPARTMENT_ALIASES
     assert "desk" in SYSTEMS_OF_RECORD
     assert "ams" in SYSTEMS_OF_RECORD
     assert "crm" in SYSTEMS_OF_RECORD
@@ -375,6 +384,16 @@ def test_docs_pack_covers_the_build_sequence():
     for name in LAUNCH_WORKFLOWS:
         assert name in readme
     assert (DOCS / "SETUP_CHECKLIST.md").is_file()
+    assert (DOCS / "LIVE.md").is_file()
+    live = (DOCS / "LIVE.md").read_text(encoding="utf-8")
+    assert ORG_ID in live
+    assert DEPARTMENT_ID in live
+    for layout_name, layout_id in LAYOUT_IDS.items():
+        assert layout_name in live
+        assert layout_id in live
+    assert NATIVE_BRIDGES["cf_request_category"] == "classification"
+    assert LAYOUT_CLASSIFICATION_DEFAULTS["Certificate Request"] == "Certificate Request"
+    assert LAYOUT_CLASSIFICATION_DEFAULTS["Billing and Cancellation"] == "Billing and Payments"
     assert (DOCS / "automations.md").is_file()
     assert (DOCS / "blueprints.md").is_file()
     assert (DOCS / "email_templates.md").is_file()
