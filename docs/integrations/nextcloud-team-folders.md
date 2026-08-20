@@ -10,21 +10,23 @@ Do **not** share a folder out of one person's Files tree. That folder lives in
 that user's quota, disappears if they leave, and does not have a consistent
 path for every login.
 
-## Live instance (checked 2026-08-20)
+## Live instance (applied 2026-08-20)
 
 | Item | Value |
 |---|---|
 | Host | `https://nextcloud-x6wle-u69864.vm.elestio.app` (Nextcloud 34.0.2) |
-| Staff group | `All Team` — already contains Gretchen Coates, Lamar, hermes, root |
-| Service account | `hermes` (already in `All Team`; use this instead of creating `agency_bot`) |
-| Admin | Elestio user `root` (only this login can enable apps) |
-| Team Folders app | **not enabled** until an admin applies the setup script |
-| Existing DAV root | `Carriers`, `Clients`, `Commercial Lines`, `Commissions`, `Deck`, `Hermes`, `Personal Lines`, `Talk`, `Unclassified - Needs Review` |
+| Staff group | `All Team` — Gretchen Coates, Lamar, hermes, root |
+| ACL subgroups | `Commercial Lines` (Lamar, hermes), `Personal Lines` (Gretchen Coates, hermes), `Management` (Lamar, root) |
+| Service account | `hermes` (in `All Team`; do not create `agency_bot`) |
+| Admin | Elestio user `root` |
+| Team Folders app | **enabled** (`groupfolders`) |
+| Team Folder | **Agency Documents** (id 1), All Team permissions 31, quota 500 GiB |
+| Lanes | `Agency Documents/Commercial Lines`, `…/Personal Lines`, `…/Claims` |
 
-`Commercial Lines/` and `Personal Lines/` at the hermes user's root are
-**personal folders**, not Team Folders. Leave them in place until `Agency
-Documents` exists, then file new work under the Team Folder. Do not MKCOL a
-personal folder named `Agency Documents` — that collides with the mount.
+Hermes already sees `Agency Documents` at WebDAV root. Personal folders named
+`Commercial Lines/` / `Personal Lines/` / `Clients/` still exist beside the
+mount — leave them; file **new** work under the Team Folder. Do not MKCOL a
+second personal folder named `Agency Documents`.
 
 ## Canonical tree
 
