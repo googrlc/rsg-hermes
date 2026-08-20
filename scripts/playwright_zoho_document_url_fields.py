@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Create Zoho Nextcloud URL fields using a logged-in Playwright CRM session.
 
-This cloud VM cannot finish the job: Playwright opens Zoho's sign-in page and
-there are no ZOHO credentials here. Run this headed on a machine where you can
-sign into the RSG Zoho org. After login, the script calls the same Settings API
-as ``ensure_zoho_document_url_fields.py`` (create Website fields, put them on
-the Standard layout Documents section) using the CRM cookies + CSRF token — no
+After you sign into CRM (including CRM Plus at crmplus.zoho.com), this script
+calls the Settings API with the browser cookies, CSRF token, and X-CRM-ORG
+header. Same payloads as ``ensure_zoho_document_url_fields.py`` — no
 ``ZohoCRM.settings.ALL`` OAuth scope required.
 
 Usage:
@@ -15,19 +13,11 @@ Usage:
     python scripts/playwright_zoho_document_url_fields.py
   PYTHONPATH=packages/rsg-hermes-core:. \\
     python scripts/playwright_zoho_document_url_fields.py --apply
-
-Optional:
-  --storage-state state/zoho-playwright.json   reuse a previous login
-  --headed / --headless
-  --login-timeout 300
-  --module Accounts
-  ZOHO_EMAIL / ZOHO_PASSWORD   pre-fill the sign-in form (2FA still needs you)
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
@@ -36,6 +26,7 @@ from typing import Any
 from hermes_integrations.zoho_document_fields import DOCUMENT_URL_FIELDS
 from hermes_integrations.zoho_settings_ensure import (
     crm_csrf_from_cookie_header,
+    crm_org_from_url,
     crm_origin_from_url,
     decode_settings_response,
     list_module_api_names,
@@ -63,9 +54,10 @@ class PlaywrightZohoSettingsClient:
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         origin = crm_origin_from_url(self.page.url)
+        org = crm_org_from_url(self.page.url)
         url = settings_url(origin, path, query, version=self.api_version)
         result = self.page.evaluate(
-            """async ({ method, url, body }) => {
+            """async ({ method, url, body, org }) => {
               const csrf = (() => {
                 const parts = document.cookie.split(';');
                 const wanted = ['crmcsr', 'crmcsrfparam', 'CSRF_TOKEN'];
@@ -80,8 +72,9 @@ class PlaywrightZohoSettingsClient:
                 }
                 return '';
               })();
-              const headers = { 'Content-Type': 'application/json' };
+              const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
               if (csrf) headers['X-ZCSRF-TOKEN'] = 'crmcsrfparam=' + csrf;
+              if (org) headers['X-CRM-ORG'] = org;
               const res = await fetch(url, {
                 method,
                 credentials: 'include',
@@ -90,7 +83,7 @@ class PlaywrightZohoSettingsClient:
               });
               return { status: res.status, text: await res.text() };
             }""",
-            {"method": method, "url": url, "body": body},
+            {"method": method, "url": url, "body": body, "org": org},
         )
         return decode_settings_response(method, url, int(result["status"]), str(result.get("text") or ""))
 

@@ -39,6 +39,7 @@ def test_website_payload_is_url_field():
     assert payload["data_type"] == "website"
     assert payload["field_label"] == "Document URL"
     assert payload["length"] == 450
+    assert len(payload["tooltip"]["value"]) <= 32
 
 
 def test_is_http_url_rejects_relative_paths():

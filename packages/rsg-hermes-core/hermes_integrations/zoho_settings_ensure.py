@@ -24,7 +24,8 @@ from hermes_integrations.zoho_document_fields import (
     website_create_payload,
 )
 
-CRM_HOST_RE = re.compile(r"^crm\.zoho\.[a-z.]+$", re.I)
+CRM_HOST_RE = re.compile(r"^(?:crmplus\.|crm\.)zoho\.[a-z.]+$", re.I)
+ORG_ID_RE = re.compile(r"/org(\d+)", re.I)
 CSRF_COOKIE_NAMES = ("crmcsr", "crmcsrfparam", "CSRF_TOKEN")
 
 
@@ -40,15 +41,23 @@ class SettingsClient(Protocol):
 
 
 def crm_origin_from_url(url: str) -> str:
-    """Return ``https://crm.zoho.com`` (or .eu / .in / …) from a CRM page URL."""
+    """Return the CRM origin (``crm.zoho.com`` or ``crmplus.zoho.com``) from a page URL."""
     parsed = urllib.parse.urlparse(str(url or "").strip())
     host = parsed.hostname or ""
     if not CRM_HOST_RE.match(host):
         raise RuntimeError(
-            f"Not on a Zoho CRM host yet (got {url!r}). Log into crm.zoho.com first."
+            f"Not on a Zoho CRM host yet (got {url!r}). Log into crm.zoho.com or crmplus.zoho.com first."
         )
     scheme = parsed.scheme or "https"
     return f"{scheme}://{host}"
+
+
+def crm_org_from_url(url: str) -> str:
+    """Parse ``org935119573`` from a CRM Plus / CRM URL."""
+    match = ORG_ID_RE.search(str(url or ""))
+    if match:
+        return match.group(1)
+    return str(os.environ.get("ZOHO_CRM_ORG") or "").strip()
 
 
 def crm_csrf_from_cookie_header(cookie_header: str) -> str:

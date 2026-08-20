@@ -10,7 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 # Zoho website/URL fields cap at 450 characters.
+# Tooltip static_text max is 32 (live Settings API rejected 35).
 URL_FIELD_LENGTH = 450
+TOOLTIP_MAX_LENGTH = 32
 DOCUMENTS_SECTION = "Documents"
 
 # module API name -> fields to create. Accounts gets the client folder;
@@ -134,7 +136,7 @@ def website_create_payload(spec: dict[str, str]) -> dict[str, Any]:
     }
     tooltip = spec.get("tooltip")
     if tooltip:
-        payload["tooltip"] = {"name": "static_text", "value": tooltip[:35]}
+        payload["tooltip"] = {"name": "static_text", "value": tooltip[:TOOLTIP_MAX_LENGTH]}
     return payload
 
 

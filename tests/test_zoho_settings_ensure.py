@@ -18,6 +18,17 @@ from hermes_integrations.zoho_settings_ensure import (
 def test_crm_origin_from_us_and_eu_hosts():
     assert crm_origin_from_url("https://crm.zoho.com/crm/settings/modules") == "https://crm.zoho.com"
     assert crm_origin_from_url("https://crm.zoho.eu/crm/tab/Accounts") == "https://crm.zoho.eu"
+    assert crm_origin_from_url(
+        "https://crmplus.zoho.com/rsg10761/index.do/cxapp/crm/org935119573/settings/modules"
+    ) == "https://crmplus.zoho.com"
+
+
+def test_crm_org_from_url():
+    from hermes_integrations.zoho_settings_ensure import crm_org_from_url
+
+    assert crm_org_from_url(
+        "https://crmplus.zoho.com/rsg10761/index.do/cxapp/crm/org935119573/tab/Accounts/1"
+    ) == "935119573"
 
 
 def test_crm_origin_rejects_signin():
