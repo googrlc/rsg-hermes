@@ -20,6 +20,11 @@ node_modules/
 *.tmp
 *.swp
 
+# Playwright MCP / local browser noise (never commit screenshots or sessions)
+.playwright-mcp/
+playwright-report/
+zoho-signin-page.png
+
 # Environment
 .env
 .env.local

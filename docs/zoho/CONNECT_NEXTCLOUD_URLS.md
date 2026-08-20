@@ -31,34 +31,56 @@ Field definitions: `fields_accounts.csv`, `fields_policies.csv`,
 
 ## 1. Create the URL fields (this is the actual connect)
 
-Hermes cannot click Setup for you. Run the ensure script with Zoho OAuth
-in the environment (`ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`,
-`ZOHO_REFRESH_TOKEN`). The token needs `ZohoCRM.settings.ALL` (fields +
-layouts + modules).
+Two ways to create the fields. Both send the same Settings API payloads
+(Website / URL, length 450, Documents section on the Standard layout).
+Claims and Certificates are skipped until those custom modules exist.
+
+### A. Playwright (log into CRM in a browser)
+
+Use this when you can sign into the RSG Zoho org but the OAuth token does
+not have `ZohoCRM.settings.ALL`. A headed Chromium window opens; finish
+sign-in (and 2FA). The script then uses that session.
+
+```bash
+cd /opt/rsg-hermes   # or this repo root
+source .venv/bin/activate
+pip install playwright
+playwright install chromium
+PYTHONPATH=packages/rsg-hermes-core:. \
+  python scripts/playwright_zoho_document_url_fields.py
+PYTHONPATH=packages/rsg-hermes-core:. \
+  python scripts/playwright_zoho_document_url_fields.py --apply
+```
+
+The session is saved to `state/zoho-playwright.json` (gitignored) so later
+runs can skip login. Optional: `ZOHO_EMAIL` / `ZOHO_PASSWORD` pre-fill the
+form; 2FA still needs you.
+
+A Cursor Playwright MCP tab pointed at Zoho is the same gate: if the tab
+is sitting on `accounts.zoho.com/signin`, the fields cannot be created
+until someone completes login in that browser.
+
+### B. OAuth ensure script
+
+Needs `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN` with
+`ZohoCRM.settings.ALL` (fields + layouts + modules).
 
 ```bash
 cd /opt/rsg-hermes   # or this repo root
 source .venv/bin/activate
 PYTHONPATH=packages/rsg-hermes-core:. \
   python scripts/ensure_zoho_document_url_fields.py
-```
-
-Dry-run prints which fields are missing. Then:
-
-```bash
 PYTHONPATH=packages/rsg-hermes-core:. \
   python scripts/ensure_zoho_document_url_fields.py --apply
 ```
 
-That will:
+Either path will:
 
 1. `POST /crm/v8/settings/fields?module=…` — create Website fields
 2. `PATCH /crm/v8/settings/layouts/{id}` — put them in a **Documents**
    section on the Standard layout so they are visible and clickable
 
-Claims and Certificates are skipped until those custom modules exist.
-
-### Manual backup (if the token lacks settings scope)
+### Manual backup (if neither script can authenticate)
 
 Zoho CRM → Setup → Customization → Modules and Fields → pick the module →
 **New Field** → type **URL** (sometimes labeled Website):

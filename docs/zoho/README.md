@@ -22,7 +22,7 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 
 1. Create custom modules **Policies**, **Renewal_Events**, **Renewals**, **AMS_Write_Queue** (if not using Zoho Insurance vertical for Policies). Optional later: **Claims**, **Certificates**.
 2. Create two Deal pipelines: **New Business** and **Renewals**, with stages copied from `picklists_nowcerts_seed.csv` (`pipeline_new_business` / `pipeline_renewal`).
-3. For each `fields_*.csv` row: create the field with the given **API_Name**, **Data_Type**, **Length**, and picklist values. URL fields: run `scripts/ensure_zoho_document_url_fields.py --apply` (see [`CONNECT_NEXTCLOUD_URLS.md`](CONNECT_NEXTCLOUD_URLS.md)).
+3. For each `fields_*.csv` row: create the field with the given **API_Name**, **Data_Type**, **Length**, and picklist values. URL fields: run `scripts/playwright_zoho_document_url_fields.py --apply` (headed CRM login) or `scripts/ensure_zoho_document_url_fields.py --apply` (see [`CONNECT_NEXTCLOUD_URLS.md`](CONNECT_NEXTCLOUD_URLS.md)).
 4. Store NowCerts option UUIDs in the companion `*_Option_ID` fields (do not invent new UUIDs).
 5. Mark External IDs as listed in the checklist before any AMS sync.
 

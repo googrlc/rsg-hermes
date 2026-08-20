@@ -158,7 +158,7 @@ Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch date
 
 See [`CONNECT_NEXTCLOUD_URLS.md`](CONNECT_NEXTCLOUD_URLS.md). Nextcloud is the file store. Zoho holds https URLs.
 
-- [ ] Run `python scripts/ensure_zoho_document_url_fields.py --apply` (needs `ZohoCRM.settings.ALL`)
+- [ ] Run `python scripts/playwright_zoho_document_url_fields.py --apply` (headed login) **or** `python scripts/ensure_zoho_document_url_fields.py --apply` (needs `ZohoCRM.settings.ALL`)
 - [ ] Accounts: `Nextcloud_Folder_URL` on the Standard layout
 - [ ] Policies / Deals / Renewals: `Primary_Folder_URL` + `Document_URL`
 - [ ] Optional: create modules Claims and Certificates, then re-run the script
