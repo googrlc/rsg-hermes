@@ -10,14 +10,11 @@ paste [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md) into Cliq Smart Chat
 (`Ctrl+Space`); that searches contacts/channels. Creator Zia for forms is
 **+ → Form → Using Zia**. Fallback: click through below and paste Deluge by hand.
 
-**Playwright (logged-in browser):** from the repo root, `scripts/zoho-creator-desk`
-(`npm install && npm run build-desk`). See that folder's README. It opens the
-existing `renewals-desk` app only.
-
 Creator MCP in Cursor can inventory the live app (see
 [`LIVE_INVENTORY.md`](LIVE_INVENTORY.md)) but cannot create pages, reports,
-CRM integrations, or workflows. The builder requires a logged-in Creator IDE
-session. Do not create a second application to work around that.
+CRM integrations, or workflows. Paste [`pages/desk.html`](pages/desk.html)
+(palette included) into the Desk page HTML snippet. Do not create a second
+application.
 
 ## Prerequisites
 

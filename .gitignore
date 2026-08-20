@@ -11,8 +11,6 @@ __pycache__/
 .venv-tmp-openclaw/
 venv/
 node_modules/
-scripts/zoho-creator-desk/.pw-profile/
-scripts/zoho-creator-desk/storage-state.json
 
 # OS / tooling noise
 .DS_Store
