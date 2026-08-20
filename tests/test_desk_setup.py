@@ -34,6 +34,12 @@ def test_field_payload_maps_desk_types_and_marks_sensitive():
     assert field_payload(url)["type"] == "URL"
     dt = next(f for f in SHARED_FIELDS if f.api_name == "cf_last_sync_date")
     assert field_payload(dt)["type"] == "DateTime"
+    amount = next(f for f in SHARED_FIELDS if f.api_name == "cf_reopen_count")
+    assert field_payload(amount)["type"] == "Number"
+    from hermes.desk.fields import BILLING_FIELDS
+
+    due_amt = next(f for f in BILLING_FIELDS if f.api_name == "cf_amount_due")
+    assert field_payload(due_amt)["decimalPlaces"] == "2"
     assert set(DESK_TYPES) >= {"Picklist", "URL", "DateTime", "Boolean"}
 
 

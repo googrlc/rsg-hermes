@@ -64,6 +64,8 @@ def field_payload(spec: Field) -> dict[str, Any]:
     }
     if spec.length and desk_type in {"Text", "Number", "Decimal", "Email", "Phone", "URL"}:
         payload["maxLength"] = str(spec.length)
+    if desk_type == "Decimal":
+        payload["decimalPlaces"] = "2"
     if spec.picklist_values:
         payload["_allowedValues"] = list(spec.picklist_values)
         payload["_isMandatory"] = spec.mandatory

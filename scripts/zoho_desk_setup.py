@@ -21,8 +21,17 @@ import json
 import sys
 from typing import Any
 
+from hermes.desk.fields import (
+    AUTO_DRIVER_FIELDS,
+    BILLING_FIELDS,
+    CANCELLATION_FIELDS,
+    CERTIFICATE_FIELDS,
+    POLICY_CHANGE_FIELDS,
+    SHARED_FIELDS,
+)
 from hermes.desk.live import LAYOUT_IDS
 from hermes.desk.setup import Phase1Plan, matching_department, plan_phase1
+from hermes.desk.spec import CATEGORIES
 from hermes.desk.spec import DEPARTMENT
 from hermes_integrations.zoho_desk_client import ZohoDeskClient, ZohoDeskClientError
 
@@ -70,6 +79,30 @@ def build_plan(client: ZohoDeskClient) -> Phase1Plan:
     )
 
 
+DEFAULT_LAYOUT_ID = LAYOUT_IDS["General Service"]
+CLONE_TARGETS = {
+    "shared": [lid for name, lid in LAYOUT_IDS.items() if name != "General Service"],
+    "certificate": [LAYOUT_IDS["Certificate Request"]],
+    "auto_driver": [LAYOUT_IDS["Auto or Driver Change"]],
+    "policy_change": [LAYOUT_IDS["General Policy Change"]],
+    "billing": [LAYOUT_IDS["Billing and Cancellation"]],
+    "cancellation": [LAYOUT_IDS["Billing and Cancellation"]],
+}
+
+
+def _create_ticket_field(client: ZohoDeskClient, payload: dict[str, Any]) -> tuple[dict[str, Any], list[str] | None]:
+    try:
+        return client.create_field(payload, module="tickets"), None
+    except ZohoDeskClientError as exc:
+        if "LICENSE_ACCESS_LIMITED" in str(exc) and payload.get("type") == "Boolean":
+            fallback = dict(payload)
+            fallback["type"] = "Picklist"
+            fallback.pop("isEncryptedField", None)
+            body = client.create_field(fallback, module="tickets")
+            return body, ["Yes", "No"]
+        raise
+
+
 def apply_plan(client: ZohoDeskClient, plan: Phase1Plan) -> dict[str, Any]:
     created: list[dict[str, str]] = []
     errors: list[dict[str, str]] = []
@@ -83,29 +116,40 @@ def apply_plan(client: ZohoDeskClient, plan: Phase1Plan) -> dict[str, Any]:
         allowed = payload.pop("_allowedValues", None)
         mandatory = payload.pop("_isMandatory", None)
         try:
-            body = client.create_field(payload, module="tickets")
+            body, fallback_values = _create_ticket_field(client, payload)
         except ZohoDeskClientError as exc:
             errors.append({"kind": "field", "name": item.name, "error": str(exc)[:400]})
             continue
+        if fallback_values:
+            allowed = list(fallback_values)
+            created.append(
+                {
+                    "kind": "field",
+                    "name": item.name,
+                    "id": str(body.get("id") or ""),
+                    "apiName": str(body.get("apiName") or ""),
+                    "note": "Boolean limit 20; created as Yes/No picklist",
+                }
+            )
+        else:
+            created.append(
+                {
+                    "kind": "field",
+                    "name": item.name,
+                    "id": str(body.get("id") or ""),
+                    "apiName": str(body.get("apiName") or ""),
+                }
+            )
         field_id = str(body.get("id") or "")
-        created.append(
-            {
-                "kind": "field",
-                "name": item.name,
-                "id": field_id,
-                "apiName": str(body.get("apiName") or ""),
-            }
-        )
-        layout_id = LAYOUT_IDS.get("General Service")
         patch: dict[str, Any] = {}
         if allowed:
             patch["allowedValues"] = list(allowed)
             patch["sortBy"] = "userDefined"
         if mandatory:
             patch["isMandatory"] = True
-        if patch and field_id and layout_id:
+        if patch and field_id:
             try:
-                client.patch_layout_field(layout_id, field_id, patch)
+                client.patch_layout_field(DEFAULT_LAYOUT_ID, field_id, patch)
             except ZohoDeskClientError as exc:
                 errors.append(
                     {"kind": "field-layout", "name": item.name, "error": str(exc)[:400]}
@@ -120,6 +164,10 @@ def apply_plan(client: ZohoDeskClient, plan: Phase1Plan) -> dict[str, Any]:
             errors.append({"kind": "team", "name": item.name, "error": str(exc)[:400]})
             continue
         created.append({"kind": "team", "name": item.name, "id": str(body.get("id") or "")})
+
+    clone_errors = _clone_fields_to_layouts(client)
+    errors.extend(clone_errors)
+    _patch_request_category(client)
     return {
         "org_id": client.org_id,
         "department_id": department_id,
@@ -127,6 +175,59 @@ def apply_plan(client: ZohoDeskClient, plan: Phase1Plan) -> dict[str, Any]:
         "skipped": plan.skipped,
         "errors": errors,
     }
+
+
+def _label_to_field_id(client: ZohoDeskClient) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for row in client.list_organization_fields("tickets"):
+        if not row.get("isCustomField"):
+            continue
+        label = str(row.get("displayLabel") or "").strip().lower()
+        fid = str(row.get("id") or "")
+        if label and fid:
+            out[label] = fid
+    return out
+
+
+def _clone_fields_to_layouts(client: ZohoDeskClient) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    ids = _label_to_field_id(client)
+    groups = (
+        ("shared", SHARED_FIELDS),
+        ("certificate", CERTIFICATE_FIELDS),
+        ("auto_driver", AUTO_DRIVER_FIELDS),
+        ("policy_change", POLICY_CHANGE_FIELDS),
+        ("billing", BILLING_FIELDS),
+        ("cancellation", CANCELLATION_FIELDS),
+    )
+    seen: set[str] = set()
+    for group, fields in groups:
+        targets = [tid for tid in CLONE_TARGETS[group] if tid != DEFAULT_LAYOUT_ID]
+        if not targets:
+            continue
+        for spec in fields:
+            label = spec.label.strip().lower()
+            fid = ids.get(label)
+            if not fid or fid in seen:
+                continue
+            seen.add(fid)
+            try:
+                client.clone_field_to_layouts(DEFAULT_LAYOUT_ID, fid, targets)
+            except ZohoDeskClientError as exc:
+                errors.append({"kind": "clone", "name": spec.label, "error": str(exc)[:400]})
+    return errors
+
+
+def _patch_request_category(client: ZohoDeskClient) -> None:
+    ids = _label_to_field_id(client)
+    fid = ids.get("request category")
+    if not fid:
+        return
+    client.patch_layout_field(
+        DEFAULT_LAYOUT_ID,
+        fid,
+        {"allowedValues": list(CATEGORIES), "sortBy": "userDefined", "isMandatory": True},
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
