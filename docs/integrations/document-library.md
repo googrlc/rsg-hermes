@@ -6,9 +6,11 @@ references. It renders as **folders → documents**.
 
 > **This is not the file store.** Client files (policies, applications, quotes,
 > signed docs, COIs' source material) live in **Nextcloud**, the agency's file
-> source of truth. This library only holds the write-ups Hermes authors, so they
-> are searchable and recallable by the agent. There is **no Google Drive** in this
-> pipeline (the former Drive mirror was removed 2026-07-10).
+> source of truth. Metadata for those files belongs in Zoho **Document_Registry**
+> (see `docs/integrations/nextcloud-team-folders.md`). This library only holds
+> the write-ups Hermes authors, so they are searchable and recallable by the
+> agent. There is **no Google Drive** in this pipeline (the former Drive mirror
+> was removed 2026-07-10).
 
 ## Where documents live (two stores, one write)
 

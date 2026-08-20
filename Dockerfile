@@ -31,6 +31,11 @@ COPY . .
 # at module scope, so it must be installed before the app is.
 RUN pip install -e './packages/rsg-hermes-core'
 RUN pip install -e '.'
+# `pyproject.toml` only sets lower bounds, so `pip install -e .` pulls FastAPI
+# 0.141+ and `include_router` stores lazy wrappers. That breaks split-service
+# routing in hermes/services.py. Pin to poetry.lock (same as .cursor/install.sh).
+RUN pip install "fastapi==0.136.1" "starlette==1.0.0" "uvicorn==0.46.0" \
+    && python -c "import fastapi, starlette, uvicorn; print('fastapi', fastapi.__version__, 'starlette', starlette.__version__, 'uvicorn', uvicorn.__version__)"
 # Belt-and-suspenders: guarantee the PDF dependency is present + pinned in the image
 # (renewal worksheet PDF generation). Verified in CI/rebuild via `python -c import reportlab`.
 RUN pip install "reportlab==5.0.0"

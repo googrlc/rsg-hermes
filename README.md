@@ -46,7 +46,7 @@ The credentials that matter now are:
 | **`hermes-api` bearer** | `HERMES_API_TOKEN`, `HERMES_API_HOST`, `HERMES_API_PORT` |
 | **LLM (advisor / NL agent)** | `HERMES_OPENAI_API_KEY` / `LITELLM_API_KEY` + `LITELLM_BASE_URL` |
 | **Slack posting** (outbound only) | `SLACK_THE_BOSS`, `HERMES_SENTINEL_SLACK_CHANNEL`, bot token |
-| **Nextcloud (file storage)** | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_APP_PASSWORD` |
+| **Nextcloud (file storage)** | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_APP_PASSWORD`; after Team Folders: `NEXTCLOUD_BASE_PATH=Agency Documents` (see [`docs/integrations/nextcloud-team-folders.md`](docs/integrations/nextcloud-team-folders.md)) |
 
 The `ESPO_*` keys are gone from `.env.example` — nothing reads them. See
 [`docs/DEPLOY.md`](docs/DEPLOY.md) for the box layout.

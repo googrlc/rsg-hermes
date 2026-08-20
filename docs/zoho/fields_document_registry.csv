@@ -1,0 +1,20 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Document_Registry,Document Name,Name,Single Line,255,Y,N,N,,,,Z-only,,"Display field; auto from file name if blank"
+Document_Registry,Account,Account,Lookup (Accounts),,N,N,N,,,Z-only,account_id,Links to the client
+Document_Registry,Account Name,Account_Name,Single Line,255,Y,N,N,,,Z-only,account_name,Searchable even when Account lookup is empty
+Document_Registry,Policy,Policy,Lookup (Policies),,N,N,N,,,Z-only,policy_id,Skip create if Policies module is not in the org yet
+Document_Registry,Document Type,Document_Type,Picklist,50,Y,N,N,,picklists_hermes_vocab.csv:document_registry_type,Z-only,document_type,
+Document_Registry,Carrier,Carrier,Single Line,150,N,N,N,,,Z-only,carrier,Free text until a Carriers module exists
+Document_Registry,Policy Type,Policy_Type,Picklist,80,Y,N,N,,picklists_hermes_vocab.csv:document_registry_policy_type,Z-only,policy_type,
+Document_Registry,Effective Date,Effective_Date,Date,,N,N,N,,,Z-only,effective_date,yyyy-MM-dd
+Document_Registry,Expiration Date,Expiration_Date,Date,,N,N,N,,,Z-only,expiration_date,yyyy-MM-dd
+Document_Registry,Renewal Cycle,Renewal_Cycle,Picklist,10,Y,N,N,,picklists_hermes_vocab.csv:document_registry_renewal_cycle,Z-only,renewal_cycle,
+Document_Registry,Line of Business,Line_of_Business,Picklist,40,Y,N,N,,picklists_hermes_vocab.csv:document_registry_line,Z-only,line_of_business,
+Document_Registry,Nextcloud File URL,Nextcloud_File_URL,URL,450,Y,N,N,,,System,files_url,GOLDEN RULE — mandatory; Files UI URL from Hermes after PUT
+Document_Registry,Nextcloud File ID,Nextcloud_File_ID,Single Line,100,N,Y,N,,,System,file_id,OC-FileId response header
+Document_Registry,Nextcloud Folder Path,Nextcloud_Folder_Path,Single Line,255,N,N,N,,,System,folder_path,Canonical path under Agency Documents
+Document_Registry,File Name,File_Name,Single Line,255,N,N,N,,,System,file_name,Filename in Nextcloud
+Document_Registry,Uploaded By,Uploaded_By,Lookup (Users),,N,N,N,,,Z-only,uploaded_by,Who uploaded
+Document_Registry,Status,Status,Picklist,20,Y,N,N,Active,picklists_hermes_vocab.csv:document_registry_status,Z-only,status,
+Document_Registry,File Size,File_Size,Number,9,N,N,N,,,System,file_size,Bytes from Nextcloud PUT (Zoho integer max 9 digits)
+Document_Registry,MIME Type,MIME_Type,Single Line,100,N,N,N,,,System,mime_type,e.g. application/pdf

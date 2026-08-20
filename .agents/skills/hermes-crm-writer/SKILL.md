@@ -179,7 +179,8 @@ exposes `list_renewals`, `list_tasks`, `list_documents`, `retention_scan`,
 `list_commissions`, `commission_rules`, `carrier_appetite`,
 `ams_search_insured`, `sync_health`, `ping`, `create_client`, `create_case`,
 `create_task`, `complete_task`, `draft_intake`, `save_document`,
-`file_to_nextcloud`, `ams_create_insured`, `ams_upsert_policy`,
+`file_to_nextcloud`, `document_registry_upload`, `document_registry_search`,
+`ams_create_insured`, `ams_upsert_policy`,
 `hermes_dispatch` — and nothing for the pipeline. Use HTTP. If pipeline writes
 become routine, the fix is a bridge tool, not a workaround.
 

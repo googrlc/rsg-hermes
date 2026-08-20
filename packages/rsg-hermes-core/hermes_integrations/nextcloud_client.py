@@ -11,9 +11,17 @@ Config (env; real values live only in .env / 1Password, never committed):
     NEXTCLOUD_APP_PASSWORD  Nextcloud app password
     NEXTCLOUD_BASE_PATH     optional prefix under the user's files (e.g. "Agency")
 
-Folder taxonomy (confirmed):
-    Clients/{client}/{Renewal Reviews|COIs|Policies|Proposals|Quotes|Correspondence}/
-    Internal/{folder}/
+Folder taxonomy:
+
+    Legacy (still used by intake/renewal filing until accounts are cut over):
+        Clients/{client}/{Renewal Reviews|COIs|Policies|Proposals|Quotes|Correspondence|Intake}/
+
+    Team Folder (canonical shared store — see nextcloud_team_folders.py):
+        {NEXTCLOUD_BASE_PATH or "Agency Documents"}/
+            Commercial Lines/{account}/{policy type}/{document type}s/{year}/
+            Personal Lines/{account}/{policy type}/{document type}s/{year}/
+            Claims/{account}/...
+        Internal/{folder}/
 """
 
 from __future__ import annotations
@@ -27,6 +35,14 @@ if TYPE_CHECKING:
 
 # The confirmed per-client document categories.
 CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Quotes", "Correspondence", "Intake")
+
+# Canonical Team Folder lanes (relative to NEXTCLOUD_BASE_PATH).
+TEAM_FOLDER_NAME = "Agency Documents"
+AGENCY_LINE_ROOTS = {
+    "commercial": "Commercial Lines",
+    "personal": "Personal Lines",
+    "claims": "Claims",
+}
 
 # PROPFIND body — ask only for the props list_dir surfaces (keeps the response small).
 _PROPFIND_BODY = (
@@ -43,10 +59,14 @@ class NextcloudError(RuntimeError):
     pass
 
 
-def _sanitize_segment(name: str) -> str:
+def sanitize_segment(name: str) -> str:
     """Trim a path segment to something safe for a folder/file name (no slashes)."""
     cleaned = (name or "").replace("/", "-").replace("\\", "-").strip().strip(".")
     return cleaned or "unnamed"
+
+
+# Kept as an alias — older callers import the private name.
+_sanitize_segment = sanitize_segment
 
 
 class NextcloudClient:
@@ -109,6 +129,67 @@ class NextcloudClient:
     def _dav_url(self, rel_path: str) -> str:
         return f"{self._dav_base()}/{self._encode(self._rel_with_base(rel_path))}"
 
+    def files_ui_url(self, rel_path: str, *, fileid: str | int | None = None) -> str:
+        """Nextcloud Files UI URL for a folder (Option C CRM link). Requires login."""
+        self._require_configured()
+        directory = self._rel_with_base(rel_path).strip("/")
+        # Files UI wants an unencoded path in the dir query; spaces are fine.
+        url = f"{self.url}/apps/files/?dir=/{directory}"
+        if fileid is not None and str(fileid).strip():
+            url = f"{url}&fileid={fileid}"
+        return url
+
+    def agency_account_dir(
+        self,
+        *,
+        line: str,
+        account: str,
+        policy_type: str,
+        document_type: str,
+        year: str,
+    ) -> str:
+        """Relative path for one account/policy/document/year folder in the agency tree.
+
+        ``line`` is commercial | personal | claims. The returned path is relative
+        to the WebDAV user root *before* ``NEXTCLOUD_BASE_PATH`` is applied, so
+        callers pass it to ``ensure_dirs`` / ``put_file`` as usual.
+        """
+        key = (line or "").strip().lower()
+        if key not in AGENCY_LINE_ROOTS:
+            raise NextcloudError(
+                f"unknown agency line {line!r} — expected one of {sorted(AGENCY_LINE_ROOTS)}"
+            )
+        from hermes_integrations.nextcloud_paths import pluralize_document_type
+
+        parts = [
+            AGENCY_LINE_ROOTS[key],
+            _sanitize_segment(account),
+            _sanitize_segment(policy_type),
+            pluralize_document_type(document_type),
+            _sanitize_segment(year),
+        ]
+        return "/".join(parts)
+
+    def ensure_agency_account_tree(
+        self,
+        *,
+        line: str,
+        account: str,
+        policy_type: str,
+        document_type: str,
+        year: str,
+    ) -> str:
+        """MKCOL the canonical Team Folder account tree. Returns the stored path."""
+        rel = self.agency_account_dir(
+            line=line,
+            account=account,
+            policy_type=policy_type,
+            document_type=document_type,
+            year=year,
+        )
+        self.ensure_dirs(rel)
+        return self._rel_with_base(rel)
+
     # -- operations ---------------------------------------------------------
 
     def ensure_dirs(self, rel_dir: str) -> None:
@@ -147,22 +228,83 @@ class NextcloudClient:
         if resp.status_code not in (200, 201):
             raise NextcloudError(f"Talk post to {token} failed: {resp.status_code} {resp.text[:200]}")
 
-    def put_file(self, rel_path: str, content: bytes, *, content_type: str = "application/octet-stream") -> str:
+    def put_file(
+        self,
+        rel_path: str,
+        content: bytes,
+        *,
+        content_type: str = "application/octet-stream",
+        auto_mkcol: bool = False,
+    ) -> str:
         """Upload bytes to *rel_path* (creating parent dirs). Returns the stored path."""
+        return self.put_file_receipt(
+            rel_path, content, content_type=content_type, auto_mkcol=auto_mkcol
+        )["path"]
+
+    def put_file_receipt(
+        self,
+        rel_path: str,
+        content: bytes,
+        *,
+        content_type: str = "application/octet-stream",
+        auto_mkcol: bool = False,
+    ) -> dict[str, Any]:
+        """PUT a file and return path, Files UI URL, WebDAV URL, and OC-FileId.
+
+        When ``auto_mkcol`` is true, send ``X-NC-WebDAV-AutoMkcol: 1`` (Nextcloud
+        32+) so missing parents are created in one request. A 404/409 falls back
+        to explicit MKCOL then PUT. ``put_file`` keeps the historical MKCOL-first
+        behaviour (``auto_mkcol=False``).
+        """
         self._require_configured()
-        parent = "/".join(rel_path.strip("/").split("/")[:-1])
-        if parent:
+        rel = rel_path.strip("/")
+        parent = "/".join(rel.split("/")[:-1])
+        headers = {"Content-Type": content_type}
+        if auto_mkcol:
+            headers["X-NC-WebDAV-AutoMkcol"] = "1"
+        elif parent:
             self.ensure_dirs(parent)
+
         resp = self.session.put(
-            self._dav_url(rel_path),
+            self._dav_url(rel),
             data=content,
-            headers={"Content-Type": content_type},
+            headers=headers,
             verify=self.verify_tls,
             timeout=60,
         )
+        if auto_mkcol and resp.status_code in (404, 409) and parent:
+            self.ensure_dirs(parent)
+            headers = {"Content-Type": content_type}
+            resp = self.session.put(
+                self._dav_url(rel),
+                data=content,
+                headers=headers,
+                verify=self.verify_tls,
+                timeout=60,
+            )
         if resp.status_code not in (200, 201, 204):
             raise NextcloudError(f"PUT {rel_path} failed: {resp.status_code} {resp.text[:200]}")
-        return self._rel_with_base(rel_path)
+
+        file_id = None
+        get_header = getattr(getattr(resp, "headers", None), "get", None)
+        if callable(get_header):
+            raw_id = get_header("OC-FileId")
+            if isinstance(raw_id, (str, int)) and str(raw_id).strip():
+                file_id = str(raw_id).strip()
+        stored = self._rel_with_base(rel)
+        folder = "/".join(stored.split("/")[:-1])
+        file_name = stored.rsplit("/", 1)[-1]
+        return {
+            "path": stored,
+            "folder_path": folder,
+            "file_name": file_name,
+            "webdav_url": self._dav_url(rel),
+            "files_url": self.files_ui_url(folder or stored, fileid=file_id),
+            "file_id": file_id,
+            "status_code": resp.status_code,
+            "file_size": len(content) if content is not None else None,
+            "mime_type": content_type,
+        }
 
     def ensure_client_folders(self, client: str) -> str:
         """Create the standard Clients/{client}/{category}/ folder tree. Returns the client base path."""
@@ -296,4 +438,9 @@ class NextcloudClient:
         if not overwrite and self.path_exists(rel):
             raise NextcloudError(f"Refusing to overwrite existing file: {rel}")
         stored = self.put_file(rel, content, content_type=content_type)
-        return {"path": stored, "url": self._dav_url(rel)}
+        parent = "/".join(rel.strip("/").split("/")[:-1])
+        return {
+            "path": stored,
+            "url": self._dav_url(rel),
+            "files_url": self.files_ui_url(parent or rel),
+        }

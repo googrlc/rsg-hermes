@@ -79,10 +79,11 @@ The guard is already in this file; there is no separate patch to apply.
 
 **Read:** `ping` · `list_renewals` · `retention_scan` · `list_tasks` ·
 `list_documents` · `list_commissions` · `commission_rules` · `carrier_appetite` ·
-`ams_search_insured` · `sync_health`
+`ams_search_insured` · `sync_health` · `document_registry_search`
 
 **Write:** `hermes_dispatch` · `create_task` · `complete_task` · `create_case` ·
 `create_client` · `draft_intake` · `save_document` · `file_to_nextcloud` ·
+`document_registry_upload` ·
 `ams_create_insured` · `ams_upsert_policy`
 
 `hermes_dispatch` is the keystone: it forwards natural language to `POST
