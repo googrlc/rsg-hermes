@@ -73,3 +73,20 @@ def test_claims_and_certificates_are_in_the_pack():
         "Primary_Folder_URL",
         "Document_URL",
     }
+
+
+def test_filed_documents_map_to_nextcloud_subfolders():
+    from hermes_integrations.zoho_document_fields import (
+        FILED_DOCUMENT_TYPES,
+        FILED_DOCUMENTS_MODULE,
+        FILED_DOCUMENTS_RELATED_LIST,
+        PARENT_FOLDER_BY_TYPE,
+        PARENT_TYPE_BY_MODULE,
+    )
+
+    assert FILED_DOCUMENTS_MODULE == "Filed_Documents"
+    assert FILED_DOCUMENTS_RELATED_LIST == "Nextcloud Files"
+    assert set(FILED_DOCUMENT_TYPES) == set(PARENT_FOLDER_BY_TYPE)
+    assert PARENT_TYPE_BY_MODULE["Deals"] == "Quote"
+    assert PARENT_FOLDER_BY_TYPE["Quote"] == "Quotes"
+    assert PARENT_FOLDER_BY_TYPE["Policy"] == "Policies"

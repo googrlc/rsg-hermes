@@ -108,6 +108,39 @@ DOCUMENT_URL_FIELDS: dict[str, tuple[dict[str, str], ...]] = {
     ),
 }
 
+# Custom module: one CRM row per file. The PDF stays in Nextcloud.
+# Lookups create the Nextcloud Files related list on each parent.
+FILED_DOCUMENTS_MODULE = "Filed_Documents"
+FILED_DOCUMENTS_RELATED_LIST = "Nextcloud Files"
+FILED_DOCUMENT_TYPES = (
+    "Policy",
+    "Quote",
+    "Proposal",
+    "COI",
+    "Claim",
+    "Correspondence",
+    "Intake",
+    "Renewal Review",
+)
+PARENT_FOLDER_BY_TYPE = {
+    "Policy": "Policies",
+    "Quote": "Quotes",
+    "Proposal": "Proposals",
+    "COI": "COIs",
+    "Claim": "Claims",
+    "Correspondence": "Correspondence",
+    "Intake": "Intake",
+    "Renewal Review": "Renewal Reviews",
+}
+PARENT_TYPE_BY_MODULE = {
+    "Policies": "Policy",
+    "Deals": "Quote",
+    "Renewals": "Renewal Review",
+    "Claims": "Claim",
+    "Certificates": "COI",
+    "Accounts": "Correspondence",
+}
+
 
 def normalize_api_name(name: str | None) -> str:
     """Strip Zoho org suffixes so Nextcloud_Folder_URL__s matches Nextcloud_Folder_URL."""

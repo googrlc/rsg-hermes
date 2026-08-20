@@ -12,6 +12,7 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `fields_ams_write_queue.csv` | Custom module **AMS_Write_Queue** ← `outbound_sync_queue` |
 | `fields_claims.csv` | Custom module **Claims** — metadata; files in Nextcloud |
 | `fields_certificates.csv` | Custom module **Certificates** — metadata; files in Nextcloud |
+| `fields_documents.csv` | Custom module **Filed_Documents** — one CRM row per Nextcloud file; related list **Nextcloud Files** |
 | [`CONNECT_NEXTCLOUD_URLS.md`](CONNECT_NEXTCLOUD_URLS.md) | Create URL fields and put them on layouts so Zoho opens Nextcloud |
 | `picklists_nowcerts_seed.csv` | Exact Hermes `nowcerts_picklist_options` seeds (labels + option_id UUIDs) |
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |

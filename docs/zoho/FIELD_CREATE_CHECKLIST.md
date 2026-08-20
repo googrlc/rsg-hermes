@@ -6,7 +6,7 @@ Use with the CSVs in this folder. Labels and UUIDs for seeded NowCerts picklists
 
 - [ ] Zoho CRM org with API access
 - [ ] Decide: custom module **Policies** vs Zoho Insurance Policy module
-- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`
+- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`, `Filed_Documents`
 - [ ] Create Users matching `agency_crm_users` emails (for Deal Owner / Approved By)
 
 ## 1. Picklists & pipelines (do first)
@@ -92,6 +92,7 @@ Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_
 | 4 | `fields_renewal_events.csv` | Renewal_Events | `Hermes_Candidate_ID` |
 | 5 | `fields_renewals.csv` | Renewals | `Hermes_Renewal_ID` |
 | 6 | `fields_ams_write_queue.csv` | AMS_Write_Queue | `Queue_ID` |
+| 7 | `fields_documents.csv` | Filed_Documents | — |
 
 For each row: create field → set length → set picklist → mark mandatory/unique → set External ID where flagged.
 
@@ -112,6 +113,7 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Renewal_Events → Accounts, Policies
 - [ ] Renewals → Policies, Accounts, Renewal_Events (`Related_Renewal_Event`), Deals (`Related_Deal`)
 - [ ] AMS_Write_Queue → Accounts / Deals / Policies / Renewals (optional convenience)
+- [ ] Filed_Documents → Accounts, Policies, Deals, Renewals (related list **Nextcloud Files**)
 
 ## 4. Approval & AMS write rules (Zoho Blueprint / Approval)
 
@@ -163,6 +165,8 @@ See [`CONNECT_NEXTCLOUD_URLS.md`](CONNECT_NEXTCLOUD_URLS.md). Nextcloud is the f
 - [ ] Policies / Deals / Renewals: `Primary_Folder_URL` + `Document_URL`
 - [ ] Optional: create modules Claims and Certificates, then re-run the script
 - [x] Confirm **Open Nextcloud** (or paste `Nextcloud Folder Link`) opens `/f/{fileid}` for a comma name like Berrios, Edwin (`15700` → `/f/15700`; login `redirect_url=/f/15700`, no `%252C`)
+- [x] Custom module **Filed Documents** with related list **Nextcloud Files** on Account / Policy / Deal / Renewal
+- [ ] Hide **Attachments** on those layouts (Setup → Related Lists — API cannot uncheck it)
 - [ ] Do **not** use Zoho attachments as the document library
 
 ## 7. Do not create as editable user fields

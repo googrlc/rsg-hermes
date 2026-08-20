@@ -178,6 +178,41 @@ If the field is empty, the folder was never created or Zoho write was off.
 If click does nothing, the value is not `https://` — check API names and
 re-run intake/backfill.
 
+## 4b. Related list — how people file without attaching
+
+Zoho's **Attachments** related list is still there. People on a Policy will
+try to attach the policy PDF; on a Deal they will try to attach quotes.
+Do not use that list. The file goes to Nextcloud; CRM keeps a row.
+
+Custom module **Filed Documents** (`Filed_Documents`) with related list
+**Nextcloud Files** on Account, Policy, Deal, and Renewal.
+
+| You are on | Click | Drop the file in Nextcloud | Then |
+|---|---|---|---|
+| Account | **Open Nextcloud** | `Clients/{name}/…` | Related list → **New Nextcloud Files** (type Correspondence / Intake / …) |
+| Policy | **File in Nextcloud** | `…/Policies` | Related list → new row, type **Policy**, lookup this Policy |
+| Deal | **File in Nextcloud** | `…/Quotes` | Related list → new row, type **Quote**, lookup this Deal. The Deal *is* the quote in CRM; the PDF is the file. |
+| Renewal | **File in Nextcloud** | `…/Renewal Reviews` | Related list → new row, type **Renewal Review** |
+
+Each Filed Document row stores `Nextcloud_File_Link` (`/f/{fileid}`) plus
+optional Policy/Deal/Renewal lookup. Hermes should create the row when it
+files a PDF. Humans add a row after they drop a file in the folder.
+
+Live org (2026-08-20): module `7529682000000873605`. Related list API name
+`Nextcloud_Files`. Do **not** name this module Documents — Zoho already has
+a built-in Documents tab (WorkDrive).
+
+Hide **Attachments** on each layout so the attach habit dies:
+
+Zoho CRM → Setup → Customization → Modules and Fields → pick the module →
+**Related Lists** → uncheck **Attachments**. Keep **Nextcloud Files**
+checked and near the top. The Settings API rejected `visible: false` on
+Attachments (`INVALID_DATA`).
+
+Zoho's built-in **Quotes** related list on Deals is inventory/CPQ quotes,
+not carrier quote PDFs. Carrier quotes are Nextcloud `Quotes/` + a Filed
+Document of type Quote.
+
 ## 5. OAuth scope note
 
 Record writes (`ZohoCRM.modules.ALL`) are not enough to *create* fields.

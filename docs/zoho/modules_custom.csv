@@ -5,3 +5,4 @@ Renewals,Renewal,Renewals,Desk projection of eligible renewals (Creator Renewals
 AMS_Write_Queue,AMS Write Queue Item,AMS Write Queue,Approval-gated outbound NowCerts/Momentum writes,outbound_sync_queue,
 Claims,Claim,Claims,Claim record — metadata in Zoho; files in Nextcloud Clients/{name}/Claims,manual / AMS later,Accounts; Policies
 Certificates,Certificate,Certificates,COI / certificate record — issued in NowCerts; filed copy in Nextcloud; Zoho holds the link,manual / NowCerts later,Accounts; Policies
+Filed_Documents,Filed Document,Filed Documents,Catalog of files that live in Nextcloud — one row per PDF; related list Nextcloud Files on Account/Policy/Deal/Renewal,Hermes stamp / manual,Accounts; Policies; Deals; Renewals
