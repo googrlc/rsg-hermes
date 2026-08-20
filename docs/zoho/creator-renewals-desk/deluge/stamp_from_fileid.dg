@@ -1,6 +1,10 @@
 // CRM / Creator workflow: when Nextcloud_File_ID is updated, fill Nextcloud_Folder_Link.
 // Host matches live Nextcloud; keep in sync with NEXTCLOUD_URL. Do not write
 // Nextcloud_Folder_URL.
+//
+// Use this as a Deluge *function* action. Do not paste the URL into a CRM
+// static field-update value with ${!Accounts.Nextcloud_File_ID} — Zoho strips
+// the token and writes https://…/f/ with an empty id.
 
 host = "https://nextcloud-x6wle-u69864.vm.elestio.app";
 fid = trim(ifnull(input.Nextcloud_File_ID, input.fileid));

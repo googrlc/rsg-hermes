@@ -162,7 +162,7 @@ See [`CONNECT_NEXTCLOUD_URLS.md`](CONNECT_NEXTCLOUD_URLS.md). Nextcloud is the f
 - [ ] Accounts: `Nextcloud_Folder_Link` + `Nextcloud_File_ID` on the Standard layout (leave legacy `Nextcloud_Folder_URL` unused)
 - [ ] Policies / Deals / Renewals: `Primary_Folder_URL` + `Document_URL`
 - [ ] Optional: create modules Claims and Certificates, then re-run the script
-- [ ] Confirm **Open Nextcloud** (or paste `Nextcloud Folder Link`) opens `/f/{fileid}` for a comma name like Berrios, Edwin
+- [x] Confirm **Open Nextcloud** (or paste `Nextcloud Folder Link`) opens `/f/{fileid}` for a comma name like Berrios, Edwin (`15700` → `/f/15700`; login `redirect_url=/f/15700`, no `%252C`)
 - [ ] Do **not** use Zoho attachments as the document library
 
 ## 7. Do not create as editable user fields

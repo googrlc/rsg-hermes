@@ -138,11 +138,30 @@ Website fields canonicalize commas (`Berrios, Edwin` → `%2C`); Nextcloud
 login then encodes again (`%252C`) and the Files app shows **Folder not found**.
 `/f/{id}` has no comma, so Zoho cannot mangle it.
 
-Paste this Deluge on an Accounts custom button named **Open Nextcloud**:
+Live org (2026-08-20, `crmplus` org `935119573`):
+
+| Object | Id / value |
+|---|---|
+| `Nextcloud_Folder_Link` (text, writable) | `7529682000000873535` |
+| `Nextcloud_File_ID` (text 32, writable) | `7529682000000873543` |
+| Custom link **Open Nextcloud** | `7529682000000873588` → `${!Accounts.Nextcloud_Folder_Link}` |
+| Custom button **Open Nextcloud Button** (view) | `7529682000000873590` → `https://nextcloud-x6wle-u69864.vm.elestio.app/f/${!Accounts.Nextcloud_File_ID}` |
+| Sample Account Berrios, Edwin | `7529682000000725084` — File ID `15700`, link `/f/15700` |
+
+Do **not** reactivate workflow `Hermes Stamp Nextcloud Link`
+(`7529682000000873580`) as a static field update. Zoho stored
+`${!Accounts.Nextcloud_File_ID}` in the value, then wrote
+`https://…/f/` with an empty id and would wipe a good stamp. Hermes
+already writes both text fields. The custom button concatenates `/f/`
+plus File ID at click time. A Deluge function
+(`stamp_from_fileid.dg`) is the safe workflow writer if you need one.
+
+Paste this Deluge on an Accounts custom button named **Open Nextcloud**
+if you replace the URL button with a function:
 
 `docs/zoho/creator-renewals-desk/deluge/open_nextcloud.dg`
 
-To stamp from Creator or a CRM workflow, use
+To stamp from Creator or a CRM workflow function, use
 `docs/zoho/creator-renewals-desk/deluge/stamp_nextcloud_link.dg`.
 When `Nextcloud_File_ID` is set, `stamp_from_fileid.dg` concatenates
 `{NEXTCLOUD_HOST}/f/{id}` into `Nextcloud_Folder_Link`.
