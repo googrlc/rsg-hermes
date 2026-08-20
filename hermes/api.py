@@ -2366,6 +2366,28 @@ class NextcloudUploadRequest(BaseModel):
     content_type: str = "application/pdf"
 
 
+class DocumentRegistryUploadRequest(BaseModel):
+    """Metadata + file for the Nextcloud → Zoho Document_Registry pipeline."""
+
+    account_name: str
+    document_type: str
+    policy_type: str
+    line_of_business: str
+    renewal_cycle: str
+    file_name: str
+    content_base64: str
+    carrier: str = ""
+    document_name: str = ""
+    content_type: str = "application/pdf"
+    effective_date: str = ""
+    expiration_date: str = ""
+    account_id: str = ""
+    policy_id: str = ""
+    uploaded_by: str = ""
+    status: str = "Active"
+    write_to_zoho: bool | None = None
+
+
 _NEXTCLOUD_LINE_ROOTS = {
     "commercial": "Commercial Lines",
     "personal": "Personal Lines",
@@ -2516,7 +2538,88 @@ def nextcloud_upload(req: NextcloudUploadRequest):
     return {**result, "verified": True}
 
 
+@router.post("/api/document-registry/upload")
+def document_registry_upload(req: DocumentRegistryUploadRequest):
+    """PUT a file into the Agency Documents tree, then write Zoho Document_Registry.
 
+    Folder path is derived from metadata (never typed). The CRM record is
+    created only after Nextcloud returns a URL (golden rule). Zoho writes
+    still require ``HERMES_WRITE_TO_ZOHO=1`` unless ``write_to_zoho`` is true.
+    """
+    from hermes.documents.registry import DocumentRegistryError, register_document
+
+    if not req.account_name.strip():
+        raise HTTPException(status_code=400, detail="account_name is required")
+    if not req.file_name.strip():
+        raise HTTPException(status_code=400, detail="file_name is required")
+    try:
+        content = base64.b64decode(req.content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="content_base64 is invalid")
+    if not content:
+        raise HTTPException(status_code=400, detail="file content is required")
+    if len(content) > _NEXTCLOUD_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="file exceeds 25 MiB")
+
+    try:
+        return register_document(
+            content=content,
+            file_name=req.file_name,
+            account_name=req.account_name,
+            document_type=req.document_type,
+            policy_type=req.policy_type,
+            line_of_business=req.line_of_business,
+            renewal_cycle=req.renewal_cycle,
+            carrier=req.carrier,
+            document_name=req.document_name,
+            content_type=req.content_type,
+            effective_date=req.effective_date,
+            expiration_date=req.expiration_date,
+            account_id=req.account_id,
+            policy_id=req.policy_id,
+            uploaded_by=req.uploaded_by,
+            status=req.status or "Active",
+            write_to_zoho=req.write_to_zoho,
+        )
+    except DocumentRegistryError as exc:
+        msg = str(exc)
+        status = 503 if "not configured" in msg.lower() else 502
+        if "required" in msg.lower() or "unknown line" in msg.lower():
+            status = 400
+        raise HTTPException(status_code=status, detail=msg)
+
+
+@router.get("/api/document-registry/search")
+def document_registry_search(
+    account_name: str = "",
+    document_type: str = "",
+    carrier: str = "",
+    policy_type: str = "",
+    renewal_cycle: str = "",
+    line_of_business: str = "",
+    status: str = "",
+):
+    """Search Zoho Document_Registry by metadata. Returns clickable Nextcloud URLs."""
+    from hermes.documents.registry import DocumentRegistryError, search_documents
+    from hermes_integrations.zoho_client import ZohoClientError
+
+    try:
+        rows = search_documents(
+            account_name=account_name,
+            document_type=document_type,
+            carrier=carrier,
+            policy_type=policy_type,
+            renewal_cycle=renewal_cycle,
+            line_of_business=line_of_business,
+            status=status,
+        )
+    except DocumentRegistryError as exc:
+        msg = str(exc)
+        code = 400 if "at least one search filter" in msg else 502
+        raise HTTPException(status_code=code, detail=msg)
+    except ZohoClientError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"ok": True, "count": len(rows), "records": rows}
 
 
 

@@ -6,7 +6,7 @@ Use with the CSVs in this folder. Labels and UUIDs for seeded NowCerts picklists
 
 - [ ] Zoho CRM org with API access
 - [ ] Decide: custom module **Policies** vs Zoho Insurance Policy module
-- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`
+- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`, `Document_Registry`
 - [ ] Create Users matching `agency_crm_users` emails (for Deal Owner / Approved By)
 
 ## 1. Picklists & pipelines (do first)
@@ -92,6 +92,7 @@ Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_
 | 4 | `fields_renewal_events.csv` | Renewal_Events | `Hermes_Candidate_ID` |
 | 5 | `fields_renewals.csv` | Renewals | `Hermes_Renewal_ID` |
 | 6 | `fields_ams_write_queue.csv` | AMS_Write_Queue | `Queue_ID` |
+| 7 | `fields_document_registry.csv` | Document_Registry | `Nextcloud_File_ID` (unique; URL is mandatory) |
 
 For each row: create field → set length → set picklist → mark mandatory/unique → set External ID where flagged.
 
@@ -112,6 +113,8 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Renewal_Events → Accounts, Policies
 - [ ] Renewals → Policies, Accounts, Renewal_Events (optional)
 - [ ] AMS_Write_Queue → Accounts / Deals / Policies / Renewals (optional convenience)
+- [ ] Document_Registry → Accounts, Policies (optional), Users (`Uploaded_By`)
+- [ ] Document_Registry: **Nextcloud_File_URL is mandatory** — no record without a real file
 
 ## 4. Approval & AMS write rules (Zoho Blueprint / Approval)
 

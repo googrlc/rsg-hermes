@@ -42,16 +42,23 @@ Agency Documents /
   Commercial Lines /  or  Personal Lines /
     [Client Name] /
       [Policy type] /
-        [Document type] /
+        [Document type]s /
           [Year] /
+            [Carrier] [file]
 ```
 
 Examples:
 ```
 Agency Documents / Commercial Lines / ABC Plumbing LLC / Commercial Auto / Policies / 2026 /
+Agency Documents / Commercial Lines / ABC Roofing / General Liability / Declaration Pages / 2027 / Travelers GL Dec Page.pdf
 Agency Documents / Personal Lines / Johnson Family / Home / Applications / 2026 /
 Agency Documents / Claims / ABC Plumbing LLC /
 ```
+
+Search the file by metadata in Zoho **Document_Registry** (Hermes
+`document_registry_search`) — do not hunt folders. The record's
+`Nextcloud_File_URL` opens the file. New registry uploads go through Hermes
+(`document_registry_upload`); the path is generated from metadata, never typed.
 
 Until the Team Folder cutover finishes, some accounts still live under
 the legacy `Clients/{name}/{category}/` tree (Hermes intake/renewal filing).
@@ -62,8 +69,8 @@ the Team Folder mount.
 
 1. Every client should have a folder in Nextcloud (the agency's file
    source of truth) under the Personal or Commercial lane.
-2. File placement in Nextcloud is manual (via WebDAV) — there is no
-   automatic mirror.
+2. File placement in Nextcloud is either Hermes Document Registry (canonical
+   path from metadata) or manual. Do not invent a folder path.
 3. COIs stay in NowCerts — do not duplicate to Nextcloud unless the
    client specifically requests a copy.
 4. CRM records (notes, tasks, opportunities) live in the CRM — do not

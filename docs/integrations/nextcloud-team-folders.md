@@ -35,19 +35,20 @@ Agency Documents/                 ← Team Folder (everyone in All Team sees thi
 ├── Commercial Lines/
 │   └── {Account}/
 │       └── {Policy type}/        e.g. General Liability, Property, Workers Comp
-│           └── {Document type}/  e.g. Declaration Pages, Loss Runs, Quotes
-│               └── {Year}/
+│           └── {Document type}s/ e.g. Declaration Pages, Loss Runs, Quotes
+│               └── {Renewal cycle}/
+│                   {Carrier} {file}
 ├── Personal Lines/
 │   └── {Household}/
 │       └── {Policy type}/
-│           └── {Document type}/
-│               └── {Year}/
+│           └── {Document type}s/
+│               └── {Renewal cycle}/
 └── Claims/
 ```
 
-Hermes path helper: `NextcloudClient.agency_account_dir` /
-`ensure_agency_account_tree`. After the mount exists, set
-`NEXTCLOUD_BASE_PATH=Agency Documents` so those helpers prefix correctly.
+Example: `Agency Documents/Commercial Lines/ABC Roofing/General Liability/Declaration Pages/2027/Travelers GL Dec Page.pdf`
+
+Path helpers: `hermes_integrations.nextcloud_paths.canonical_rel_path` (registry pipeline) and `NextcloudClient.agency_account_dir`. The registry helper prefixes `Agency Documents/` when `NEXTCLOUD_BASE_PATH` is unset, so new registry uploads land in the Team Folder without waiting on the env cutover. After the mount exists, set `NEXTCLOUD_BASE_PATH=Agency Documents` so the client also prefixes correctly for other helpers.
 
 Legacy intake/renewal filing still uses `Clients/{client}/{category}/` until
 those accounts are cut over. Do not bulk-move `Clients/` without a separate
@@ -71,44 +72,52 @@ https://nextcloud-x6wle-u69864.vm.elestio.app/apps/files/?dir=/Agency Documents/
 for login; public share links are optional per file (`shareType=3`) when a
 document must open without a Nextcloud session.
 
-## One-time admin apply
+## Document Registry (Zoho metadata + Nextcloud files)
 
-The Hermes filing user is a **subadmin of `All Team`**, not a full admin, so
-it cannot enable apps or create Team Folders.
+Zoho CRM is the metadata registry. Nextcloud is the file store. **Hermes** is
+the integration layer — n8n was never deployed, and Deluge is not required.
 
-1. In Nextcloud, log in as **`root`** (Elestio admin).
-2. **Apps → Team folders** (or Group folders) → **Enable**.
-3. Personal settings → Security → create an app password for `root`.
-4. From a machine with Hermes Nextcloud env vars:
+| Layer | Role |
+|---|---|
+| Zoho custom module `Document_Registry` | Searchable metadata (account, type, carrier, dates) |
+| Nextcloud Team Folder | The actual file (WebDAV PUT, `OC-FileId`) |
+| Hermes `POST /api/document-registry/upload` | Derive path → PUT → write CRM only if URL exists |
+
+**Golden rule:** no `Document_Registry` row without `Nextcloud_File_URL`. Hermes
+uploads first, then upserts Zoho (when `HERMES_WRITE_TO_ZOHO=1`). A failed PUT
+never creates a CRM record.
+
+Stand up the Zoho module (dry-run default; needs settings OAuth scopes to apply):
 
 ```bash
-source .venv/bin/activate
-NEXTCLOUD_ADMIN_USER=root \
-NEXTCLOUD_ADMIN_APP_PASSWORD='app-password' \
-  python scripts/nextcloud_team_folders_setup.py --apply
+python scripts/zoho_document_registry_setup.py
 ```
 
-Or, still as `root` in the web UI:
+Field pack: `docs/zoho/fields_document_registry.csv`. Search:
 
-1. Administration Settings → Team folders → create **Agency Documents**.
-2. Add group **All Team** with Write, Share, and Delete.
-3. Set a quota (500 GB recommended).
-4. Create `Commercial Lines`, `Personal Lines`, and `Claims` inside it.
+```
+GET /api/document-registry/search?account_name=ABC%20Roofing&document_type=Declaration%20Page&carrier=Travelers
+```
 
-Then set `NEXTCLOUD_BASE_PATH=Agency Documents` on the Hermes API container
-(Elestio env / 1Password). Do not commit the value as a secret; it is not one.
+MCP: `document_registry_upload` / `document_registry_search`. Legacy
+`file_to_nextcloud` still files into the older client-tree endpoint.
 
-Status / dry-run (works as `hermes`, no writes):
+## Remaining: point Hermes at the mount
+
+The mount is live. Hermes still files into the personal `Clients/` tree until
+`NEXTCLOUD_BASE_PATH=Agency Documents` is set on the Hermes API container
+(Elestio env / 1Password). That is not a secret. Do not restart production
+without an explicit go-ahead.
+
+Status / dry-run:
 
 ```bash
 python scripts/nextcloud_team_folders_setup.py
 ```
 
-Optional ACL subgroups (`Commercial Lines`, `Personal Lines`, `Management`)
-are created by `--apply` unless you pass `--skip-optional-groups`. Enabling
+`--apply` is idempotent. Optional ACL subgroups already exist. Enabling
 advanced permissions on subfolders still needs the Nextcloud admin UI or
-`occ groupfolders:permissions` on the Nextcloud box (this Cloud agent cannot
-SSH to that VM).
+`occ groupfolders:permissions` on the Nextcloud box.
 
 ## What this repo will not do
 
