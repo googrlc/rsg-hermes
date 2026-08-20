@@ -17,7 +17,7 @@ Renewals,Line of Business,Line_of_Business,Single Line,150,N,N,N,,,AMS→Z via P
 Renewals,Effective Date,Effective_Date,Date,,N,N,N,,,AMS→Z via Policy,(joined),From canonical_policies
 Renewals,Dismissed,Dismissed,Checkbox,,N,N,N,false,,Z-only override,(portal_overrides),Soft-remove; not a DB column
 Renewals,Related Renewal Event,Related_Renewal_Event,Lookup (Renewal_Events),,N,N,N,,,AMS→Z via join,,"Join on Hermes_Candidate_ID / policy + event date"
-Renewals,Related Deal,Related_Deal,Lookup (Deals),,N,N,N,,,Z-only,,"Optional link to Renewals pipeline Deal"
+Renewals,Related Deal,Related_Deal,Lookup (Deals),,N,N,N,,,AMS→Z / Z-only,,"Required 1:1 link to Renewals-pipeline Deal. Worklist hides rows where this is empty. Hermes fills when empty; does not overwrite a set link."
 Renewals,Desk Stage,Desk_Stage,Picklist,40,N,N,N,Identified,picklists_hermes_vocab.csv:desk_stage,Z-only,,"Creator desk; never skip; default Identified on create; sync must not overwrite"
 Renewals,Disposition,Disposition,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:desk_disposition,Z-only,,"Required when Desk_Stage=Closed; codes from hermes/renewals/config.py"
 Renewals,Recommended Action,Recommended_Action,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:recommended_action,Z-only,,retain / remarket / escalate

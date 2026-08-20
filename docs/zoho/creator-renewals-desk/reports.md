@@ -6,7 +6,9 @@ rows into Creator forms.
 ## Worklist (`REPORT_WORKLIST`)
 
 - Module: **Renewals**
-- Criteria: `Dismissed` is false (or empty)
+- Criteria: `Dismissed` is false (or empty) **and** `Related_Deal` is not empty.
+  The desk is a 1:1 projection of Deals on the CRM **Renewals** pipeline.
+  Hermes (`hermes --sync-zoho-renewals`) creates the missing side either way.
 - Columns: Client_Name, Policy_Number, Carrier, Line_of_Business, Expiration_Date, Days_To_Expiration, Window_Bucket, Premium_Current, Premium_Renewal, Increase_Percent, Risk_Status, Desk_Stage, Recommended_Action
 - Sort: Expiration_Date ascending
 - Filters (quick): Window_Bucket, Risk_Status, Desk_Stage, Line_of_Business

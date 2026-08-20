@@ -153,7 +153,7 @@ Dashboard rule: show **worst-of** book-sync OK + queue depth + Zoho `Last_Synced
 | Zoho REST client | `packages/rsg-hermes-core/hermes_integrations/zoho_client.py` |
 | Intake → Zoho | `hermes/intake/commit.py` (`HERMES_WRITE_TO_ZOHO`) |
 | Momentum → Zoho backfill | `scripts/backfill_zoho_from_momentum.py` |
-| Zoho renewals upsert | `hermes/sync/zoho_renewals.py` (`hermes --sync-zoho-renewals`) |
+| Zoho renewals upsert | `hermes/sync/zoho_renewals.py` (`hermes --sync-zoho-renewals`) — Renewal_Events + Renewals + matching Renewals-pipeline Deals |
 | Zoho AMS queue mirror | `hermes/sync/zoho_ams_queue.py` (`hermes --sync-zoho-ams-queue`) |
 | Creator Renewals Desk | `docs/zoho/creator-renewals-desk/` |
 | Canonical book sync | `hermes/sync/canonical_book_sync.py` |

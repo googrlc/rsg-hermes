@@ -25,6 +25,8 @@ def test_zia_paste_prompt_targets_existing_app_only():
         "Tasks",
     ):
         assert module in prompt
+    assert "Related_Deal is not empty" in prompt
+    assert "Dismissed is false" in prompt
 
 
 def test_zia_prompt_embeds_deluge_scripts():

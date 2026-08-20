@@ -57,16 +57,21 @@ they stayed in sync.
 
 ```
 canonical_policies --renewal-refresh--> renewal_candidates / project_85_renewals
-        --sync-zoho-renewals--> Zoho Renewal_Events + Renewals
+        --sync-zoho-renewals--> Zoho Renewal_Events + Renewals + Deals (Renewals pipeline)
 Creator reads/writes Zoho
 Creator AMS action --> Zoho AMS_Write_Queue (Approved_By + Approved_At)
         --sync-zoho-ams-queue--> outbound_sync_queue
         --renewal-executor--> NowCerts
 ```
 
+The desk table and the CRM Renewals pipeline are the same book, linked by
+`Related_Deal`. If a Deal is on the Renewals pipeline, Hermes creates the
+desk row. If a desk row has no pipeline Deal, it is not on the worklist.
+Hermes fills `Related_Deal` when empty; after that it is left alone.
+
 Desk-owned fields Hermes must **not** overwrite on update: `Desk_Stage`,
 `Disposition`, `Recommended_Action`, `Touch_Early` / `Touch_Mid` /
-`Touch_Decision`, `Related_Deal`.
+`Touch_Decision`.
 
 Correctable fields (portal overlay, keyed by policy number): `Client_Name`,
 `Premium_Current`, `Premium_Renewal`, `Risk_Status`, `Expiration_Date`,

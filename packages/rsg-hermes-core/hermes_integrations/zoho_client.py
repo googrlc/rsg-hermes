@@ -730,3 +730,15 @@ class ZohoClient:
         rid = self._assert_write_ok(body, action="create", module=module)
         log.info("Zoho: created %s id=%s %s=%r", module, rid, match_field, value)
         return {"id": rid, "action": "created"}
+
+    def update_record(
+        self, module: str, record_id: str, record: dict[str, Any]
+    ) -> dict[str, Any]:
+        """PUT /{module} for an existing record id."""
+        if not record_id:
+            raise ZohoClientError(f"update_record({module}): record_id is required")
+        payload = {k: v for k, v in record.items() if _present(v) or v is False}
+        body = self._put(module, {"data": [{"id": str(record_id), **payload}]})
+        rid = self._assert_write_ok(body, action="update", module=module)
+        log.info("Zoho: updated %s id=%s", module, rid)
+        return {"id": rid, "action": "updated"}

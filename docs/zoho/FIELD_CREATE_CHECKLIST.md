@@ -147,7 +147,7 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Publish to Gretchen and Lamar (development first; production only when asked)
 - [ ] Confirm `hermes --sync-zoho-renewals` then `--sync-zoho-ams-queue` are on cron after `--renewal-refresh`
 
-Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch dates, `Related_Deal`) must **not** be overwritten by book sync. Hermes sets `Desk_Stage=Identified` only on create.
+Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch dates) must **not** be overwritten by book sync. Hermes sets `Desk_Stage=Identified` only on create. Hermes fills `Related_Deal` when empty so the desk and the Renewals pipeline stay 1:1; it does not overwrite a Deal Gretchen already linked.
 
 ## 6. Sync direction smoke tests
 

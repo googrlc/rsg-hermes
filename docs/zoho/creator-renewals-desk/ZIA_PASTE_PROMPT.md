@@ -50,7 +50,8 @@ Create these CRM integration reports (criteria exact):
 ### Worklist (`worklist`)
 
 - Module: Renewals
-- Criteria: Dismissed is false or empty
+- Criteria: Dismissed is false or empty **and** Related_Deal is not empty
+  (desk membership = CRM Renewals-pipeline Deal)
 - Columns: Client_Name, Policy_Number, Carrier, Line_of_Business,
   Expiration_Date, Days_To_Expiration, Window_Bucket, Premium_Current,
   Premium_Renewal, Increase_Percent, Risk_Status, Desk_Stage,
@@ -122,7 +123,7 @@ reports above after they exist.
   <p class="empty-hint">Empty buckets must say why they are empty (no eligible renewals vs sync stale vs the current filter). A blank grid is a lie.</p>
   <div class="worklist">
     <h2>Worklist</h2>
-    <p>Default sort: Expiration Date ascending. Hide Dismissed. Personal rows sit in the personal bucket even inside 30 days.</p>
+    <p>Default sort: Expiration Date ascending. Hide Dismissed. Hide rows without a Related Deal (desk = Renewals pipeline). Personal rows sit in the personal bucket even inside 30 days.</p>
     <iframe title="Renewals worklist" src="{{REPORT_WORKLIST}}"></iframe>
   </div>
 </section>
