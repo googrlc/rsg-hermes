@@ -2367,8 +2367,8 @@ class NextcloudUploadRequest(BaseModel):
 
 
 _NEXTCLOUD_LINE_ROOTS = {
-    "commercial": "Commercial Lines/Clients",
-    "personal": "Personal Lines/Clients",
+    "commercial": "Commercial Lines",
+    "personal": "Personal Lines",
 }
 _NEXTCLOUD_CATEGORIES = {
     "commercial": {

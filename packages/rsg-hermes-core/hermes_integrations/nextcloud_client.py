@@ -11,9 +11,17 @@ Config (env; real values live only in .env / 1Password, never committed):
     NEXTCLOUD_APP_PASSWORD  Nextcloud app password
     NEXTCLOUD_BASE_PATH     optional prefix under the user's files (e.g. "Agency")
 
-Folder taxonomy (confirmed):
-    Clients/{client}/{Renewal Reviews|COIs|Policies|Proposals|Quotes|Correspondence}/
-    Internal/{folder}/
+Folder taxonomy:
+
+    Legacy (still used by intake/renewal filing until accounts are cut over):
+        Clients/{client}/{Renewal Reviews|COIs|Policies|Proposals|Quotes|Correspondence|Intake}/
+
+    Team Folder (canonical shared store — see nextcloud_team_folders.py):
+        {NEXTCLOUD_BASE_PATH or "Agency Documents"}/
+            Commercial Lines/{account}/{policy type}/{document type}/{year}/
+            Personal Lines/{account}/{policy type}/{document type}/{year}/
+            Claims/{account}/...
+        Internal/{folder}/
 """
 
 from __future__ import annotations
@@ -27,6 +35,14 @@ if TYPE_CHECKING:
 
 # The confirmed per-client document categories.
 CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Quotes", "Correspondence", "Intake")
+
+# Canonical Team Folder lanes (relative to NEXTCLOUD_BASE_PATH).
+TEAM_FOLDER_NAME = "Agency Documents"
+AGENCY_LINE_ROOTS = {
+    "commercial": "Commercial Lines",
+    "personal": "Personal Lines",
+    "claims": "Claims",
+}
 
 # PROPFIND body — ask only for the props list_dir surfaces (keeps the response small).
 _PROPFIND_BODY = (
@@ -108,6 +124,65 @@ class NextcloudClient:
 
     def _dav_url(self, rel_path: str) -> str:
         return f"{self._dav_base()}/{self._encode(self._rel_with_base(rel_path))}"
+
+    def files_ui_url(self, rel_path: str, *, fileid: str | int | None = None) -> str:
+        """Nextcloud Files UI URL for a folder (Option C CRM link). Requires login."""
+        self._require_configured()
+        directory = self._rel_with_base(rel_path).strip("/")
+        # Files UI wants an unencoded path in the dir query; spaces are fine.
+        url = f"{self.url}/apps/files/?dir=/{directory}"
+        if fileid is not None and str(fileid).strip():
+            url = f"{url}&fileid={fileid}"
+        return url
+
+    def agency_account_dir(
+        self,
+        *,
+        line: str,
+        account: str,
+        policy_type: str,
+        document_type: str,
+        year: str,
+    ) -> str:
+        """Relative path for one account/policy/document/year folder in the agency tree.
+
+        ``line`` is commercial | personal | claims. The returned path is relative
+        to the WebDAV user root *before* ``NEXTCLOUD_BASE_PATH`` is applied, so
+        callers pass it to ``ensure_dirs`` / ``put_file`` as usual.
+        """
+        key = (line or "").strip().lower()
+        if key not in AGENCY_LINE_ROOTS:
+            raise NextcloudError(
+                f"unknown agency line {line!r} — expected one of {sorted(AGENCY_LINE_ROOTS)}"
+            )
+        parts = [
+            AGENCY_LINE_ROOTS[key],
+            _sanitize_segment(account),
+            _sanitize_segment(policy_type),
+            _sanitize_segment(document_type),
+            _sanitize_segment(year),
+        ]
+        return "/".join(parts)
+
+    def ensure_agency_account_tree(
+        self,
+        *,
+        line: str,
+        account: str,
+        policy_type: str,
+        document_type: str,
+        year: str,
+    ) -> str:
+        """MKCOL the canonical Team Folder account tree. Returns the stored path."""
+        rel = self.agency_account_dir(
+            line=line,
+            account=account,
+            policy_type=policy_type,
+            document_type=document_type,
+            year=year,
+        )
+        self.ensure_dirs(rel)
+        return self._rel_with_base(rel)
 
     # -- operations ---------------------------------------------------------
 
@@ -296,4 +371,9 @@ class NextcloudClient:
         if not overwrite and self.path_exists(rel):
             raise NextcloudError(f"Refusing to overwrite existing file: {rel}")
         stored = self.put_file(rel, content, content_type=content_type)
-        return {"path": stored, "url": self._dav_url(rel)}
+        parent = "/".join(rel.strip("/").split("/")[:-1])
+        return {
+            "path": stored,
+            "url": self._dav_url(rel),
+            "files_url": self.files_ui_url(parent or rel),
+        }

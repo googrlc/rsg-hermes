@@ -139,16 +139,15 @@ cadence, escalate immediately. Do not mark onboarding complete.
 ## Step 5 — NextCloud folders
 
 NextCloud is the file source of truth. Nothing lives on a desktop.
+Use the **Agency Documents** Team Folder (not a personal share):
 
 ```
-RSG /
-  🏠 Personal (Gretchen)  |  🏢 Commercial (Lamar) /
+Agency Documents /
+  Commercial Lines  |  Personal Lines /
     [Client Name] /
-      2026 /
-        [LOB] /
-          Applications /
-          Policy Documents /
-          Correspondence /
+      [LOB] /
+        Applications /  Policy Documents /  Correspondence /
+          [Year] /
 ```
 
 One `[LOB]` folder per line of business the client actually has. Don't

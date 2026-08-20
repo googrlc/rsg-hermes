@@ -34,20 +34,29 @@ do I put this?" and "where is that file?"
 
 ## Client folder structure
 
+Canonical store is the **Agency Documents** Team Folder (not a share from
+one user's Files). See `docs/integrations/nextcloud-team-folders.md`.
+
 ```
-RSG /
-  🏠 Personal (Gretchen)  or  🏢 Commercial (Lamar) /
+Agency Documents /
+  Commercial Lines /  or  Personal Lines /
     [Client Name] /
-      [Year] /
-        [Line of Business] /
+      [Policy type] /
+        [Document type] /
+          [Year] /
 ```
 
 Examples:
 ```
-RSG / 🏠 Personal (Gretchen) / Johnson Family / 2026 / Personal Auto /
-RSG / 🏠 Personal (Gretchen) / Johnson Family / 2026 / Home /
-RSG / 🏢 Commercial (Lamar) / ABC Plumbing LLC / 2026 / Commercial Auto /
+Agency Documents / Commercial Lines / ABC Plumbing LLC / Commercial Auto / Policies / 2026 /
+Agency Documents / Personal Lines / Johnson Family / Home / Applications / 2026 /
+Agency Documents / Claims / ABC Plumbing LLC /
 ```
+
+Until the Team Folder cutover finishes, some accounts still live under
+the legacy `Clients/{name}/{category}/` tree (Hermes intake/renewal filing).
+Do not create a personal folder named Agency Documents — that collides with
+the Team Folder mount.
 
 ## Rules
 
