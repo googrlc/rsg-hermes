@@ -26,7 +26,9 @@ effects. Do not fold commissions into this app.
 | Surface | File | CRM source |
 |---|---|---|
 | Desk home | [`pages/desk.html`](pages/desk.html) | Renewals worklist + KPI counts |
-| Desk palette / CSS | [`pages/desk.css`](pages/desk.css) | Copy into Catalyst `renewals/src` |
+| Desk palette / CSS | [`pages/desk.css`](pages/desk.css) | Copy into Catalyst `renewals/src/desk.css` |
+| Catalyst React desk | [`catalyst/App.js`](catalyst/App.js) | Replace `~/catalyst-renewals-desk/renewals/src/App.js` |
+| Catalyst copy steps | [`catalyst/README.md`](catalyst/README.md) | `npm start` on the Mac Mini |
 | Desk preview | [`pages/desk_preview.html`](pages/desk_preview.html) | Open locally to review Commercial/Personal colors |
 | Renewal card | [`pages/card.html`](pages/card.html) | One Renewal + Policy + Account + Event + Deal |
 | Needs verification | [`reports.md`](reports.md) | Renewal_Events.Eligibility = needs_verification |

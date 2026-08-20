@@ -106,6 +106,17 @@ def test_desk_palette_tokens():
     assert "status-pill overdue" in desk
 
 
+def test_catalyst_app_js_uses_desk_palette():
+    app = (DESK / "catalyst" / "App.js").read_text()
+    assert 'import "./desk.css"' in app
+    assert "type-pill" in app
+    assert "Commercial" in app
+    assert "Personal" in app
+    assert "status-pill attention" in app
+    assert "status-pill overdue" in app
+    assert "NowCerts" in app
+
+
 def test_cursor_api_function_never_calls_nowcerts():
     body = (DESK / "deluge" / "cursor_api.dg").read_text()
     compact = body.replace(" ", "").lower()

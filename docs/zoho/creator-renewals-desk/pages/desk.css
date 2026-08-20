@@ -1,3 +1,9 @@
+html, body, #root {
+  margin: 0;
+  min-height: 100%;
+  background: var(--desk-bg, #f6f7f9);
+}
+
 /* Renewals Desk workstation palette.
    Blue = Commercial only. Sage = Personal only.
    Amber = attention soon. Rose = overdue / blocked.
