@@ -110,7 +110,11 @@ def field_create_payload(
     }
     length = (row.get("Length") or "").strip()
     if length and data_type in ("text", "website", "integer"):
-        field["length"] = int(length.split(".")[0])
+        parsed = int(length.split(".")[0])
+        # Zoho CRM integer fields max out at 9 digits (~1e9 bytes).
+        if data_type == "integer":
+            parsed = min(parsed, 9)
+        field["length"] = parsed
 
     if data_type == "picklist":
         source = (row.get("Picklist_Source") or "").strip()

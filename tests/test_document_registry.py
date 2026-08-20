@@ -337,6 +337,19 @@ def test_field_pack_marks_nextcloud_url_mandatory():
     assert policy["action"] == "skip"
 
 
+def test_integer_field_length_capped_at_zoho_max():
+    row = {
+        "API_Name": "File_Size",
+        "Display_Label": "File Size",
+        "Data_Type": "Number",
+        "Length": "18",
+        "Picklist_Source": "",
+    }
+    payload = field_create_payload(row)
+    assert payload["fields"][0]["data_type"] == "integer"
+    assert payload["fields"][0]["length"] == 9
+
+
 def test_url_field_payload_is_website_type():
     row = {
         "API_Name": "Nextcloud_File_URL",
