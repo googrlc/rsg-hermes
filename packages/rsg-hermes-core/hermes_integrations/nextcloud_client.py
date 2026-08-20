@@ -20,12 +20,16 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlparse, urlunparse
 
 if TYPE_CHECKING:
     import requests
 
-# The confirmed per-client document categories.
+# Files-app dir= must keep comma and space unencoded. Nextcloud 34 and Zoho
+# website-field clicks both encode the URL once; a pre-encoded %2C/%20 becomes
+# %252C/%2520 and the Files app looks for a folder that does not exist.
+FILES_APP_DIR_SAFE = "/, "
+FILES_APP_PATH = "/apps/files/files"
 CLIENT_CATEGORIES = (
     "Renewal Reviews",
     "COIs",
@@ -56,6 +60,40 @@ def _sanitize_segment(name: str) -> str:
     """Trim a path segment to something safe for a folder/file name (no slashes)."""
     cleaned = (name or "").replace("/", "-").replace("\\", "-").strip().strip(".")
     return cleaned or "unnamed"
+
+
+def rewrite_stale_files_app_url(url: str) -> str:
+    """Repair a stored Files-app link that 404s after Zoho/login double-encoding.
+
+    Old stamps used ``/apps/files/?dir=/Clients/Berrios%2C%20Edwin``. Nextcloud 34
+    serves folders at ``/apps/files/files`` and a second encode turns ``%2C`` into
+    ``%252C``, which is not a real folder.
+    """
+    text = str(url or "").strip()
+    if not text:
+        return text
+    parsed = urlparse(text)
+    path = parsed.path or ""
+    if "/apps/files" not in path:
+        return text
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    dirs = query.get("dir") or []
+    if not dirs:
+        return text
+    raw_dir = unquote(dirs[0]).strip("/")
+    encoded_dir = quote(raw_dir, safe=FILES_APP_DIR_SAFE)
+    parts = [f"dir=/{encoded_dir}"]
+    if query.get("scrollto"):
+        parts.append(
+            f"scrollto={quote(unquote(query['scrollto'][0]), safe=FILES_APP_DIR_SAFE)}"
+        )
+    new_path = path
+    stripped = new_path.rstrip("/")
+    if stripped.endswith("/apps/files"):
+        new_path = stripped + "/files"
+    elif "/apps/files/files" not in new_path:
+        new_path = "/apps/files/files"
+    return urlunparse(parsed._replace(path=new_path, query="&".join(parts)))
 
 
 class NextcloudClient:
@@ -135,12 +173,17 @@ class NextcloudClient:
                 raise NextcloudError(f"MKCOL {acc} failed: {resp.status_code} {resp.text[:200]}")
 
     def browser_dir_url(self, rel_dir: str) -> str | None:
-        """Human-facing Files app folder link (not WebDAV)."""
+        """Human-facing Files app folder link (not WebDAV).
+
+        Nextcloud 28+ serves the Files UI at ``/apps/files/files``. Commas and
+        spaces in *dir* stay literal so Zoho/login do not double-encode them.
+        """
         base = self.url.rstrip("/")
         if not base or not rel_dir:
             return None
         path = self._rel_with_base(rel_dir).strip("/")
-        return f"{base}/apps/files/?dir=/{quote(path, safe='/')}"
+        encoded = quote(path, safe=FILES_APP_DIR_SAFE)
+        return f"{base}{FILES_APP_PATH}?dir=/{encoded}"
 
     def browser_file_url(self, rel_path: str) -> str | None:
         """Human-facing Files app link that opens the folder and highlights the file."""
@@ -153,7 +196,7 @@ class NextcloudClient:
         dir_url = self.browser_dir_url(folder) if folder else self.browser_dir_url("/")
         if not dir_url:
             return None
-        return f"{dir_url}&scrollto={quote(fname)}"
+        return f"{dir_url}&scrollto={quote(fname, safe=FILES_APP_DIR_SAFE)}"
 
     def client_category_url(self, client: str, category: str | None = None) -> str | None:
         """Browser URL for the client folder, or one document-class subfolder."""

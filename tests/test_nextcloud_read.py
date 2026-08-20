@@ -104,8 +104,21 @@ def test_read_file_404_raises():
 def test_browser_urls_are_files_app_links_not_webdav():
     c = _client(_FakeSession())
     folder = c.client_category_url("ABC Trucking", "Policies")
-    assert folder == "https://nc.example/apps/files/?dir=/Clients/ABC%20Trucking/Policies"
+    assert folder == "https://nc.example/apps/files/files?dir=/Clients/ABC Trucking/Policies"
     file_url = c.browser_file_url("Clients/ABC Trucking/Policies/Progressive Policy 2026.pdf")
-    assert file_url.endswith("scrollto=Progressive%20Policy%202026.pdf")
+    assert file_url.endswith("scrollto=Progressive Policy 2026.pdf")
     assert "/remote.php/" not in (folder or "")
+
+
+def test_browser_url_keeps_comma_so_zoho_does_not_double_encode():
+    from hermes_integrations.nextcloud_client import rewrite_stale_files_app_url
+
+    c = _client(_FakeSession())
+    folder = c.client_category_url("Berrios, Edwin")
+    assert folder == "https://nc.example/apps/files/files?dir=/Clients/Berrios, Edwin"
+    assert "%2C" not in folder
+    stale = "https://nextcloud.example/apps/files/?dir=/Clients/Berrios%2C%20Edwin"
+    assert rewrite_stale_files_app_url(stale) == (
+        "https://nextcloud.example/apps/files/files?dir=/Clients/Berrios, Edwin"
+    )
 

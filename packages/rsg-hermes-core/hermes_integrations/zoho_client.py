@@ -17,6 +17,7 @@ from typing import Any
 
 import requests
 
+from hermes_integrations.nextcloud_client import rewrite_stale_files_app_url
 from hermes_integrations.zoho_document_fields import is_http_url
 
 log = logging.getLogger(__name__)
@@ -460,6 +461,8 @@ class ZohoClient:
         folder_url = mapping.get("Nextcloud_Folder_URL")
         if folder_url is not None and not is_http_url(folder_url):
             mapping.pop("Nextcloud_Folder_URL", None)
+        elif folder_url:
+            mapping["Nextcloud_Folder_URL"] = rewrite_stale_files_app_url(str(folder_url))
         return {k: v for k, v in mapping.items() if _present(v)}
 
     def _map_contact(self, contact_data: dict[str, Any], account_id: str) -> dict[str, Any]:
@@ -557,8 +560,11 @@ class ZohoClient:
         if not mapping.get("Deal_Name") and mapping.get("Line_of_Business"):
             mapping["Deal_Name"] = str(mapping["Line_of_Business"])
         for url_key in ("Document_URL", "Primary_Folder_URL"):
-            if mapping.get(url_key) is not None and not is_http_url(mapping.get(url_key)):
+            value = mapping.get(url_key)
+            if value is not None and not is_http_url(value):
                 mapping.pop(url_key, None)
+            elif value:
+                mapping[url_key] = rewrite_stale_files_app_url(str(value))
         return {k: v for k, v in mapping.items() if _present(v)}
 
     # ── Public write methods ──────────────────────────────────────────────

@@ -119,14 +119,25 @@ Once the fields exist, these paths fill them:
 
 | When | Field | Value |
 |---|---|---|
-| Intake (`HERMES_WRITE_TO_ZOHO=1`) | Account `Nextcloud_Folder_URL` | `https://{nextcloud}/apps/files/?dir=/Clients/{name}` |
+| Intake (`HERMES_WRITE_TO_ZOHO=1`) | Account `Nextcloud_Folder_URL` | `https://{nextcloud}/apps/files/files?dir=/Clients/{name}` |
 | Intake | Deal `Primary_Folder_URL` | `…/Clients/{name}/Quotes` |
 | Book backfill | Account folder URL, Policy `Primary_Folder_URL` (`…/Policies`), Renewal `Primary_Folder_URL` (`…/Renewal Reviews`) | same Files-app links |
-| Quote / proposal / renewal PDF file | Hermes stores the file in Nextcloud; stamp `Document_URL` onto the Zoho row when that writer already has the record id | `…/apps/files/?dir=/…&scrollto={filename}` |
+| Quote / proposal / renewal PDF file | Hermes stores the file in Nextcloud; stamp `Document_URL` onto the Zoho row when that writer already has the record id | `…/apps/files/files?dir=/…&scrollto={filename}` |
 
 Hermes will **not** write a relative path like `Clients/ABC Trucking` into
 a URL field — Zoho would not open it. It also skips Zoho file attachments
 when a Nextcloud folder URL is present.
+
+Nextcloud 34 serves folders at `/apps/files/files?dir=/…`. Hermes stamps
+that form. Do not pre-encode commas (`Berrios%2C%20Edwin`): Zoho website
+fields and the Nextcloud login redirect both encode the URL again, which
+turns `%2C` into `%252C` and the Files app shows **Folder not found** even
+though `Clients/Berrios, Edwin` exists. If a click 404s, open Files →
+Clients → the client name, or paste:
+
+`https://{nextcloud}/apps/files/files?dir=/Clients/{name}`
+
+with the comma and space left as-is.
 
 ## 4. How you know it connected
 
