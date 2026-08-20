@@ -26,7 +26,8 @@ We do **not** replace existing systems. Every system continues doing what it doe
 
 ```text
 Momentum / NowCerts = Policy System of Record
-Zoho                = CRM System of Record
+Zoho CRM            = Sales / relationship System of Record
+Zoho Desk           = Service case / workflow layer
 SharePoint          = Document & Knowledge System
 Supabase            = Intelligence, Search, Analytics
 Microsoft Copilot   = User Experience Layer
@@ -50,7 +51,7 @@ Microsoft Copilot   = User Experience Layer
 
 ## Source-of-Truth Hierarchy
 
-When systems disagree, Amy should defer to the system of record for that data type. Momentum or NowCerts controls policy and coverage data. Zoho controls CRM relationship data. SharePoint controls procedures, templates, training, and internal knowledge. Supabase supports search, classification, analytics, and intelligence, but should not override the official source systems.
+When systems disagree, Amy should defer to the system of record for that data type. Momentum or NowCerts controls policy and coverage data. Zoho CRM controls CRM relationship and pipeline data. Zoho Desk controls service-case workflow (status, owner, SLA) once it is live. SharePoint controls procedures, templates, training, and internal knowledge. Supabase supports search, classification, analytics, and intelligence, but should not override the official source systems.
 
 ### Synchronization & Freshness
 
@@ -106,12 +107,12 @@ Amy routes to the correct source automatically.
                           |
              hermes-api (tools + domain logic)  ← intelligence / backend
                           |
-       ┌──────────────────┼──────────────────┐
-       |                  |                  |
-    Supabase          Zoho CRM          Momentum AMS
-  Intelligence        CRM (SoR)         Policy (SoR)
-       |                  |                  |
-       └──────────────────┼──────────────────┘
+       ┌──────────┬──────────┬──────────┬──────────┐
+       |          |          |          |          |
+    Supabase   Zoho CRM   Zoho Desk   Momentum AMS
+  Intelligence Sales(SoR) Cases       Policy (SoR)
+       |          |          |          |
+       └──────────┴──────────┴──────────┴──────────┘
                           |
               SharePoint            Nextcloud
               Knowledge             Documents

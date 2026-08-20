@@ -1,0 +1,11 @@
+Layout,Display_Label,API_Name,Data_Type,Length,Mandatory,Picklist_Values,Section,Sensitive,Notes
+Billing and Payment,Billing Type,cf_billing_type,Picklist,100,N,Direct bill | Agency bill | Premium finance,Billing,N,
+Billing and Payment,Due Date,cf_due_date,Date,,N,,Billing,N,
+Billing and Payment,Amount Due,cf_amount_due,Decimal,16,N,,Billing,N,
+Billing and Payment,Cancellation Warning Received,cf_cancellation_warning_received,Boolean,,N,,Billing,N,
+Billing and Payment,Cancellation Date,cf_cancellation_date,Date,,N,,Billing,N,
+Billing and Payment,Reinstatement Requested,cf_reinstatement_requested,Boolean,,N,,Billing,N,
+Billing and Payment,Payment Submitted,cf_payment_submitted,Boolean,,N,,Billing,N,
+Billing and Payment,Confirmation Number,cf_confirmation_number,Text,64,N,,Billing,N,
+Billing and Payment,Escalation Required,cf_escalation_required,Boolean,,N,,Billing,N,
+Billing and Payment,Documented Disposition,cf_documented_disposition,Textarea,4000,N,,Billing,N,Required before resolving a cancellation-warning case.

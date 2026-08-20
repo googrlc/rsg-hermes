@@ -14,6 +14,8 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |
 | `FIELD_CREATE_CHECKLIST.md` | Ordered create steps + uniqueness / pipeline rules |
 
+Related: Zoho Desk (service cases) field pack lives in [`docs/zoho-desk/`](../zoho-desk/README.md). CRM stays the sales system of record; Desk is the case/workflow layer.
+
 ## How to use
 
 1. Create custom modules **Policies**, **Renewal_Events**, **Renewals**, **AMS_Write_Queue** (if not using Zoho Insurance vertical for Policies).

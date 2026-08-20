@@ -1,9 +1,10 @@
 # Hermes (rsg-hermes)
 
 Python operations engine for Risk Solutions Group, bridging **Zoho CRM**
-(the CRM system of record), **NowCerts** (the AMS system of record), and
-**Supabase** (the operations layer — canonical book mirror, queues, KPIs,
-renewal state, intake governance). It ships two entry points:
+(the CRM system of record), **Zoho Desk** (the case/workflow layer — see
+[`docs/zoho-desk/`](docs/zoho-desk/README.md)), **NowCerts** (the AMS system
+of record), and **Supabase** (the operations layer — canonical book mirror,
+queues, KPIs, renewal state, intake governance). It ships two entry points:
 
 - **`hermes`** — a one-shot / REPL CLI that runs the scheduled jobs (sync,
   renewals, revenue sentinel, commissions, scorecards, intake execution).
@@ -22,8 +23,10 @@ renewal state, intake governance). It ships two entry points:
 > EspoCRM was decommissioned July 2026; the inbound **Slack Socket Mode**
 > listener has been **retired**. Insured and policy truth live in **NowCerts**;
 > Hermes mirrors them into **Supabase** for analytics and syncs client/pipeline
-> work to **Zoho**. The Espo client and its CLI flags have been **deleted** from
-> the tree; a few Espo-era `.env` keys remain but are unused — see
+> work to **Zoho CRM**. Service cases target **Zoho Desk** (Desk owns the work;
+> Momentum owns the policy record; CRM owns the sales opportunity). The Espo
+> client and its CLI flags have been **deleted** from the tree; a few Espo-era
+> `.env` keys remain but are unused — see
 > [Legacy / decommissioned](#legacy--decommissioned) so a fresh reader does not
 > mistake them for live paths.
 
@@ -41,6 +44,7 @@ The credentials that matter now are:
 | Purpose | Vars |
 |---|---|
 | **Zoho CRM (system of record)** | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`; optional `ZOHO_DATA_CENTER`, `HERMES_WRITE_TO_ZOHO` |
+| **Zoho Desk (case/workflow layer)** | `ZOHO_DESK_ORG_ID`; reuses the CRM OAuth client when the refresh token has Desk scopes, or `ZOHO_DESK_CLIENT_ID` / `ZOHO_DESK_CLIENT_SECRET` / `ZOHO_DESK_REFRESH_TOKEN` |
 | **NowCerts (AMS, system of record)** | `NOWCERTS_API_URL`, `NOWCERTS_USERNAME`, `NOWCERTS_PASSWORD` |
 | **Supabase (operations DB)** | `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | **`hermes-api` bearer** | `HERMES_API_TOKEN`, `HERMES_API_HOST`, `HERMES_API_PORT` |

@@ -1,0 +1,13 @@
+Layout,Display_Label,API_Name,Data_Type,Length,Mandatory,Picklist_Values,Section,Sensitive,Notes
+Renewal Service,Expiration Date,cf_expiration_date,Date,,Y,,Renewal,N,One renewal case per policy expiration — not three tickets for 90/60/30.
+Renewal Service,Assigned Producer,cf_assigned_producer,Text,255,N,,Renewal,N,
+Renewal Service,Assigned Service Owner,cf_assigned_service_owner,Text,255,N,,Renewal,N,
+Renewal Service,Renewal Stage,cf_renewal_stage,Text,255,N,,Renewal,N,"90-day, 60-day, 30-day, or Completion."
+Renewal Service,Renewal Questionnaire Sent,cf_renewal_questionnaire_sent,Boolean,,N,,Renewal,N,
+Renewal Service,Exposure Updates Received,cf_exposure_updates_received,Boolean,,N,,Renewal,N,
+Renewal Service,Loss Runs Ordered,cf_loss_runs_ordered,Boolean,,N,,Renewal,N,
+Renewal Service,Current Loss Runs Received,cf_current_loss_runs_received,Boolean,,N,,Renewal,N,
+Renewal Service,Marketing Required,cf_marketing_required,Boolean,,N,,Renewal,N,
+Renewal Service,Renewal Proposal Received,cf_renewal_proposal_received,Boolean,,N,,Renewal,N,
+Renewal Service,Client Decision,cf_client_decision,Picklist,100,N,Pending | Renew as is | Remarket | Nonrenew | Rewrite,Renewal,N,
+Renewal Service,Renewal Completed,cf_renewal_completed,Boolean,,N,,Renewal,N,
