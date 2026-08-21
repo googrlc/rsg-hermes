@@ -1,15 +1,14 @@
-// Zoho Renewals button → Hermes relay → Cursor Data Quality Investigator.
+// Zoho Renewals custom button → Hermes relay → Cursor Data Quality Investigator.
 //
-// Zoho only stores Hermes URL + shared secret. Cursor webhook creds stay on hermes-gretch.
+// Category MUST be `button` when created from Setup → Renewals → Links and Buttons.
 //
-// CRM Variables (Setup → Developer Space → CRM Variables):
-//   hermes_dqi_webhook_base   e.g. https://hermes-gretch.tail1cbc83.ts.net:8444
-//   hermes_dqi_webhook_secret same value as SERVICE_WEBHOOK_SECRET on Hermes
+// CRM Variables:
+//   hermes_dqi_webhook_base    https://hermes-gretch.tail1cbc83.ts.net:10000
+//   hermes_dqi_webhook_secret  same as SERVICE_WEBHOOK_SECRET on Hermes
 //
-// Custom button argument (merge-field picker):
-//   renewalId → Renewals → Record Id
+// Button argument: renewalId → Record Id (merge-field picker)
 
-string automation.trigger_cursor_policy_investigation(String renewalId)
+string button.trigger_cursor_policy_investigation(String renewalId)
 {
 	baseUrl = zoho.crm.getOrgVariable("hermes_dqi_webhook_base");
 	secret = zoho.crm.getOrgVariable("hermes_dqi_webhook_secret");
