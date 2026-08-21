@@ -6,6 +6,7 @@
 // Persist Checkpoint_State on the Zoho Renewals record. No Supabase OS table.
 
 const os = require("./operating");
+const fields = require("./fields");
 
 function lookupId(value) {
   if (!value) return "";
@@ -87,4 +88,6 @@ module.exports = {
   attachOsToDeskPayload,
   completeCheckpointOnCard,
   hasPipelineDeal,
+  ensureRenewalDeskFields: fields.ensureRenewalDeskFields,
+  DESK_FIELDS: fields.DESK_FIELDS,
 };

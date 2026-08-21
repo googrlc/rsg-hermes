@@ -148,6 +148,23 @@ def test_catalyst_spa_is_live_client_not_creator():
     assert "nowcerts.com" not in app.lower()
 
 
+def test_ensure_renewal_desk_fields_creates_related_deal_not_hermes_id():
+    fields = (DESK / "catalyst" / "functions" / "renewals_desk_function" / "fields.js").read_text()
+    os_js = (DESK / "catalyst" / "functions" / "renewals_desk_function" / "os.js").read_text()
+    assert "ensureRenewalDeskFields" in fields
+    assert "ensureRenewalDeskFields" in os_js
+    assert 'api_name: "Related_Deal"' in fields
+    assert 'api_name: "Deals"' in fields
+    assert 'data_type: "lookup"' in fields
+    assert 'api_name: "Checkpoint_State"' in fields
+    assert 'data_type: "textarea"' in fields
+    assert "skippedHermesRenewalId: true" in fields
+    assert "skippedDealId: true" in fields
+    assert 'api_name: "Hermes_Renewal_ID"' not in fields
+    assert 'api_name: "Deal_Id"' not in fields
+    assert "nowcerts.com" not in fields.lower()
+
+
 def test_operating_js_checkpoint_keys_match_python():
     from hermes.renewals.operating import CHECKPOINTS, STAGE_TASKS
 

@@ -731,6 +731,14 @@ class ZohoClient:
         log.info("Zoho: created %s id=%s %s=%r", module, rid, match_field, value)
         return {"id": rid, "action": "created"}
 
+    def create_record(self, module: str, record: dict[str, Any]) -> dict[str, Any]:
+        """POST /{module} with no search. Used when the match field is unsearchable."""
+        payload = {k: v for k, v in record.items() if _present(v) or v is False}
+        body = self._post(module, {"data": [payload]})
+        rid = self._assert_write_ok(body, action="create", module=module)
+        log.info("Zoho: created %s id=%s", module, rid)
+        return {"id": rid, "action": "created"}
+
     def update_record(
         self, module: str, record_id: str, record: dict[str, Any]
     ) -> dict[str, Any]:

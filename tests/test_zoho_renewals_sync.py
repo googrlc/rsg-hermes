@@ -15,6 +15,7 @@ from hermes.sync.zoho_renewals import (
     DEAL_STAGE_REQUOTE,
     DEAL_STAGE_WON,
     _iso_datetime,
+    _write_renewal,
     creator_override_diffs,
     deal_window_stage,
     find_desk_for_deal,
@@ -252,6 +253,7 @@ class FakeZoho:
     def __init__(self):
         self.upserts = []
         self.updates = []
+        self.creates = []
         self.existing = {}
         self.records = {}
 
@@ -314,18 +316,26 @@ class FakeZoho:
     def upsert_by_field(self, module, record, *, match_field, match_value=None):
         value = match_value if match_value is not None else record.get(match_field)
         self.upserts.append((module, match_field, value, record))
-        existing = self.existing.get((module, value))
-        if existing is None:
-            for rec in self._all(module):
-                if _field(rec, match_field) == str(value):
-                    existing = rec
-                    break
+        existing = None
+        if value:
+            existing = self._find_first(module, f"({match_field}:equals:{value})")
         action = "updated" if existing else "created"
         rid = str((existing or {}).get("id") or f"{module}-{value}")
         merged = {**(existing or {}), **record, "id": rid}
-        self.existing[(module, value)] = merged
+        if value:
+            self.existing[(module, value)] = merged
         self.records[rid] = (module, merged)
         return {"id": rid, "action": action}
+
+    def create_record(self, module, record):
+        self.creates.append((module, record))
+        rid = str(record.get("id") or f"{module}-created-{len(self.records) + 1}")
+        merged = {**record, "id": rid}
+        pn = str(record.get("Policy_Number") or "").strip()
+        if pn:
+            self.existing[(module, pn)] = merged
+        self.records[rid] = (module, merged)
+        return {"id": rid, "action": "created"}
 
     def update_record(self, module, record_id, record):
         self.updates.append((module, record_id, record))
@@ -341,7 +351,8 @@ class FakeZoho:
 def _renewal_writes(zoho: FakeZoho) -> list[dict]:
     from_upsert = [rec for mod, _f, _v, rec in zoho.upserts if mod == "Renewals"]
     from_update = [rec for mod, _rid, rec in zoho.updates if mod == "Renewals"]
-    return from_upsert + from_update
+    from_create = [rec for mod, rec in getattr(zoho, "creates", []) if mod == "Renewals"]
+    return from_upsert + from_update + from_create
 
 
 def test_run_sync_upserts_event_then_renewal_and_captures_override():
@@ -633,6 +644,129 @@ def test_find_existing_renewal_reraises_other_zoho_errors():
 
     with pytest.raises(ZohoClientError, match="500"):
         find_existing_renewal(Boom(), hermes_renewal_id="x", policy_number="CPP1")
+
+
+def test_write_renewal_creates_by_policy_number_when_hermes_id_unsearchable():
+    """Live miss: p85 row, Deal exists, no desk row, Hermes_Renewal_ID search 400s."""
+    zoho = UnsearchableHermesIdZoho()
+    zoho.seed(
+        "Deals",
+        {
+            "id": "deal-bop",
+            "Opportunity_Type": "Renewals",
+            "Bound_Policy_Number": "BOP-RSG-77301",
+            "Hermes_Opportunity_ID": "p85-bop",
+            "Stage": DEAL_STAGE_90,
+        },
+        "p85-bop",
+        "BOP-RSG-77301",
+    )
+    zoho.seed(
+        "Deals",
+        {
+            "id": "deal-auto",
+            "Opportunity_Type": "Renewals",
+            "Bound_Policy_Number": "AUTO-RSG-118822",
+            "Hermes_Opportunity_ID": "p85-auto",
+            "Stage": DEAL_STAGE_90,
+        },
+        "p85-auto",
+        "AUTO-RSG-118822",
+    )
+    p85 = [
+        {
+            "id": "p85-bop",
+            "policy_number": "BOP-RSG-77301",
+            "client_name": "BOP Account",
+            "expiration_date": "2026-11-10",
+            "premium_current": 1200,
+            "risk_status": "SAFE",
+        },
+        {
+            "id": "p85-auto",
+            "policy_number": "AUTO-RSG-118822",
+            "client_name": "Auto Account",
+            "expiration_date": "2026-10-10",
+            "premium_current": 900,
+            "risk_status": "SAFE",
+        },
+    ]
+    result = run_zoho_renewals_sync(
+        supa=_supa(p85=p85, candidates=[], policies=[]),
+        zoho=zoho,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert result.ok
+    assert result.errors == []
+    assert result.renewals_created == 2
+    assert result.deals_created == 0
+    renewal_upserts = [u for u in zoho.upserts if u[0] == "Renewals"]
+    assert renewal_upserts
+    assert all(match_field == "Policy_Number" for _mod, match_field, _v, _rec in renewal_upserts)
+    assert {u[2] for u in renewal_upserts} == {"BOP-RSG-77301", "AUTO-RSG-118822"}
+    for rec in _renewal_writes(zoho):
+        assert rec.get("Related_Deal")
+        assert "Checkpoint_State" not in rec
+        assert rec.get("Desk_Stage") == "Identified"
+
+
+def test_write_renewal_post_creates_when_policy_number_also_unsearchable():
+    class NoSearch(FakeZoho):
+        def _find_first(self, module, criteria):
+            raise ZohoClientError(
+                'Zoho GET Renewals/search failed 400: {"code":"INVALID_QUERY",'
+                '"message":"the field is not available for search"}'
+            )
+
+    zoho = NoSearch()
+    written = _write_renewal(
+        zoho,
+        {"Name": "BOP Account — BOP-RSG-77301", "Policy_Number": "BOP-RSG-77301"},
+        existing=None,
+        hermes_id="p85-bop",
+        dry_run=False,
+    )
+    assert written["action"] == "created"
+    assert written["id"]
+    assert zoho.creates
+    assert zoho.creates[0][0] == "Renewals"
+    assert all(u[1] != "Hermes_Renewal_ID" for u in zoho.upserts)
+
+
+def test_desk_only_leftovers_without_p85_do_not_mint_deals():
+    zoho = FakeZoho()
+    leftovers = [
+        ("Lombardo, Tiffany", "991540615"),
+        ("Prak", "990414352"),
+        ("Weeks", "988312391"),
+        ("Green", "6259704770"),
+        ("Bassey-Duke", "869947160"),
+    ]
+    for name, pn in leftovers:
+        zoho.seed(
+            "Renewals",
+            {
+                "id": f"leftover-{pn}",
+                "Client_Name": name,
+                "Policy_Number": pn,
+                "Deal_Id": None,
+                "Related_Deal": None,
+                "Stage": "Identified",
+            },
+            pn,
+        )
+    result = run_zoho_renewals_sync(
+        supa=_supa(p85=[], candidates=[], policies=[]),
+        zoho=zoho,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert result.ok
+    assert result.deals_created == 0
+    assert not any(mod == "Deals" for mod, *_rest in zoho.upserts)
+    assert not any(mod == "Deals" for mod, _rid, _rec in zoho.updates)
+
 
 
 def test_checkpoint_state_is_never_synced_from_hermes():

@@ -18,6 +18,7 @@ HERMES="$(git -C ~/rsg-hermes rev-parse --show-toplevel 2>/dev/null || git rev-p
 FUNC=~/catalyst-renewals-desk/functions/renewals_desk_function
 cp "$HERMES/docs/zoho/creator-renewals-desk/catalyst/functions/renewals_desk_function/operating.js" "$FUNC/operating.js"
 cp "$HERMES/docs/zoho/creator-renewals-desk/catalyst/functions/renewals_desk_function/os.js" "$FUNC/os.js"
+cp "$HERMES/docs/zoho/creator-renewals-desk/catalyst/functions/renewals_desk_function/fields.js" "$FUNC/fields.js"
 ```
 
 ## Merge into the existing Advanced I/O handler
@@ -26,6 +27,15 @@ At the top of `index.js`:
 
 ```js
 const osDesk = require("./os");
+```
+
+0. On cold start or `GET /api/health`, ensure desk fields (idempotent). Creates
+   `Checkpoint_State` (textarea) and `Related_Deal` (lookup → Deals) when
+   missing. Does **not** create `Hermes_Renewal_ID` or `Deal_Id`. Live Catalyst
+   derives `Deal_Id` from `Related_Deal`.
+
+```js
+await osDesk.ensureRenewalDeskFields(crmRequest);
 ```
 
 1. After you build the GET `/api/desk` payload:
@@ -64,7 +74,8 @@ when Lamar asks.
 
 Rules that must stay true:
 
-- `Deal_Id` / `Related_Deal` 1:1 with Opportunity_Type=Renewals
+- `Related_Deal` lookup to Deals (create if missing). Live Catalyst derives
+  `Deal_Id` from `Related_Deal` — do not require a second Deal_Id field.
 - Worklist hides rows with no pipeline Deal
 - Completing a checkpoint does **not** advance Desk_Stage
 - `actor=hermes` never advances

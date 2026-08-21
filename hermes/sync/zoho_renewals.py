@@ -764,6 +764,25 @@ def _write_deal(
     )
 
 
+def _create_renewal_record(
+    client: ZohoClient, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """POST a Renewals row. Does not search Hermes_Renewal_ID."""
+    creator = getattr(client, "create_record", None)
+    if callable(creator):
+        written = creator(RENEWALS_MODULE, payload)
+        if isinstance(written, dict) and written.get("id"):
+            if "action" not in written:
+                written = {**written, "action": "created"}
+            return written
+    poster = getattr(client, "_post", None)
+    if not callable(poster):
+        raise ZohoClientError("Zoho client cannot POST-create a Renewals row")
+    body = poster(RENEWALS_MODULE, {"data": [payload]})
+    rid = ZohoClient._assert_write_ok(body, action="create", module=RENEWALS_MODULE)
+    return {"id": rid, "action": "created"}
+
+
 def _write_renewal(
     client: ZohoClient,
     payload: dict[str, Any],
@@ -772,7 +791,13 @@ def _write_renewal(
     hermes_id: str | None,
     dry_run: bool,
 ) -> dict[str, Any]:
-    """Update by Zoho id when a live row already exists (even without Hermes_Renewal_ID)."""
+    """Update by Zoho id, else upsert by searchable Policy_Number.
+
+    Live CRM cannot search ``Hermes_Renewal_ID`` (``INVALID_QUERY``). Do not
+    upsert on that field. If Policy_Number search is also unsearchable,
+    POST-create. ``hermes_id`` is unused for matching.
+    """
+    _ = hermes_id
     if dry_run:
         if existing and existing.get("id"):
             return {"id": str(existing["id"]), "action": "updated"}
@@ -781,9 +806,25 @@ def _write_renewal(
         updater = getattr(client, "update_record", None)
         if callable(updater):
             return updater(RENEWALS_MODULE, str(existing["id"]), payload)
-    return client.upsert_by_field(
-        RENEWALS_MODULE, payload, match_field="Hermes_Renewal_ID", match_value=hermes_id
-    )
+    policy_number = str(
+        payload.get("Policy_Number") or (existing or {}).get("Policy_Number") or ""
+    ).strip()
+    if policy_number:
+        try:
+            return client.upsert_by_field(
+                RENEWALS_MODULE,
+                payload,
+                match_field="Policy_Number",
+                match_value=policy_number,
+            )
+        except ZohoClientError as exc:
+            if not _is_unsearchable_field_error(exc):
+                raise
+            log.info(
+                "Zoho Renewals.Policy_Number is not searchable (%s); POST-creating",
+                exc,
+            )
+    return _create_renewal_record(client, payload)
 
 
 def _iter_renewal_deals(client: ZohoClient):
@@ -1034,11 +1075,12 @@ def run_zoho_renewals_sync(
             if dry_run:
                 result.pipeline_desk_created += 1
                 continue
-            upserted = zoho.upsert_by_field(
-                RENEWALS_MODULE,
+            upserted = _write_renewal(
+                zoho,
                 payload,
-                match_field="Hermes_Renewal_ID",
-                match_value=hermes_id,
+                existing=None,
+                hermes_id=hermes_id or None,
+                dry_run=False,
             )
             linked_deal_ids.add(deal_id)
             if upserted.get("action") == "created":
