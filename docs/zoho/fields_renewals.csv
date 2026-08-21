@@ -16,5 +16,15 @@ Renewals,Carrier,Carrier,Single Line,150,N,N,N,,,AMS→Z via Policy,(joined),Fro
 Renewals,Line of Business,Line_of_Business,Single Line,150,N,N,N,,,AMS→Z via Policy,(joined),From canonical_policies
 Renewals,Effective Date,Effective_Date,Date,,N,N,N,,,AMS→Z via Policy,(joined),From canonical_policies
 Renewals,Dismissed,Dismissed,Checkbox,,N,N,N,false,,Z-only override,(portal_overrides),Soft-remove; not a DB column
+Renewals,Related Renewal Event,Related_Renewal_Event,Lookup (Renewal_Events),,N,N,N,,,AMS→Z via join,,"Join on Hermes_Candidate_ID / policy + event date"
+Renewals,Related Deal,Related_Deal,Lookup (Deals),,N,N,N,,,AMS→Z / Z-only,,"Required 1:1 link to Renewals-pipeline Deal. Worklist hides rows where this is empty. Hermes fills when empty; does not overwrite a set link."
+Renewals,Desk Stage,Desk_Stage,Picklist,40,N,N,N,Identified,picklists_hermes_vocab.csv:desk_stage,Z-only,,"Stored OS stage (Identified…Closed). UI labels are Review Account…Close Renewal — see hermes/renewals/operating.py. Live CRM may expose this as Stage. Sync sets it on create only."
+Renewals,Disposition,Disposition,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:desk_disposition,Z-only,,"Required when Desk_Stage=Closed; codes from hermes/renewals/config.py"
+Renewals,Recommended Action,Recommended_Action,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:recommended_action,Z-only,,retain / remarket / escalate
+Renewals,Days To Expiration,Days_To_Expiration,Formula (Number),,,N,N,N,,,Derived,,"Datecomp(Expiration_Date,Today); signed days until x-date"
+Renewals,Window Bucket,Window_Bucket,Picklist,20,N,N,N,,picklists_hermes_vocab.csv:window_bucket,Derived,,"90 / 60 / 30 / personal / past_due — Hermes writes; personal LOB always personal"
+Renewals,Touch Early,Touch_Early,Date,,N,N,N,,,Z-only,,"T-90 / T-45 / T-40 stamp only; no auto-send"
+Renewals,Touch Mid,Touch_Mid,Date,,N,N,N,,,Z-only,,"T-60 stamp only; no auto-send"
+Renewals,Touch Decision,Touch_Decision,Date,,N,N,N,,,Z-only,,"T-30 / T-15 stamp only; no auto-send"
 Renewals,Created Time,Created_Time,DateTime,,N,N,N,,,System,created_at,
 Renewals,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,updated_at,

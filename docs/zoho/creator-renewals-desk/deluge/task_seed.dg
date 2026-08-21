@@ -1,0 +1,100 @@
+// Renewals Desk — seed CRM tasks once per renewal (idempotent by Subject).
+// Background only: the OS UI is checkpoints on the renewal, not a task list.
+// Keep the original five titles. Add OS checkpoint titles from
+// hermes/renewals/operating.py CHECKPOINTS.
+// Trigger: Renewals on create, and Card page load.
+
+titles = {
+	"Pull renewal declaration & review exposures",
+	"Request renewal terms from carrier",
+	"Prepare renewal options / comparison",
+	"Send renewal review to client",
+	"Update AMS (NowCerts) & file worksheet",
+	"Verify customer info",
+	"Verify policy info",
+	"Review claims history",
+	"Review renewability",
+	"Review current premium",
+	"Review renewal timeline",
+	"Send questionnaire",
+	"Gather exposure changes",
+	"Verify contact info",
+	"Record customer response",
+	"Request carrier terms",
+	"Request alternative quotes",
+	"Record carrier responses",
+	"Follow up pending markets",
+	"Analyze carrier response",
+	"Compare alternatives",
+	"Review coverage differences",
+	"Prepare recommendations / proposal package",
+	"Deliver proposal",
+	"Contact customer",
+	"Record customer selection",
+	"Record final premium",
+	"Record disposition",
+	"Record bound carrier",
+	"Record effective date",
+	"Queue AMS update"
+};
+details = {
+	"Retrieve the expiring dec page and confirm current exposures on the worksheet.",
+	"Request renewal terms from the incumbent carrier (remarket if flagged).",
+	"Build the option comparison and premium-change explanation for the client.",
+	"Deliver the renewal review and confirm the client's intent.",
+	"Stage the approved NowCerts write-back and file the worksheet in the client folder.",
+	"Confirm named insured, contacts, and account match the file.",
+	"Confirm policy number, carrier, LOB, dates, and limits.",
+	"Pull loss runs / claims notes. Do not invent a claim.",
+	"Incumbent appetite, non-renew notice, or remarket flag.",
+	"Confirm Premium Current on the desk matches the dec.",
+	"Confirm x-date, window bucket, and who owns the next touch.",
+	"Send the renewal questionnaire. Do not auto-email from Hermes.",
+	"Drivers, locations, payroll, vehicles, or property changes.",
+	"Phone, email, and decision maker are current.",
+	"Log that the customer replied (or that we are waiting).",
+	"Request incumbent terms. Queue AMS; never write NowCerts from the desk.",
+	"Remarket only when recommended. Still a queue, not an AMS write.",
+	"At least one carrier response is on the file.",
+	"Chase markets still outstanding.",
+	"Read terms, deductibles, exclusions, and premium.",
+	"Side-by-side. Do not invent a quote number.",
+	"Coverage differences vs the expiring policy.",
+	"Proposal package generated for the client.",
+	"Send the package. Desk does not email by itself unless asked.",
+	"Talk to the customer. Log the conversation on the renewal.",
+	"What the customer chose, in their words.",
+	"Premium Renewal on the desk row.",
+	"Required to close.",
+	"Bound carrier on the file.",
+	"Effective date of the renewal term.",
+	"Enqueue AMS_Write_Queue. Hermes is the only NowCerts writer."
+};
+renewalId = input.get("id");
+accountId = ifnull(input.get("Account_Name"), Map()).get("id");
+existing = zoho.crm.getRelatedRecords("Tasks", "Renewals", renewalId);
+have = List();
+for each task in existing
+{
+	have.add(task.get("Subject"));
+}
+i = 0;
+for each title in titles
+{
+	if(!have.contains(title))
+	{
+		taskMap = Map();
+		taskMap.put("Subject", title);
+		taskMap.put("Description", details.get(i));
+		taskMap.put("Status", "Not Started");
+		taskMap.put("Priority", "Normal");
+		if(accountId != null)
+		{
+			taskMap.put("What_Id", accountId);
+			taskMap.put("$se_module", "Accounts");
+		}
+		taskMap.put("Renewal_Id", renewalId);
+		zoho.crm.createRecord("Tasks", taskMap);
+	}
+	i = i + 1;
+}

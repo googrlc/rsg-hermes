@@ -13,6 +13,8 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `picklists_nowcerts_seed.csv` | Exact Hermes `nowcerts_picklist_options` seeds (labels + option_id UUIDs) |
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |
 | `FIELD_CREATE_CHECKLIST.md` | Ordered create steps + uniqueness / pipeline rules |
+| [`creator-renewals-desk/`](creator-renewals-desk/) | **Catalyst** Renewals Desk (live SPA + `renewals_desk_function`). Creator `renewals-desk` is an empty stub — do not fill it |
+| [`creator-renewals-desk/catalyst/`](creator-renewals-desk/catalyst/) | Recovered Catalyst client + function OS patch |
 
 ## How to use
 

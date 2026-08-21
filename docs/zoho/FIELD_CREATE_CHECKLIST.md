@@ -80,7 +80,7 @@ Use as a subset of Policy Status or a separate Renewal Status field:
 
 ### 1e. Other Hermes vocab
 
-Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_Type, Insured_Type, Win_Likelihood, Deal_Status, Policy_Status (full normalize set), Billing_Type, Risk_Status, Eligibility, Branch, Segment, queue enums.
+Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_Type, Insured_Type, Win_Likelihood, Deal_Status, Policy_Status (full normalize set), Billing_Type, Risk_Status, Eligibility, Branch, Segment, queue enums, **Desk_Stage**, **Disposition**, **Recommended_Action**, **Window_Bucket**.
 
 ## 2. Create fields (CSV order)
 
@@ -110,7 +110,7 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Deals → Accounts
 - [ ] Policies → Accounts
 - [ ] Renewal_Events → Accounts, Policies
-- [ ] Renewals → Policies, Accounts, Renewal_Events (optional)
+- [ ] Renewals → Policies, Accounts, Renewal_Events (`Related_Renewal_Event`), Deals (`Related_Deal`)
 - [ ] AMS_Write_Queue → Accounts / Deals / Policies / Renewals (optional convenience)
 
 ## 4. Approval & AMS write rules (Zoho Blueprint / Approval)
@@ -130,7 +130,24 @@ For each row: create field → set length → set picklist → mark mandatory/un
 ## 5. Formulas
 
 - [ ] `Renewals.Increase_Percent` = `((Premium_Renewal - Premium_Current) / Premium_Current) * 100` (null-safe when Premium_Current = 0 → 0)
+- [ ] `Renewals.Days_To_Expiration` = `Datecomp(${Expiration_Date}, Today)` (signed days; negative = past due)
 - [ ] Optional: Deal Probability default from Stage (see pipeline tables above)
+
+`Window_Bucket` is a **picklist written by Hermes** (`hermes --sync-zoho-renewals`), not a formula — personal LOB always buckets as `personal`.
+
+## 5b. Catalyst Renewals Desk (live) — not Creator
+
+- [ ] Live product is Catalyst project `935150771` / `renewals_desk_function`.
+      Do **not** fill Creator `renewals-desk` (empty stub).
+- [ ] Copy the SPA from [`creator-renewals-desk/catalyst/`](creator-renewals-desk/catalyst/)
+      onto `~/catalyst-renewals-desk/renewals/src` (development only).
+- [ ] Optional CRM field `Renewals.Checkpoint_State` (multi-line text, desk-owned JSON).
+      Hermes must **not** overwrite it on nightly sync.
+- [ ] Confirm `hermes --sync-zoho-renewals` then `--sync-zoho-ams-queue` are on cron after `--renewal-refresh`
+
+Do not publish Catalyst production from this fill.
+
+Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch dates) must **not** be overwritten by book sync. Hermes sets `Desk_Stage=Identified` only on create. Hermes fills `Related_Deal` / `Deal_Id` when empty so the desk and the Renewals pipeline stay 1:1; it does not overwrite a Deal Gretchen already linked. Live Catalyst lists `Deal_Id`; the field pack names the lookup `Related_Deal`. Match existing desk rows by `Hermes_Renewal_ID` or `Policy_Number` so sync does not mint leftovers.
 
 ## 6. Sync direction smoke tests
 

@@ -1,0 +1,112 @@
+<!--
+  Creator Page: Card (one renewal).
+  Opened with CRM Renewals record id. Lookups: Policy, Account,
+  Related_Renewal_Event, Related_Deal.
+  Type pill uses the same Commercial blue / Personal sage as Desk.
+  Status (attention / overdue) is separate from type.
+-->
+<style>
+:root {
+  --desk-bg: #F6F7F9;
+  --desk-row: #FFFFFF;
+  --desk-text: #1F2937;
+  --desk-muted: #5B6472;
+  --desk-border: #D9DEE7;
+  --commercial-bg: #DCEAF7;
+  --commercial-text: #245A86;
+  --personal-bg: #E3F0E7;
+  --personal-text: #2F6B4F;
+  --attention-bg: #FFF1D6;
+  --attention-text: #8A5A12;
+  --overdue-bg: #FBE4E6;
+  --overdue-text: #9B3A43;
+}
+.renewal-card { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--desk-text); background: var(--desk-bg); padding: 20px 22px 36px; }
+.renewal-card > header .kicker { display: flex; align-items: center; gap: 8px; color: var(--desk-muted); font-size: 13px; margin: 0 0 6px; }
+.renewal-card h1 { margin: 0 0 8px; font-size: 24px; }
+.renewal-card .meta, .renewal-card .money { color: var(--desk-muted); font-size: 13.5px; }
+.renewal-card .meta strong { color: var(--desk-text); }
+.type-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 3px 9px 3px 7px; }
+.type-pill.commercial { background: var(--commercial-bg); color: var(--commercial-text); }
+.type-pill.personal { background: var(--personal-bg); color: var(--personal-text); }
+.status-pill { display: inline-block; font-size: 12px; font-weight: 650; border-radius: 999px; padding: 3px 9px; border: 1px solid var(--desk-border); }
+.status-pill.attention { background: var(--attention-bg); color: var(--attention-text); border-color: transparent; }
+.status-pill.overdue { background: var(--overdue-bg); color: var(--overdue-text); border-color: transparent; }
+.renewal-card section { background: var(--desk-row); border: 1px solid var(--desk-border); border-radius: 12px; padding: 14px 16px; margin-top: 12px; }
+.renewal-card section h2 { font-size: 13px; margin: 0 0 8px; }
+.renewal-card button { font: inherit; font-size: 12.5px; font-weight: 650; margin: 4px 6px 4px 0; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--desk-border); background: var(--desk-row); color: var(--desk-text); cursor: pointer; }
+</style>
+<article class="renewal-card card" data-renewal-id="{{RENEWAL_ID}}">
+  <header>
+    <p class="kicker">
+      <span class="type-pill commercial" data-field="Account_Type"><span aria-hidden="true">🏢</span> Commercial</span>
+      <span data-field="Line_of_Business"></span> · <span data-field="Carrier"></span>
+      <span class="status-pill" data-field="Desk_Stage"></span>
+    </p>
+    <h1 data-field="Client_Name">Client</h1>
+    <p class="meta">
+      Policy <strong data-field="Policy_Number"></strong>
+      · x-date <strong data-field="Expiration_Date"></strong>
+      · <span data-field="Days_To_Expiration"></span> days
+      · <span data-field="Window_Bucket"></span>
+      · risk <strong data-field="Risk_Status"></strong>
+    </p>
+    <p class="money">
+      Current <span data-field="Premium_Current"></span>
+      → renewal <span data-field="Premium_Renewal"></span>
+      (<span data-field="Increase_Percent"></span>%)
+    </p>
+  </header>
+
+  <section>
+    <h2>Desk</h2>
+    <p>Stage never skips. Closed requires Disposition. Producer confirms any
+    backward move.</p>
+    <ul>
+      <li>Desk Stage — Identified → Outreach Sent → Quote Requested → Proposal Sent → Negotiating → Closed</li>
+      <li>Disposition — on Closed only (renewed / rewritten / lost_price / lost_coverage / lost_no_response / do_not_renew)</li>
+      <li>Recommended Action — RETAIN_AS_IS / RETAIN_WITH_NEGOTIATION / REMARKET_SAMPLE / REMARKET_FULL / ESCALATE_HUMAN / MOVE_TO_AT_RISK_LIST</li>
+      <li>Strategy Notes, Last Contact Date</li>
+    </ul>
+    <!-- Bind to CRM Renewals edit form (correctable fields only). -->
+  </section>
+
+  <section>
+    <h2>Related</h2>
+    <ul>
+      <li>Policy — number, status, effective, carrier, LOB</li>
+      <li>Account — name, NowCerts insured GUID</li>
+      <li>Renewal Event — eligibility, lineage, segment</li>
+      <li>Deal — Renewals pipeline (90 / 60 / 30 day stages)</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Scorecard</h2>
+    <p>Renewal Health % plus Account Reviewed / Outreach Completed / Markets
+    Requested / Quotes Received / Proposal Pending / Client Decision Pending /
+    Closed. ✅ done · 🟨 current · ⬜ not started. Stored Desk_Stage is still
+    Identified → … → Closed; labels are Review Account → … → Close Renewal.</p>
+  </section>
+
+  <section>
+    <h2>Checkpoints</h2>
+    <p>Work the renewal here. CRM tasks are seeded in the background by
+    <code>task_seed.dg</code>. Completing a checkpoint does not advance while
+    required items remain. Hermes never auto-advances. Creator never emails
+    the client and never writes NowCerts.</p>
+  </section>
+
+  <section>
+    <h2>AMS actions</h2>
+    <p>Each button opens a short form: expected result (required) + note.
+    Deluge writes AMS_Write_Queue. Hermes drains after approval.</p>
+    <p>
+      <button type="button" data-action="request_terms">Request terms</button>
+      <button type="button" data-action="prepare_options">Prepare options</button>
+      <button type="button" data-action="client_follow_up">Client follow-up</button>
+      <button type="button" data-action="update_ams">Update AMS</button>
+    </p>
+    <p><button type="button" data-action="dismiss">Dismiss from worklist</button></p>
+  </section>
+</article>

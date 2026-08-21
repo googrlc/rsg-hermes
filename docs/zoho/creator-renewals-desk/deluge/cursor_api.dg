@@ -1,0 +1,204 @@
+// Paste into Creator starting at the MAP line (line 1 of the editor must be MAP).
+// Namespace: desk. Function: cursor_api. Existing renewals-desk app only.
+// CRM record ids are BIGINT; Custom API args are STRING — convert with toLong().
+
+MAP desk.cursor_api(STRING action, STRING id, STRING expected_result, STRING note, STRING policy_number, STRING desk_stage, STRING disposition, STRING producer_confirmed)
+{
+	ok = Map();
+	ok.put("ok", true);
+	err = Map();
+	err.put("ok", false);
+	op = trim(ifnull(action, ""));
+	if(op == "")
+	{
+		err.put("error", "action is required");
+		return err;
+	}
+	if(op == "ping")
+	{
+		ok.put("app", "renewals-desk");
+		ok.put("api", "Cursor");
+		ok.put("message", "pong");
+		return ok;
+	}
+	if(op == "approve")
+	{
+		if(id == null || id == "")
+		{
+			err.put("error", "id is required");
+			return err;
+		}
+		recordId = id.toLong();
+		rec = zoho.crm.getRecordById("AMS_Write_Queue", recordId);
+		if(rec == null || rec.get("id") == null)
+		{
+			err.put("error", "AMS_Write_Queue row not found");
+			return err;
+		}
+		if(ifnull(rec.get("Object_Type"), "") != "renewal")
+		{
+			err.put("error", "approve is only for object_type=renewal");
+			return err;
+		}
+		status = ifnull(rec.get("Status"), "");
+		approvedBy = ifnull(rec.get("Approved_By"), "");
+		awaiting = (status == "needs_approval") || (status == "queued" && approvedBy == "");
+		if(!awaiting)
+		{
+			err.put("error", "row is not awaiting approval");
+			return err;
+		}
+		upd = Map();
+		upd.put("Approved_By", zoho.loginuserid);
+		upd.put("Approved_At", zoho.currenttime);
+		upd.put("Status", "queued");
+		resp = zoho.crm.updateRecord("AMS_Write_Queue", recordId, upd);
+		ok.put("result", resp);
+		return ok;
+	}
+	if(op == "dismiss")
+	{
+		if(id == null || id == "")
+		{
+			err.put("error", "id is required");
+			return err;
+		}
+		recordId = id.toLong();
+		rec = zoho.crm.getRecordById("Renewals", recordId);
+		if(rec == null || rec.get("id") == null)
+		{
+			err.put("error", "Renewals row not found");
+			return err;
+		}
+		pn = ifnull(policy_number, rec.get("Policy_Number"));
+		if(pn == null || pn == "")
+		{
+			err.put("error", "policy_number is the dismiss key; refuse if missing");
+			return err;
+		}
+		upd = Map();
+		upd.put("Dismissed", true);
+		zoho.crm.updateRecord("Renewals", recordId, upd);
+		eventLookup = rec.get("Related_Renewal_Event");
+		if(eventLookup != null)
+		{
+			rawEventId = eventLookup.get("id");
+			if(rawEventId != null && rawEventId != "")
+			{
+				ev = Map();
+				ev.put("Eligibility", "excluded");
+				zoho.crm.updateRecord("Renewal_Events", rawEventId.toString().toLong(), ev);
+			}
+		}
+		ok.put("result", "dismissed");
+		ok.put("policy_number", pn);
+		return ok;
+	}
+	if(op == "set_stage")
+	{
+		if(id == null || id == "")
+		{
+			err.put("error", "id is required");
+			return err;
+		}
+		recordId = id.toLong();
+		rec = zoho.crm.getRecordById("Renewals", recordId);
+		if(rec == null || rec.get("id") == null)
+		{
+			err.put("error", "Renewals row not found");
+			return err;
+		}
+		deskStages = {"Identified", "Outreach Sent", "Quote Requested", "Proposal Sent", "Negotiating", "Closed"};
+		oldStage = ifnull(rec.get("Desk_Stage"), "Identified");
+		proposed = trim(ifnull(desk_stage, ""));
+		here = deskStages.indexOf(oldStage);
+		there = deskStages.indexOf(proposed);
+		if(there < 0)
+		{
+			err.put("error", "unknown desk stage");
+			return err;
+		}
+		if(there != here)
+		{
+			if(there == here + 1)
+			{
+				if(proposed == "Closed" && (disposition == null || disposition == ""))
+				{
+					err.put("error", "Closed requires a Disposition");
+					return err;
+				}
+			}
+			else if(there > here + 1)
+			{
+				err.put("error", "cannot skip desk stages");
+				return err;
+			}
+			else if(trim(ifnull(producer_confirmed, "")) != "true")
+			{
+				err.put("error", "moving backward requires producer confirmation");
+				return err;
+			}
+		}
+		upd = Map();
+		upd.put("Desk_Stage", proposed);
+		if(disposition != null && disposition != "")
+		{
+			upd.put("Disposition", disposition);
+		}
+		resp = zoho.crm.updateRecord("Renewals", recordId, upd);
+		ok.put("result", resp);
+		ok.put("Desk_Stage", proposed);
+		return ok;
+	}
+	allowed = {"request_terms", "prepare_options", "client_follow_up", "update_ams"};
+	if(!allowed.contains(op))
+	{
+		err.put("error", "unknown renewal action");
+		return err;
+	}
+	expected = trim(ifnull(expected_result, ""));
+	if(expected == "")
+	{
+		err.put("error", "expected_result is required");
+		return err;
+	}
+	if(id == null || id == "")
+	{
+		err.put("error", "id is required");
+		return err;
+	}
+	recordId = id.toLong();
+	rec = zoho.crm.getRecordById("Renewals", recordId);
+	if(rec == null || rec.get("id") == null)
+	{
+		err.put("error", "Renewals row not found");
+		return err;
+	}
+	pn = ifnull(policy_number, rec.get("Policy_Number"));
+	hermesId = rec.get("Hermes_Renewal_ID");
+	payload = Map();
+	payload.put("action", op);
+	payload.put("renewal_id", hermesId);
+	payload.put("policy_number", pn);
+	payload.put("expected_result", expected);
+	payload.put("channel", "task");
+	if(note != null && note != "")
+	{
+		payload.put("note", note);
+	}
+	queueAction = if(op == "update_ams", "update", "create");
+	row = Map();
+	row.put("Name", pn + " " + op);
+	row.put("Object_Type", "renewal");
+	row.put("Object_ID", pn);
+	row.put("Destination", "nowcerts");
+	row.put("Action", queueAction);
+	row.put("Payload", payload.toString());
+	row.put("Status", "needs_approval");
+	row.put("Attempt_Count", 0);
+	row.put("Related_Renewal", recordId);
+	resp = zoho.crm.createRecord("AMS_Write_Queue", row);
+	ok.put("result", resp);
+	ok.put("Status", "needs_approval");
+	return ok;
+}

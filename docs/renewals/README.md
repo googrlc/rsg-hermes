@@ -8,9 +8,11 @@ contract wins.
 - **Hermes = the runner and the only writer.** Nightly classify → refresh
   `renewal_candidates` → execute human-approved instructions → fire doorbells and
   escalations → compute the scoreboard. **Hermes never talks to a client.**
-- **The cockpit = the workstation.** Renewals are worked in the Command Center
-  (`/command-center/`), which reads the canonical book from Supabase and stages
-  approved instructions for the executor.
+- **The cockpit = the workstation.** Renewals are worked in the **Zoho Catalyst
+  Renewals Desk** (`docs/zoho/creator-renewals-desk/catalyst/`), which reads
+  Zoho CRM Renewals. Hermes upserts those modules via `--sync-zoho-renewals`
+  and mirrors approved AMS_Write_Queue rows via `--sync-zoho-ams-queue`.
+  The Creator app `renewals-desk` is an empty stub — do not fill it.
 - **Gretchen = the only hands that touch clients.** Hermes drafts; she sends.
 - **Slack = the notification wire only.** Morning doorbell DM to Gretchen,
   🚨 escalations and 📋 handoffs to `#lamar-alerts`, Monday digest. No

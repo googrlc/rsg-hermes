@@ -1,0 +1,19 @@
+// Renewals Desk — dismiss from the worklist. Never delete.
+// Hermes --sync-zoho-renewals records this as a portal_overrides row
+// keyed by Policy_Number so nightly refresh does not put it back.
+
+if(input.get("Policy_Number") == null || input.get("Policy_Number") == "")
+{
+	return "policy_number is the dismiss key; refuse if missing";
+}
+upd = Map();
+upd.put("Dismissed", true);
+zoho.crm.updateRecord("Renewals", input.get("id"), upd);
+eventId = ifnull(input.get("Related_Renewal_Event"), Map()).get("id");
+if(eventId != null)
+{
+	ev = Map();
+	ev.put("Eligibility", "excluded");
+	zoho.crm.updateRecord("Renewal_Events", eventId, ev);
+}
+return "dismissed";

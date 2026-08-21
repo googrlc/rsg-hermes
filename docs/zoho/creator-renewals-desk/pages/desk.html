@@ -1,0 +1,185 @@
+<!--
+  Creator Page: Desk (application home).
+  Paste this HTML (including the style block) into the Desk page.
+  Bind live rows from the CRM Renewals worklist. The sample rows below
+  are layout fixtures only.
+  Blue = Commercial. Sage = Personal. Amber = attention. Rose = overdue.
+  Status never uses blue/green.
+-->
+<style>
+:root {
+  --desk-bg: #F6F7F9;
+  --desk-row: #FFFFFF;
+  --desk-zebra: #F9FAFB;
+  --desk-text: #1F2937;
+  --desk-muted: #5B6472;
+  --desk-border: #D9DEE7;
+  --desk-selected: #E8F0FE;
+  --commercial-bg: #DCEAF7;
+  --commercial-text: #245A86;
+  --personal-bg: #E3F0E7;
+  --personal-text: #2F6B4F;
+  --attention-bg: #FFF1D6;
+  --attention-text: #8A5A12;
+  --overdue-bg: #FBE4E6;
+  --overdue-text: #9B3A43;
+  --desk-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.desk { font-family: var(--desk-sans); color: var(--desk-text); background: var(--desk-bg); padding: 20px 22px 40px; }
+.desk > header h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 4px; }
+.desk > header .sub, .desk .empty-hint, .worklist > p { color: var(--desk-muted); font-size: 13px; margin: 0 0 16px; }
+.kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 8px; margin: 16px 0 18px; }
+.kpi { display: flex; flex-direction: column; gap: 4px; background: var(--desk-row); border: 1px solid var(--desk-border); border-radius: 10px; padding: 10px 12px; text-decoration: none; color: var(--desk-text); }
+.kpi .label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--desk-muted); }
+.kpi .value { font-size: 20px; font-weight: 650; }
+.kpi.risk .value { color: var(--attention-text); }
+.kpi.recon .value, .kpi.ams .value { color: var(--overdue-text); }
+.type-filters { display: flex; gap: 8px; margin: 0 0 14px; }
+.type-filters button { font: inherit; font-size: 12px; font-weight: 600; border: 1px solid var(--desk-border); background: var(--desk-row); color: var(--desk-text); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.type-filters button[aria-pressed="true"] { outline: 2px solid var(--desk-text); outline-offset: 1px; }
+.type-filters button.commercial[aria-pressed="true"] { background: var(--commercial-bg); color: var(--commercial-text); outline-color: var(--commercial-text); }
+.type-filters button.personal[aria-pressed="true"] { background: var(--personal-bg); color: var(--personal-text); outline-color: var(--personal-text); }
+.worklist { background: var(--desk-row); border: 1px solid var(--desk-border); border-radius: 12px; overflow: hidden; }
+.worklist > h2 { font-size: 14px; font-weight: 650; margin: 0; padding: 14px 16px 0; }
+.worklist > p { padding: 4px 16px 10px; }
+.worklist-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.worklist-table th { text-align: left; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--desk-muted); font-weight: 650; padding: 8px 14px; border-bottom: 1px solid var(--desk-border); background: var(--desk-bg); }
+.worklist-table td { padding: 11px 14px; border-bottom: 1px solid var(--desk-border); vertical-align: middle; }
+.worklist-table tbody tr { background: var(--desk-row); }
+.worklist-table tbody tr:nth-child(even) { background: var(--desk-zebra); }
+.worklist-table tbody tr:hover { background: #F3F6FA; }
+.worklist-table tbody tr[aria-selected="true"] { background: var(--desk-selected); }
+.worklist-table tbody tr.row-commercial { box-shadow: inset 4px 0 0 var(--commercial-text); }
+.worklist-table tbody tr.row-personal { box-shadow: inset 4px 0 0 var(--personal-text); }
+.worklist-table .insured { font-weight: 650; color: var(--desk-text); }
+.worklist-table .muted { color: var(--desk-muted); }
+.type-col { width: 148px; }
+.type-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 3px 9px 3px 7px; white-space: nowrap; }
+.type-pill.commercial { background: var(--commercial-bg); color: var(--commercial-text); }
+.type-pill.personal { background: var(--personal-bg); color: var(--personal-text); }
+.status-pill { display: inline-block; font-size: 12px; font-weight: 650; border-radius: 999px; padding: 3px 9px; color: var(--desk-text); background: var(--desk-bg); border: 1px solid var(--desk-border); }
+.status-pill.attention { background: var(--attention-bg); color: var(--attention-text); border-color: transparent; }
+.status-pill.overdue { background: var(--overdue-bg); color: var(--overdue-text); border-color: transparent; }
+</style>
+
+<section class="desk">
+  <header>
+    <h1>Renewals Desk</h1>
+    <p class="sub">Work the book. Hermes writes the AMS. Gretchen talks to the client.</p>
+  </header>
+
+  <div class="kpi-strip" role="navigation">
+    <a class="kpi" href="{{REPORT_WORKLIST}}?Window_Bucket=90">
+      <span class="label">90 days</span>
+      <span class="value" data-bucket="90">—</span>
+    </a>
+    <a class="kpi" href="{{REPORT_WORKLIST}}?Window_Bucket=60">
+      <span class="label">60 days</span>
+      <span class="value" data-bucket="60">—</span>
+    </a>
+    <a class="kpi" href="{{REPORT_WORKLIST}}?Window_Bucket=30">
+      <span class="label">30 days</span>
+      <span class="value" data-bucket="30">—</span>
+    </a>
+    <a class="kpi risk" href="{{REPORT_WORKLIST}}?Window_Bucket=personal">
+      <span class="label">Personal</span>
+      <span class="value" data-bucket="personal">—</span>
+    </a>
+    <a class="kpi recon" href="{{REPORT_NEEDS_VERIFICATION}}">
+      <span class="label">Needs verification</span>
+      <span class="value" data-elig="needs_verification">—</span>
+    </a>
+    <a class="kpi ams" href="{{REPORT_AMS_PENDING}}">
+      <span class="label">Pending AMS</span>
+      <span class="value" data-ams="pending">—</span>
+    </a>
+  </div>
+
+  <p class="empty-hint">
+    Empty buckets must say why they are empty (no eligible renewals vs sync
+    stale vs the current filter). A blank grid is a lie.
+  </p>
+
+  <div class="type-filters" role="group" aria-label="Account type">
+    <button type="button" aria-pressed="true">All</button>
+    <button type="button" class="commercial" aria-pressed="false">Commercial</button>
+    <button type="button" class="personal" aria-pressed="false">Personal</button>
+  </div>
+
+  <div class="worklist">
+    <h2>Worklist</h2>
+    <p>Default sort: Expiration Date ascending. Hide Dismissed. Hide rows
+      without a Related Deal (desk = Renewals pipeline). Personal rows
+    sit in the personal bucket even inside 30 days. Type is Commercial or
+    Personal; status is a separate column.</p>
+    <table class="worklist-table">
+      <thead>
+        <tr>
+          <th class="type-col" scope="col">Type</th>
+          <th scope="col">Insured</th>
+          <th scope="col">Renewal</th>
+          <th scope="col">Carrier</th>
+          <th scope="col">Due</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="row-commercial">
+          <td>
+            <span class="type-pill commercial">
+              <span aria-hidden="true">🏢</span>
+              Commercial
+            </span>
+          </td>
+          <td class="insured">Acme Trucking LLC</td>
+          <td>BOP + Auto</td>
+          <td class="muted">Travelers</td>
+          <td>Sep 15</td>
+          <td><span class="status-pill">In review</span></td>
+        </tr>
+        <tr class="row-personal">
+          <td>
+            <span class="type-pill personal">
+              <span aria-hidden="true">🏠</span>
+              Personal
+            </span>
+          </td>
+          <td class="insured">James Wilson</td>
+          <td>Home + Auto</td>
+          <td class="muted">Safeco</td>
+          <td>Sep 18</td>
+          <td><span class="status-pill">Contacted</span></td>
+        </tr>
+        <tr class="row-commercial">
+          <td>
+            <span class="type-pill commercial">
+              <span aria-hidden="true">🏢</span>
+              Commercial
+            </span>
+          </td>
+          <td class="insured">Acme Trucking LLC</td>
+          <td>Workers Comp</td>
+          <td class="muted">Travelers</td>
+          <td>Sep 8</td>
+          <td><span class="status-pill attention">Nearing deadline</span></td>
+        </tr>
+        <tr class="row-personal" aria-selected="true">
+          <td>
+            <span class="type-pill personal">
+              <span aria-hidden="true">🏠</span>
+              Personal
+            </span>
+          </td>
+          <td class="insured">James Wilson</td>
+          <td>Umbrella</td>
+          <td class="muted">Safeco</td>
+          <td>Aug 12</td>
+          <td><span class="status-pill overdue">Overdue</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <!-- Embed CRM Renewals integration report when permalinks exist:
+         <iframe title="Renewals worklist" src="{{REPORT_WORKLIST}}"></iframe>
+    -->
+  </div>
+</section>

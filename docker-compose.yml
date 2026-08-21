@@ -40,6 +40,10 @@ services:
       HERMES_SENTINEL_STATE_FILE: /var/lib/hermes/sentinel_state.json
       HERMES_COMMISSION_AUDIT_STATE_FILE: /var/lib/hermes/commission_audit_state.json
       HERMES_EOM_SCORECARD_STATE_FILE: /var/lib/hermes/eom_scorecard_state.json
+      # Zoho Deals pipelines live in .env (not hardcoded here so a sandbox can
+      # override). ZOHO_PIPELINE_ID = New Business 7529682000000697038.
+      # ZOHO_RENEWALS_PIPELINE_ID = Renewals 7529682000000697079 — never reuse
+      # New Business for Opportunity_Type=Renewals deals. Code default matches.
     # Per-cron runner, not a listener: jobs run as
     #   docker compose run --rm hermes hermes --<job>
     # Default command is a harmless read-only check so a plain `up -d`
@@ -61,6 +65,10 @@ services:
       HERMES_SENTINEL_STATE_FILE: /var/lib/hermes/sentinel_state.json
       HERMES_COMMISSION_AUDIT_STATE_FILE: /var/lib/hermes/commission_audit_state.json
       HERMES_EOM_SCORECARD_STATE_FILE: /var/lib/hermes/eom_scorecard_state.json
+      # Zoho Deals pipelines live in .env (not hardcoded here so a sandbox can
+      # override). ZOHO_PIPELINE_ID = New Business 7529682000000697038.
+      # ZOHO_RENEWALS_PIPELINE_ID = Renewals 7529682000000697079 — never reuse
+      # New Business for Opportunity_Type=Renewals deals. Code default matches.
     restart: unless-stopped
     ports:
       - "8788:8787"

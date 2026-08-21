@@ -40,6 +40,8 @@ x-hermes-service: &hermes-service
     dockerfile: Dockerfile
   env_file:
     - .env
+  # ZOHO_RENEWALS_PIPELINE_ID (default 7529682000000697079) is the Renewals
+  # Deals pipeline. ZOHO_PIPELINE_ID is New Business — do not reuse it.
   volumes:
     - hermes-state:/var/lib/hermes
   restart: unless-stopped

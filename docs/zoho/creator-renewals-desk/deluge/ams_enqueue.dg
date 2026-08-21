@@ -1,0 +1,42 @@
+// Renewals Desk — AMS action button.
+// Parameters: action (one of the four), expected_result (required text), note (optional).
+// Creates AMS_Write_Queue. Does NOT call NowCerts.
+// Mirrors hermes/renewals/executor.py ACTIONS + stage_renewal_job payload shape.
+
+allowed = {"request_terms", "prepare_options", "client_follow_up", "update_ams"};
+action = input.action;
+if(!allowed.contains(action))
+{
+	return "unknown renewal action";
+}
+expected = trim(ifnull(input.expected_result, ""));
+if(expected == "")
+{
+	return "expected_result is required";
+}
+renewalId = input.get("id");
+policyNumber = input.get("Policy_Number");
+hermesId = input.get("Hermes_Renewal_ID");
+payload = Map();
+payload.put("action", action);
+payload.put("renewal_id", hermesId);
+payload.put("policy_number", policyNumber);
+payload.put("expected_result", expected);
+payload.put("channel", "task");
+if(input.note != null && input.note != "")
+{
+	payload.put("note", input.note);
+}
+queueAction = if(action == "update_ams", "update", "create");
+row = Map();
+row.put("Name", policyNumber + " " + action);
+row.put("Object_Type", "renewal");
+row.put("Object_ID", policyNumber);
+row.put("Destination", "nowcerts");
+row.put("Action", queueAction);
+row.put("Payload", payload.toString());
+row.put("Status", "needs_approval");
+row.put("Attempt_Count", 0);
+row.put("Related_Renewal", renewalId);
+resp = zoho.crm.createRecord("AMS_Write_Queue", row);
+return resp;
