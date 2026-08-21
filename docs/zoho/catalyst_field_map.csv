@@ -1,0 +1,37 @@
+Catalyst_Field,Live_Cases_Source,Service_Requests_Logical_API,Transform,Notes
+id,Cases.id,id,passthrough,Zoho record id
+Case_Number,Cases.Case_Number,Request_Number,passthrough,Auto number on Service_Requests
+Subject,Cases.Subject,Subject,passthrough,
+Description,Cases.Description,Description,passthrough,
+Request_Type,Cases.Request_Type (codes: coi|endorsement|id_cards|billing|claim|cancellation|coverage_change|other),Request_Type,cases_code_to_label,See cases_request_type_map.csv. Service_Requests stores the user's labels not the live codes.
+Request_Type_Label,function label map,Request_Type,passthrough,UI shows this; after retarget label = Request_Type
+Desk_Stage,Cases.Desk_Stage CUSTOM picklist (NOT CRM Status),Status + Waiting_On,project_desk_stage,"Live values: New / In progress / Waiting on carrier / Waiting on client / Done. Do NOT create Desk_Stage on Service_Requests. Project: New→New; In Progress→In progress; Waiting+carrier→Waiting on carrier; Waiting+client→Waiting on client; Completed→Done."
+Status,CRM Status (unused by the UI today),Status,passthrough,SoT on Service_Requests: New / In Progress / Waiting / Completed
+Waiting_On,(none — encoded in Desk_Stage),Waiting_On,passthrough,carrier | client. Only meaningful when Status=Waiting.
+Owner_Name,Owner.name,Owner,lookup_name,System user
+Client_Name,Cases.Client_Name,Client_Name,or_account_name,
+Account_Name,Cases.Account_Name,Account_Name,lookup,Required
+Contact_Name,Cases.Contact_Name,Contact_Name,lookup,
+Policy_Number,Cases.Policy_Number,Policy_Number,passthrough,
+Due_Date,Cases.Due_Date,Due_Date,iso_datetime,
+Next_Step,Cases.Next_Step,Next_Step,passthrough,Live extra column; keep for the current Worklist
+Age_Days,computed in function from created/open,Age_Days,formula_or_function,Live function computes this. CRM formula is a fallback.
+Service_Time,computed in function (runs In progress; pauses Waiting),Service_Time,function_preferred,"Worklist copy: service time runs in In progress; Waiting pauses it. CRM formula is wall-clock — the Catalyst function owns pause-accurate timers after retarget."
+Completion_Time,computed in function (opened → now until Done),Completion_Time,function_preferred,Opened → Done. Keeps running while Waiting.
+Overdue,computed vs Due_Date,Overdue,computed,KPI tile only. Clicking Overdue opens unfiltered Open list (KpiStrip.js).
+Completed_At,Cases.Completed_At,Closed_Date,coalesce,UI: Completed_At || Closed_Time || Modified_Time
+Closed_Time,Cases.Closed_Time,Closed_Date,coalesce,
+Modified_Time,system,Modified_Time,passthrough,
+related.account.NowCerts_Insured_GUID,Accounts.NowCerts_Insured_GUID,Account_Name → Accounts,related_read,
+related.policy.Policy_Number,Policies.Policy_Number,Policy lookup,related_read,
+related.policy.Status,Policies.Policy_Status,Policy lookup,related_read,
+related.policy.Carrier,Policies.Carrier,Policy lookup,related_read,
+related.notes,Notes related list,Notes,related_read,
+related.tasks,Tasks related list (UI reads top-level `tasks`),Tasks,related_read,Close-out currently creates CRM Tasks. Card.js maps `a.tasks` not `related.tasks`.
+module,Cases,Service_Requests,constant,Web tab `${Cases.id}&module=Cases`. Widget PageLoad only opens if entity matches /case/i — must change for Service_Requests.
+api_base,/server/service_desk_function,same path suffix,constant,Client api.js. NOT Hermes today. NOT Desk. NOT a Catalyst Data Store.
+api_list,/api/desk,GET /api/desk,constant,Query view=worklist|waiting|completed
+api_card,/api/desk/cases/:id,GET/PATCH Service_Requests,constant,Missing live: {"error":"Cases 1 not found"}
+api_close,POST .../close,POST Status=Completed on SR,constant,Live writes Cases + creates CRM Tasks; does not write NowCerts or Desk
+api_email,POST .../email,CRM send-mail on SR,constant,Live ZohoCRM.send_mail; keep as CRM write
+api_tasks,PATCH /api/desk/tasks/:id,CRM Tasks,constant,Completes a Zoho Task. Not NowCerts.

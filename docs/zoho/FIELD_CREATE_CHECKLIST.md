@@ -6,7 +6,7 @@ Use with the CSVs in this folder. Labels and UUIDs for seeded NowCerts picklists
 
 - [ ] Zoho CRM org with API access
 - [ ] Decide: custom module **Policies** vs Zoho Insurance Policy module
-- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`
+- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`, `Service_Requests`
 - [ ] Create Users matching `agency_crm_users` emails (for Deal Owner / Approved By)
 
 ## 1. Picklists & pipelines (do first)
@@ -63,7 +63,10 @@ Use as a subset of Policy Status or a separate Renewal Status field:
 | 24 | Non-Renewed | `c35d86b7-fb74-2a17-f734-7c1395c51713` |
 | 25 | Cancelled | `a2b134fa-5416-5873-9493-979b501e6f2c` |
 
-### 1d. Endorsement type (`list_key=endorsement_type`) — for Cases later
+### 1d. Endorsement type (`list_key=endorsement_type`) — NowCerts seed only
+
+These remain the AMS endorsement-type seed. They are **not** the Service
+Requests taxonomy. Do not copy this list onto `Service_Requests.Request_Type`.
 
 | Order | Label | option_id |
 |------:|-------|-----------|
@@ -78,7 +81,47 @@ Use as a subset of Policy Status or a separate Renewal Status field:
 | 34 | Certificate of Insurance | `39b78879-21ce-6f4f-59d4-b153c330295f` |
 | 35 | Other | `d92e98fd-533c-1958-e938-3a8ad75065aa` |
 
-### 1e. Other Hermes vocab
+### 1e. Service Requests — Request_Type / Status / Waiting_On / Priority / Team
+
+Create on custom module `Service_Requests` (see `fields_service_requests.csv`
+and `docs/zoho/service_requests.md`). Labels must match exactly. Do not add
+1d extras (`Replace Driver`, `Address Change`, `Coverage Change`,
+`Certificate of Insurance`).
+
+**Request_Type** (`list_key=service_request_type`)
+
+| Order | Label |
+|------:|-------|
+| 1 | Certificate Request |
+| 2 | Policy Change |
+| 3 | Add Vehicle |
+| 4 | Remove Vehicle |
+| 5 | Add Driver |
+| 6 | Remove Driver |
+| 7 | Billing Question |
+| 8 | Claims Question |
+| 9 | Coverage Question |
+| 10 | Renewal Service |
+| 11 | Cancellation |
+| 12 | Reinstatement |
+| 13 | ID Card Request |
+| 14 | Mortgagee Change |
+| 15 | Document Request |
+| 16 | Other |
+
+**Status:** New, In Progress, Waiting, Completed  
+**Waiting_On:** carrier, client (only when Status = Waiting; projects live Desk_Stage “Waiting on carrier/client”)  
+**Priority:** Low, Standard, High  
+**Team:** Personal Lines, Commercial, Unassigned
+
+Live Catalyst queues **Cases** with custom `Desk_Stage` (New / In progress /
+Waiting on carrier / Waiting on client / Done) and Request_Type **codes**
+(`coi`, `endorsement`, …). Do not copy those onto Service_Requests. Map them
+(`docs/zoho/cases_request_type_map.csv`, `catalyst_field_map.csv`). After this
+module exists, retarget Catalyst reads to `Service_Requests`. Do not dual-write
+Desk.
+
+### 1f. Other Hermes vocab
 
 Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_Type, Insured_Type, Win_Likelihood, Deal_Status, Policy_Status (full normalize set), Billing_Type, Risk_Status, Eligibility, Branch, Segment, queue enums.
 
@@ -92,6 +135,7 @@ Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_
 | 4 | `fields_renewal_events.csv` | Renewal_Events | `Hermes_Candidate_ID` |
 | 5 | `fields_renewals.csv` | Renewals | `Hermes_Renewal_ID` |
 | 6 | `fields_ams_write_queue.csv` | AMS_Write_Queue | `Queue_ID` |
+| 7 | `fields_service_requests.csv` | Service_Requests | — (CRM-only; no External ID / no Supabase mirror) |
 
 For each row: create field → set length → set picklist → mark mandatory/unique → set External ID where flagged.
 
@@ -112,6 +156,10 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Renewal_Events → Accounts, Policies
 - [ ] Renewals → Policies, Accounts, Renewal_Events (optional)
 - [ ] AMS_Write_Queue → Accounts / Deals / Policies / Renewals (optional convenience)
+- [ ] Service_Requests → Accounts (**required**), Contacts (optional), Policies, Renewals (optional)
+- [ ] Related lists: Accounts / Contacts / Policies / Renewals → Service Requests
+- [ ] Service Request related lists: Activities, Tasks, Emails, Notes, Attachments, Calls, Meetings
+- [ ] Account related lists: Policies, Renewals, Service Requests, Tasks; Claims only if that module already exists (do not create Claims)
 
 ## 4. Approval & AMS write rules (Zoho Blueprint / Approval)
 
@@ -131,6 +179,10 @@ For each row: create field → set length → set picklist → mark mandatory/un
 
 - [ ] `Renewals.Increase_Percent` = `((Premium_Renewal - Premium_Current) / Premium_Current) * 100` (null-safe when Premium_Current = 0 → 0)
 - [ ] Optional: Deal Probability default from Stage (see pipeline tables above)
+- [ ] `Service_Requests.Service_Time` hours = `Datecomp(If(IsEmpty(Closed_Date), Now(), Closed_Date), Open_Date) / 60`
+- [ ] `Service_Requests.Completion_Time` hours = Closed_Date − Open_Date (empty until Completed)
+- [ ] `Service_Requests.Age_Days` = same span / 1440
+- [ ] `Service_Requests.Overdue` = Due_Date < Now() and Status != Completed
 
 ## 6. Sync direction smoke tests
 

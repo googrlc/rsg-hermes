@@ -10,13 +10,17 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `fields_renewal_events.csv` | Custom module **Renewal_Events** ← `renewal_candidates` |
 | `fields_renewals.csv` | Custom module **Renewals** ← `project_85_renewals` |
 | `fields_ams_write_queue.csv` | Custom module **AMS_Write_Queue** ← `outbound_sync_queue` |
+| `fields_service_requests.csv` | Custom module **Service_Requests** — CRM service work (not Supabase, not Desk) |
+| `catalyst_field_map.csv` | Live Catalyst Cases UI → Service_Requests field map (source map `main.d2e4dc07.js.map`) |
+| `cases_request_type_map.csv` | Live Cases Request_Type codes (`coi`, …) → Service_Requests labels |
+| `service_requests.md` | Operator pack: module, buttons, workflows, Catalyst retarget, Desk is not SoT |
 | `picklists_nowcerts_seed.csv` | Exact Hermes `nowcerts_picklist_options` seeds (labels + option_id UUIDs) |
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |
 | `FIELD_CREATE_CHECKLIST.md` | Ordered create steps + uniqueness / pipeline rules |
 
 ## How to use
 
-1. Create custom modules **Policies**, **Renewal_Events**, **Renewals**, **AMS_Write_Queue** (if not using Zoho Insurance vertical for Policies).
+1. Create custom modules **Policies**, **Renewal_Events**, **Renewals**, **AMS_Write_Queue**, **Service_Requests** (if not using Zoho Insurance vertical for Policies). Service Requests is CRM-only — do not mirror it to Supabase. Apply with `scripts/zoho_apply_service_requests.py` (dry-run by default).
 2. Create two Deal pipelines: **New Business** and **Renewals**, with stages copied from `picklists_nowcerts_seed.csv` (`pipeline_new_business` / `pipeline_renewal`).
 3. For each `fields_*.csv` row: create the field with the given **API_Name**, **Data_Type**, **Length**, and picklist values.
 4. Store NowCerts option UUIDs in the companion `*_Option_ID` fields (do not invent new UUIDs).

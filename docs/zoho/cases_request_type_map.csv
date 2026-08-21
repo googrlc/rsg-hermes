@@ -1,0 +1,9 @@
+Live_Cases_Code,Live_Label,Service_Requests_Request_Type,Notes
+coi,COI,Certificate Request,Live Cases code. Do not keep coi on Service_Requests.
+endorsement,Endorsement,Policy Change,Live Cases used one endorsement bucket; Service_Requests splits Add/Remove Vehicle/Driver.
+id_cards,ID cards,ID Card Request,
+billing,Billing,Billing Question,
+claim,Claim,Claims Question,
+cancellation,Cancellation,Cancellation,Same label; live code was cancellation.
+coverage_change,Coverage change,Coverage Question,Not the 1d endorsement seed "Coverage Change".
+other,Other,Other,

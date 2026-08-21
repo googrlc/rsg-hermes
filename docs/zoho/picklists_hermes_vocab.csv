@@ -84,3 +84,31 @@ renewal_queue_action,3,client_follow_up,AMS_Write_Queue.Payload.action,renewal e
 renewal_queue_action,4,update_ams,AMS_Write_Queue.Payload.action,renewal executor
 sync_owner,1,book_sync,Policies.Sync_Owner,canonical_policy_ownership
 sync_owner,2,rsg-import,Policies.Sync_Owner,canonical_policy_ownership
+service_request_type,1,Certificate Request,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,2,Policy Change,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,3,Add Vehicle,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,4,Remove Vehicle,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,5,Add Driver,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,6,Remove Driver,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,7,Billing Question,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,8,Claims Question,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,9,Coverage Question,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,10,Renewal Service,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,11,Cancellation,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,12,Reinstatement,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,13,ID Card Request,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,14,Mortgagee Change,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,15,Document Request,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_type,16,Other,Service_Requests.Request_Type,docs/zoho/service_requests.md
+service_request_status,1,New,Service_Requests.Status,docs/zoho/service_requests.md
+service_request_status,2,In Progress,Service_Requests.Status,docs/zoho/service_requests.md
+service_request_status,3,Waiting,Service_Requests.Status,docs/zoho/service_requests.md
+service_request_status,4,Completed,Service_Requests.Status,docs/zoho/service_requests.md
+service_request_priority,1,Low,Service_Requests.Priority,docs/zoho/service_requests.md
+service_request_priority,2,Standard,Service_Requests.Priority,docs/zoho/service_requests.md
+service_request_priority,3,High,Service_Requests.Priority,docs/zoho/service_requests.md
+service_request_team,1,Personal Lines,Service_Requests.Team,docs/zoho/service_requests.md
+service_request_team,2,Commercial,Service_Requests.Team,docs/zoho/service_requests.md
+service_request_team,3,Unassigned,Service_Requests.Team,docs/zoho/service_requests.md
+service_request_waiting_on,1,carrier,Service_Requests.Waiting_On,docs/zoho/service_requests.md
+service_request_waiting_on,2,client,Service_Requests.Waiting_On,docs/zoho/service_requests.md

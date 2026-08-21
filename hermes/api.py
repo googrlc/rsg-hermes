@@ -119,6 +119,7 @@ except Exception:  # pragma: no cover - surfaced in logs, never fatal
 # second copy here would give those paths two implementations against one set of
 # tables, drifting apart from the day it was added.
 from hermes.routers import carriers as _carriers_router
+from hermes.routers import desk as _desk_router
 from hermes.routers import finance as _finance_router
 from hermes.routers import intake as _intake_router
 from hermes.routers import renewals as _renewals_router
@@ -127,6 +128,9 @@ app.include_router(_finance_router.router)
 app.include_router(_carriers_router.router)
 app.include_router(_renewals_router.router)
 app.include_router(_intake_router.router)
+# Catalyst work queue: CRM Service_Requests, not the departed /api/cases service
+# and not Zoho Desk. Mounted on the hub router so split hub + monolith both serve it.
+router.include_router(_desk_router.router)
 
 # General document extractor (OCR-aware quote-field extraction) — POST /api/extract.
 try:
