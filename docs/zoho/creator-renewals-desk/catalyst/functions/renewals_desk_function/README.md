@@ -4,7 +4,10 @@ Do **not** create a second Catalyst project. Merge this OS layer into
 `~/catalyst-renewals-desk/functions/renewals_desk_function`.
 
 Hermes is still the only NowCerts writer. Completing a checkpoint must
-**not** call NowCerts. AMS still goes through `AMS_Write_Queue`.
+**not** call NowCerts and must **not** advance `Desk_Stage` / `Stage`.
+Continue / `POST /next` still advances when the stage CRM task is Completed
+(`taskIsDone`). Persist `Checkpoint_State` on the Zoho **Renewals** record.
+Do not write Supabase `renewals_master` or `renewal_checklist_items`.
 
 ## Copy
 
@@ -32,7 +35,7 @@ payload = osDesk.attachOsToDeskPayload(payload);
 ```
 
 That attaches the scorecard **and** hides desk-only leftovers (no `Deal_Id` /
-`Related_Deal`). Do not leave unlinked rows on the worklist.
+`Related_Deal`).
 
 2. After you build GET `/api/desk/renewals/:id` (the object with
    `renewal`, `tasks`, `next`), wrap it:
@@ -46,16 +49,15 @@ payload = osDesk.attachOsToCard(payload);
 ```js
 const result = osDesk.completeCheckpointOnCard(card, key, body);
 if (!result.ok) return res.status(400).json(result);
-// Mark the matching CRM task Status=Completed (subject = checkpoint title
-// or alias). Do not write NowCerts.
-if (result.advanced) {
-  // PUT Renewals Stage / Desk_Stage = result.desk_stage (one step only).
-  // Closed still requires Disposition. Never skip.
-}
+// PUT Renewals Checkpoint_State = result.checkpoint_state
+// If result.task_complete, mark the matching CRM task Status=Completed
+// (subject = result.title or result.aliases). Do not write Desk_Stage.
+// Do not write NowCerts.
 return res.json(result);
 ```
 
-4. POST `/next` must refuse if `result.remaining.length > 0` after attaching OS.
+4. POST `/next` still advances one stored stage when `taskIsDone`. Keep that
+   gate. Do not skip. Closed still requires Disposition.
 
 Do not `catalyst deploy` to production. Development project only, and only
 when Lamar asks.
@@ -64,10 +66,9 @@ Rules that must stay true:
 
 - `Deal_Id` / `Related_Deal` 1:1 with Opportunity_Type=Renewals
 - Worklist hides rows with no pipeline Deal
-- `actor=hermes` never advances Desk_Stage / Stage
-- No skipped stage
-- Completing a checkpoint while required items remain does **not** advance
+- Completing a checkpoint does **not** advance Desk_Stage
+- `actor=hermes` never advances
+- Continue stays disabled until the stage CRM task is Completed
 - Close UI keeps Renewed / Rewritten / Lost — Price / Lost — Coverage /
   Lost — No response / Do not renew. Carrier download vs Enter in NowCerts
-  (`Is_Download`) for renewed/rewritten. Map Marketed/Cancelled/Lost to
-  Competitor onto those six — do not fork a second picklist.
+  (`Is_Download`) for renewed/rewritten.

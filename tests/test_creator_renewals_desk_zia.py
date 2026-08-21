@@ -108,31 +108,37 @@ def test_desk_palette_tokens():
     assert "status-pill overdue" in desk
 
 
-def test_catalyst_app_js_uses_desk_palette():
-    app = (DESK / "catalyst" / "App.js").read_text()
-    assert 'import "./desk.css"' in app
-    assert 'from "./operating"' in app
-    assert "type-pill" in app
-    assert "Commercial" in app
-    assert "Personal" in app
-    assert "status-pill attention" in app
-    assert "status-pill overdue" in app
-    assert "NowCerts" in app
-    assert "Related_Deal" in app
-    assert "Deal_Id" in app
-    assert "scorecard" in app
-    assert "checkpoints" in app
-    assert "Past due" in app
-    assert "CRITICAL" in app
-    assert "Needs verification" in app
-    assert "Failed AMS" in app
-    assert "Carrier download" in app
-    assert "Enter in NowCerts" in app
-    assert "Account Reviewed" in (DESK / "catalyst" / "operating.js").read_text()
-    assert "Lost — Price" in (DESK / "catalyst" / "operating.js").read_text()
-    assert "Lost to Competitor" not in (DESK / "catalyst" / "operating.js").read_text()
-    assert "Step 1 of 5" not in app
-    assert "This desk only shows the next step" not in app
+def test_catalyst_spa_is_live_client_not_creator():
+    catalyst = DESK / "catalyst"
+    app = (catalyst / "App.js").read_text()
+    workflow = (catalyst / "workflow.js").read_text()
+    card = (catalyst / "components" / "RenewalCard.js").read_text()
+    current = (catalyst / "components" / "CurrentAction.js").read_text()
+    kpi = (catalyst / "components" / "KpiStrip.js").read_text()
+    close = (catalyst / "components" / "CloseOut.js").read_text()
+    operating = (catalyst / "operating.js").read_text()
+    assert "DeskHome" in app
+    assert "RenewalCard" in app
+    assert "WORK_STEPS" in workflow
+    assert "taskIsDone" in workflow
+    assert 'label: \'Review account\'' in workflow or 'label: "Review account"' in workflow
+    assert "Request terms" in workflow
+    assert "Build options" in workflow
+    assert "Contact client" in workflow
+    assert "Close renewal" in workflow
+    assert "scorecard" in card.lower() or "Scorecard" in card
+    assert "Step " not in card
+    assert "Complete on this card" in current
+    assert "Continue" in current
+    assert "Past due" in kpi
+    assert "CRITICAL" in kpi
+    assert "Needs verification" in kpi
+    assert "Failed AMS" in kpi
+    assert "Carrier download" in close
+    assert "Enter in NowCerts" in close
+    assert "Account Reviewed" in operating
+    assert "Lost — Price" in operating
+    assert "Lost to Competitor" not in operating
     assert "nowcerts.com" not in app.lower()
 
 

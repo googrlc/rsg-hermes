@@ -1,8 +1,14 @@
-# Install — Creator Renewals Desk
+# Install — Creator Renewals Desk (DO NOT FILL)
 
-The empty app **already exists** in workspace `lamar_risksolutionsgroup668`:
-link name `renewals-desk`, development environment. Fill **that** app. Do not
-create a new Creator application and do not duplicate this one.
+The live product is the **Zoho Catalyst SPA** (project `935150771`,
+function `renewals_desk_function`). See [`catalyst/README.md`](catalyst/README.md).
+
+The Creator app **already exists** in workspace `lamar_risksolutionsgroup668`:
+link name `renewals-desk`, development environment. It is an empty stub
+(0 records). **Do not fill that app. Do not create a new Creator application
+and do not duplicate this one.** Not a new app. Not a duplicate.
+
+The rest of this file is historical. Leave Creator alone.
 
 Preferred fill: open Edit mode → **+ → Form → Using an Integrated Datasource
 → Zoho CRM** (one module per form). Pages: **+ → Page → Blank**. Do **not**

@@ -135,17 +135,17 @@ For each row: create field → set length → set picklist → mark mandatory/un
 
 `Window_Bucket` is a **picklist written by Hermes** (`hermes --sync-zoho-renewals`), not a formula — personal LOB always buckets as `personal`.
 
-## 5b. Creator Renewals Desk (after fields exist)
+## 5b. Catalyst Renewals Desk (live) — not Creator
 
-- [ ] Open **existing** Creator app **Renewals Desk** (`renewals-desk`) in Edit —
-      not a new app, not a duplicate. Workspace `lamar_risksolutionsgroup668`.
-- [ ] Add CRM integrations: Accounts, Deals, Policies, Renewal_Events, Renewals,
-      AMS_Write_Queue, Tasks
-- [ ] Paste [`creator-renewals-desk/ZIA_PASTE_PROMPT.md`](creator-renewals-desk/ZIA_PASTE_PROMPT.md)
-      into Zia inside that app, **or** follow [`creator-renewals-desk/INSTALL.md`](creator-renewals-desk/INSTALL.md)
-- [ ] Bind reports to CRM modules Policies / Renewal_Events / Renewals / AMS_Write_Queue
-- [ ] Publish to Gretchen and Lamar (development first; production only when asked)
+- [ ] Live product is Catalyst project `935150771` / `renewals_desk_function`.
+      Do **not** fill Creator `renewals-desk` (empty stub).
+- [ ] Copy the SPA from [`creator-renewals-desk/catalyst/`](creator-renewals-desk/catalyst/)
+      onto `~/catalyst-renewals-desk/renewals/src` (development only).
+- [ ] Optional CRM field `Renewals.Checkpoint_State` (multi-line text, desk-owned JSON).
+      Hermes must **not** overwrite it on nightly sync.
 - [ ] Confirm `hermes --sync-zoho-renewals` then `--sync-zoho-ams-queue` are on cron after `--renewal-refresh`
+
+Do not publish Catalyst production from this fill.
 
 Desk-owned fields (`Desk_Stage`, `Disposition`, `Recommended_Action`, touch dates) must **not** be overwritten by book sync. Hermes sets `Desk_Stage=Identified` only on create. Hermes fills `Related_Deal` / `Deal_Id` when empty so the desk and the Renewals pipeline stay 1:1; it does not overwrite a Deal Gretchen already linked. Live Catalyst lists `Deal_Id`; the field pack names the lookup `Related_Deal`. Match existing desk rows by `Hermes_Renewal_ID` or `Policy_Number` so sync does not mint leftovers.
 

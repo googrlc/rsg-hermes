@@ -1,4 +1,13 @@
-# Zia prompt — paste this inside **Renewals Desk** (`renewals-desk`)
+# Zia prompt — DO NOT PASTE (Creator is an empty stub)
+
+Live product is the **Zoho Catalyst SPA** (project `935150771`, function
+`renewals_desk_function`). The Creator app `renewals-desk` in workspace
+`lamar_risksolutionsgroup668` is an empty stub. Do **not** create a second
+application. Do **not** create a new Creator app. Do **not** duplicate.
+Do **not** paste this pack into Creator. Evolve [`catalyst/`](catalyst/) instead.
+Creator never calls NowCerts.
+
+# Historical pack (do not fill Creator)
 
 Paste this **in the existing application**, Edit mode, Zia / Build Agent.
 Do **not** create a new Creator app. Do **not** duplicate this app.
@@ -45,7 +54,16 @@ stand-in form.
 
 ## Phase 1 — Integration reports
 
-Create these CRM integration reports (criteria exact):
+# Creator Zia paste pack — DO NOT USE
+
+Live product is the Catalyst Renewals Desk SPA (`935150771` /
+`renewals_desk_function`). The Creator app `renewals-desk` in workspace
+`lamar_risksolutionsgroup668` is an empty stub. Do **not** create a second
+application. Do **not** create a new Creator app. Do **not** duplicate.
+Do **not** paste this pack into Creator. Evolve the Catalyst client instead
+([`catalyst/README.md`](catalyst/README.md)).
+
+The rest of this file is a historical spec pack. Creator never calls NowCerts.
 
 ### Worklist (`worklist`)
 

@@ -1,15 +1,21 @@
 """Renewal Operating System overlay on top of stored Desk_Stage.
 
 Zoho CRM still stores ``Desk_Stage`` / ``Stage`` as the six values in
-``hermes.renewals.desk.DESK_STAGES``. This module is the workstation layer:
-6 operating labels, checkpoints, scorecard rails, and the rule that a
-checkpoint complete may advance *one* stage only when that stage's required
-checkpoints are all done. Hermes / nightly sync must pass ``actor="hermes"``
-so they never advance.
+``hermes.renewals.desk.DESK_STAGES``. This module is the workstation layer
+for the **Catalyst** Renewals Desk SPA. Live WORK_STEPS labels (from
+``workflow.js``) are Review account / Request terms / Build options /
+Contact client / Close renewal, then Closed (lock).
+
+Checkpoint flags persist on the Zoho Renewals record (``Checkpoint_State``),
+not in Supabase ``renewals_master`` / ``renewal_checklist_items``. Completing
+a checkpoint does **not** advance Desk_Stage — Continue / POST ``/next``
+still advances, gated by the stage CRM task (``taskIsDone``). Hermes never
+advances (``actor="hermes"``).
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -21,11 +27,7 @@ from hermes.renewals.config import (
     PIPELINE_STAGE_PROPOSAL_SENT,
     PIPELINE_STAGE_QUOTE_REQUESTED,
 )
-from hermes.renewals.desk import (
-    DESK_STAGES,
-    disposition_ok,
-    stage_change_allowed,
-)
+from hermes.renewals.desk import DESK_STAGES
 
 ACTOR_USER = "user"
 ACTOR_HERMES = "hermes"
@@ -47,14 +49,14 @@ COMPLETE_ALIASES = frozenset({
     "complete", "completed", "done", "closed", "true", "1",
 })
 
-# Stored Desk_Stage → CSR-facing operating label. Do not rename the stored enum.
+# Stored Desk_Stage → live Catalyst WORK_STEPS label. Do not rename the stored enum.
 OPERATING_STAGES: tuple[dict[str, str], ...] = (
-    {"stage": PIPELINE_STAGE_IDENTIFIED, "label": "Review Account"},
-    {"stage": PIPELINE_STAGE_OUTREACH_SENT, "label": "Pre-Renewal Outreach"},
-    {"stage": PIPELINE_STAGE_QUOTE_REQUESTED, "label": "Market Renewal"},
-    {"stage": PIPELINE_STAGE_PROPOSAL_SENT, "label": "Build Renewal Options"},
-    {"stage": PIPELINE_STAGE_NEGOTIATING, "label": "Present Renewal"},
-    {"stage": PIPELINE_STAGE_CLOSED, "label": "Close Renewal"},
+    {"stage": PIPELINE_STAGE_IDENTIFIED, "label": "Review account"},
+    {"stage": PIPELINE_STAGE_OUTREACH_SENT, "label": "Request terms"},
+    {"stage": PIPELINE_STAGE_QUOTE_REQUESTED, "label": "Build options"},
+    {"stage": PIPELINE_STAGE_PROPOSAL_SENT, "label": "Contact client"},
+    {"stage": PIPELINE_STAGE_NEGOTIATING, "label": "Close renewal"},
+    {"stage": PIPELINE_STAGE_CLOSED, "label": "Closed"},
 )
 
 # Live Catalyst close UI — keep these six labels. Do not fork a second picklist.
@@ -77,6 +79,9 @@ DISPOSITION_ALIASES: dict[str, str] = {
     "non renewed": "do_not_renew",
     "nonrenewed": "do_not_renew",
 }
+
+# Desk-owned JSON on Zoho CRM Renewals. Not a parallel OS table.
+CHECKPOINT_STATE_FIELD = "Checkpoint_State"
 
 RAIL_ACCOUNT = "account_reviewed"
 RAIL_OUTREACH = "outreach_completed"
@@ -409,6 +414,64 @@ def states_from_tasks(tasks: Iterable[dict[str, Any]] | None) -> dict[str, dict[
     return out
 
 
+def parse_checkpoint_state(raw: Any) -> dict[str, dict[str, Any]]:
+    """Read ``Checkpoint_State`` from a Zoho Renewals row."""
+    if isinstance(raw, dict):
+        data = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    else:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    inner = data.get("states") if isinstance(data.get("states"), dict) else data
+    out: dict[str, dict[str, Any]] = {}
+    for key, val in inner.items():
+        if key not in CHECKPOINT_BY_KEY:
+            continue
+        if isinstance(val, dict):
+            out[key] = {
+                **val,
+                "key": key,
+                "status": normalize_checkpoint_status(val.get("status")),
+            }
+        elif is_complete(val):
+            out[key] = {"key": key, "status": STATUS_COMPLETE}
+    return out
+
+
+def dump_checkpoint_state(states: dict[str, dict[str, Any]] | None) -> str:
+    slim: dict[str, dict[str, Any]] = {}
+    for key, val in (states or {}).items():
+        if key not in CHECKPOINT_BY_KEY:
+            continue
+        slim[key] = {
+            "status": normalize_checkpoint_status((val or {}).get("status")),
+            "completed_at": (val or {}).get("completed_at"),
+        }
+    return json.dumps({"states": slim}, separators=(",", ":"))
+
+
+def merge_checkpoint_states(
+    row: dict[str, Any] | None,
+    tasks: Iterable[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Record flags + live CRM tasks. Complete wins. No second store."""
+    row = row or {}
+    out = parse_checkpoint_state(row.get(CHECKPOINT_STATE_FIELD) or row.get("checkpoint_state"))
+    for key, val in states_from_tasks(tasks).items():
+        prev = out.get(key)
+        if prev and is_complete(prev.get("status")) and not is_complete(val.get("status")):
+            continue
+        merged = dict(prev or {})
+        merged.update(val)
+        out[key] = merged
+    return out
+
+
 def checkpoints_for_stage(stage: str | None) -> tuple[CheckpointDef, ...]:
     stored = stored_desk_stage({"Desk_Stage": stage})
     return tuple(c for c in CHECKPOINTS if c.stage == stored)
@@ -609,21 +672,29 @@ def next_required_action(
 class CompleteResult:
     ok: bool
     advanced: bool = False
+    task_complete: bool = False
     desk_stage: str = PIPELINE_STAGE_IDENTIFIED
     remaining: list[str] = field(default_factory=list)
     error: str | None = None
     states: dict[str, dict[str, Any]] = field(default_factory=dict)
     scorecard: dict[str, Any] = field(default_factory=dict)
+    checkpoint_state: str = ""
+    aliases: tuple[str, ...] = ()
+    title: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "advanced": self.advanced,
+            "task_complete": self.task_complete,
             "desk_stage": self.desk_stage,
             "remaining": self.remaining,
             "error": self.error,
             "states": self.states,
             "scorecard": self.scorecard,
+            "checkpoint_state": self.checkpoint_state,
+            "aliases": list(self.aliases),
+            "title": self.title,
         }
 
 
@@ -636,10 +707,12 @@ def complete_checkpoint(
     disposition: str | None = None,
     producer_confirmed: bool = False,
 ) -> CompleteResult:
-    """Mark a checkpoint complete. Advance at most one Desk_Stage, and only for a user.
+    """Mark a checkpoint complete on the Zoho Renewals record.
 
-    Remaining required checkpoints on the current stage block advance. Hermes
-    (``actor="hermes"``) never advances.
+    Does **not** advance ``Desk_Stage``. Continue / POST ``/next`` still
+    advances when the stage CRM task is Completed (``taskIsDone``). Completing
+    required checkpoints is how the user marks that task without hunting CRM.
+    Hermes (``actor="hermes"``) also never advances.
     """
     stored = stored_desk_stage({"Desk_Stage": stage})
     spec = CHECKPOINT_BY_KEY.get(key)
@@ -656,40 +729,15 @@ def complete_checkpoint(
     remaining = remaining_required(stored, new_states)
     result = CompleteResult(
         ok=True,
+        advanced=False,
+        task_complete=not remaining,
         desk_stage=stored,
         remaining=remaining,
         states=new_states,
+        scorecard=scorecard(stored, new_states),
+        checkpoint_state=dump_checkpoint_state(new_states),
+        aliases=spec.aliases,
+        title=spec.title,
     )
-    if actor != ACTOR_USER:
-        result.scorecard = scorecard(stored, new_states)
-        return result
-    if remaining:
-        result.scorecard = scorecard(stored, new_states)
-        return result
-    nxt = next_stage(stored)
-    if not nxt:
-        result.scorecard = scorecard(stored, new_states)
-        return result
-    # Advance only from the current stage's last required checkpoint, or from
-    # record_disposition which is the Close gate while still on Negotiating.
-    on_current = spec.stage == stored
-    closing = nxt == PIPELINE_STAGE_CLOSED and key == "record_disposition"
-    if not on_current and not closing:
-        result.scorecard = scorecard(stored, new_states)
-        return result
-    disposition = normalize_disposition(disposition)
-    if nxt == PIPELINE_STAGE_CLOSED and not disposition_ok(disposition):
-        result.error = "Closed requires a Disposition"
-        result.scorecard = scorecard(stored, new_states)
-        return result
-    allowed, reason = stage_change_allowed(stored, nxt, producer_confirmed=producer_confirmed)
-    if not allowed:
-        result.ok = False
-        result.error = reason
-        result.scorecard = scorecard(stored, new_states)
-        return result
-    result.advanced = True
-    result.desk_stage = nxt
-    result.remaining = remaining_required(nxt, new_states)
-    result.scorecard = scorecard(nxt, new_states)
+    _ = (actor, disposition, producer_confirmed)
     return result

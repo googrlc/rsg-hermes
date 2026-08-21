@@ -25,13 +25,13 @@ def test_stored_stage_reads_live_stage_alias():
     assert stored_desk_stage({}) == "Identified"
 
 
-def test_operating_labels_map_six_stored_stages():
-    assert operating_label("Identified") == "Review Account"
-    assert operating_label("Outreach Sent") == "Pre-Renewal Outreach"
-    assert operating_label("Quote Requested") == "Market Renewal"
-    assert operating_label("Proposal Sent") == "Build Renewal Options"
-    assert operating_label("Negotiating") == "Present Renewal"
-    assert operating_label("Closed") == "Close Renewal"
+def test_operating_labels_match_live_work_steps():
+    assert operating_label("Identified") == "Review account"
+    assert operating_label("Outreach Sent") == "Request terms"
+    assert operating_label("Quote Requested") == "Build options"
+    assert operating_label("Proposal Sent") == "Contact client"
+    assert operating_label("Negotiating") == "Close renewal"
+    assert operating_label("Closed") == "Closed"
 
 
 def test_scorecard_empty_identified_is_mostly_empty():
@@ -51,7 +51,7 @@ def test_scorecard_uses_live_task_subjects():
     ])
     assert states["verify_policy_info"]["status"] == "Complete"
     card = scorecard("Identified", states)
-    assert card["label"] == "Review Account"
+    assert card["label"] == "Review account"
     assert "verify_policy_info" not in card["remaining"]
     assert "verify_customer_info" in card["remaining"]
 
@@ -84,7 +84,7 @@ def test_hermes_never_advances_even_when_all_required_are_done():
     assert result.desk_stage == "Identified"
 
 
-def test_last_required_checkpoint_advances_one_stage_only():
+def test_last_required_checkpoint_enables_task_not_stage_advance():
     required = [
         c.key for c in CHECKPOINTS
         if c.stage == "Identified" and c.required and c.key != "review_renewal_timeline"
@@ -96,9 +96,11 @@ def test_last_required_checkpoint_advances_one_stage_only():
         actor="user",
     )
     assert result.ok
-    assert result.advanced is True
-    assert result.desk_stage == "Outreach Sent"
-    assert result.scorecard["label"] == "Pre-Renewal Outreach"
+    assert result.advanced is False
+    assert result.task_complete is True
+    assert result.desk_stage == "Identified"
+    assert result.checkpoint_state
+    assert "verify_policy_info" in result.checkpoint_state
 
 
 def test_cannot_jump_by_completing_a_future_checkpoint():
@@ -120,11 +122,12 @@ def test_outreach_complete_rule_is_customer_response_only():
         "record_customer_response",
         actor="user",
     )
-    assert result.advanced is True
-    assert result.desk_stage == "Quote Requested"
+    assert result.advanced is False
+    assert result.task_complete is True
+    assert result.desk_stage == "Outreach Sent"
 
 
-def test_close_without_disposition_does_not_advance():
+def test_close_checkpoints_do_not_advance_stage():
     result = complete_checkpoint(
         "Negotiating",
         {},
@@ -140,10 +143,8 @@ def test_close_without_disposition_does_not_advance():
         actor="user",
         disposition="renewed",
     )
-    assert close.advanced is True
-    assert close.desk_stage == "Closed"
-    assert close.scorecard["health"] == 100
-    assert all(r["state"] == "done" for r in close.scorecard["rails"])
+    assert close.advanced is False
+    assert close.desk_stage == "Negotiating"
 
 
 def test_live_close_labels_and_alias_mapping():
@@ -164,6 +165,19 @@ def test_live_close_labels_and_alias_mapping():
     assert normalize_disposition("Cancelled") == "do_not_renew"
     assert normalize_disposition("Lost to Competitor") == "lost_price"
     assert normalize_disposition("Lost — Coverage") == "lost_coverage"
+
+
+def test_checkpoint_state_merges_record_and_live_tasks():
+    from hermes.renewals.operating import dump_checkpoint_state, merge_checkpoint_states
+
+    dumped = dump_checkpoint_state({"verify_customer_info": {"status": "Complete"}})
+    row = {"Checkpoint_State": dumped}
+    states = merge_checkpoint_states(
+        row,
+        [{"Subject": "Pull the expiring declaration and review exposures", "Status": "Not Started"}],
+    )
+    assert states["verify_customer_info"]["status"] == "Complete"
+    assert states["verify_policy_info"]["status"] == "Not Started"
 
 
 def test_remaining_required_lists_only_current_stage():

@@ -1,7 +1,9 @@
-# Live inventory — Creator Renewals Desk
+# Live inventory — Creator Renewals Desk (empty stub)
 
 Captured via Zoho Creator MCP against workspace `lamar_risksolutionsgroup668`.
-Do not invent link names. Update this file after a successful IDE/Zia fill.
+**This Creator app is not the live product.** Live desk = Catalyst project
+`935150771` / `renewals_desk_function`. Do not fill Creator. Do not invent
+link names.
 
 ## Application
 

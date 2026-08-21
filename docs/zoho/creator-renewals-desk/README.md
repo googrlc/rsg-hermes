@@ -1,15 +1,14 @@
-# Creator Renewals Desk
+# Renewals Desk
 
-Gretchen's live workstation for the Zoho CRM **Renewals** module. This is a
-Zoho Creator application that binds to CRM — it is not a second policy book
-and not a second eligibility engine.
+Gretchen's live workstation is the **Zoho Catalyst SPA** (project
+`935150771`, function `renewals_desk_function`) over Zoho CRM **Renewals**.
+It is not a second policy book and not a second eligibility engine.
 
-Hermes remains the runner and the **only** NowCerts writer. Creator drafts;
+The Zoho Creator app `renewals-desk` (workspace `lamar_risksolutionsgroup668`)
+is an empty stub. **Do not fill Creator. Do not rewrite the OS in Creator.**
+
+Hermes remains the runner and the **only** NowCerts writer. The desk drafts;
 Gretchen sends. Cadence auto-send stays off.
-
-A later Creator app (Commissions) should copy this same pattern: KPI strip,
-exception buckets, worklist, one-record card, human approval before side
-effects. Do not fold commissions into this app.
 
 ## Role split
 
@@ -17,51 +16,31 @@ effects. Do not fold commissions into this app.
 |---|---|
 | NowCerts | AMS system of record |
 | Hermes | Nightly refresh, Zoho upsert, AMS executor |
-| Zoho CRM | Records: Policies, Renewal_Events, Renewals, AMS_Write_Queue, Deals |
-| **This Creator app** | Desk UI + Deluge guards |
+| Zoho CRM | Records: Policies, Renewal_Events, Renewals, AMS_Write_Queue, Deals, Tasks |
+| **Catalyst Renewals Desk** | Live desk UI + `renewals_desk_function` |
 | Gretchen | Client-facing hands |
 
 ## Surfaces
 
-| Surface | File | CRM source |
+| Surface | File | Notes |
 |---|---|---|
-| Desk home | [`pages/desk.html`](pages/desk.html) | Renewals worklist + KPI counts |
-| Desk palette / CSS | [`pages/desk.css`](pages/desk.css) | Copy into Catalyst `renewals/src/desk.css` |
-| Catalyst React desk | [`catalyst/App.js`](catalyst/App.js) | Renewal OS worklist + card |
-| Catalyst OS rules | [`catalyst/operating.js`](catalyst/operating.js) | Scorecard / checkpoints; copy with App.js |
+| Live Catalyst SPA | [`catalyst/`](catalyst/) | Recovered from the live source map, then overlaid with scorecard / checkpoints |
 | Catalyst function patch | [`catalyst/functions/renewals_desk_function/`](catalyst/functions/renewals_desk_function/) | Merge into live `renewals_desk_function` |
-| Catalyst copy steps | [`catalyst/README.md`](catalyst/README.md) | `npm start` on the Mac Mini |
-| Desk preview | [`pages/desk_preview.html`](pages/desk_preview.html) | Open locally to review Commercial/Personal colors |
-| Renewal card | [`pages/card.html`](pages/card.html) | One Renewal + Policy + Account + Event + Deal |
-| Needs verification | [`reports.md`](reports.md) | Renewal_Events.Eligibility = needs_verification |
-| AMS approval | [`reports.md`](reports.md) | AMS_Write_Queue awaiting Approved_By / failed |
+| Copy steps | [`catalyst/README.md`](catalyst/README.md) | `npm start` on the Mac Mini |
 
-Palette: muted blue (`#DCEAF7` / `#245A86`) is **Commercial only**; muted sage (`#E3F0E7` / `#2F6B4F`) is **Personal only**. Amber is attention; rose is overdue. Status is a separate column.
+Creator HTML / Deluge under `pages/` and `deluge/` is leftover from the stub.
+Do not paste it into Creator.
 
-## Deluge
-
-| Script | When | Rule |
-|---|---|---|
-| [`deluge/stage_guard.dg`](deluge/stage_guard.dg) | On Desk_Stage change | Never skip; backward needs producer |
-| [`deluge/task_seed.dg`](deluge/task_seed.dg) | On card open / Renewal create | Seed the five default tasks once |
-| [`deluge/ams_enqueue.dg`](deluge/ams_enqueue.dg) | AMS action buttons | Four executor actions only; structured payload |
-| [`deluge/dismiss.dg`](deluge/dismiss.dg) | Dismiss button | `Dismissed=true`; never delete |
-| [`deluge/approve.dg`](deluge/approve.dg) | AMS pending Approve | Sets Approved_By / Approved_At / Status=`queued` |
-| [`deluge/cursor_api.dg`](deluge/cursor_api.dg) | Custom API **Cursor** | Standalone Map function the Custom API can associate |
-| [`deluge/window_bucket.dg`](deluge/window_bucket.dg) | On Expiration / LOB edit | Same buckets as `hermes/renewals/desk.py` |
-
-Python is the tested source of truth for stage/window/action rules
-([`hermes/renewals/desk.py`](../../../hermes/renewals/desk.py)). Deluge copies
-those rules; [`deluge/fixtures.md`](deluge/fixtures.md) is the checklist that
-they stayed in sync.
+Palette reminder if you touch CSS: muted blue is **Commercial only**; muted
+sage is **Personal only**. Amber is attention; rose is overdue.
 
 ## Data flow
 
 ```
 canonical_policies --renewal-refresh--> renewal_candidates / project_85_renewals
         --sync-zoho-renewals--> Zoho Renewal_Events + Renewals + Deals (Renewals pipeline)
-Creator reads/writes Zoho
-Creator AMS action --> Zoho AMS_Write_Queue (Approved_By + Approved_At)
+Catalyst SPA reads/writes Zoho CRM Renewals
+Catalyst AMS action --> Zoho AMS_Write_Queue (Approved_By + Approved_At)
         --sync-zoho-ams-queue--> outbound_sync_queue
         --renewal-executor--> NowCerts
 ```
@@ -69,28 +48,23 @@ Creator AMS action --> Zoho AMS_Write_Queue (Approved_By + Approved_At)
 The desk table and the CRM Renewals pipeline are the same book, linked by
 `Related_Deal` / live `Deal_Id`. If a Deal is on the Renewals pipeline, Hermes
 creates the desk row. If a desk row has no pipeline Deal, it is not on the
-worklist. Hermes fills `Related_Deal` and `Deal_Id` when empty (matching
-existing Zoho Renewals rows by `Hermes_Renewal_ID` or `Policy_Number`); after
-that the join is left alone.
+worklist.
 
-Stored `Desk_Stage` (live CRM may call it `Stage`) stays
+Checkpoint flags persist on Zoho Renewals `Checkpoint_State` (desk-owned JSON).
+Do **not** stand up `renewals_master` or `renewal_checklist_items` as an OS
+store — those schemas are empty and retired.
+
+Stored `Desk_Stage` / live `Stage` stays
 Identified → Outreach Sent → Quote Requested → Proposal Sent → Negotiating →
-Closed. The Catalyst OS shows Review Account → … → Close Renewal plus a
-scorecard. Completing checkpoints may advance one stored stage when that
-stage's required items are done. Hermes / `--sync-zoho-renewals` never
+Closed. Live WORK_STEPS labels: Review account / Request terms / Build options
+/ Contact client / Close renewal, then Closed (lock). Continue stays gated by
+the stage CRM task (`taskIsDone`). Completing checkpoints on the card marks
+that task in the background. Hermes / `--sync-zoho-renewals` never
 auto-advances.
 
 Desk-owned fields Hermes must **not** overwrite on update: `Desk_Stage`,
-`Disposition`, `Recommended_Action`, `Touch_Early` / `Touch_Mid` /
-`Touch_Decision`.
+`Stage`, `Disposition`, `Recommended_Action`, `Checkpoint_State`, touch dates.
 
-Correctable fields (portal overlay, keyed by policy number): `Client_Name`,
-`Premium_Current`, `Premium_Renewal`, `Risk_Status`, `Expiration_Date`,
-`Last_Contact_Date`, `Strategy_Notes`. `Increase_Percent` is a formula.
-`Policy_Number` is the natural key.
-
-## Install
-
-See [`INSTALL.md`](INSTALL.md). Zia paste for the existing `renewals-desk`
-app: [`ZIA_PASTE_PROMPT.md`](ZIA_PASTE_PROMPT.md). Live MCP inventory:
-[`LIVE_INVENTORY.md`](LIVE_INVENTORY.md).
+KPI tiles (90/60/30/Personal/Past due, CRITICAL/AT_RISK/SAFE, Needs
+verification, Pending/Failed AMS) stay **list filters**. Renewal Health %
+replaces the "Step n of 5" chip.

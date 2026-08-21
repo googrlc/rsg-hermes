@@ -104,8 +104,9 @@ REMARKET_ACTIONS = frozenset({"REMARKET_SAMPLE", "REMARKET_FULL"})
 
 ACTOR_CREATOR = "zoho_creator"
 
-# Fields Hermes may write on an *update*. Everything else is Creator-owned.
-# Related_Deal / Deal_Id are filled when empty (see run loop) but not in this set.
+# Fields Hermes may write on an *update*. Everything else is desk-owned
+# (Catalyst / CRM Renewals). Checkpoint_State is desk-owned JSON and is
+# never in this set. Related_Deal / Deal_Id are filled when empty.
 RENEWAL_SYNC_FIELDS = frozenset({
     "Name",
     "Hermes_Renewal_ID",

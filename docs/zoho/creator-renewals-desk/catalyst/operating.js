@@ -11,12 +11,12 @@ export const DESK_STAGES = [
 ];
 
 export const OPERATING_STAGES = [
-  { stage: "Identified", label: "Review Account" },
-  { stage: "Outreach Sent", label: "Pre-Renewal Outreach" },
-  { stage: "Quote Requested", label: "Market Renewal" },
-  { stage: "Proposal Sent", label: "Build Renewal Options" },
-  { stage: "Negotiating", label: "Present Renewal" },
-  { stage: "Closed", label: "Close Renewal" },
+  { stage: "Identified", label: "Review account" },
+  { stage: "Outreach Sent", label: "Request terms" },
+  { stage: "Quote Requested", label: "Build options" },
+  { stage: "Proposal Sent", label: "Contact client" },
+  { stage: "Negotiating", label: "Close renewal" },
+  { stage: "Closed", label: "Closed" },
 ];
 
 export const OS_DISPOSITIONS = [
@@ -136,6 +136,55 @@ export function statesFromTasks(tasks) {
   return out;
 }
 
+export function parseCheckpointState(raw) {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const inner = raw.states && typeof raw.states === "object" ? raw.states : raw;
+    return parseCheckpointState(JSON.stringify({ states: inner }));
+  }
+  const text = String(raw || "").trim();
+  if (!text) return {};
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  const inner = data && data.states && typeof data.states === "object" ? data.states : data;
+  const out = {};
+  Object.keys(inner || {}).forEach((key) => {
+    if (!CHECKPOINTS.some((spec) => spec.key === key)) return;
+    const val = inner[key];
+    if (val && typeof val === "object") {
+      out[key] = { ...val, key, status: normalizeStatus(val.status) };
+    } else if (isComplete(val)) {
+      out[key] = { key, status: "Complete" };
+    }
+  });
+  return out;
+}
+
+export function dumpCheckpointState(states) {
+  const slim = {};
+  Object.keys(states || {}).forEach((key) => {
+    if (!CHECKPOINTS.some((spec) => spec.key === key)) return;
+    slim[key] = {
+      status: normalizeStatus((states[key] || {}).status),
+      completed_at: (states[key] || {}).completed_at || null,
+    };
+  });
+  return JSON.stringify({ states: slim });
+}
+
+export function mergeCheckpointStates(row, tasks) {
+  const out = { ...parseCheckpointState((row && (row.Checkpoint_State || row.checkpoint_state)) || "") };
+  Object.entries(statesFromTasks(tasks)).forEach(([key, val]) => {
+    const prev = out[key];
+    if (prev && isComplete(prev.status) && !isComplete(val.status)) return;
+    out[key] = { ...(prev || {}), ...val };
+  });
+  return out;
+}
+
 export function remainingRequired(stage, states) {
   const stored = storedDeskStage({ Stage: stage });
   return CHECKPOINTS.filter((spec) => spec.stage === stored && spec.required).filter(
@@ -208,41 +257,33 @@ export function nextStage(stage) {
 }
 
 export function completeCheckpoint(stage, states, key, opts) {
-  const actor = (opts && opts.actor) || "user";
-  const disposition = opts && opts.disposition;
   const stored = storedDeskStage({ Stage: stage });
   const spec = CHECKPOINTS.find((row) => row.key === key);
   const nextStates = { ...(states || {}) };
   if (!spec) {
-    return { ok: false, advanced: false, desk_stage: stored, remaining: remainingRequired(stored, nextStates), error: `unknown checkpoint ${key}` };
+    return {
+      ok: false,
+      advanced: false,
+      task_complete: false,
+      desk_stage: stored,
+      remaining: remainingRequired(stored, nextStates),
+      error: `unknown checkpoint ${key}`,
+    };
   }
   nextStates[key] = { ...(nextStates[key] || { key }), status: "Complete" };
   const remaining = remainingRequired(stored, nextStates);
-  const base = { ok: true, advanced: false, desk_stage: stored, remaining, states: nextStates, error: null };
-  if (actor !== "user" || remaining.length) {
-    return { ...base, scorecard: scorecard(stored, nextStates) };
-  }
-  const nxt = nextStage(stored);
-  if (!nxt) return { ...base, scorecard: scorecard(stored, nextStates) };
-  const onCurrent = spec.stage === stored;
-  const closing = nxt === "Closed" && key === "record_disposition";
-  if (!onCurrent && !closing) return { ...base, scorecard: scorecard(stored, nextStates) };
-  if (nxt === "Closed" && !["renewed", "rewritten", "lost_price", "lost_coverage", "lost_no_response", "do_not_renew"].includes(String(disposition || ""))) {
-    return { ...base, error: "Closed requires a Disposition", scorecard: scorecard(stored, nextStates) };
-  }
-  const here = stageRank(stored);
-  const there = stageRank(nxt);
-  if (there !== here + 1) {
-    return { ok: false, advanced: false, desk_stage: stored, remaining, states: nextStates, error: "cannot skip desk stages", scorecard: scorecard(stored, nextStates) };
-  }
   return {
     ok: true,
-    advanced: true,
-    desk_stage: nxt,
-    remaining: remainingRequired(nxt, nextStates),
+    advanced: false,
+    task_complete: remaining.length === 0,
+    desk_stage: stored,
+    remaining,
     states: nextStates,
     error: null,
-    scorecard: scorecard(nxt, nextStates),
+    scorecard: scorecard(stored, nextStates),
+    checkpoint_state: dumpCheckpointState(nextStates),
+    aliases: spec.aliases || [],
+    title: spec.title,
   };
 }
 
@@ -282,6 +323,9 @@ const api = {
   scorecard,
   completeCheckpoint,
   statesFromTasks,
+  parseCheckpointState,
+  dumpCheckpointState,
+  mergeCheckpointStates,
   remainingRequired,
   checkpointsForStage,
   nextRequiredAction,
