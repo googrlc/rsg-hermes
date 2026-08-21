@@ -14,6 +14,9 @@ from hermes.sync.zoho_renewals import (
     DEAL_STAGE_LOST,
     DEAL_STAGE_REQUOTE,
     DEAL_STAGE_WON,
+    DEFAULT_RENEWALS_PIPELINE_ID,
+    NEW_BUSINESS_PIPELINE_ID,
+    DEAL_STAGE_OPTION_IDS,
     _iso_datetime,
     _write_renewal,
     creator_override_diffs,
@@ -24,6 +27,8 @@ from hermes.sync.zoho_renewals import (
     map_deal_to_renewal,
     map_projection_to_renewal,
     map_renewal_to_deal,
+    pipeline_backfill_patch,
+    renewals_pipeline_id,
     resolve_deal_stage,
     run_zoho_renewals_sync,
 )
@@ -221,7 +226,84 @@ def test_map_renewal_to_deal_sets_pipeline_type_and_window_stage():
     assert payload["Stage"] == DEAL_STAGE_90
     assert payload["Deal_Status"] == "open"
     assert payload["Account_Name"] == {"id": "A1"}
-    assert "Pipeline" not in payload  # no ZOHO_RENEWALS_PIPELINE_ID in tests
+    assert payload["Pipeline"] == {"id": DEFAULT_RENEWALS_PIPELINE_ID}
+    assert payload["Pipeline"]["id"] != NEW_BUSINESS_PIPELINE_ID
+
+
+def test_renewals_pipeline_id_uses_env_override(monkeypatch):
+    monkeypatch.setenv("ZOHO_RENEWALS_PIPELINE_ID", "custom-renewals-pipeline")
+    monkeypatch.delenv("ZOHO_PIPELINE_ID", raising=False)
+    assert renewals_pipeline_id() == "custom-renewals-pipeline"
+    payload = map_renewal_to_deal(P85, policy=POLICY, creating=True, today=TODAY)
+    assert payload["Pipeline"] == {"id": "custom-renewals-pipeline"}
+    assert payload["Pipeline"]["id"] != NEW_BUSINESS_PIPELINE_ID
+
+
+def test_renewals_pipeline_id_defaults_when_env_unset(monkeypatch):
+    monkeypatch.delenv("ZOHO_RENEWALS_PIPELINE_ID", raising=False)
+    monkeypatch.setenv("ZOHO_PIPELINE_ID", NEW_BUSINESS_PIPELINE_ID)
+    assert renewals_pipeline_id() == DEFAULT_RENEWALS_PIPELINE_ID
+    payload = map_renewal_to_deal(P85, policy=POLICY, creating=True, today=TODAY)
+    assert payload["Pipeline"] == {"id": DEFAULT_RENEWALS_PIPELINE_ID}
+    assert payload["Pipeline"]["id"] != NEW_BUSINESS_PIPELINE_ID
+
+
+def test_renewals_pipeline_id_never_writes_new_business(monkeypatch):
+    monkeypatch.setenv("ZOHO_RENEWALS_PIPELINE_ID", NEW_BUSINESS_PIPELINE_ID)
+    monkeypatch.setenv("ZOHO_PIPELINE_ID", NEW_BUSINESS_PIPELINE_ID)
+    assert renewals_pipeline_id() == DEFAULT_RENEWALS_PIPELINE_ID
+    payload = map_renewal_to_deal(P85, policy=POLICY, creating=True, today=TODAY)
+    assert payload["Pipeline"] == {"id": DEFAULT_RENEWALS_PIPELINE_ID}
+    assert payload["Pipeline"]["id"] != NEW_BUSINESS_PIPELINE_ID
+
+
+def test_won_stage_option_id_is_renewals_bound_won():
+    # Renewals Bound / Won, not New Business Bound / Won (82f61678-...).
+    assert DEAL_STAGE_OPTION_IDS[DEAL_STAGE_WON] == "76a8a582-6a6f-dbf7-2929-50096e26cb50"
+    payload = map_renewal_to_deal(
+        P85,
+        policy=POLICY,
+        desk_row={"Desk_Stage": "Closed", "Disposition": "renewed"},
+        creating=True,
+        today=TODAY,
+    )
+    assert payload["Stage"] == DEAL_STAGE_WON
+    assert payload["Stage_Option_ID"] == "76a8a582-6a6f-dbf7-2929-50096e26cb50"
+    assert payload["Pipeline"]["id"] == DEFAULT_RENEWALS_PIPELINE_ID
+
+
+def test_pipeline_backfill_patch_moves_renewals_deal_without_stage():
+    patch = pipeline_backfill_patch(
+        {
+            "id": "d1",
+            "Opportunity_Type": "Renewals",
+            "Pipeline": {"id": NEW_BUSINESS_PIPELINE_ID},
+            "Stage": DEAL_STAGE_REQUOTE,
+        }
+    )
+    assert patch == {"Pipeline": {"id": DEFAULT_RENEWALS_PIPELINE_ID}}
+    assert "Stage" not in patch
+    assert patch["Pipeline"]["id"] != NEW_BUSINESS_PIPELINE_ID
+
+
+def test_pipeline_backfill_patch_noop_when_already_on_renewals():
+    assert pipeline_backfill_patch(
+        {
+            "Opportunity_Type": "Renewals",
+            "Pipeline": {"id": DEFAULT_RENEWALS_PIPELINE_ID},
+            "Stage": DEAL_STAGE_REQUOTE,
+        }
+    ) is None
+
+
+def test_pipeline_backfill_patch_skips_new_business_deals():
+    assert pipeline_backfill_patch(
+        {
+            "Opportunity_Type": "New Business",
+            "Pipeline": {"id": NEW_BUSINESS_PIPELINE_ID},
+            "Stage": "Qualification",
+        }
+    ) is None
 
 
 def test_map_deal_to_renewal_links_related_deal():
@@ -389,6 +471,8 @@ def test_run_sync_upserts_event_then_renewal_and_captures_override():
     assert deal_upsert[3]["Opportunity_Type"] == "Renewals"
     assert deal_upsert[3]["Bound_Policy_Number"] == "CPP1"
     assert deal_upsert[3]["Stage"] == DEAL_STAGE_90
+    assert deal_upsert[3]["Pipeline"] == {"id": DEFAULT_RENEWALS_PIPELINE_ID}
+    assert deal_upsert[3]["Pipeline"]["id"] != NEW_BUSINESS_PIPELINE_ID
 
 
 def test_run_sync_does_not_overwrite_existing_related_deal():
@@ -426,6 +510,9 @@ def test_run_sync_does_not_overwrite_existing_related_deal():
     deal_updates = [u for u in zoho.updates if u[0] == "Deals"]
     assert deal_updates[0][1] == "keep-me"
     assert deal_updates[0][2]["Stage"] == DEAL_STAGE_REQUOTE
+    assert deal_updates[0][2]["Pipeline"] == {"id": DEFAULT_RENEWALS_PIPELINE_ID}
+    assert deal_updates[0][2]["Pipeline"]["id"] != NEW_BUSINESS_PIPELINE_ID
+    assert result.deals_pipeline_backfilled == 0
 
 
 def test_pipeline_deal_without_desk_row_creates_desk():
@@ -453,12 +540,81 @@ def test_pipeline_deal_without_desk_row_creates_desk():
     )
     assert result.ok
     assert result.pipeline_desk_created == 1
+    assert result.deals_pipeline_backfilled == 1
     desk_upsert = next(u for u in zoho.upserts if u[0] == "Renewals")
     assert desk_upsert[3]["Policy_Number"] == "HO-88"
     assert desk_upsert[3]["Related_Deal"] == {"id": "crm-only"}
     assert desk_upsert[3]["Deal_Id"] == {"id": "crm-only"}
     assert desk_upsert[3]["Desk_Stage"] == "Identified"
     assert desk_upsert[3]["Stage"] == "Identified"
+    stored = zoho.get_record("Deals", "crm-only")
+    assert stored["Pipeline"] == {"id": DEFAULT_RENEWALS_PIPELINE_ID}
+    assert stored["Stage"] == DEAL_STAGE_30
+
+
+def test_pipeline_backfill_dry_run_does_not_write():
+    zoho = FakeZoho()
+    zoho.seed(
+        "Deals",
+        {
+            "id": "wrong-kanban",
+            "Opportunity_Type": "Renewals",
+            "Bound_Policy_Number": "HO-88",
+            "Insured_Name": "James Wilson",
+            "Pipeline": {"id": NEW_BUSINESS_PIPELINE_ID},
+            "Stage": DEAL_STAGE_REQUOTE,
+        },
+        "wrong-kanban",
+    )
+    result = run_zoho_renewals_sync(
+        supa=_supa(p85=[], candidates=[]),
+        zoho=zoho,
+        today=TODAY,
+        dry_run=True,
+    )
+    assert result.ok
+    assert result.deals_pipeline_backfilled == 1
+    assert zoho.updates == []
+    assert zoho.upserts == []
+    assert zoho.creates == []
+    stored = zoho.get_record("Deals", "wrong-kanban")
+    assert stored["Stage"] == DEAL_STAGE_REQUOTE
+    assert stored["Pipeline"] == {"id": NEW_BUSINESS_PIPELINE_ID}
+
+
+def test_pipeline_backfill_live_keeps_protected_stage():
+    zoho = FakeZoho()
+    zoho.seed(
+        "Deals",
+        {
+            "id": "wrong-kanban",
+            "Opportunity_Type": "Renewals",
+            "Bound_Policy_Number": "HO-88",
+            "Insured_Name": "James Wilson",
+            "Pipeline": {"id": NEW_BUSINESS_PIPELINE_ID},
+            "Stage": DEAL_STAGE_REQUOTE,
+        },
+        "wrong-kanban",
+    )
+    result = run_zoho_renewals_sync(
+        supa=_supa(p85=[], candidates=[]),
+        zoho=zoho,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert result.ok
+    assert result.deals_pipeline_backfilled == 1
+    deal_updates = [u for u in zoho.updates if u[0] == "Deals"]
+    assert deal_updates
+    assert all("Stage" not in payload for _mod, _rid, payload in deal_updates)
+    assert any(
+        payload.get("Pipeline") == {"id": DEFAULT_RENEWALS_PIPELINE_ID}
+        for _mod, _rid, payload in deal_updates
+    )
+    stored = zoho.get_record("Deals", "wrong-kanban")
+    assert stored["Stage"] == DEAL_STAGE_REQUOTE
+    assert stored["Pipeline"] == {"id": DEFAULT_RENEWALS_PIPELINE_ID}
+    assert stored["Pipeline"]["id"] != NEW_BUSINESS_PIPELINE_ID
 
 
 def test_lombardo_shaped_row_links_deal_without_minting_a_leftover():

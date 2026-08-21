@@ -42,7 +42,12 @@ from hermes.renewals.config import (
 )
 from hermes_core.overrides.core import same_value
 from hermes_core.overrides.store import set_override
-from hermes_integrations.zoho_client import ZohoClient, ZohoClientError, _escape_criteria_value
+from hermes_integrations.zoho_client import (
+    DEFAULT_PIPELINE_ID,
+    ZohoClient,
+    ZohoClientError,
+    _escape_criteria_value,
+)
 
 log = logging.getLogger(__name__)
 
@@ -57,8 +62,11 @@ DEALS_MODULE = os.environ.get("ZOHO_DEALS_MODULE", "Deals")
 ACCOUNTS_MODULE = "Accounts"
 OPPORTUNITY_TYPE_RENEWALS = "Renewals"
 
-# Optional. Do not fall back to ZOHO_PIPELINE_ID (that is New Business).
-RENEWALS_PIPELINE_ID = (os.environ.get("ZOHO_RENEWALS_PIPELINE_ID") or "").strip()
+# Live CRM org 935119573, Standard Deals layout 7529682000000091023.
+# New Business (ZOHO_PIPELINE_ID / DEFAULT_PIPELINE_ID) is 7529682000000697038 —
+# never reuse that for Opportunity_Type=Renewals deals.
+DEFAULT_RENEWALS_PIPELINE_ID = "7529682000000697079"
+NEW_BUSINESS_PIPELINE_ID = DEFAULT_PIPELINE_ID
 
 # Stable namespace so a CRM-only Deal always maps to the same Hermes_Renewal_ID.
 _DEAL_HERMES_NS = uuid.UUID("6f1c2d90-4b8e-5a17-9c3d-0a1b2c3d4e5f")
@@ -143,6 +151,7 @@ class ZohoRenewalsSyncResult:
     deals_created: int = 0
     deals_updated: int = 0
     deals_skipped: int = 0
+    deals_pipeline_backfilled: int = 0
     pipeline_desk_created: int = 0
     pipeline_desk_updated: int = 0
     pipeline_desk_skipped: int = 0
@@ -165,7 +174,8 @@ class ZohoRenewalsSyncResult:
             f"Renewals +{self.renewals_created}/~{self.renewals_updated} "
             f"skipped {self.renewals_skipped}; "
             f"Deals +{self.deals_created}/~{self.deals_updated} "
-            f"skipped {self.deals_skipped}; "
+            f"skipped {self.deals_skipped} "
+            f"pipeline-backfill {self.deals_pipeline_backfilled}; "
             f"pipeline→desk +{self.pipeline_desk_created}/~{self.pipeline_desk_updated} "
             f"skipped {self.pipeline_desk_skipped}; "
             f"overrides captured {self.overrides_captured}; "
@@ -344,6 +354,63 @@ def _picklist_label(value: Any) -> str:
     return str(value or "").strip()
 
 
+def deal_pipeline_id(deal: dict[str, Any] | None) -> str:
+    """Native Deals Pipeline id from a CRM record (lookup dict or bare id)."""
+    if not deal:
+        return ""
+    raw = deal.get("Pipeline")
+    if isinstance(raw, dict):
+        return str(raw.get("id") or "").strip()
+    return str(raw or "").strip()
+
+
+def renewals_pipeline_id() -> str:
+    """Native Deals Pipeline id for Opportunity_Type=Renewals.
+
+    Reads ``ZOHO_RENEWALS_PIPELINE_ID`` at call time so tests can monkeypatch
+    env. Defaults to the live Renewals pipeline. Never uses
+    ``ZOHO_PIPELINE_ID`` / New Business.
+    """
+    raw = (os.environ.get("ZOHO_RENEWALS_PIPELINE_ID") or "").strip()
+    new_business = (os.environ.get("ZOHO_PIPELINE_ID") or "").strip() or NEW_BUSINESS_PIPELINE_ID
+    if not raw:
+        return DEFAULT_RENEWALS_PIPELINE_ID
+    if raw == NEW_BUSINESS_PIPELINE_ID or raw == new_business:
+        log.warning(
+            "ZOHO_RENEWALS_PIPELINE_ID=%s is the New Business pipeline; "
+            "using Renewals default %s",
+            raw,
+            DEFAULT_RENEWALS_PIPELINE_ID,
+        )
+        return DEFAULT_RENEWALS_PIPELINE_ID
+    return raw
+
+
+def pipeline_backfill_patch(deal: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Pipeline-only patch for Opportunity_Type=Renewals deals on the wrong kanban.
+
+    Never includes Stage, so Gretchen's Requote / Annual Review / Auto-Renewal
+    moves stay put. Returns None when the deal is already on the Renewals
+    pipeline or is not a Renewals deal.
+    """
+    if not deal:
+        return None
+    opp = str(deal.get("Opportunity_Type") or "").strip()
+    if opp != OPPORTUNITY_TYPE_RENEWALS:
+        return None
+    target = renewals_pipeline_id()
+    if deal_pipeline_id(deal) == target:
+        return None
+    return {"Pipeline": {"id": target}}
+
+
+def _stamp_renewals_pipeline(payload: dict[str, Any]) -> dict[str, Any]:
+    """Force native Pipeline onto a renewal Deal payload. Never New Business."""
+    payload = dict(payload)
+    payload["Pipeline"] = {"id": renewals_pipeline_id()}
+    return payload
+
+
 def deal_window_stage(expiration: date | str | None, *, today: date | None = None) -> str:
     """Calendar window → Renewals pipeline stage. Independent of desk Window_Bucket."""
     days = desk.days_to_expiration(expiration, today=today)
@@ -459,8 +526,7 @@ def map_renewal_to_deal(
         "Account_Name": _lookup(account_id),
         "Sync_Source": "hermes_renewals_sync",
     }
-    if RENEWALS_PIPELINE_ID:
-        payload["Pipeline"] = {"id": RENEWALS_PIPELINE_ID}
+    payload = _stamp_renewals_pipeline(payload)
     if creating:
         payload["Win_Likelihood"] = "Good"
         payload["Created_By_Hermes"] = "hermes --sync-zoho-renewals"
@@ -741,7 +807,13 @@ def _write_deal(
     existing: dict[str, Any] | None,
     dry_run: bool,
 ) -> dict[str, Any]:
-    """Create or update a Deal. Uses id when we already matched one."""
+    """Create or update a Deal. Uses id when we already matched one.
+
+    Always stamps the Renewals native Pipeline. Never writes the New Business
+    pipeline id, even if the incoming payload omitted Pipeline or copied
+    ``ZOHO_PIPELINE_ID``.
+    """
+    payload = _stamp_renewals_pipeline(payload)
     if dry_run:
         if existing and existing.get("id"):
             return {"id": str(existing["id"]), "action": "updated"}
@@ -1030,6 +1102,15 @@ def run_zoho_renewals_sync(
             if not deal_id:
                 result.pipeline_desk_skipped += 1
                 continue
+            backfill = pipeline_backfill_patch(deal)
+            if backfill:
+                try:
+                    _write_deal(zoho, backfill, existing=deal, dry_run=dry_run)
+                    result.deals_pipeline_backfilled += 1
+                    deal["Pipeline"] = backfill["Pipeline"]
+                except Exception as exc:  # noqa: BLE001
+                    log.exception("Renewals pipeline backfill failed for deal %s", deal_id)
+                    result.errors.append(f"deal {deal_id} pipeline: {exc}")
             if deal_id in linked_deal_ids:
                 continue
             pn = str(deal.get("Bound_Policy_Number") or "").strip()
