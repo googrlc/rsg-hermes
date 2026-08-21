@@ -1,0 +1,29 @@
+Catalyst_Field,Service_Requests_Logical_API,Transform,Notes
+id,id,passthrough,Zoho record id
+Subject,Subject,passthrough,
+Description,Description,passthrough,
+Request_Type,Request_Type,passthrough,Exact Request_Type picklist values
+Request_Type_Label,Request_Type,passthrough,Same labels; no separate field
+Desk_Stage,Status,status_to_desk_stage,"New→New; In Progress→In progress; Waiting→Waiting; Completed→Completed. Catalyst filters on 'In progress'."
+Status,Status,passthrough,CRM SoT; do not dual-write Desk
+Priority,Priority,passthrough,Low / Standard / High
+Policy_Number,Policy_Number,passthrough,Also stamped from Policy lookup
+Client_Name,Client_Name,or_account_name,Fallback Account_Name.name
+Account_Name,Account_Name,lookup_name,Lookup; emit display name string for the list
+Owner_Name,Owner,lookup_name,System Owner.name — not a custom field
+Due_Date,Due_Date,iso_datetime,
+Service_Time,Service_Time,passthrough,Formula hours
+Completion_Time,Completion_Time,passthrough,Formula hours
+Age_Days,Age_Days,passthrough,Formula days
+Overdue,Overdue,bool,Formula boolean
+Completed_At,Closed_Date,passthrough,Catalyst completed timestamp
+Closed_Time,Closed_Date,passthrough,Alias of Closed_Date
+Next_Step,Next_Step,passthrough,
+Contact_Name,Contact_Name,lookup_name,
+Carrier,Carrier,passthrough,
+Line_Of_Business,Line_Of_Business,passthrough,
+Open_Date,Open_Date,iso_datetime,
+Last_Activity,Last_Activity,or_modified_time,Fallback Modified_Time
+module,literal:Service_Requests,constant,Catalyst web-tab currently uses module=Cases — retarget
+api_list,/api/desk,constant,Same path; Hermes now reads Service_Requests not Cases/Desk
+api_detail,/api/desk/cases/{id},constant,Path kept for the minified Catalyst bundle; record is Service_Requests

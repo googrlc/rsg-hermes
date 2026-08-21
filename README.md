@@ -200,8 +200,9 @@ write-back/queue flags (`--espo-writeback`, `--process-crm-queue`,
 For readiness checks use **`--ops-doctor`** (Supabase connectivity + Hermes
 tables). `docs/espocrm-read-lane.md` is historical (the direct-Postgres read lane
 was removed in PR #191). Zoho field packs and backfill scripts live under
-`docs/zoho/`; the Supabase `agency_crm_*` tables are legacy tail — do not treat
-them as the CRM.
+`docs/zoho/`; the Service Requests module pack is `docs/zoho/service_requests.md`
+(apply with `scripts/zoho_apply_service_requests.py`, dry-run by default). The
+Supabase `agency_crm_*` tables are legacy tail — do not treat them as the CRM.
 
 Still in the tree but retired:
 

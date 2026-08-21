@@ -1,0 +1,31 @@
+Module,Display_Label,API_Name,Data_Type,Length,Mandatory,Unique,External_ID,Default_Value,Picklist_Source,Sync_Direction,Hermes_Column,Notes
+Service_Requests,Request Name,Name,Single Line,255,Y,N,N,,,Z-only,,Display name; buttons stamp Subject here. Not a Supabase column.
+Service_Requests,Request Number,Request_Number,Auto Number,20,N,Y,N,SR-1001,,Z-only,,Prefix SR-; start 1001. Zoho may suffix API name __s/__c.
+Service_Requests,Subject,Subject,Single Line,255,Y,N,N,,,Z-only,,Required. Catalyst list title fallback.
+Service_Requests,Description,Description,Multi Line,32000,N,N,N,,,Z-only,,Email body / request details.
+Service_Requests,Request Type,Request_Type,Picklist,80,Y,N,N,,picklists_hermes_vocab.csv:service_request_type,Z-only,,Exact labels in vocab. Distinct from endorsement_type seed (1d) — do not add Replace Driver / Address Change / COI wording.
+Service_Requests,Priority,Priority,Picklist,20,N,N,N,Standard,picklists_hermes_vocab.csv:service_request_priority,Z-only,,Low / Standard / High. Desk PR used Normal — do not copy Desk.
+Service_Requests,Status,Status,Picklist,40,Y,N,N,New,picklists_hermes_vocab.csv:service_request_status,Z-only,,New / In Progress / Waiting / Completed. Catalyst Desk_Stage is a projection of this field (In Progress → 'In progress').
+Service_Requests,Owner,Owner,User,,N,N,N,,,Z-only,,System CRM User. Account Owner on create if no CSR field. Leave empty when unassigned — do not invent a queue user.
+Service_Requests,Team,Team,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:service_request_team,Z-only,,Personal Lines / Commercial / Unassigned.
+Service_Requests,Open Date,Open_Date,DateTime,,N,N,N,,,Z-only,,Set on create. Clock start for Service_Time.
+Service_Requests,Due Date,Due_Date,DateTime,,N,N,N,,,Z-only,,Catalyst Due column. Overdue formula reads this.
+Service_Requests,Closed Date,Closed_Date,DateTime,,N,N,N,,,Z-only,,Set when Status=Completed.
+Service_Requests,Service Time,Service_Time,Formula (Decimal),,N,N,N,,,Z-only,,"Hours open: Datecomp(If(IsEmpty(Closed_Date),Now(),Closed_Date), Open_Date)/60. Wall-clock; Waiting does not pause (no custom DB)."
+Service_Requests,Completion Time,Completion_Time,Formula (Decimal),,N,N,N,,,Z-only,,Hours Open_Date→Closed_Date when Closed_Date is set; else empty.
+Service_Requests,Age Days,Age_Days,Formula (Decimal),,N,N,N,,,Z-only,,Days open: Datecomp(...)/1440. Catalyst Age_Days.
+Service_Requests,Overdue,Overdue,Formula (Boolean),,N,N,N,,,Z-only,,True when Due_Date < Now() and Status != Completed. Requested as Checkbox; formula is the no-DB equivalent. Apply script may fall back to Checkbox if boolean formula is rejected.
+Service_Requests,Last Activity,Last_Activity,DateTime,,N,N,N,,,Z-only,,Stamp on create/edit via workflow. Catalyst Last_Activity.
+Service_Requests,Account Name,Account_Name,Lookup (Accounts),,Y,N,N,,,Z-only,,REQUIRED. Related list Accounts → Service Requests.
+Service_Requests,Contact Name,Contact_Name,Lookup (Contacts),,N,N,N,,,Z-only,,Optional. Related list Contacts → Service Requests.
+Service_Requests,Policy,Policy,Lookup (Policies),,N,N,N,,,Z-only,,Lookup to custom module Policies (skip apply if Policies is absent live). Related list Policies → Service Requests.
+Service_Requests,Renewal,Renewal,Lookup (Renewals),,N,N,N,,,Z-only,,Optional. Related list Renewals → Service Requests. Skip apply if Renewals is absent live.
+Service_Requests,Policy Number,Policy_Number,Single Line,100,N,N,N,,,Z-only,,Stamp from Policy lookup / email parse. Catalyst column.
+Service_Requests,Carrier,Carrier,Single Line,150,N,N,N,,,Z-only,,"Stamp from Policies.Carrier (Single Line, not a lookup)."
+Service_Requests,Line of Business,Line_Of_Business,Single Line,150,N,N,N,,,Z-only,,Match Policies.Line_of_Business text. Not a new picklist.
+Service_Requests,Effective Date,Effective_Date,Date,,N,N,N,,,Z-only,,Stamp from Policy when present.
+Service_Requests,Client Name,Client_Name,Single Line,255,N,N,N,,,Z-only,,Stamp from Account.Account_Name. Catalyst Client column.
+Service_Requests,Named Insured,Named_Insured,Single Line,255,N,N,N,,,Z-only,,Policy button prefills from Account / named insured.
+Service_Requests,Next Step,Next_Step,Single Line,255,N,N,N,,,Z-only,,Catalyst Next_Step. Not a second status field.
+Service_Requests,Created Time,Created_Time,DateTime,,N,N,N,,,System,,System field — do not create.
+Service_Requests,Modified Time,Modified_Time,DateTime,,N,N,N,,,System,,System field — do not create.
