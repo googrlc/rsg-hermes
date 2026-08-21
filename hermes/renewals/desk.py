@@ -218,3 +218,14 @@ def lookup_id(value: Any) -> str | None:
         rid = value.get("id")
         return str(rid) if rid else None
     return str(value)
+
+
+def linked_deal_id(row: dict[str, Any] | None) -> str | None:
+    """Pipeline join. Live Catalyst uses ``Deal_Id``; the field pack names it ``Related_Deal``."""
+    row = row or {}
+    return lookup_id(row.get("Related_Deal")) or lookup_id(row.get("Deal_Id"))
+
+
+def has_pipeline_deal(row: dict[str, Any] | None) -> bool:
+    """Worklist membership: hide desk-only leftovers with no Renewals-pipeline Deal."""
+    return linked_deal_id(row) is not None

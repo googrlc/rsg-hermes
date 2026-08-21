@@ -50,7 +50,7 @@ Create these CRM integration reports (criteria exact):
 ### Worklist (`worklist`)
 
 - Module: Renewals
-- Criteria: Dismissed is false or empty **and** Related_Deal is not empty
+- Criteria: Dismissed is false or empty **and** Related_Deal or Deal_Id is not empty
   (desk membership = CRM Renewals-pipeline Deal)
 - Columns: Client_Name, Policy_Number, Carrier, Line_of_Business,
   Expiration_Date, Days_To_Expiration, Window_Bucket, Premium_Current,

@@ -21,6 +21,7 @@ from hermes.sync.zoho_renewals import (
     resolve_deal_stage,
     run_zoho_renewals_sync,
 )
+from hermes.renewals.desk import has_pipeline_deal, linked_deal_id
 
 TODAY = date(2026, 8, 18)
 
@@ -228,7 +229,9 @@ def test_map_deal_to_renewal_links_related_deal():
     payload = map_deal_to_renewal(deal, creating=True, today=TODAY)
     assert payload["Policy_Number"] == "HO-88"
     assert payload["Related_Deal"] == {"id": "z-deal-9"}
+    assert payload["Deal_Id"] == {"id": "z-deal-9"}
     assert payload["Desk_Stage"] == "Identified"
+    assert payload["Stage"] == "Identified"
     assert payload["Dismissed"] is False
     assert payload["Hermes_Renewal_ID"]
     lost = map_deal_to_renewal({**deal, "Stage": DEAL_STAGE_LOST}, creating=True, today=TODAY)
@@ -326,6 +329,12 @@ class FakeZoho:
         return {"id": str(record_id), "action": "updated"}
 
 
+def _renewal_writes(zoho: FakeZoho) -> list[dict]:
+    from_upsert = [rec for mod, _f, _v, rec in zoho.upserts if mod == "Renewals"]
+    from_update = [rec for mod, _rid, rec in zoho.updates if mod == "Renewals"]
+    return from_upsert + from_update
+
+
 def test_run_sync_upserts_event_then_renewal_and_captures_override():
     p85 = dict(P85)
     zoho = FakeZoho()
@@ -350,10 +359,11 @@ def test_run_sync_upserts_event_then_renewal_and_captures_override():
     assert any(c.args[0] == "portal_overrides" for c in supa.insert.call_args_list)
     event_upsert = next(u for u in zoho.upserts if u[0] == "Renewal_Events")
     assert event_upsert[3]["Hermes_Candidate_ID"] == "cand-1"
-    renewal_upsert = next(u for u in zoho.upserts if u[0] == "Renewals")
-    assert "Desk_Stage" not in renewal_upsert[3]
-    assert renewal_upsert[3]["Premium_Current"] == 4500
-    assert renewal_upsert[3]["Related_Deal"] == {"id": "Deals-ren-1"}
+    renewal_write = next(rec for rec in _renewal_writes(zoho) if rec.get("Policy_Number") == "CPP1")
+    assert "Desk_Stage" not in renewal_write
+    assert renewal_write["Premium_Current"] == 4500
+    assert renewal_write["Related_Deal"] == {"id": "Deals-ren-1"}
+    assert renewal_write["Deal_Id"] == {"id": "Deals-ren-1"}
     deal_upsert = next(u for u in zoho.upserts if u[0] == "Deals")
     assert deal_upsert[3]["Opportunity_Type"] == "Renewals"
     assert deal_upsert[3]["Bound_Policy_Number"] == "CPP1"
@@ -388,11 +398,13 @@ def test_run_sync_does_not_overwrite_existing_related_deal():
     result = run_zoho_renewals_sync(supa=_supa(), zoho=zoho, today=TODAY, dry_run=False)
     assert result.ok
     assert result.deals_updated == 1
-    renewal_upsert = next(u for u in zoho.upserts if u[0] == "Renewals")
-    assert "Related_Deal" not in renewal_upsert[3]
+    renewal_write = next(rec for rec in _renewal_writes(zoho))
+    assert "Related_Deal" not in renewal_write
+    assert "Deal_Id" not in renewal_write
     assert zoho.updates
-    assert zoho.updates[0][1] == "keep-me"
-    assert zoho.updates[0][2]["Stage"] == DEAL_STAGE_REQUOTE
+    deal_updates = [u for u in zoho.updates if u[0] == "Deals"]
+    assert deal_updates[0][1] == "keep-me"
+    assert deal_updates[0][2]["Stage"] == DEAL_STAGE_REQUOTE
 
 
 def test_pipeline_deal_without_desk_row_creates_desk():
@@ -423,7 +435,78 @@ def test_pipeline_deal_without_desk_row_creates_desk():
     desk_upsert = next(u for u in zoho.upserts if u[0] == "Renewals")
     assert desk_upsert[3]["Policy_Number"] == "HO-88"
     assert desk_upsert[3]["Related_Deal"] == {"id": "crm-only"}
+    assert desk_upsert[3]["Deal_Id"] == {"id": "crm-only"}
     assert desk_upsert[3]["Desk_Stage"] == "Identified"
+    assert desk_upsert[3]["Stage"] == "Identified"
+
+
+def test_lombardo_shaped_row_links_deal_without_minting_a_leftover():
+    """Live Catalyst: Renewals row has Policy_Number, empty Deal_Id, no Hermes_Renewal_ID."""
+    zoho = FakeZoho()
+    live = zoho.seed(
+        "Renewals",
+        {
+            "id": "7529682000000707078",
+            "Client_Name": "Lombardo, Tiffany",
+            "Policy_Number": "991540615",
+            "Carrier": "PROGRESSIVE MOUNTAIN INS CO",
+            "Expiration_Date": "2026-08-15",
+            "Deal_Id": None,
+            "Related_Deal": None,
+            "Stage": "Identified",
+            "Dismissed": False,
+        },
+        "991540615",
+    )
+    p85 = {
+        "id": "p85-lombardo",
+        "policy_number": "991540615",
+        "client_name": "Lombardo, Tiffany",
+        "expiration_date": "2026-08-15",
+        "premium_current": 3225,
+        "premium_renewal": None,
+        "risk_status": "RENEWED",
+        "ai_strategy_notes": None,
+        "last_contact_date": None,
+    }
+    policy = {
+        "policy_number": "991540615",
+        "policy_guid": "9200743b-e3c4-4d93-9c30-348349df1894",
+        "nowcerts_insured_guid": "c2e05679-f7c7-4dfa-98a0-ccb7d8ab1112",
+        "carrier": "PROGRESSIVE MOUNTAIN INS CO",
+        "lines_of_business": "Auto",
+        "effective_date": "2026-02-15",
+    }
+    result = run_zoho_renewals_sync(
+        supa=_supa(p85=[p85], candidates=[], policies=[policy]),
+        zoho=zoho,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert result.ok
+    assert result.renewals_created == 0
+    assert result.renewals_updated == 1
+    assert result.deals_created == 1
+    renewals = [rec for _rid, (mod, rec) in zoho.records.items() if mod == "Renewals"]
+    assert len(renewals) == 1
+    linked = renewals[0]
+    assert linked["id"] == live["id"]
+    assert linked_deal_id(linked)
+    assert has_pipeline_deal(linked)
+    write = _renewal_writes(zoho)[0]
+    assert write["Related_Deal"]["id"]
+    assert write["Deal_Id"]["id"]
+    assert write["Hermes_Renewal_ID"] == "p85-lombardo"
+    assert "Desk_Stage" not in write
+
+
+def test_worklist_hides_desk_only_leftovers():
+    leftover = {"id": "desk-only", "Policy_Number": "991540615", "Deal_Id": None}
+    linked = {"id": "ok", "Deal_Id": {"id": "deal-1"}}
+    related = {"id": "ok2", "Related_Deal": {"id": "deal-2"}}
+    assert has_pipeline_deal(leftover) is False
+    assert has_pipeline_deal(linked) is True
+    assert has_pipeline_deal(related) is True
 
 
 def test_dismissed_desk_moves_deal_to_not_renewed():

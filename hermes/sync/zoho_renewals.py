@@ -7,12 +7,17 @@ captures Creator corrections as ``portal_overrides`` so the next
 
 The Renewals desk table and the CRM **Renewals pipeline** (Deals with
 ``Opportunity_Type=Renewals``) are a 1:1 projection linked by
-``Renewals.Related_Deal``. A row belongs on the desk only when that Deal
-exists. A Deal on the Renewals pipeline belongs on the desk.
+``Renewals.Related_Deal`` and/or live ``Renewals.Deal_Id``. A row belongs
+on the desk only when that Deal exists. A Deal on the Renewals pipeline
+belongs on the desk. Desk-only leftovers (no Deal) stay off the worklist.
 
 Desk-owned fields (stage, disposition, recommended action, touch dates)
-are set on create (Desk_Stage=Identified) and never overwritten on update.
-``Related_Deal`` is filled when empty and then left alone.
+are set on create (Desk_Stage/Stage=Identified) and never overwritten on
+update. ``Related_Deal`` / ``Deal_Id`` are filled when empty and then left
+alone. Existing Zoho Renewals rows are matched by ``Hermes_Renewal_ID`` or,
+when that is empty (live Catalyst 47-row book), by ``Policy_Number`` so
+sync does not mint a second leftover row.
+
 """
 
 from __future__ import annotations
@@ -100,7 +105,7 @@ REMARKET_ACTIONS = frozenset({"REMARKET_SAMPLE", "REMARKET_FULL"})
 ACTOR_CREATOR = "zoho_creator"
 
 # Fields Hermes may write on an *update*. Everything else is Creator-owned.
-# Related_Deal is filled when empty (see run loop) but is not in this set.
+# Related_Deal / Deal_Id are filled when empty (see run loop) but not in this set.
 RENEWAL_SYNC_FIELDS = frozenset({
     "Name",
     "Hermes_Renewal_ID",
@@ -443,19 +448,26 @@ def map_deal_to_renewal(
         "Window_Bucket": desk.window_bucket(exp, lob, today=today),
         "Account_Name": _lookup(desk.lookup_id(deal.get("Account_Name"))),
         "Related_Deal": _lookup(str(deal.get("id") or "").strip() or None),
+        "Deal_Id": _lookup(str(deal.get("id") or "").strip() or None),
         "Risk_Status": "SAFE",
     }
     if creating:
         if stage_label == DEAL_STAGE_WON:
             payload["Desk_Stage"] = PIPELINE_STAGE_CLOSED
+            payload["Stage"] = PIPELINE_STAGE_CLOSED
             payload["Disposition"] = "renewed"
         elif dismissed:
             payload["Desk_Stage"] = PIPELINE_STAGE_CLOSED
+            payload["Stage"] = PIPELINE_STAGE_CLOSED
             payload["Disposition"] = "do_not_renew"
         else:
             payload["Desk_Stage"] = PIPELINE_STAGE_IDENTIFIED
+            payload["Stage"] = PIPELINE_STAGE_IDENTIFIED
     else:
-        payload = {k: v for k, v in payload.items() if k in RENEWAL_SYNC_FIELDS or k == "Related_Deal"}
+        payload = {
+            k: v for k, v in payload.items()
+            if k in RENEWAL_SYNC_FIELDS or k in {"Related_Deal", "Deal_Id"}
+        }
     return {k: v for k, v in payload.items() if v is not None and v != ""}
 
 
@@ -572,8 +584,10 @@ def find_renewal_deal(
     hermes_renewal_id: str | None = None,
     policy_number: str | None = None,
     related_deal_id: str | None = None,
+    desk_row: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Locate the Renewals-pipeline Deal for a desk row. Never reuse New Business."""
+    related_deal_id = related_deal_id or desk.linked_deal_id(desk_row)
     if related_deal_id:
         row = _get_record(client, DEALS_MODULE, related_deal_id)
         if is_renewals_pipeline_deal(row):
@@ -596,6 +610,50 @@ def find_renewal_deal(
     return None
 
 
+def find_existing_renewal(
+    client: ZohoClient,
+    *,
+    hermes_renewal_id: str | None = None,
+    policy_number: str | None = None,
+) -> dict[str, Any] | None:
+    """Match a live desk row even when Hermes_Renewal_ID was never written."""
+    if hermes_renewal_id:
+        hit = client._find_first(  # noqa: SLF001
+            RENEWALS_MODULE,
+            f"(Hermes_Renewal_ID:equals:{_escape_criteria_value(hermes_renewal_id)})",
+        )
+        if hit:
+            return hit
+    if policy_number:
+        hit = client._find_first(  # noqa: SLF001
+            RENEWALS_MODULE,
+            f"(Policy_Number:equals:{_escape_criteria_value(policy_number)})",
+        )
+        if hit:
+            return hit
+    return None
+
+
+def deal_join_fields(deal_id: str | None) -> dict[str, Any]:
+    """Write both join fields. Live Catalyst lists ``Deal_Id``; the pack uses ``Related_Deal``."""
+    if not deal_id or deal_id == "dry-run":
+        return {}
+    lookup = _lookup(deal_id)
+    return {"Related_Deal": lookup, "Deal_Id": lookup}
+
+
+def apply_deal_join(
+    payload: dict[str, Any],
+    existing: dict[str, Any] | None,
+    deal_id: str | None,
+) -> None:
+    if not deal_id or deal_id == "dry-run":
+        return
+    if desk.linked_deal_id(existing):
+        return
+    payload.update(deal_join_fields(deal_id))
+
+
 def find_desk_for_deal(
     client: ZohoClient,
     deal: dict[str, Any],
@@ -604,12 +662,13 @@ def find_desk_for_deal(
     hermes_id = str(deal.get("Hermes_Opportunity_ID") or "").strip()
     pn = str(deal.get("Bound_Policy_Number") or "").strip()
     if deal_id:
-        hit = client._find_first(  # noqa: SLF001
-            RENEWALS_MODULE,
-            f"(Related_Deal:equals:{_escape_criteria_value(deal_id)})",
-        )
-        if hit:
-            return hit
+        for field in ("Related_Deal", "Deal_Id"):
+            hit = client._find_first(  # noqa: SLF001
+                RENEWALS_MODULE,
+                f"({field}:equals:{_escape_criteria_value(deal_id)})",
+            )
+            if hit:
+                return hit
     if hermes_id:
         hit = client._find_first(  # noqa: SLF001
             RENEWALS_MODULE,
@@ -654,6 +713,28 @@ def _write_deal(
         payload,
         match_field="Hermes_Opportunity_ID",
         match_value=payload.get("Hermes_Opportunity_ID"),
+    )
+
+
+def _write_renewal(
+    client: ZohoClient,
+    payload: dict[str, Any],
+    *,
+    existing: dict[str, Any] | None,
+    hermes_id: str | None,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Update by Zoho id when a live row already exists (even without Hermes_Renewal_ID)."""
+    if dry_run:
+        if existing and existing.get("id"):
+            return {"id": str(existing["id"]), "action": "updated"}
+        return {"id": "dry-run", "action": "created"}
+    if existing and existing.get("id"):
+        updater = getattr(client, "update_record", None)
+        if callable(updater):
+            return updater(RENEWALS_MODULE, str(existing["id"]), payload)
+    return client.upsert_by_field(
+        RENEWALS_MODULE, payload, match_field="Hermes_Renewal_ID", match_value=hermes_id
     )
 
 
@@ -770,9 +851,8 @@ def run_zoho_renewals_sync(
         policy = policies.get(pn) or {}
         source = source_by_pn.get(pn) or {}
         try:
-            existing = zoho._find_first(  # noqa: SLF001
-                RENEWALS_MODULE,
-                f"(Hermes_Renewal_ID:equals:{_escape_criteria_value(rid)})",
+            existing = find_existing_renewal(
+                zoho, hermes_renewal_id=rid, policy_number=pn
             )
             diffs = creator_override_diffs(source, existing, active_overrides=overlay_index)
             for diff in diffs:
@@ -796,7 +876,7 @@ def run_zoho_renewals_sync(
                 zoho,
                 hermes_renewal_id=rid,
                 policy_number=pn,
-                related_deal_id=desk.lookup_id((existing or {}).get("Related_Deal")),
+                desk_row=existing or {},
             )
             deal_payload = map_renewal_to_deal(
                 row,
@@ -837,17 +917,15 @@ def run_zoho_renewals_sync(
                 today=today,
                 creating=creating,
             )
-            linked = desk.lookup_id((existing or {}).get("Related_Deal"))
-            if deal_id and deal_id != "dry-run" and not linked:
-                payload["Related_Deal"] = _lookup(deal_id)
+            apply_deal_join(payload, existing, deal_id)
             if dry_run:
                 if creating:
                     result.renewals_created += 1
                 else:
                     result.renewals_updated += 1
                 continue
-            upserted = zoho.upsert_by_field(
-                RENEWALS_MODULE, payload, match_field="Hermes_Renewal_ID", match_value=rid
+            upserted = _write_renewal(
+                zoho, payload, existing=existing, hermes_id=rid, dry_run=False
             )
             if upserted.get("action") == "created":
                 result.renewals_created += 1
@@ -872,8 +950,7 @@ def run_zoho_renewals_sync(
             existing_desk = find_desk_for_deal(zoho, deal)
             if existing_desk:
                 patch: dict[str, Any] = {}
-                if not desk.lookup_id(existing_desk.get("Related_Deal")):
-                    patch["Related_Deal"] = _lookup(deal_id)
+                apply_deal_join(patch, existing_desk, deal_id)
                 stage_label = _picklist_label(deal.get("Stage"))
                 dismissed = _as_bool(existing_desk.get("Dismissed"))
                 if stage_label == DEAL_STAGE_LOST and not dismissed:
@@ -881,16 +958,22 @@ def run_zoho_renewals_sync(
                 elif stage_label != DEAL_STAGE_LOST and dismissed:
                     patch["Dismissed"] = False
                 hermes_id = str(existing_desk.get("Hermes_Renewal_ID") or "").strip()
-                if not patch or not hermes_id:
+                if not patch:
                     result.pipeline_desk_skipped += 1
                     continue
                 if dry_run:
                     result.pipeline_desk_updated += 1
                     continue
-                zoho.upsert_by_field(
-                    RENEWALS_MODULE, patch, match_field="Hermes_Renewal_ID", match_value=hermes_id
+                written = _write_renewal(
+                    zoho,
+                    patch,
+                    existing=existing_desk,
+                    hermes_id=hermes_id or None,
+                    dry_run=False,
                 )
                 result.pipeline_desk_updated += 1
+                if written.get("id"):
+                    linked_deal_ids.add(deal_id)
                 continue
             if not pn:
                 result.pipeline_desk_skipped += 1

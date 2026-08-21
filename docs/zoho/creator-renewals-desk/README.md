@@ -67,9 +67,11 @@ Creator AMS action --> Zoho AMS_Write_Queue (Approved_By + Approved_At)
 ```
 
 The desk table and the CRM Renewals pipeline are the same book, linked by
-`Related_Deal`. If a Deal is on the Renewals pipeline, Hermes creates the
-desk row. If a desk row has no pipeline Deal, it is not on the worklist.
-Hermes fills `Related_Deal` when empty; after that it is left alone.
+`Related_Deal` / live `Deal_Id`. If a Deal is on the Renewals pipeline, Hermes
+creates the desk row. If a desk row has no pipeline Deal, it is not on the
+worklist. Hermes fills `Related_Deal` and `Deal_Id` when empty (matching
+existing Zoho Renewals rows by `Hermes_Renewal_ID` or `Policy_Number`); after
+that the join is left alone.
 
 Stored `Desk_Stage` (live CRM may call it `Stage`) stays
 Identified → Outreach Sent → Quote Requested → Proposal Sent → Negotiating →
