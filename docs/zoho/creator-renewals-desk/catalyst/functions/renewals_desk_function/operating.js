@@ -19,6 +19,29 @@ const OPERATING_STAGES = [
   { stage: "Closed", label: "Closed" },
 ];
 
+const STAGE_TASKS = {
+  Identified: {
+    title: "Pull the expiring declaration and review exposures",
+    aliases: ["Pull the expiring declaration and review exposures", "Pull renewal declaration & review exposures"],
+  },
+  "Outreach Sent": {
+    title: "Request renewal terms from the carrier",
+    aliases: ["Request renewal terms from the carrier", "Request renewal terms from carrier"],
+  },
+  "Quote Requested": {
+    title: "Build the renewal options and premium-change explanation",
+    aliases: ["Build the renewal options and premium-change explanation"],
+  },
+  "Proposal Sent": {
+    title: "Send the renewal review and get the client's decision",
+    aliases: ["Send the renewal review and get the client's decision", "Send renewal review to client"],
+  },
+  Negotiating: {
+    title: "Enter Premium Renewal and mark Won or Lost",
+    aliases: ["Enter Premium Renewal and mark Won or Lost"],
+  },
+};
+
 const OS_DISPOSITIONS = [
   { code: "renewed", label: "Renewed" },
   { code: "rewritten", label: "Rewritten" },
@@ -48,19 +71,19 @@ const CHECKPOINTS = [
   { key: "send_questionnaire", title: "Send questionnaire", stage: "Outreach Sent", required: false },
   { key: "gather_exposure_changes", title: "Gather exposure changes", stage: "Outreach Sent", required: false },
   { key: "verify_contact_info", title: "Verify contact info", stage: "Outreach Sent", required: false },
-  { key: "record_customer_response", title: "Record customer response", stage: "Outreach Sent", required: true },
-  { key: "request_carrier_terms", title: "Request carrier terms", stage: "Quote Requested", required: false, aliases: ["Request renewal terms from the carrier", "Request renewal terms from carrier"] },
+  { key: "record_customer_response", title: "Record customer response", stage: "Outreach Sent", required: true, aliases: ["Request renewal terms from the carrier", "Request renewal terms from carrier"] },
+  { key: "request_carrier_terms", title: "Request carrier terms", stage: "Quote Requested", required: false, aliases: ["Request renewal terms from carrier"] },
   { key: "request_alternative_quotes", title: "Request alternative quotes", stage: "Quote Requested", required: false },
-  { key: "record_carrier_responses", title: "Record carrier responses", stage: "Quote Requested", required: true },
+  { key: "record_carrier_responses", title: "Record carrier responses", stage: "Quote Requested", required: true, aliases: ["Build the renewal options and premium-change explanation", "Prepare renewal options / comparison"] },
   { key: "follow_up_pending_markets", title: "Follow up pending markets", stage: "Quote Requested", required: false },
   { key: "analyze_carrier_response", title: "Analyze carrier response", stage: "Proposal Sent", required: false },
   { key: "compare_alternatives", title: "Compare alternatives", stage: "Proposal Sent", required: false },
   { key: "review_coverage_differences", title: "Review coverage differences", stage: "Proposal Sent", required: false },
-  { key: "prepare_recommendations", title: "Prepare recommendations / proposal package", stage: "Proposal Sent", required: true, aliases: ["Build the renewal options and premium-change explanation", "Prepare renewal options / comparison"] },
-  { key: "deliver_proposal", title: "Deliver proposal", stage: "Negotiating", required: false, aliases: ["Send the renewal review and get the client's decision", "Send renewal review to client"] },
+  { key: "prepare_recommendations", title: "Prepare recommendations / proposal package", stage: "Proposal Sent", required: true, aliases: ["Send the renewal review and get the client's decision", "Send renewal review to client", "Prepare renewal options / comparison"] },
+  { key: "deliver_proposal", title: "Deliver proposal", stage: "Negotiating", required: false, aliases: ["Send renewal review to client"] },
   { key: "contact_customer", title: "Contact customer", stage: "Negotiating", required: false },
-  { key: "record_customer_selection", title: "Record customer selection", stage: "Negotiating", required: true },
-  { key: "record_final_premium", title: "Record final premium", stage: "Closed", required: false, aliases: ["Enter Premium Renewal and mark Won or Lost", "Update AMS (NowCerts) & file worksheet"] },
+  { key: "record_customer_selection", title: "Record customer selection", stage: "Negotiating", required: true, aliases: ["Enter Premium Renewal and mark Won or Lost", "Update AMS (NowCerts) & file worksheet"] },
+  { key: "record_final_premium", title: "Record final premium", stage: "Closed", required: false, aliases: ["Update AMS (NowCerts) & file worksheet"] },
   { key: "record_disposition", title: "Record disposition", stage: "Closed", required: true },
   { key: "record_bound_carrier", title: "Record bound carrier", stage: "Closed", required: false },
   { key: "record_effective_date", title: "Record effective date", stage: "Closed", required: false },
@@ -74,6 +97,17 @@ function storedDeskStage(row) {
   if (raw && typeof raw === "object") return String(raw.name || raw.value || "Identified");
   const label = String(raw || "").trim();
   return label || "Identified";
+}
+
+function stageTaskFor(stage) {
+  const stored = storedDeskStage({ Stage: stage });
+  const hit = STAGE_TASKS[stored] || { title: "", aliases: [] };
+  const aliases = [];
+  [hit.title, ...(hit.aliases || [])].forEach((item) => {
+    const text = String(item || "").trim();
+    if (text && !aliases.includes(text)) aliases.push(text);
+  });
+  return { title: hit.title || "", aliases };
 }
 
 function operatingLabel(stage) {
@@ -268,10 +302,13 @@ function completeCheckpoint(stage, states, key, opts) {
       desk_stage: stored,
       remaining: remainingRequired(stored, nextStates),
       error: `unknown checkpoint ${key}`,
+      stage_task_title: stageTaskFor(stored).title,
+      stage_task_aliases: stageTaskFor(stored).aliases,
     };
   }
   nextStates[key] = { ...(nextStates[key] || { key }), status: "Complete" };
   const remaining = remainingRequired(stored, nextStates);
+  const stageTask = stageTaskFor(stored);
   return {
     ok: true,
     advanced: false,
@@ -284,6 +321,8 @@ function completeCheckpoint(stage, states, key, opts) {
     checkpoint_state: dumpCheckpointState(nextStates),
     aliases: spec.aliases || [],
     title: spec.title,
+    stage_task_title: stageTask.title,
+    stage_task_aliases: stageTask.aliases,
   };
 }
 
@@ -315,10 +354,12 @@ function nextRequiredAction(stage, states) {
 const api = {
   DESK_STAGES,
   OPERATING_STAGES,
+  STAGE_TASKS,
   OS_DISPOSITIONS,
   SCORECARD_RAILS,
   CHECKPOINTS,
   storedDeskStage,
+  stageTaskFor,
   operatingLabel,
   scorecard,
   completeCheckpoint,

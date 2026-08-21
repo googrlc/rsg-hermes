@@ -500,6 +500,15 @@ def test_lombardo_shaped_row_links_deal_without_minting_a_leftover():
     assert "Desk_Stage" not in write
 
 
+def test_checkpoint_state_is_never_synced_from_hermes():
+    from hermes.sync.zoho_renewals import RENEWAL_SYNC_FIELDS
+
+    assert "Checkpoint_State" not in RENEWAL_SYNC_FIELDS
+    assert "Desk_Stage" not in RENEWAL_SYNC_FIELDS
+    assert "Disposition" not in RENEWAL_SYNC_FIELDS
+    assert "Recommended_Action" not in RENEWAL_SYNC_FIELDS
+
+
 def test_worklist_hides_desk_only_leftovers():
     leftover = {"id": "desk-only", "Policy_Number": "991540615", "Deal_Id": None}
     linked = {"id": "ok", "Deal_Id": {"id": "deal-1"}}

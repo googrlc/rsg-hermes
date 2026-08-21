@@ -2,7 +2,7 @@
 
 Renewal work runs off ``renewal_candidates`` (rebuilt from the live NowCerts
 book by ``hermes --renewal-refresh``, per the eligibility rule in
-``eligibility.py``). The Zoho Creator Renewals Desk is the CRM workstation;
+``eligibility.py``). The Zoho Catalyst Renewals Desk is the CRM workstation;
 approved AMS instructions are staged in ``outbound_sync_queue`` and applied by
 ``executor.py`` under Job Contract v2.
 

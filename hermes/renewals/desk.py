@@ -1,9 +1,9 @@
-"""Creator Renewals Desk — working-state vocab and derived buckets.
+"""Renewals Desk — working-state vocab and derived buckets.
 
-The Zoho Creator desk and ``hermes --sync-zoho-renewals`` share these values so
-the CRM picklists, Deluge guards, and Python mapping cannot drift. Eligibility
-and AMS writes still live in ``eligibility.py`` / ``executor.py``; this module
-is only the workstation overlay (stage, disposition, recommended action, window).
+The Catalyst desk and ``hermes --sync-zoho-renewals`` share these values so
+the CRM picklists and Python mapping cannot drift. Eligibility and AMS writes
+still live in ``eligibility.py`` / ``executor.py``; this module is only the
+workstation overlay (stage, disposition, recommended action, window).
 """
 
 from __future__ import annotations

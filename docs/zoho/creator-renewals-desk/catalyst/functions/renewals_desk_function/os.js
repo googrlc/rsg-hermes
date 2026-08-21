@@ -59,8 +59,9 @@ function completeCheckpointOnCard(card, key, body) {
   });
   // Caller must:
   // 1. PUT Renewals Checkpoint_State = result.checkpoint_state (desk-owned JSON)
-  // 2. If result.task_complete, mark the matching CRM task Status=Completed
-  //    (subject = result.title or result.aliases). That is the live taskIsDone gate.
+  // 2. If result.task_complete, mark the live STAGE CRM task
+  //    Status=Completed (subject = result.stage_task_title or
+  //    result.stage_task_aliases). That is the live taskIsDone gate.
   // 3. Do NOT write Desk_Stage here. Continue / POST /next still advances.
   // 4. Do not write NowCerts.
   return result;

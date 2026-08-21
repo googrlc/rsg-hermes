@@ -89,3 +89,6 @@ _codex_backups/
 *.bak
 *.bak.*
 *.bak-disabled
+
+# Local Playwright scratch from the Creator stub (do not fill Creator)
+scripts/zoho-creator-desk/

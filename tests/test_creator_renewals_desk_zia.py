@@ -69,6 +69,9 @@ def test_install_opens_existing_app():
     assert "ZIA_PASTE_PROMPT.md" in install
     assert "deluge/approve.dg" in install
     assert "deluge/cursor_api.dg" in install
+    assert "renewals_desk_function" in install
+    assert "Do not fill" in install or "Do not fill that app" in install
+    assert "Catalyst" in install
 
 
 PALETTE = {
@@ -139,15 +142,23 @@ def test_catalyst_spa_is_live_client_not_creator():
     assert "Account Reviewed" in operating
     assert "Lost — Price" in operating
     assert "Lost to Competitor" not in operating
+    assert "STAGE_TASKS" in operating
+    assert "Request renewal terms from the carrier" in operating
+    assert "stage_task_title" in current
     assert "nowcerts.com" not in app.lower()
 
 
 def test_operating_js_checkpoint_keys_match_python():
-    from hermes.renewals.operating import CHECKPOINTS
+    from hermes.renewals.operating import CHECKPOINTS, STAGE_TASKS
 
     js = (DESK / "catalyst" / "operating.js").read_text()
+    func = (DESK / "catalyst" / "functions" / "renewals_desk_function" / "operating.js").read_text()
     for spec in CHECKPOINTS:
         assert f'key: "{spec.key}"' in js, spec.key
+        assert f'key: "{spec.key}"' in func, spec.key
+    for row in STAGE_TASKS.values():
+        assert row["title"] in js
+        assert row["title"] in func
 
 
 def test_cursor_api_function_never_calls_nowcerts():

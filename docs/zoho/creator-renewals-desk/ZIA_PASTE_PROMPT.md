@@ -9,12 +9,12 @@ Creator never calls NowCerts.
 
 # Historical pack (do not fill Creator)
 
-Paste this **in the existing application**, Edit mode, Zia / Build Agent.
-Do **not** create a new Creator app. Do **not** duplicate this app.
+Do **not** paste this pack. Do **not** create a new Creator app.
+Do **not** duplicate this app. The live workstation is Catalyst.
 
-You are filling Zoho Creator application **Renewals Desk**
+Historical Creator application name: **Renewals Desk**
 (workspace `lamar_risksolutionsgroup668`, link name `renewals-desk`,
-development environment). This is Gretchen’s live workstation over Zoho CRM.
+development environment). Creator is an empty stub, not Gretchen's desk.
 Hermes remains the only NowCerts writer. Creator never calls NowCerts.
 
 ## Hard rules

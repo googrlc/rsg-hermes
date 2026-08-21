@@ -50,9 +50,9 @@ payload = osDesk.attachOsToCard(payload);
 const result = osDesk.completeCheckpointOnCard(card, key, body);
 if (!result.ok) return res.status(400).json(result);
 // PUT Renewals Checkpoint_State = result.checkpoint_state
-// If result.task_complete, mark the matching CRM task Status=Completed
-// (subject = result.title or result.aliases). Do not write Desk_Stage.
-// Do not write NowCerts.
+// If result.task_complete, mark the live STAGE CRM task Status=Completed
+// (subject = result.stage_task_title or result.stage_task_aliases).
+// Do not write Desk_Stage. Do not write NowCerts.
 return res.json(result);
 ```
 

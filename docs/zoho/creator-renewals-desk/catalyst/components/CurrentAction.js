@@ -5,6 +5,7 @@ import {
   checkpointsForStage,
   completeCheckpoint as markCheckpoint,
   mergeCheckpointStates,
+  stageTaskFor,
   storedDeskStage,
 } from '../operating';
 import ClientEmail from './ClientEmail';
@@ -54,6 +55,7 @@ export default function CurrentAction({ recordId, data, form, setData, setForm, 
   const renewal = data.renewal || {};
   const states = mergeCheckpointStates(renewal, data.tasks || []);
   const checkpoints = checkpointsForStage(storedDeskStage(renewal), states);
+  const stageTask = stageTaskFor(stage);
   const title = finished
     ? 'Renewal closed'
     : opensTask && stage === 'Closed'
@@ -77,8 +79,17 @@ export default function CurrentAction({ recordId, data, form, setData, setForm, 
     try {
       await postCheckpoint(recordId, key, { actor: 'user' });
     } catch {
-      const subjects = [result.title, ...(result.aliases || [])].map((item) => String(item || '').trim().toLowerCase());
-      const task = (data.tasks || []).find((row) => subjects.includes(String(row.Subject || '').trim().toLowerCase()));
+      const subjects = [
+        result.stage_task_title,
+        ...(result.stage_task_aliases || []),
+        stageTask.title,
+        ...(stageTask.aliases || []),
+      ]
+        .map((item) => String(item || '').trim().toLowerCase())
+        .filter(Boolean);
+      const task = (data.tasks || []).find((row) =>
+        subjects.includes(String(row.Subject || '').trim().toLowerCase()),
+      );
       if (result.task_complete && task && task.id && !taskIsDone(task.Status)) {
         try {
           await patchTask(task.id, { Status: 'Completed' });
@@ -133,7 +144,11 @@ export default function CurrentAction({ recordId, data, form, setData, setForm, 
 
       {checkpoints.length ? (
         <div className="checkpoint-list">
-          <p className="muted">Complete on this card. Hermes marks the matching Zoho task. Continue stays disabled until that task is Completed.</p>
+          <p className="muted">
+            Complete on this card. That marks the stage CRM task
+            {stageTask.title ? ` (“${stageTask.title}”)` : ''} so you never hunt Tasks.
+            Continue stays disabled until that task is Completed.
+          </p>
           {checkpoints.map((item) => (
             <div className="checkpoint" key={item.key}>
               <span aria-hidden="true">{item.status === 'Complete' ? '✅' : item.required ? '⬜' : '·'}</span>

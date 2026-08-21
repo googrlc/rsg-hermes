@@ -183,3 +183,57 @@ def test_checkpoint_state_merges_record_and_live_tasks():
 def test_remaining_required_lists_only_current_stage():
     left = remaining_required("Quote Requested", {})
     assert left == ["record_carrier_responses"]
+
+
+def test_live_stage_tasks_match_catalyst_work_steps():
+    from hermes.renewals.operating import stage_task_for
+
+    assert stage_task_for("Identified")["title"] == (
+        "Pull the expiring declaration and review exposures"
+    )
+    assert stage_task_for("Outreach Sent")["title"] == (
+        "Request renewal terms from the carrier"
+    )
+    assert stage_task_for("Quote Requested")["title"] == (
+        "Build the renewal options and premium-change explanation"
+    )
+    assert stage_task_for("Proposal Sent")["title"] == (
+        "Send the renewal review and get the client's decision"
+    )
+    assert stage_task_for("Negotiating")["title"] == (
+        "Enter Premium Renewal and mark Won or Lost"
+    )
+    assert stage_task_for("Closed")["title"] == ""
+
+
+def test_last_required_returns_live_stage_task_not_checkpoint_title():
+    required = [
+        c.key for c in CHECKPOINTS
+        if c.stage == "Identified" and c.required and c.key != "review_renewal_timeline"
+    ]
+    result = complete_checkpoint(
+        "Identified",
+        _done(required),
+        "review_renewal_timeline",
+        actor="user",
+    )
+    assert result.task_complete is True
+    assert result.advanced is False
+    assert result.title == "Review renewal timeline"
+    assert result.stage_task_title == "Pull the expiring declaration and review exposures"
+    assert "Pull the expiring declaration and review exposures" in result.stage_task_aliases
+
+
+def test_outreach_live_task_subject_maps_to_required_checkpoint():
+    states = states_from_tasks([
+        {"Subject": "Request renewal terms from the carrier", "Status": "Completed"},
+    ])
+    assert states["record_customer_response"]["status"] == "Complete"
+    result = complete_checkpoint(
+        "Outreach Sent",
+        states,
+        "record_customer_response",
+        actor="user",
+    )
+    assert result.task_complete is True
+    assert result.stage_task_title == "Request renewal terms from the carrier"

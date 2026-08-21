@@ -518,7 +518,7 @@ def creator_override_diffs(
             "override_value": zoho_val,
             "original_value": source_val,
             "approved_by": ACTOR_CREATOR,
-            "reason": "captured from Zoho Creator Renewals Desk",
+            "reason": "captured from Zoho Catalyst Renewals Desk",
         })
     if _as_bool(zoho_row.get("Dismissed")) and not _as_bool(source.get("dismissed")):
         current = known.get((pn, corr.PROJECTION.dismiss_field))
@@ -530,7 +530,7 @@ def creator_override_diffs(
                 "override_value": True,
                 "original_value": False,
                 "approved_by": ACTOR_CREATOR,
-                "reason": "dismissed on Zoho Creator Renewals Desk",
+                "reason": "dismissed on Zoho Catalyst Renewals Desk",
             })
     return out
 

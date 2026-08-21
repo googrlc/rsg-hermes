@@ -140,6 +140,32 @@ _CLOSE_PREMIUM_ALIASES = (
     "Update AMS (NowCerts) & file worksheet",
 )
 
+# Live Catalyst WORK_STEPS CRM task — one per stored Desk_Stage.
+# Completing required checkpoints on the card marks THIS task (taskIsDone).
+# Continue / POST /next still will not advance until that CRM task is Completed.
+STAGE_TASKS: dict[str, dict[str, Any]] = {
+    PIPELINE_STAGE_IDENTIFIED: {
+        "title": "Pull the expiring declaration and review exposures",
+        "aliases": _PULL_DEC_ALIASES,
+    },
+    PIPELINE_STAGE_OUTREACH_SENT: {
+        "title": "Request renewal terms from the carrier",
+        "aliases": _REQUEST_TERMS_ALIASES,
+    },
+    PIPELINE_STAGE_QUOTE_REQUESTED: {
+        "title": "Build the renewal options and premium-change explanation",
+        "aliases": ("Build the renewal options and premium-change explanation",),
+    },
+    PIPELINE_STAGE_PROPOSAL_SENT: {
+        "title": "Send the renewal review and get the client's decision",
+        "aliases": _SEND_REVIEW_ALIASES,
+    },
+    PIPELINE_STAGE_NEGOTIATING: {
+        "title": "Enter Premium Renewal and mark Won or Lost",
+        "aliases": ("Enter Premium Renewal and mark Won or Lost",),
+    },
+}
+
 
 CHECKPOINTS: tuple[CheckpointDef, ...] = (
     CheckpointDef(
@@ -191,12 +217,13 @@ CHECKPOINTS: tuple[CheckpointDef, ...] = (
     CheckpointDef(
         "record_customer_response", "Record customer response",
         PIPELINE_STAGE_OUTREACH_SENT, True, "customer_response",
+        aliases=_REQUEST_TERMS_ALIASES,
         detail="Log that the customer replied (or that we are waiting).",
     ),
     CheckpointDef(
         "request_carrier_terms", "Request carrier terms",
         PIPELINE_STAGE_QUOTE_REQUESTED, False, "carrier_response",
-        aliases=_REQUEST_TERMS_ALIASES,
+        aliases=("Request renewal terms from carrier",),
         detail="Request incumbent terms. Queues AMS via Hermes; never writes NowCerts.",
     ),
     CheckpointDef(
@@ -207,6 +234,7 @@ CHECKPOINTS: tuple[CheckpointDef, ...] = (
     CheckpointDef(
         "record_carrier_responses", "Record carrier responses",
         PIPELINE_STAGE_QUOTE_REQUESTED, True, "carrier_response",
+        aliases=_BUILD_OPTIONS_ALIASES,
         detail="At least one carrier response is on the file.",
     ),
     CheckpointDef(
@@ -231,13 +259,13 @@ CHECKPOINTS: tuple[CheckpointDef, ...] = (
     CheckpointDef(
         "prepare_recommendations", "Prepare recommendations / proposal package",
         PIPELINE_STAGE_PROPOSAL_SENT, True, "proposal_package",
-        aliases=_BUILD_OPTIONS_ALIASES,
+        aliases=_SEND_REVIEW_ALIASES + ("Prepare renewal options / comparison",),
         detail="Proposal package generated for the client.",
     ),
     CheckpointDef(
         "deliver_proposal", "Deliver proposal",
         PIPELINE_STAGE_NEGOTIATING, False, "customer_decision",
-        aliases=_SEND_REVIEW_ALIASES,
+        aliases=("Send renewal review to client",),
         detail="Send the package. Desk does not email by itself unless asked.",
     ),
     CheckpointDef(
@@ -247,12 +275,13 @@ CHECKPOINTS: tuple[CheckpointDef, ...] = (
     CheckpointDef(
         "record_customer_selection", "Record customer selection",
         PIPELINE_STAGE_NEGOTIATING, True, "customer_decision",
+        aliases=_CLOSE_PREMIUM_ALIASES,
         detail="What the customer chose, in their words.",
     ),
     CheckpointDef(
         "record_final_premium", "Record final premium",
         PIPELINE_STAGE_CLOSED, False, "disposition",
-        aliases=_CLOSE_PREMIUM_ALIASES,
+        aliases=("Update AMS (NowCerts) & file worksheet",),
         detail="Premium Renewal on the desk row. Correctable overlay.",
     ),
     CheckpointDef(
@@ -289,6 +318,19 @@ def stored_desk_stage(row: dict[str, Any] | None) -> str:
         if label:
             return label
     return PIPELINE_STAGE_IDENTIFIED
+
+
+def stage_task_for(stage: str | None) -> dict[str, Any]:
+    """Live CRM task subject that gates Continue for this Desk_Stage."""
+    stored = stored_desk_stage({"Desk_Stage": stage})
+    hit = STAGE_TASKS.get(stored) or {}
+    title = str(hit.get("title") or "")
+    aliases: list[str] = []
+    for item in (title, *tuple(hit.get("aliases") or ())):
+        text = str(item or "").strip()
+        if text and text not in aliases:
+            aliases.append(text)
+    return {"title": title, "aliases": tuple(aliases)}
 
 
 def operating_label(stage: str | None) -> str:
@@ -681,6 +723,8 @@ class CompleteResult:
     checkpoint_state: str = ""
     aliases: tuple[str, ...] = ()
     title: str = ""
+    stage_task_title: str = ""
+    stage_task_aliases: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -695,6 +739,8 @@ class CompleteResult:
             "checkpoint_state": self.checkpoint_state,
             "aliases": list(self.aliases),
             "title": self.title,
+            "stage_task_title": self.stage_task_title,
+            "stage_task_aliases": list(self.stage_task_aliases),
         }
 
 
@@ -727,6 +773,7 @@ def complete_checkpoint(
     new_states[key] = row
 
     remaining = remaining_required(stored, new_states)
+    stage_task = stage_task_for(stored)
     result = CompleteResult(
         ok=True,
         advanced=False,
@@ -738,6 +785,8 @@ def complete_checkpoint(
         checkpoint_state=dump_checkpoint_state(new_states),
         aliases=spec.aliases,
         title=spec.title,
+        stage_task_title=stage_task["title"],
+        stage_task_aliases=stage_task["aliases"],
     )
     _ = (actor, disposition, producer_confirmed)
     return result
