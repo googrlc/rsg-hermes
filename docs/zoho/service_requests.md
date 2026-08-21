@@ -14,9 +14,9 @@ Zoho CRM
 ```
 
 **Catalyst Service Desk** is a dashboard / work queue over CRM data. It does
-not store records (no Catalyst Data Store). **Zoho Desk is not the system of
-record.** Do not create Desk tickets from the CRM buttons in this pack. Do not
-stamp `cf_crm_account_id` onto Desk tickets.
+not store records (no Catalyst Data Store). **Zoho Desk is not the system of record.**
+Do not create Desk tickets from the CRM buttons in this pack. Do not stamp
+`cf_crm_account_id` onto Desk tickets.
 
 Draft PR #358 (`docs/zoho-desk/`, `hermes/desk/`) encoded a Desk-owned model.
 Leave that code in place; do not delete it. The buttons here write
