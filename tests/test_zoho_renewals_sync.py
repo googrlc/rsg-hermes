@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
+
+import pytest
 
 from hermes.sync.zoho_renewals import (
     DEAL_STAGE_30,
@@ -12,8 +14,11 @@ from hermes.sync.zoho_renewals import (
     DEAL_STAGE_LOST,
     DEAL_STAGE_REQUOTE,
     DEAL_STAGE_WON,
+    _iso_datetime,
     creator_override_diffs,
     deal_window_stage,
+    find_desk_for_deal,
+    find_existing_renewal,
     map_candidate_to_renewal_event,
     map_deal_to_renewal,
     map_projection_to_renewal,
@@ -21,6 +26,7 @@ from hermes.sync.zoho_renewals import (
     resolve_deal_stage,
     run_zoho_renewals_sync,
 )
+from hermes_integrations.zoho_client import ZohoClientError
 from hermes.renewals.desk import has_pipeline_deal, linked_deal_id
 
 TODAY = date(2026, 8, 18)
@@ -47,6 +53,7 @@ CANDIDATE = {
     "risk_status": "SAFE",
     "premium_current": 4200,
     "premium_renewal": None,
+    "last_verified_at": "2026-07-15T20:42:58.124383+00:00",
 }
 
 P85 = {
@@ -106,6 +113,8 @@ def test_map_candidate_sets_external_id_and_key():
     assert payload["Account_Name"] == {"id": "A1"}
     assert payload["Policy"] == {"id": "P1"}
     assert payload["Name"].startswith("CPP1")
+    assert payload["Last_Verified"] == "2026-07-15T20:42:58+00:00"
+    assert "." not in payload["Last_Verified"].split("+")[0]
 
 
 def test_map_projection_create_sets_identified_and_window():
@@ -359,6 +368,7 @@ def test_run_sync_upserts_event_then_renewal_and_captures_override():
     assert any(c.args[0] == "portal_overrides" for c in supa.insert.call_args_list)
     event_upsert = next(u for u in zoho.upserts if u[0] == "Renewal_Events")
     assert event_upsert[3]["Hermes_Candidate_ID"] == "cand-1"
+    assert event_upsert[3]["Last_Verified"] == "2026-07-15T20:42:58+00:00"
     renewal_write = next(rec for rec in _renewal_writes(zoho) if rec.get("Policy_Number") == "CPP1")
     assert "Desk_Stage" not in renewal_write
     assert renewal_write["Premium_Current"] == 4500
@@ -498,6 +508,131 @@ def test_lombardo_shaped_row_links_deal_without_minting_a_leftover():
     assert write["Deal_Id"]["id"]
     assert write["Hermes_Renewal_ID"] == "p85-lombardo"
     assert "Desk_Stage" not in write
+
+
+class UnsearchableHermesIdZoho(FakeZoho):
+    """Live CRM: Hermes_Renewal_ID search returns INVALID_QUERY."""
+
+    def _find_first(self, module, criteria):
+        if "Hermes_Renewal_ID:" in (criteria or ""):
+            raise ZohoClientError(
+                'Zoho GET Renewals/search failed 400: {"code":"INVALID_QUERY",'
+                '"details":{"reason":"the field is not available for search",'
+                '"api_name":"Hermes_Renewal_ID"},'
+                '"message":"Invalid query formed","status":"error"}'
+            )
+        return super()._find_first(module, criteria)
+
+
+def test_iso_datetime_strips_microseconds_and_keeps_offset():
+    assert _iso_datetime("2026-07-15T20:42:58.124383+00:00") == "2026-07-15T20:42:58+00:00"
+    assert _iso_datetime("2026-07-15T20:42:58.124383Z") == "2026-07-15T20:42:58+00:00"
+    parsed = datetime(2026, 7, 15, 20, 42, 58, 124383, tzinfo=timezone.utc)
+    assert _iso_datetime(parsed) == "2026-07-15T20:42:58+00:00"
+    assert _iso_datetime("not-a-datetime") is None
+    assert _iso_datetime("") is None
+    assert _iso_datetime(None) is None
+
+
+def test_map_candidate_omits_last_verified_when_unparseable():
+    payload = map_candidate_to_renewal_event({**CANDIDATE, "last_verified_at": "nope"})
+    assert "Last_Verified" not in payload
+
+
+def test_find_existing_renewal_falls_back_to_policy_number_when_hermes_id_unsearchable():
+    zoho = UnsearchableHermesIdZoho()
+    live = zoho.seed(
+        "Renewals",
+        {
+            "id": "7529682000000707078",
+            "Policy_Number": "991540615",
+            "Hermes_Renewal_ID": None,
+        },
+        "991540615",
+    )
+    hit = find_existing_renewal(
+        zoho, hermes_renewal_id="p85-lombardo", policy_number="991540615"
+    )
+    assert hit is not None
+    assert hit["id"] == live["id"]
+
+
+def test_find_desk_for_deal_falls_back_to_policy_number_when_hermes_id_unsearchable():
+    zoho = UnsearchableHermesIdZoho()
+    live = zoho.seed(
+        "Renewals",
+        {
+            "id": "desk-1",
+            "Policy_Number": "HO-88",
+            "Hermes_Renewal_ID": None,
+        },
+        "HO-88",
+    )
+    hit = find_desk_for_deal(
+        zoho,
+        {
+            "id": "crm-only",
+            "Hermes_Opportunity_ID": "from-deal",
+            "Bound_Policy_Number": "HO-88",
+            "Opportunity_Type": "Renewals",
+        },
+    )
+    assert hit is not None
+    assert hit["id"] == live["id"]
+
+
+def test_unsearchable_hermes_id_does_not_fail_the_sync():
+    zoho = UnsearchableHermesIdZoho()
+    live = zoho.seed(
+        "Renewals",
+        {
+            "id": "7529682000000707078",
+            "Client_Name": "Lombardo, Tiffany",
+            "Policy_Number": "991540615",
+            "Deal_Id": None,
+            "Related_Deal": None,
+            "Stage": "Identified",
+            "Dismissed": False,
+        },
+        "991540615",
+    )
+    p85 = {
+        "id": "p85-lombardo",
+        "policy_number": "991540615",
+        "client_name": "Lombardo, Tiffany",
+        "expiration_date": "2026-08-15",
+        "premium_current": 3225,
+        "premium_renewal": None,
+        "risk_status": "RENEWED",
+        "ai_strategy_notes": None,
+        "last_contact_date": None,
+    }
+    result = run_zoho_renewals_sync(
+        supa=_supa(p85=[p85], candidates=[], policies=[]),
+        zoho=zoho,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert result.ok
+    assert result.errors == []
+    assert result.renewals_created == 0
+    assert result.renewals_updated == 1
+    write = _renewal_writes(zoho)[0]
+    assert write["Hermes_Renewal_ID"] == "p85-lombardo"
+    assert "Checkpoint_State" not in write
+    assert "Desk_Stage" not in write
+    assert "Disposition" not in write
+    assert "Recommended_Action" not in write
+    assert live["id"] == "7529682000000707078"
+
+
+def test_find_existing_renewal_reraises_other_zoho_errors():
+    class Boom(FakeZoho):
+        def _find_first(self, module, criteria):
+            raise ZohoClientError("Zoho GET Renewals/search failed 500: boom")
+
+    with pytest.raises(ZohoClientError, match="500"):
+        find_existing_renewal(Boom(), hermes_renewal_id="x", policy_number="CPP1")
 
 
 def test_checkpoint_state_is_never_synced_from_hermes():

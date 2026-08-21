@@ -16,7 +16,9 @@ are set on create (Desk_Stage/Stage=Identified) and never overwritten on
 update. ``Related_Deal`` / ``Deal_Id`` are filled when empty and then left
 alone. Existing Zoho Renewals rows are matched by ``Hermes_Renewal_ID`` or,
 when that is empty (live Catalyst 47-row book), by ``Policy_Number`` so
-sync does not mint a second leftover row.
+sync does not mint a second leftover row. Live CRM cannot search
+``Hermes_Renewal_ID`` (``INVALID_QUERY`` / not available for search); those
+lookups fall back to ``Policy_Number`` instead of aborting the sync.
 
 """
 
@@ -26,7 +28,7 @@ import logging
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from hermes.renewals import corrections as corr
@@ -177,6 +179,57 @@ def _iso_date(value: Any) -> str | None:
     return str(value)[:10]
 
 
+def _iso_datetime(value: Any) -> str | None:
+    """Zoho datetime: ISO without microseconds, offset kept.
+
+    Postgres ``timestamptz`` (``2026-07-15T20:42:58.124383+00:00``) is
+    ``INVALID_DATA expected_data_type datetime`` on Renewal_Events.Last_Verified.
+    Omit the field when parse fails.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip().replace("Z", "+00:00")
+        if not text:
+            return None
+        if len(text) > 3 and text[-3] == "+" and text[-2:].isdigit():
+            text += ":00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.replace(microsecond=0).isoformat(timespec="seconds")
+
+
+def _is_unsearchable_field_error(exc: BaseException) -> bool:
+    """Live Renewals.Hermes_Renewal_ID is not a search field."""
+    text = str(exc).lower()
+    return "invalid_query" in text or "not available for search" in text
+
+
+def _find_renewal_by_hermes_id(
+    client: ZohoClient, hermes_id: str
+) -> dict[str, Any] | None:
+    try:
+        return client._find_first(  # noqa: SLF001
+            RENEWALS_MODULE,
+            f"(Hermes_Renewal_ID:equals:{_escape_criteria_value(hermes_id)})",
+        )
+    except ZohoClientError as exc:
+        if _is_unsearchable_field_error(exc):
+            log.info(
+                "Zoho Renewals.Hermes_Renewal_ID is not searchable (%s); "
+                "falling back to Policy_Number",
+                exc,
+            )
+            return None
+        raise
+
+
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -219,7 +272,7 @@ def map_candidate_to_renewal_event(
         "Successor_Policy": row.get("successor_policy_number") or None,
         "Eligibility": row.get("eligibility_state") or None,
         "Eligibility_Reason": row.get("eligibility_reason") or None,
-        "Last_Verified": row.get("last_verified_at") or None,
+        "Last_Verified": _iso_datetime(row.get("last_verified_at")),
         "Segment": row.get("segment") or None,
         "Line_of_Business": row.get("line_of_business") or None,
         "Client_Name": row.get("client_name") or None,
@@ -619,10 +672,7 @@ def find_existing_renewal(
 ) -> dict[str, Any] | None:
     """Match a live desk row even when Hermes_Renewal_ID was never written."""
     if hermes_renewal_id:
-        hit = client._find_first(  # noqa: SLF001
-            RENEWALS_MODULE,
-            f"(Hermes_Renewal_ID:equals:{_escape_criteria_value(hermes_renewal_id)})",
-        )
+        hit = _find_renewal_by_hermes_id(client, hermes_renewal_id)
         if hit:
             return hit
     if policy_number:
@@ -671,10 +721,7 @@ def find_desk_for_deal(
             if hit:
                 return hit
     if hermes_id:
-        hit = client._find_first(  # noqa: SLF001
-            RENEWALS_MODULE,
-            f"(Hermes_Renewal_ID:equals:{_escape_criteria_value(hermes_id)})",
-        )
+        hit = _find_renewal_by_hermes_id(client, hermes_id)
         if hit:
             return hit
     if pn:
