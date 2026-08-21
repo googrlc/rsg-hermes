@@ -287,6 +287,91 @@ class ZohoClient:
     def _put(self, path: str, payload: Any) -> Any:
         return self._request("PUT", path, json_body=payload)
 
+    def _delete(self, path: str) -> Any:
+        return self._request("DELETE", path)
+
+    def get_record(self, module: str, record_id: str) -> dict[str, Any]:
+        """GET /{module}/{id} — one CRM record."""
+        rid = str(record_id or "").strip()
+        if not module or not rid:
+            raise ZohoClientError("get_record requires module and record_id")
+        body = self._get(f"{module}/{rid}")
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+        if isinstance(body, dict) and body.get("id"):
+            return body
+        raise ZohoClientError(f"Zoho {module}/{rid} returned no record")
+
+    def update_record(
+        self, module: str, record_id: str, record: dict[str, Any]
+    ) -> dict[str, Any]:
+        """PUT /{module} with id + fields. Returns ``{"id", "action": "updated"}``."""
+        rid = str(record_id or "").strip()
+        if not module or not rid:
+            raise ZohoClientError("update_record requires module and record_id")
+        payload = {k: v for k, v in record.items() if _present(v) or v is False}
+        body = self._put(module, {"data": [{"id": rid, **payload}]})
+        updated = self._assert_write_ok(body, action="update", module=module)
+        return {"id": updated, "action": "updated"}
+
+    def list_attachments(self, module: str, record_id: str) -> list[dict[str, Any]]:
+        """GET /{module}/{id}/Attachments — Zoho temp files, not the library."""
+        rid = str(record_id or "").strip()
+        if not module or not rid:
+            raise ZohoClientError("list_attachments requires module and record_id")
+        try:
+            body = self._get(f"{module}/{rid}/Attachments")
+        except ZohoClientError as exc:
+            if "204" in str(exc) or "no data" in str(exc).lower():
+                return []
+            raise
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, list):
+            return []
+        return [row for row in data if isinstance(row, dict)]
+
+    def download_attachment(
+        self, module: str, record_id: str, attachment_id: str
+    ) -> bytes:
+        """GET /{module}/{id}/Attachments/{attId} as raw bytes."""
+        rid = str(record_id or "").strip()
+        att = str(attachment_id or "").strip()
+        if not module or not rid or not att:
+            raise ZohoClientError("download_attachment requires module, record_id, attachment_id")
+        url = f"{self.api_base}/{module}/{rid}/Attachments/{att}"
+        resp = requests.get(
+            url,
+            headers={
+                "Authorization": f"Zoho-oauthtoken {self._ensure_token()}",
+                "Accept": "*/*",
+            },
+            timeout=self.timeout,
+        )
+        if resp.status_code == 401:
+            self._authenticate()
+            resp = requests.get(
+                url,
+                headers={
+                    "Authorization": f"Zoho-oauthtoken {self._ensure_token()}",
+                    "Accept": "*/*",
+                },
+                timeout=self.timeout,
+            )
+        if not resp.ok:
+            raise ZohoClientError(
+                f"Zoho download attachment failed {resp.status_code}: {resp.text[:300]}"
+            )
+        return resp.content
+
+    def delete_attachment(self, module: str, record_id: str, attachment_id: str) -> None:
+        """DELETE /{module}/{id}/Attachments/{attId} after Nextcloud filing."""
+        rid = str(record_id or "").strip()
+        att = str(attachment_id or "").strip()
+        if not module or not rid or not att:
+            raise ZohoClientError("delete_attachment requires module, record_id, attachment_id")
+        self._delete(f"{module}/{rid}/Attachments/{att}")
+
     @staticmethod
     def _record_id(body: Any) -> str | None:
         if not isinstance(body, dict):

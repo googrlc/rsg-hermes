@@ -83,7 +83,11 @@ The guard is already in this file; there is no separate patch to apply.
 
 **Write:** `hermes_dispatch` · `create_task` · `complete_task` · `create_case` ·
 `create_client` · `draft_intake` · `save_document` · `file_to_nextcloud` ·
+`document_registry_upload` · `document_registry_search` ·
 `ams_create_insured` · `ams_upsert_policy`
+
+`document_registry_upload` files a PDF into Nextcloud `Clients/{name}/` and
+writes Zoho Document_Registry only after the `/f/{fileid}` permalink exists.
 
 `hermes_dispatch` is the keystone: it forwards natural language to `POST
 /dispatch`, which returns `requires_confirmation=true` for any write, so the

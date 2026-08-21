@@ -159,6 +159,7 @@ def test_the_bridge_still_carries_the_tools_production_was_running() -> None:
         "commission_rules", "complete_task", "create_case", "create_client",
         "create_task", "draft_intake", "ensure_nextcloud_folders",
         "file_to_nextcloud", "hermes_dispatch", "list_cases", "list_commissions",
+        "document_registry_search", "document_registry_upload",
         "list_deck_boards", "list_documents", "list_intake_queue",
         "list_nextcloud_folder", "list_renewals", "list_tasks", "ping",
         "retention_scan", "save_document", "sync_health",
