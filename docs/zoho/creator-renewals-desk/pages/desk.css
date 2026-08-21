@@ -308,3 +308,86 @@ html, body, #root {
   color: var(--desk-text);
   cursor: pointer;
 }
+
+/* Renewal OS — scorecard + in-place checkpoints. Complete ≠ Personal sage. */
+.desk.os {
+  display: grid;
+  grid-template-columns: minmax(320px, 42%) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.desk.os .os-list,
+.desk.os .os-card {
+  min-width: 0;
+}
+
+.health-chip {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.scorecard {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 8px 0 0;
+}
+
+.scorecard .rail {
+  font-size: 11px;
+  color: var(--desk-muted);
+  white-space: nowrap;
+}
+
+.scorecard .rail b {
+  font-weight: 650;
+  color: var(--desk-text);
+}
+
+.os-card .countdown {
+  font-size: 13px;
+  color: var(--desk-muted);
+}
+
+.os-layout {
+  display: grid;
+  grid-template-columns: 1fr minmax(220px, 280px);
+  gap: 12px;
+}
+
+.checkpoint {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--desk-border);
+}
+
+.checkpoint .meta {
+  color: var(--desk-muted);
+  font-size: 12px;
+}
+
+.checkpoint button.complete {
+  margin: 0;
+}
+
+.os-side .blockers {
+  color: var(--overdue-text);
+}
+
+.activity li {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+@media (max-width: 960px) {
+  .desk.os,
+  .os-layout {
+    grid-template-columns: 1fr;
+  }
+}
+

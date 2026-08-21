@@ -82,16 +82,19 @@
   </section>
 
   <section>
-    <h2>Tasks</h2>
-    <ol>
-      <li>Pull renewal declaration &amp; review exposures</li>
-      <li>Request renewal terms from carrier</li>
-      <li>Prepare renewal options / comparison</li>
-      <li>Send renewal review to client</li>
-      <li>Update AMS (NowCerts) &amp; file worksheet</li>
-    </ol>
-    <p>Seeded once per renewal by <code>task_seed.dg</code>. Gretchen completes
-    them here; Creator never emails the client.</p>
+    <h2>Scorecard</h2>
+    <p>Renewal Health % plus Account Reviewed / Outreach Completed / Markets
+    Requested / Quotes Received / Proposal Pending / Client Decision Pending /
+    Closed. ✅ done · 🟨 current · ⬜ not started. Stored Desk_Stage is still
+    Identified → … → Closed; labels are Review Account → … → Close Renewal.</p>
+  </section>
+
+  <section>
+    <h2>Checkpoints</h2>
+    <p>Work the renewal here. CRM tasks are seeded in the background by
+    <code>task_seed.dg</code>. Completing a checkpoint does not advance while
+    required items remain. Hermes never auto-advances. Creator never emails
+    the client and never writes NowCerts.</p>
   </section>
 
   <section>

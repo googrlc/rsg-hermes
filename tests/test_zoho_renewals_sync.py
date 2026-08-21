@@ -115,6 +115,7 @@ def test_map_projection_create_sets_identified_and_window():
         today=TODAY,
     )
     assert payload["Desk_Stage"] == "Identified"
+    assert payload["Stage"] == "Identified"
     assert payload["Window_Bucket"] == "90"
     assert payload["Carrier"] == "Travelers"
     assert payload["Hermes_Renewal_ID"] == "ren-1"
@@ -123,6 +124,7 @@ def test_map_projection_create_sets_identified_and_window():
 def test_map_projection_update_omits_desk_owned_fields():
     payload = map_projection_to_renewal(P85, creating=False, today=TODAY)
     assert "Desk_Stage" not in payload
+    assert "Stage" not in payload
     assert "Disposition" not in payload
     assert "Recommended_Action" not in payload
     assert "Touch_Early" not in payload

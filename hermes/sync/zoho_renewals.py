@@ -26,6 +26,7 @@ from typing import Any
 
 from hermes.renewals import corrections as corr
 from hermes.renewals import desk as desk
+from hermes.renewals.operating import stored_desk_stage
 from hermes.renewals.config import (
     LOSS_DISPOSITIONS,
     PIPELINE_STAGE_CLOSED,
@@ -272,6 +273,7 @@ def map_projection_to_renewal(
     }
     if creating:
         payload["Desk_Stage"] = PIPELINE_STAGE_IDENTIFIED
+        payload["Stage"] = PIPELINE_STAGE_IDENTIFIED
     if not creating:
         payload = {k: v for k, v in payload.items() if k in RENEWAL_SYNC_FIELDS}
     return {k: v for k, v in payload.items() if v is not None and v != ""}
@@ -362,7 +364,7 @@ def map_renewal_to_deal(
     dismissed = _as_bool(row.get("dismissed")) or _as_bool(desk_row.get("Dismissed"))
     stage = resolve_deal_stage(
         expiration=exp or row.get("expiration_date"),
-        desk_stage=desk_row.get("Desk_Stage"),
+        desk_stage=stored_desk_stage(desk_row),
         disposition=desk_row.get("Disposition") or row.get("disposition"),
         recommended_action=desk_row.get("Recommended_Action") or row.get("recommended_action"),
         dismissed=dismissed,

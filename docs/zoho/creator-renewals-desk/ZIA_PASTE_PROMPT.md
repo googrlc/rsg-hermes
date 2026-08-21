@@ -173,7 +173,7 @@ Related_Renewal_Event, Related_Deal.
       <li>Send renewal review to client</li>
       <li>Update AMS (NowCerts) &amp; file worksheet</li>
     </ol>
-    <p>Seeded once per renewal by task_seed. Gretchen completes them here; Creator never emails the client.</p>
+    <p>Seeded in the background by task_seed. Gretchen completes checkpoints on the renewal. Creator never emails the client.</p>
   </section>
   <section>
     <h2>AMS actions</h2>

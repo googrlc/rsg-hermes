@@ -111,12 +111,28 @@ def test_desk_palette_tokens():
 def test_catalyst_app_js_uses_desk_palette():
     app = (DESK / "catalyst" / "App.js").read_text()
     assert 'import "./desk.css"' in app
+    assert 'from "./operating"' in app
     assert "type-pill" in app
     assert "Commercial" in app
     assert "Personal" in app
     assert "status-pill attention" in app
     assert "status-pill overdue" in app
     assert "NowCerts" in app
+    assert "Related_Deal" in app
+    assert "scorecard" in app
+    assert "checkpoints" in app
+    assert "Account Reviewed" in (DESK / "catalyst" / "operating.js").read_text()
+    assert "Step 1 of 5" not in app
+    assert "This desk only shows the next step" not in app
+    assert "nowcerts.com" not in app.lower()
+
+
+def test_operating_js_checkpoint_keys_match_python():
+    from hermes.renewals.operating import CHECKPOINTS
+
+    js = (DESK / "catalyst" / "operating.js").read_text()
+    for spec in CHECKPOINTS:
+        assert f'key: "{spec.key}"' in js, spec.key
 
 
 def test_cursor_api_function_never_calls_nowcerts():

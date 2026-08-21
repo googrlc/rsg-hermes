@@ -27,7 +27,9 @@ effects. Do not fold commissions into this app.
 |---|---|---|
 | Desk home | [`pages/desk.html`](pages/desk.html) | Renewals worklist + KPI counts |
 | Desk palette / CSS | [`pages/desk.css`](pages/desk.css) | Copy into Catalyst `renewals/src/desk.css` |
-| Catalyst React desk | [`catalyst/App.js`](catalyst/App.js) | Replace `~/catalyst-renewals-desk/renewals/src/App.js` |
+| Catalyst React desk | [`catalyst/App.js`](catalyst/App.js) | Renewal OS worklist + card |
+| Catalyst OS rules | [`catalyst/operating.js`](catalyst/operating.js) | Scorecard / checkpoints; copy with App.js |
+| Catalyst function patch | [`catalyst/functions/renewals_desk_function/`](catalyst/functions/renewals_desk_function/) | Merge into live `renewals_desk_function` |
 | Catalyst copy steps | [`catalyst/README.md`](catalyst/README.md) | `npm start` on the Mac Mini |
 | Desk preview | [`pages/desk_preview.html`](pages/desk_preview.html) | Open locally to review Commercial/Personal colors |
 | Renewal card | [`pages/card.html`](pages/card.html) | One Renewal + Policy + Account + Event + Deal |
@@ -68,6 +70,13 @@ The desk table and the CRM Renewals pipeline are the same book, linked by
 `Related_Deal`. If a Deal is on the Renewals pipeline, Hermes creates the
 desk row. If a desk row has no pipeline Deal, it is not on the worklist.
 Hermes fills `Related_Deal` when empty; after that it is left alone.
+
+Stored `Desk_Stage` (live CRM may call it `Stage`) stays
+Identified → Outreach Sent → Quote Requested → Proposal Sent → Negotiating →
+Closed. The Catalyst OS shows Review Account → … → Close Renewal plus a
+scorecard. Completing checkpoints may advance one stored stage when that
+stage's required items are done. Hermes / `--sync-zoho-renewals` never
+auto-advances.
 
 Desk-owned fields Hermes must **not** overwrite on update: `Desk_Stage`,
 `Disposition`, `Recommended_Action`, `Touch_Early` / `Touch_Mid` /

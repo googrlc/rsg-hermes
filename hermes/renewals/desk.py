@@ -114,6 +114,8 @@ DEFAULT_TASK_TITLES: tuple[str, ...] = (
     "Send renewal review to client",
     "Update AMS (NowCerts) & file worksheet",
 )
+# OS checkpoints (and live Catalyst subject aliases) live in operating.py.
+# Keep these five titles stable — they are already in Zoho CRM.
 
 
 def _env_int(name: str, default: int) -> int:

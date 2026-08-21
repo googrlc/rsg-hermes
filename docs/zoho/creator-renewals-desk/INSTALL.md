@@ -116,7 +116,8 @@ shared robot user.
 
 1. Run `hermes --sync-zoho-renewals --sync-zoho-renewals-dry-run` then live.
 2. Open Desk: KPI strip has counts; worklist is expiration-ascending.
-3. Open a SAFE commercial row: card shows Policy + Account; five tasks exist.
+3. Open a SAFE commercial row: card shows Policy + Account, a scorecard, and
+   the current stage's checkpoints (CRM tasks seeded in the background).
 4. Try to jump Identified → Negotiating: refused.
 5. Enqueue `prepare_options` with an expected result: AMS_Write_Queue row in
    `needs_approval` (or `queued` after approve). Payload is JSON with
