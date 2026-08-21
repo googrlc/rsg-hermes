@@ -510,6 +510,44 @@ def _mcp_tools() -> list[dict[str, Any]]:
             "inputSchema": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         },
         {
+            "name": "book_sync_health",
+            "description": (
+                "Book-of-business drift report: compares live NowCerts policy counts, "
+                "tombstones, and per-carrier premium against the Supabase canonical mirror "
+                "via GET /api/hermes/book-sync (read-only). Use for 'book sync health', "
+                "'mirror drift', 'tombstoned policies'."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "max_pages": {"type": "integer", "description": "Cap NowCerts pagination (default 50)."},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "investigate_policy",
+            "description": (
+                "Cross-system policy investigation via GET /api/hermes/investigate-policy "
+                "(read-only). Compares live NowCerts, the canonical mirror, renewal_candidates, "
+                "project_85_renewals, and portal_overrides for ONE policy. Use when CRM shows "
+                "a renewal but AMS says canceled, or any AMS vs mirror mismatch. Returns a "
+                "verdict (outcome_a_stale_mirror, outcome_b_ams_wrong, etc.) and recommended "
+                "correction steps — never auto-writes."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "policy_number": {"type": "string", "description": "AMS policy number (required)."},
+                    "client_name": {"type": "string", "description": "Client name for disambiguation (optional)."},
+                    "line_of_business": {"type": "string", "description": "LOB for disambiguation (optional)."},
+                },
+                "required": ["policy_number"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "list_commissions",
             "description": "Commission ledger rows (expected vs actual, reconciled) via GET /api/commissions (read-only). Use for 'what are we owed', 'commission status', 'unreconciled commissions'.",
             "inputSchema": {
@@ -829,6 +867,23 @@ def _run_sync_health(_: dict[str, Any]) -> str:
     return _text(_api("GET", "/api/hermes/sync-health"))
 
 
+def _run_book_sync_health(args: dict[str, Any]) -> str:
+    params = {"max_pages": args.get("max_pages")}
+    return _text(_api("GET", "/api/hermes/book-sync", params=params))
+
+
+def _run_investigate_policy(args: dict[str, Any]) -> str:
+    policy_number = str(args.get("policy_number") or "").strip()
+    if not policy_number:
+        return "Error: 'policy_number' is required."
+    params = {
+        "policy_number": policy_number,
+        "client_name": args.get("client_name"),
+        "line_of_business": args.get("line_of_business"),
+    }
+    return _text(_api("GET", "/api/hermes/investigate-policy", params=params))
+
+
 def _run_list_commissions(args: dict[str, Any]) -> str:
     params = {"limit": args.get("limit"), "status": args.get("status")}
     return _text(_api("GET", "/api/commissions", params=params))
@@ -923,6 +978,8 @@ _HANDLERS = {
     "file_to_nextcloud": _run_file_to_nextcloud,
     "create_client": _run_create_client,
     "sync_health": _run_sync_health,
+    "book_sync_health": _run_book_sync_health,
+    "investigate_policy": _run_investigate_policy,
     "list_commissions": _run_list_commissions,
     "commission_rules": _run_commission_rules,
     "carrier_appetite": _run_carrier_appetite,

@@ -44,6 +44,8 @@ TOOL_SOURCES: dict[str, str] = {
     "crm_client_activity": "Supabase (`agency_crm_*`, legacy → Zoho)",
     "email_search": "Microsoft 365 Graph",
     "find_client": "Canonical book (Supabase, NowCerts-sourced)",
+    "investigate_policy": "NowCerts + Supabase mirror + renewals (read-only)",
+    "book_sync_health": "Supabase canonical book sync health",
     "intake_lead": "Supabase intake; Zoho CRM when `HERMES_WRITE_TO_ZOHO`",
     "list_carriers": "Supabase (`carriers`)",
     "list_cases": "Supabase (`agency_crm_*`, legacy → Zoho)",

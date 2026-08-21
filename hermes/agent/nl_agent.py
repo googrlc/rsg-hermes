@@ -384,6 +384,28 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "investigate_policy",
+            "description": (
+                "Cross-system data-quality investigation for ONE policy number. Compares "
+                "live NowCerts (AMS), the canonical mirror, renewal_candidates, "
+                "project_85_renewals, and portal_overrides. Use when CRM shows a renewal "
+                "but AMS says canceled, or for any AMS vs mirror mismatch. Returns a "
+                "verdict and recommended correction steps — read-only, never auto-writes."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["policy_number"],
+                "properties": {
+                    "policy_number": {"type": "string", "description": "AMS policy number."},
+                    "client_name": {"type": "string", "description": "Optional client name."},
+                    "line_of_business": {"type": "string", "description": "Optional line of business."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "crm_client_activity",
             "description": (
                 "Open cases and their tasks for a client — read from the legacy Supabase "
@@ -1328,6 +1350,29 @@ def _exec_ams_snapshot(args: dict[str, Any]) -> DispatchResult:
                           {"insured": name, "insured_guid": guid, "policies": pols, "opportunities": opps})
 
 
+def _exec_investigate_policy(args: dict[str, Any]) -> DispatchResult:
+    """Cross-system policy investigation — AMS vs mirror vs renewal worklist."""
+    from hermes.book_sync import investigate_policy as run_investigation
+    from hermes_integrations.nowcerts_client import NowCertsClient
+    from hermes_integrations.supabase_client import SupabaseClient
+
+    pn = (args.get("policy_number") or "").strip()
+    if not pn:
+        return DispatchResult(False, "Tell me the policy number to investigate.")
+    try:
+        report = run_investigation(
+            pn,
+            client_name=(args.get("client_name") or "").strip() or None,
+            line_of_business=(args.get("line_of_business") or "").strip() or None,
+            nowcerts=NowCertsClient(),
+            supa=SupabaseClient(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DispatchResult(False, f"Policy investigation failed: {exc}")
+    lines = report.format_lines()
+    return DispatchResult(True, "\n".join(lines), report.to_dict())
+
+
 def _exec_crm_activity(args: dict[str, Any]) -> DispatchResult:
     """CRM hub tool — a client's open cases + tasks from legacy Supabase agency CRM
     (`agency_crm_cases` / `agency_crm_tasks`; migrating to Zoho)."""
@@ -1574,6 +1619,7 @@ _EXECUTORS: dict[str, Any] = {
     "find_client": _exec_find_client,
     "client_policies": _exec_client_policies,
     "ams_client_snapshot": _exec_ams_snapshot,
+    "investigate_policy": _exec_investigate_policy,
     "crm_client_activity": _exec_crm_activity,
     "client_documents": _exec_client_documents,
     "list_intake_submissions": _exec_list_intake,
@@ -1600,7 +1646,7 @@ _HUB_TOOLS: dict[str, set[str]] = {
     # all read-only. Carrier appetite, commissions, and intake stay out of its lane.
     "crm": {
         "find_client", "client_policies", "renewals_overview",
-        "ams_client_snapshot", "crm_client_activity", "client_documents",
+        "ams_client_snapshot", "investigate_policy", "crm_client_activity", "client_documents",
     },
     # Renewals Desk — the retention worklist. The portal has had a Renewals
     # screen all along and this file had no hub for it, so every renewal question
@@ -1608,7 +1654,7 @@ _HUB_TOOLS: dict[str, set[str]] = {
     # remarket this?" is unanswerable without knowing what else they hold.
     "renewals": {
         "renewals_overview", "find_client", "client_policies",
-        "ams_client_snapshot", "crm_client_activity",
+        "ams_client_snapshot", "investigate_policy", "crm_client_activity",
     },
     # Cases Desk — the service queue. Carries the CRM read tools because you
     # cannot triage a case without knowing who the client is and what they hold;
