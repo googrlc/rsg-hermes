@@ -11,9 +11,13 @@ Config (env; real values live only in .env / 1Password, never committed):
     NEXTCLOUD_APP_PASSWORD  Nextcloud app password
     NEXTCLOUD_BASE_PATH     optional prefix under the user's files (e.g. "Agency")
 
-Folder taxonomy (confirmed):
-    Clients/{client}/{Renewal Reviews|COIs|Policies|Proposals|Quotes|Correspondence}/
+Folder taxonomy (confirmed — one tree for client files):
+    Clients/{client}/{Renewal Reviews|COIs|Policies|Proposals|Quotes|Correspondence|Intake|Claims}/
     Internal/{folder}/
+
+``NEXTCLOUD_BASE_PATH`` (often ``Agency Documents``) is a WebDAV mount prefix,
+not a second client tree. Do not file the same PDF under both ``Clients/{name}/``
+and ``Commercial Lines/{name}/``.
 """
 
 from __future__ import annotations
@@ -26,17 +30,45 @@ if TYPE_CHECKING:
     import requests
 
 # The confirmed per-client document categories.
-CLIENT_CATEGORIES = ("Renewal Reviews", "COIs", "Policies", "Proposals", "Quotes", "Correspondence", "Intake")
+CLIENT_CATEGORIES = (
+    "Renewal Reviews",
+    "COIs",
+    "Policies",
+    "Proposals",
+    "Quotes",
+    "Correspondence",
+    "Intake",
+    "Claims",
+)
 
-# PROPFIND body — ask only for the props list_dir surfaces (keeps the response small).
+# PROPFIND body — list_dir props plus oc:fileid for stable /f/{id} permalinks.
 _PROPFIND_BODY = (
     '<?xml version="1.0" encoding="utf-8"?>'
-    '<d:propfind xmlns:d="DAV:"><d:prop>'
+    '<d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop>'
     "<d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:displayname/>"
+    "<oc:fileid/>"
     "</d:prop></d:propfind>"
 )
+_DAV_NS = {"d": "DAV:", "oc": "http://owncloud.org/ns"}
 DEFAULT_CATEGORY = "Renewal Reviews"
 QUOTES_CATEGORY = "Quotes"
+
+
+def fileid_open_url(base_url: str | None, fileid: str | int | None) -> str | None:
+    """Stable Nextcloud permalink ``{host}/f/{fileid}``. Zoho will not mangle it."""
+    base = str(base_url or "").strip().rstrip("/")
+    fid = str(fileid or "").strip()
+    if not base or not fid.isdigit():
+        return None
+    return f"{base}/f/{fid}"
+
+
+def _oc_fileid(prop) -> str | None:
+    if prop is None:
+        return None
+    el = prop.find("oc:fileid", _DAV_NS)
+    text = (el.text or "").strip() if el is not None else ""
+    return text if text.isdigit() else None
 
 
 class NextcloudError(RuntimeError):
@@ -147,22 +179,126 @@ class NextcloudClient:
         if resp.status_code not in (200, 201):
             raise NextcloudError(f"Talk post to {token} failed: {resp.status_code} {resp.text[:200]}")
 
-    def put_file(self, rel_path: str, content: bytes, *, content_type: str = "application/octet-stream") -> str:
-        """Upload bytes to *rel_path* (creating parent dirs). Returns the stored path."""
+    def fileid_url(self, fileid: str | int | None) -> str | None:
+        """Human-facing ``/f/{id}`` permalink for a Nextcloud file or folder."""
+        return fileid_open_url(self.url, fileid)
+
+    def get_fileid(self, rel_path: str) -> str | None:
+        """Return numeric ``oc:fileid`` for a path via Depth-0 PROPFIND, or None."""
         self._require_configured()
-        parent = "/".join(rel_path.strip("/").split("/")[:-1])
-        if parent:
-            self.ensure_dirs(parent)
-        resp = self.session.put(
+        import xml.etree.ElementTree as ET
+
+        resp = self.session.request(
+            "PROPFIND",
             self._dav_url(rel_path),
+            headers={"Depth": "0", "Content-Type": "application/xml"},
+            data=_PROPFIND_BODY,
+            verify=self.verify_tls,
+            timeout=30,
+        )
+        if resp.status_code == 404:
+            return None
+        if resp.status_code not in (207, 200):
+            raise NextcloudError(
+                f"PROPFIND {rel_path} failed: {resp.status_code} {resp.text[:200]}"
+            )
+        try:
+            root = ET.fromstring(resp.content)
+        except ET.ParseError:
+            return None
+        except (TypeError, ValueError):
+            return None
+        for resp_el in root.findall("d:response", _DAV_NS):
+            prop = resp_el.find("d:propstat/d:prop", _DAV_NS)
+            fid = _oc_fileid(prop)
+            if fid:
+                return fid
+        return None
+
+    def put_file(
+        self,
+        rel_path: str,
+        content: bytes,
+        *,
+        content_type: str = "application/octet-stream",
+        auto_mkcol: bool = False,
+    ) -> str:
+        """Upload bytes to *rel_path* (creating parent dirs). Returns the stored path."""
+        return self.put_file_receipt(
+            rel_path, content, content_type=content_type, auto_mkcol=auto_mkcol
+        )["path"]
+
+    def put_file_receipt(
+        self,
+        rel_path: str,
+        content: bytes,
+        *,
+        content_type: str = "application/octet-stream",
+        auto_mkcol: bool = False,
+    ) -> dict[str, Any]:
+        """PUT a file and return path, ``/f/{fileid}`` permalink, and OC-FileId.
+
+        When ``auto_mkcol`` is true, send ``X-NC-WebDAV-AutoMkcol: 1`` (Nextcloud
+        32+) so missing parents are created in one request. A 404/409 falls back
+        to explicit MKCOL then PUT. ``put_file`` keeps the historical MKCOL-first
+        behaviour (``auto_mkcol=False``) unless callers opt in.
+
+        The CRM stamp is the numeric ``oc:fileid`` permalink ``/f/{id}``, not a
+        ``/apps/files/?dir=`` URL (Zoho Website fields mangle commas in dir paths).
+        """
+        self._require_configured()
+        rel = rel_path.strip("/")
+        parent = "/".join(rel.split("/")[:-1])
+        headers = {"Content-Type": content_type}
+        if auto_mkcol:
+            headers["X-NC-WebDAV-AutoMkcol"] = "1"
+        elif parent:
+            self.ensure_dirs(parent)
+
+        resp = self.session.put(
+            self._dav_url(rel),
             data=content,
-            headers={"Content-Type": content_type},
+            headers=headers,
             verify=self.verify_tls,
             timeout=60,
         )
+        if auto_mkcol and resp.status_code in (404, 409) and parent:
+            self.ensure_dirs(parent)
+            headers = {"Content-Type": content_type}
+            resp = self.session.put(
+                self._dav_url(rel),
+                data=content,
+                headers=headers,
+                verify=self.verify_tls,
+                timeout=60,
+            )
         if resp.status_code not in (200, 201, 204):
             raise NextcloudError(f"PUT {rel_path} failed: {resp.status_code} {resp.text[:200]}")
-        return self._rel_with_base(rel_path)
+
+        stored = self._rel_with_base(rel)
+        folder = "/".join(stored.split("/")[:-1])
+        file_name = stored.rsplit("/", 1)[-1]
+        try:
+            numeric_id = self.get_fileid(rel)
+        except NextcloudError:
+            numeric_id = None
+        permalink = self.fileid_url(numeric_id)
+        header_id = None
+        get_header = getattr(getattr(resp, "headers", None), "get", None)
+        if callable(get_header):
+            raw_id = get_header("OC-FileId")
+            if isinstance(raw_id, (str, int)) and str(raw_id).strip():
+                header_id = str(raw_id).strip()
+        return {
+            "path": stored,
+            "folder_path": folder,
+            "file_name": file_name,
+            "file_id": numeric_id or header_id,
+            "files_url": permalink or "",
+            "webdav_url": self._dav_url(rel),
+            "file_size": len(content),
+            "mime_type": content_type,
+        }
 
     def ensure_client_folders(self, client: str) -> str:
         """Create the standard Clients/{client}/{category}/ folder tree. Returns the client base path."""

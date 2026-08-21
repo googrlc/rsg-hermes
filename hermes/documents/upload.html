@@ -1,0 +1,203 @@
+<!--
+  RSG Document Registry — CRM upload drop zone.
+  Served at /command-center/document-registry
+  POSTs JSON to /api/document-registry/upload.
+  Zoho custom button opens this page with lead_* or account_* query params.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Risk Solutions Group — Document Registry</title>
+<style>
+  :root{
+    --bg:#faf8f2; --panel:#ffffff; --border:#eae6db;
+    --text:#17271f; --muted:#8a938d; --teal:#1f7a5f; --teal-soft:#e9f1ec;
+    --red:#b0442f; --green:#2f7d5c; --radius:11px;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:13px;min-height:100vh}
+  .wrap{max-width:640px;margin:0 auto;padding:22px 18px 60px}
+  .top{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+  .logo{width:36px;height:36px;border-radius:9px;background:#142e37;display:grid;place-items:center;font-weight:700;color:#fff;font-size:20px;font-family:var(--serif)}
+  .brandname{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+  h1{font-family:var(--serif);font-size:20px;font-weight:600}
+  h1 small{display:block;font-size:11px;color:var(--muted);font-weight:400;font-family:var(--sans)}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+  label{display:block;font-size:11px;color:var(--muted);margin:10px 0 4px}
+  input,select{width:100%;background:#fff;border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:13px}
+  .drop{margin-top:12px;border:1.5px dashed var(--border);border-radius:10px;padding:28px 12px;text-align:center;color:var(--muted);cursor:pointer}
+  .drop.over{border-color:var(--teal);background:var(--teal-soft);color:var(--teal)}
+  .btn{margin-top:14px;width:100%;padding:11px;border:none;border-radius:9px;font-weight:700;font-size:13px;cursor:pointer;background:var(--teal);color:#fff}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .note{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5}
+  .err{color:var(--red);margin-top:10px}
+  .ok{color:var(--green);margin-top:10px;word-break:break-all}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:560px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="logo">R</div>
+    <div>
+      <div class="brandname">Risk Solutions Group</div>
+      <h1>Document Registry<small>Drop the file here. Hermes files it in Nextcloud. Zoho keeps the link.</small></h1>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Party</label>
+        <select id="partyKind">
+          <option value="lead">Lead</option>
+          <option value="account">Account</option>
+        </select>
+      </div>
+      <div>
+        <label>Party name (folder)</label>
+        <input id="partyName" placeholder="Johnson Family or ABC Roofing">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Lead id (optional)</label>
+        <input id="leadId" placeholder="Zoho Lead id">
+      </div>
+      <div>
+        <label>Account id (optional)</label>
+        <input id="accountId" placeholder="Zoho Account id">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Document type</label>
+        <select id="documentType">
+          <option>Intake</option>
+          <option>Application</option>
+          <option>Quote</option>
+          <option>Proposal</option>
+          <option>Policy</option>
+          <option>Declaration Page</option>
+          <option>Binder</option>
+          <option>Endorsement</option>
+          <option>Certificate of Insurance</option>
+          <option>Claim</option>
+          <option>Correspondence</option>
+          <option>Renewal Review</option>
+          <option>Loss Run</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div>
+        <label>Policy type</label>
+        <input id="policyType" placeholder="Home, GL, Commercial Auto…">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Line of business</label>
+        <select id="lob">
+          <option>Personal Lines</option>
+          <option>Commercial Lines</option>
+          <option>Claims</option>
+        </select>
+      </div>
+      <div>
+        <label>Renewal cycle</label>
+        <input id="cycle" placeholder="2026">
+      </div>
+    </div>
+    <label>Carrier (optional)</label>
+    <input id="carrier" placeholder="Progressive, Travelers…">
+    <div class="drop" id="drop">Drop the PDF here or click to choose</div>
+    <input type="file" id="file" hidden>
+    <button class="btn" id="go" disabled>File in Nextcloud</button>
+    <div class="note">The file lives in Nextcloud <code>Clients/{name}/…</code>. Zoho stores the <code>/f/{fileid}</code> permalink. Attachments are not the library.</div>
+    <div id="msg"></div>
+  </div>
+</div>
+<script>
+const qs = new URLSearchParams(location.search);
+const $ = (id) => document.getElementById(id);
+if (qs.get("lead_id") || qs.get("lead_name")) {
+  $("partyKind").value = "lead";
+  $("leadId").value = qs.get("lead_id") || "";
+  $("partyName").value = qs.get("lead_name") || "";
+}
+if (qs.get("account_id") || qs.get("account_name")) {
+  $("partyKind").value = "account";
+  $("accountId").value = qs.get("account_id") || "";
+  $("partyName").value = qs.get("account_name") || $("partyName").value;
+}
+let chosen = null;
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault(); drop.classList.remove("over");
+  if (e.dataTransfer.files[0]) pick(e.dataTransfer.files[0]);
+});
+$("file").addEventListener("change", (e) => { if (e.target.files[0]) pick(e.target.files[0]); });
+function pick(f) {
+  chosen = f;
+  drop.textContent = f.name + " (" + Math.round(f.size/1024) + " KB)";
+  $("go").disabled = false;
+}
+$("go").addEventListener("click", async () => {
+  if (!chosen) return;
+  $("go").disabled = true;
+  $("msg").textContent = "Filing…";
+  $("msg").className = "note";
+  const buf = await chosen.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  const b64 = btoa(binary);
+  const kind = $("partyKind").value;
+  const body = {
+    document_type: $("documentType").value,
+    policy_type: $("policyType").value,
+    line_of_business: $("lob").value,
+    renewal_cycle: $("cycle").value,
+    carrier: $("carrier").value,
+    file_name: chosen.name,
+    content_base64: b64,
+    content_type: chosen.type || "application/pdf",
+    write_to_zoho: true,
+  };
+  if (kind === "lead") {
+    body.lead_id = $("leadId").value;
+    body.lead_name = $("partyName").value;
+  } else {
+    body.account_id = $("accountId").value;
+    body.account_name = $("partyName").value;
+  }
+  try {
+    const resp = await fetch("/api/document-registry/upload", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || JSON.stringify(data));
+    const url = (data.nextcloud && data.nextcloud.files_url) || "";
+    $("msg").className = "ok";
+    $("msg").textContent = "Filed. " + (url || data.path && data.path.rel_path || "ok");
+  } catch (err) {
+    $("msg").className = "err";
+    $("msg").textContent = String(err.message || err);
+    $("go").disabled = false;
+  }
+});
+</script>
+</body>
+</html>

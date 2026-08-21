@@ -72,6 +72,8 @@ ALL_TOOL_PATHS = [
     "/api/documents",
     "/api/documents/save",
     "/api/nextcloud/upload",
+    "/api/document-registry/upload",
+    "/api/document-registry/search",
     "/api/ams/search-insured",
     "/api/hermes/sync-health",
 ]

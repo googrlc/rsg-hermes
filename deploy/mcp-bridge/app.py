@@ -495,6 +495,56 @@ def _mcp_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "document_registry_upload",
+            "description": (
+                "Upload a file into Nextcloud Clients/{Lead or Account name}/ "
+                "from metadata, then write Zoho Document_Registry. Party is "
+                "lead_id/lead_name XOR account_id/account_name. Nextcloud PUT "
+                "happens first; the CRM record is refused without Nextcloud_File_URL "
+                "(/f/{fileid}). Via POST /api/document-registry/upload."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "payload": {
+                        "type": "object",
+                        "description": (
+                            "lead_id/lead_name OR account_id/account_name, "
+                            "document_type, policy_type, line_of_business, "
+                            "renewal_cycle, file_name, content_base64, optional "
+                            "carrier, document_name, content_type, effective_date, "
+                            "expiration_date, policy_id, deal_id, renewal_id, write_to_zoho."
+                        ),
+                    }
+                },
+                "required": ["payload"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "document_registry_search",
+            "description": (
+                "Search Zoho Document_Registry by metadata (account/lead name, "
+                "document type, carrier, policy type, renewal cycle). Returns "
+                "records with Nextcloud_File_URL. Via GET /api/document-registry/search."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "account_name": {"type": "string"},
+                    "lead_name": {"type": "string"},
+                    "document_type": {"type": "string"},
+                    "carrier": {"type": "string"},
+                    "policy_type": {"type": "string"},
+                    "renewal_cycle": {"type": "string"},
+                    "line_of_business": {"type": "string"},
+                    "status": {"type": "string"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "create_client",
             "description": "Create a new EspoCRM Account + Contact and link them via POST /api/crm/create-client.",
             "inputSchema": {
@@ -818,6 +868,27 @@ def _run_file_to_nextcloud(args: dict[str, Any]) -> str:
     return _text(_api("POST", "/api/nextcloud/upload", body=payload))
 
 
+def _run_document_registry_upload(args: dict[str, Any]) -> str:
+    payload = args.get("payload")
+    if not isinstance(payload, dict):
+        return "Error: 'payload' object is required."
+    return _text(_api("POST", "/api/document-registry/upload", body=payload))
+
+
+def _run_document_registry_search(args: dict[str, Any]) -> str:
+    params = {
+        "account_name": args.get("account_name"),
+        "lead_name": args.get("lead_name"),
+        "document_type": args.get("document_type"),
+        "carrier": args.get("carrier"),
+        "policy_type": args.get("policy_type"),
+        "renewal_cycle": args.get("renewal_cycle"),
+        "line_of_business": args.get("line_of_business"),
+        "status": args.get("status"),
+    }
+    return _text(_api("GET", "/api/document-registry/search", params=params))
+
+
 def _run_create_client(args: dict[str, Any]) -> str:
     payload = args.get("payload")
     if not isinstance(payload, dict):
@@ -921,6 +992,8 @@ _HANDLERS = {
     "ensure_nextcloud_folders": _run_ensure_nextcloud_folders,
     "save_document": _run_save_document,
     "file_to_nextcloud": _run_file_to_nextcloud,
+    "document_registry_upload": _run_document_registry_upload,
+    "document_registry_search": _run_document_registry_search,
     "create_client": _run_create_client,
     "sync_health": _run_sync_health,
     "list_commissions": _run_list_commissions,

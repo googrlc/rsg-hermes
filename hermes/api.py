@@ -2516,8 +2516,162 @@ def nextcloud_upload(req: NextcloudUploadRequest):
     return {**result, "verified": True}
 
 
+class DocumentRegistryUploadRequest(BaseModel):
+    """Upload-first Document Registry filing. Party is Lead XOR Account."""
+
+    file_name: str
+    content_base64: str
+    document_type: str
+    policy_type: str
+    line_of_business: str
+    renewal_cycle: str
+    lead_id: str = ""
+    lead_name: str = ""
+    account_id: str = ""
+    account_name: str = ""
+    carrier: str = ""
+    document_name: str = ""
+    content_type: str = "application/octet-stream"
+    effective_date: str = ""
+    expiration_date: str = ""
+    policy_id: str = ""
+    deal_id: str = ""
+    renewal_id: str = ""
+    uploaded_by: str = ""
+    status: str = "Active"
+    write_to_zoho: bool | None = None
 
 
+class DocumentRegistryFromZohoRequest(BaseModel):
+    record_id: str
+    module: str = "Document_Registry"
+    write_to_zoho: bool | None = True
+
+
+def _document_registry_http_status(exc: Exception) -> int:
+    msg = str(exc).lower()
+    if "not configured" in msg:
+        return 503
+    if (
+        "required" in msg
+        or "exactly one" in msg
+        or "unknown" in msg
+        or "party is" in msg
+        or "lead_name" in msg
+        or "account_name" in msg
+        or "no zoho attachment" in msg
+    ):
+        return 400
+    return 502
+
+
+@router.get("/command-center/document-registry", response_class=HTMLResponse)
+def document_registry_upload_page():
+    """CRM drop zone. Zoho custom buttons open this with lead_* or account_* query params."""
+    from pathlib import Path
+
+    page = Path(__file__).resolve().parent / "documents" / "upload.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
+
+@router.post("/api/document-registry/upload")
+def document_registry_upload(req: DocumentRegistryUploadRequest):
+    """PUT a file into Clients/{party}/…, then write Zoho Document_Registry.
+
+    Party is ``lead_id``/``lead_name`` OR ``account_id``/``account_name``.
+    Empty ``account_name`` is fine when a lead is provided. Folder find-or-create
+    is a side effect of the upload. The CRM record is created only after
+    Nextcloud returns a ``/f/{fileid}`` URL (golden rule).
+    """
+    from hermes.documents.registry import DocumentRegistryError, register_document
+
+    if not req.file_name.strip():
+        raise HTTPException(status_code=400, detail="file_name is required")
+    try:
+        content = base64.b64decode(req.content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="content_base64 is invalid")
+    if not content:
+        raise HTTPException(status_code=400, detail="file content is required")
+    if len(content) > _NEXTCLOUD_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="file exceeds 25 MiB")
+
+    try:
+        return register_document(
+            content=content,
+            file_name=req.file_name,
+            document_type=req.document_type,
+            policy_type=req.policy_type,
+            line_of_business=req.line_of_business,
+            renewal_cycle=req.renewal_cycle,
+            lead_id=req.lead_id,
+            lead_name=req.lead_name,
+            account_id=req.account_id,
+            account_name=req.account_name,
+            carrier=req.carrier,
+            document_name=req.document_name,
+            content_type=req.content_type,
+            effective_date=req.effective_date,
+            expiration_date=req.expiration_date,
+            policy_id=req.policy_id,
+            deal_id=req.deal_id,
+            renewal_id=req.renewal_id,
+            uploaded_by=req.uploaded_by,
+            status=req.status or "Active",
+            write_to_zoho=req.write_to_zoho,
+        )
+    except DocumentRegistryError as exc:
+        raise HTTPException(status_code=_document_registry_http_status(exc), detail=str(exc))
+
+
+@router.post("/api/document-registry/from-zoho")
+def document_registry_from_zoho(req: DocumentRegistryFromZohoRequest):
+    """Webhook/worker: file a temp Zoho attachment, stamp /f/{fileid}, delete the attachment."""
+    from hermes.documents.registry import DocumentRegistryError, file_zoho_attachment
+
+    try:
+        return file_zoho_attachment(
+            req.record_id,
+            module=req.module or "Document_Registry",
+            write_to_zoho=req.write_to_zoho,
+        )
+    except DocumentRegistryError as exc:
+        raise HTTPException(status_code=_document_registry_http_status(exc), detail=str(exc))
+
+
+@router.get("/api/document-registry/search")
+def document_registry_search(
+    account_name: str = "",
+    lead_name: str = "",
+    document_type: str = "",
+    carrier: str = "",
+    policy_type: str = "",
+    renewal_cycle: str = "",
+    line_of_business: str = "",
+    status: str = "",
+):
+    """Search Zoho Document_Registry by metadata. Returns clickable Nextcloud permalinks."""
+    from hermes.documents.registry import DocumentRegistryError, search_documents
+    from hermes_integrations.zoho_client import ZohoClientError
+
+    try:
+        rows = search_documents(
+            account_name=account_name,
+            lead_name=lead_name,
+            document_type=document_type,
+            carrier=carrier,
+            policy_type=policy_type,
+            renewal_cycle=renewal_cycle,
+            line_of_business=line_of_business,
+            status=status,
+        )
+    except DocumentRegistryError as exc:
+        msg = str(exc)
+        code = 400 if "at least one search filter" in msg else 502
+        raise HTTPException(status_code=code, detail=msg)
+    except ZohoClientError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"ok": True, "count": len(rows), "records": rows}
 
 
 @router.post("/agency-fact", response_model=AgencyFactResponse)

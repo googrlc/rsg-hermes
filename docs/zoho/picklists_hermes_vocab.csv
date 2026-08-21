@@ -84,3 +84,45 @@ renewal_queue_action,3,client_follow_up,AMS_Write_Queue.Payload.action,renewal e
 renewal_queue_action,4,update_ams,AMS_Write_Queue.Payload.action,renewal executor
 sync_owner,1,book_sync,Policies.Sync_Owner,canonical_policy_ownership
 sync_owner,2,rsg-import,Policies.Sync_Owner,canonical_policy_ownership
+document_registry_type,1,Intake,Document_Registry.Document_Type,document registry → Clients/{name}/Intake
+document_registry_type,2,Application,Document_Registry.Document_Type,document registry → Clients/{name}/Intake
+document_registry_type,3,Quote,Document_Registry.Document_Type,document registry → Clients/{name}/Quotes
+document_registry_type,4,Proposal,Document_Registry.Document_Type,document registry → Clients/{name}/Proposals
+document_registry_type,5,Policy,Document_Registry.Document_Type,document registry → Clients/{name}/Policies
+document_registry_type,6,Declaration Page,Document_Registry.Document_Type,document registry → Clients/{name}/Policies
+document_registry_type,7,Binder,Document_Registry.Document_Type,document registry → Clients/{name}/Policies
+document_registry_type,8,Endorsement,Document_Registry.Document_Type,document registry → Clients/{name}/Policies
+document_registry_type,9,Certificate of Insurance,Document_Registry.Document_Type,document registry → Clients/{name}/COIs
+document_registry_type,10,Claim,Document_Registry.Document_Type,document registry → Clients/{name}/Claims
+document_registry_type,11,Correspondence,Document_Registry.Document_Type,document registry → Clients/{name}/Correspondence
+document_registry_type,12,Renewal Review,Document_Registry.Document_Type,document registry → Clients/{name}/Renewal Reviews
+document_registry_type,13,Loss Run,Document_Registry.Document_Type,document registry → Clients/{name}/Renewal Reviews
+document_registry_type,14,Audit,Document_Registry.Document_Type,document registry → Clients/{name}/Policies
+document_registry_type,15,Invoice,Document_Registry.Document_Type,document registry → Clients/{name}/Policies
+document_registry_type,16,Other,Document_Registry.Document_Type,document registry → Clients/{name}/Correspondence
+document_registry_policy_type,1,General Liability,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,2,Property,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,3,Commercial Auto,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,4,Workers Comp,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,5,Umbrella,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,6,Inland Marine,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,7,Professional Liability,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,8,Cyber,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,9,BOP,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,10,Home,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,11,Auto,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,12,Dwelling Fire,Document_Registry.Policy_Type,document registry
+document_registry_policy_type,13,Other,Document_Registry.Policy_Type,document registry
+document_registry_line,1,Commercial Lines,Document_Registry.Line_of_Business,document registry metadata (not a second Nextcloud tree)
+document_registry_line,2,Personal Lines,Document_Registry.Line_of_Business,document registry metadata (not a second Nextcloud tree)
+document_registry_line,3,Claims,Document_Registry.Line_of_Business,document registry metadata (not a second Nextcloud tree)
+document_registry_status,1,Active,Document_Registry.Status,document registry
+document_registry_status,2,Archived,Document_Registry.Status,document registry
+document_registry_status,3,Superseded,Document_Registry.Status,document registry
+document_registry_status,4,Pending File,Document_Registry.Status,temp Zoho attachment awaiting Hermes
+document_registry_status,5,Failed Filing,Document_Registry.Status,Nextcloud PUT failed — no URL stamped
+document_registry_renewal_cycle,1,2026,Document_Registry.Renewal_Cycle,document registry
+document_registry_renewal_cycle,2,2027,Document_Registry.Renewal_Cycle,document registry
+document_registry_renewal_cycle,3,2028,Document_Registry.Renewal_Cycle,document registry
+document_registry_renewal_cycle,4,2029,Document_Registry.Renewal_Cycle,document registry
+document_registry_renewal_cycle,5,2030,Document_Registry.Renewal_Cycle,document registry
