@@ -2253,6 +2253,72 @@ def investigate_policy_endpoint(
     return report.to_dict()
 
 
+class ZohoDqiWebhookRequest(BaseModel):
+    """Zoho CRM custom button / workflow payload."""
+
+    renewal_id: str | None = Field(default=None, description="Renewals module record id")
+    policy_id: str | None = Field(default=None, description="Policies module record id")
+    policy_number: str | None = None
+    client_name: str | None = None
+    line_of_business: str | None = None
+    zoho_record_id: str | None = None
+    source: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_camel_case(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        aliases = {
+            "renewalId": "renewal_id",
+            "policyId": "policy_id",
+            "policyNumber": "policy_number",
+            "clientName": "client_name",
+            "lineOfBusiness": "line_of_business",
+            "zohoRecordId": "zoho_record_id",
+            "lob": "line_of_business",
+        }
+        out = dict(data)
+        for src, dst in aliases.items():
+            if src in out and dst not in out:
+                out[dst] = out[src]
+        return out
+
+
+@router.post("/api/webhooks/zoho/dqi-investigation")
+def zoho_dqi_investigation_webhook(request: Request, body: ZohoDqiWebhookRequest):
+    """Zoho CRM → Cursor Data Quality Investigator relay.
+
+    Authenticated with SERVICE_WEBHOOK_SECRET (Bearer or X-Webhook-Secret).
+    Zoho only needs this URL + shared secret; Cursor webhook creds live on Hermes.
+
+    Typical Zoho body: ``{"renewal_id": "<record id>"}`` — Hermes loads Policy_Number
+    from Zoho and forwards to the Cursor automation webhook.
+    """
+    from hermes.webhooks.auth import require_service_webhook_secret
+    from hermes.webhooks.cursor_dqi import CursorDqiTriggerError
+    from hermes.webhooks.zoho_dqi import handle_zoho_dqi_webhook
+
+    require_service_webhook_secret(request)
+
+    payload = _model_dict(body)
+    payload = {k: v for k, v in payload.items() if v is not None}
+
+    try:
+        result = handle_zoho_dqi_webhook(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except CursorDqiTriggerError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive top-level
+        log.exception("zoho dqi webhook failed")
+        raise HTTPException(status_code=500, detail=f"zoho dqi webhook failed: {exc}") from exc
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # AMS insured search — the search-before-insert gate used by the bridge's
 # `ams_search_insured` tool (GET /api/ams/search-insured?name=&email=&fein=).

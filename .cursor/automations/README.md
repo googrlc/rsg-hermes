@@ -18,10 +18,9 @@ Use these when creating automations at [cursor.com/automations/new](https://curs
 
 2. **Name:** `RSG Data Quality Investigator`
 
-3. **Trigger:** **Manual** for ad-hoc runs; **Webhook** for Zoho (see below)
-   - Manual: paste a case when you run the automation
-   - Webhook: Zoho CRM → Deluge → Cursor — full guide:
-     [`docs/integrations/zoho-data-quality-investigator-webhook.md`](../../docs/integrations/zoho-data-quality-investigator-webhook.md)
+3. **Trigger:** **Manual** for ad-hoc; **Webhook** on Cursor automation for Zoho relay
+   - Zoho → Hermes → Cursor: [`docs/integrations/zoho-data-quality-investigator-webhook.md`](../../docs/integrations/zoho-data-quality-investigator-webhook.md)
+   - Setup helper: `python scripts/zoho_setup_dqi_integration.py`
 
 4. **Repository:** `googrlc/rsg-hermes`  
    - **Environment:** `rsg-hermes`  
@@ -54,14 +53,16 @@ Investigate policy 990414352 for Steven Prak, Personal Auto
 
 Policy number is required. Client name and LOB are optional but help with duplicates.
 
-### Invoke from Zoho CRM (webhook)
+### Invoke from Zoho CRM (Renewals button)
 
-See **[`docs/integrations/zoho-data-quality-investigator-webhook.md`](../../docs/integrations/zoho-data-quality-investigator-webhook.md)** for:
+**Flow:** Zoho button → `POST /api/webhooks/zoho/dqi-investigation` (Hermes) → Cursor automation.
 
-1. Enable **Webhook** trigger on the Cursor automation; copy URL + API key
-2. Store secrets in Zoho **CRM Variables** (`cursor_dqi_webhook_url`, `cursor_dqi_webhook_key`)
-3. Create Deluge function from `docs/zoho/deluge/trigger_policy_investigation.deluge`
-4. Workflow rule on **Renewals** (button: “Investigate data quality”) → call function
+See **[`docs/integrations/zoho-data-quality-investigator-webhook.md`](../../docs/integrations/zoho-data-quality-investigator-webhook.md)**:
+
+1. Hermes `.env`: `SERVICE_WEBHOOK_SECRET`, `CURSOR_AUTOMATION_WEBHOOK_URL`, `CURSOR_AUTOMATION_WEBHOOK_KEY`
+2. `tailscale funnel 8444` on hermes-gretch
+3. Zoho CRM variables: `hermes_dqi_webhook_base`, `hermes_dqi_webhook_secret`
+4. Deluge + **Policy verification** button (`renewalId` = Record Id only)
 
 ### Invoke via webhook (shell)
 

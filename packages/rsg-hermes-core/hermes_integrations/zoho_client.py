@@ -348,6 +348,23 @@ class ZohoClient:
             return []
         return [row for row in data if isinstance(row, dict)]
 
+    def get_record(self, module: str, record_id: str) -> dict[str, Any] | None:
+        """GET /{module}/{id} — single record or None when missing."""
+        rid = str(record_id or "").strip()
+        if not rid:
+            return None
+        try:
+            body = self._get(f"{module}/{rid}")
+        except ZohoClientError as exc:
+            msg = str(exc).lower()
+            if "404" in msg or "invalid" in msg and "id" in msg:
+                return None
+            raise
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+        return None
+
     def _find_first(self, module: str, criteria: str) -> dict[str, Any] | None:
         rows = self.search_records(module, criteria)
         return rows[0] if rows else None

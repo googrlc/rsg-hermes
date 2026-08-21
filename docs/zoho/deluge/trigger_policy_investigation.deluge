@@ -1,77 +1,57 @@
-// Trigger Cursor "RSG Data Quality Investigator" from a Zoho CRM custom button.
+// Zoho Renewals button → Hermes relay → Cursor Data Quality Investigator.
 //
-// ONE argument only — custom buttons resolve Record Id reliably; field merge
-// syntax like ${Renewals.Policy_Number} is often passed through literally.
+// Zoho only stores Hermes URL + shared secret. Cursor webhook creds stay on hermes-gretch.
 //
-// Button argument mapping:
-//   renewalId  → pick "Record Id" from merge-field picker (Renewals module)
+// CRM Variables (Setup → Developer Space → CRM Variables):
+//   hermes_dqi_webhook_base   e.g. https://hermes-gretch.tail1cbc83.ts.net:8444
+//   hermes_dqi_webhook_secret same value as SERVICE_WEBHOOK_SECRET on Hermes
 //
-// CRM Variables:
-//   cursor_dqi_webhook_url
-//   cursor_dqi_webhook_key
+// Custom button argument (merge-field picker):
+//   renewalId → Renewals → Record Id
 
 string automation.trigger_cursor_policy_investigation(String renewalId)
 {
-	webhookUrl = zoho.crm.getOrgVariable("cursor_dqi_webhook_url");
-	webhookKey = zoho.crm.getOrgVariable("cursor_dqi_webhook_key");
-	moduleApi = "Renewals";
+	baseUrl = zoho.crm.getOrgVariable("hermes_dqi_webhook_base");
+	secret = zoho.crm.getOrgVariable("hermes_dqi_webhook_secret");
 
-	if(webhookUrl == null || webhookUrl == "")
+	if(baseUrl == null || baseUrl == "")
 	{
-		return "ERROR: cursor_dqi_webhook_url CRM variable is not set";
+		return "ERROR: hermes_dqi_webhook_base CRM variable is not set";
 	}
-	if(webhookKey == null || webhookKey == "")
+	if(secret == null || secret == "")
 	{
-		return "ERROR: cursor_dqi_webhook_key CRM variable is not set";
+		return "ERROR: hermes_dqi_webhook_secret CRM variable is not set";
 	}
 	rid = ifnull(renewalId, "").trim();
 	if(rid == "" || rid.startsWith("${"))
 	{
-		return "ERROR: renewalId is empty or merge field did not resolve — map Record Id from the merge-field picker, not typed ${...} text";
+		return "ERROR: renewalId empty or merge field did not resolve — pick Record Id from merge-field picker";
 	}
 
-	rec = zoho.crm.getRecordById(moduleApi, rid);
-	if(rec == null || rec.isEmpty())
-	{
-		return "ERROR: could not load " + moduleApi + " record " + rid;
-	}
-
-	pn = ifnull(rec.get("Policy_Number"), "").trim();
-	if(pn == "")
-	{
-		return "ERROR: Policy_Number is empty on renewal " + rid;
-	}
-	cn = ifnull(rec.get("Client_Name"), "").trim();
-	lob = ifnull(rec.get("Line_of_Business"), "").trim();
-
-	// Build JSON explicitly — Map body can produce invalid JSON for Cursor.
-	pnEsc = pn.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
-	cnEsc = cn.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
-	lobEsc = lob.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
 	ridEsc = rid.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
-
-	jsonBody = "{\"policy_number\":\"" + pnEsc + "\"";
-	if(cn != "")
-	{
-		jsonBody = jsonBody + ",\"client_name\":\"" + cnEsc + "\"";
-	}
-	if(lob != "")
-	{
-		jsonBody = jsonBody + ",\"line_of_business\":\"" + lobEsc + "\"";
-	}
-	jsonBody = jsonBody + ",\"source\":\"zoho_renewals\",\"zoho_record_id\":\"" + ridEsc + "\"}";
+	jsonBody = "{\"renewal_id\":\"" + ridEsc + "\"}";
 
 	headers = Map();
 	headers.put("Content-Type", "application/json");
-	headers.put("Authorization", "Bearer " + webhookKey);
+	headers.put("Authorization", "Bearer " + secret);
+
+	url = baseUrl;
+	if(!url.endsWith("/"))
+	{
+		url = url + "/api/webhooks/zoho/dqi-investigation";
+	}
+	else
+	{
+		url = url + "api/webhooks/zoho/dqi-investigation";
+	}
 
 	response = invokeurl
 	[
-		url :webhookUrl
+		url :url
 		type :POST
 		headers:headers
 		body:jsonBody
 	];
 
-	return "Triggered Cursor DQ investigation for policy " + pn + " — response: " + response;
+	return "Hermes DQI relay triggered for renewal " + rid + " — response: " + response;
 }
