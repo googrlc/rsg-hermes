@@ -3,15 +3,16 @@ Service_Requests,Request Name,Name,Single Line,255,Y,N,N,,,Z-only,,Display name;
 Service_Requests,Request Number,Request_Number,Auto Number,20,N,Y,N,SR-1001,,Z-only,,Prefix SR-; start 1001. Zoho may suffix API name __s/__c.
 Service_Requests,Subject,Subject,Single Line,255,Y,N,N,,,Z-only,,Required. Catalyst list title fallback.
 Service_Requests,Description,Description,Multi Line,32000,N,N,N,,,Z-only,,Email body / request details.
-Service_Requests,Request Type,Request_Type,Picklist,80,Y,N,N,,picklists_hermes_vocab.csv:service_request_type,Z-only,,Exact labels in vocab. Distinct from endorsement_type seed (1d) — do not add Replace Driver / Address Change / COI wording.
+Service_Requests,Request Type,Request_Type,Picklist,80,Y,N,N,,picklists_hermes_vocab.csv:service_request_type,Z-only,,"Exact user labels in vocab (Certificate Request, Add Vehicle, …). Distinct from 1d endorsement seed — do not add Replace Driver / Address Change / COI wording. Do not store live Cases codes (coi, endorsement, …); map via cases_request_type_map.csv."
 Service_Requests,Priority,Priority,Picklist,20,N,N,N,Standard,picklists_hermes_vocab.csv:service_request_priority,Z-only,,Low / Standard / High. Desk PR used Normal — do not copy Desk.
-Service_Requests,Status,Status,Picklist,40,Y,N,N,New,picklists_hermes_vocab.csv:service_request_status,Z-only,,New / In Progress / Waiting / Completed. Catalyst Desk_Stage is a projection of this field (In Progress → 'In progress').
+Service_Requests,Status,Status,Picklist,40,Y,N,N,New,picklists_hermes_vocab.csv:service_request_status,Z-only,,"New / In Progress / Waiting / Completed. Do not create Desk_Stage on this module. Catalyst Desk_Stage is projected from Status + Waiting_On: New→New; In Progress→In progress; Waiting+carrier→Waiting on carrier; Waiting+client or empty→Waiting on client; Completed→Done. Worklist tab = New+In Progress. Waiting tab = Status Waiting. Completed tab = Done. Overdue is a KPI only."
+Service_Requests,Waiting On,Waiting_On,Picklist,20,N,N,N,,picklists_hermes_vocab.csv:service_request_waiting_on,Z-only,,carrier or client. Only when Status is Waiting. Lets Catalyst keep two waiting buckets without storing Desk_Stage. Ignored unless Status is Waiting.
 Service_Requests,Owner,Owner,User,,N,N,N,,,Z-only,,System CRM User. Account Owner on create if no CSR field. Leave empty when unassigned — do not invent a queue user.
 Service_Requests,Team,Team,Picklist,40,N,N,N,,picklists_hermes_vocab.csv:service_request_team,Z-only,,Personal Lines / Commercial / Unassigned.
 Service_Requests,Open Date,Open_Date,DateTime,,N,N,N,,,Z-only,,Set on create. Clock start for Service_Time.
 Service_Requests,Due Date,Due_Date,DateTime,,N,N,N,,,Z-only,,Catalyst Due column. Overdue formula reads this.
 Service_Requests,Closed Date,Closed_Date,DateTime,,N,N,N,,,Z-only,,Set when Status=Completed.
-Service_Requests,Service Time,Service_Time,Formula (Decimal),,N,N,N,,,Z-only,,"Hours open: Datecomp(If(IsEmpty(Closed_Date),Now(),Closed_Date), Open_Date)/60. Wall-clock; Waiting does not pause (no custom DB)."
+Service_Requests,Service Time,Service_Time,Formula (Decimal),,N,N,N,,,Z-only,,"Hours open: Datecomp(If(IsEmpty(Closed_Date),Now(),Closed_Date), Open_Date)/60. Wall-clock fallback only. Live Catalyst function runs Service_Time in In progress and pauses Waiting — keep that in the function after retarget."
 Service_Requests,Completion Time,Completion_Time,Formula (Decimal),,N,N,N,,,Z-only,,Hours Open_Date→Closed_Date when Closed_Date is set; else empty.
 Service_Requests,Age Days,Age_Days,Formula (Decimal),,N,N,N,,,Z-only,,Days open: Datecomp(...)/1440. Catalyst Age_Days.
 Service_Requests,Overdue,Overdue,Formula (Boolean),,N,N,N,,,Z-only,,True when Due_Date < Now() and Status != Completed. Requested as Checkbox; formula is the no-DB equivalent. Apply script may fall back to Checkbox if boolean formula is rejected.

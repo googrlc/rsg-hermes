@@ -81,7 +81,7 @@ Requests taxonomy. Do not copy this list onto `Service_Requests.Request_Type`.
 | 34 | Certificate of Insurance | `39b78879-21ce-6f4f-59d4-b153c330295f` |
 | 35 | Other | `d92e98fd-533c-1958-e938-3a8ad75065aa` |
 
-### 1e. Service Requests — Request_Type / Status / Priority / Team
+### 1e. Service Requests — Request_Type / Status / Waiting_On / Priority / Team
 
 Create on custom module `Service_Requests` (see `fields_service_requests.csv`
 and `docs/zoho/service_requests.md`). Labels must match exactly. Do not add
@@ -110,11 +110,16 @@ and `docs/zoho/service_requests.md`). Labels must match exactly. Do not add
 | 16 | Other |
 
 **Status:** New, In Progress, Waiting, Completed  
+**Waiting_On:** carrier, client (only when Status = Waiting; projects live Desk_Stage “Waiting on carrier/client”)  
 **Priority:** Low, Standard, High  
 **Team:** Personal Lines, Commercial, Unassigned
 
-Catalyst currently queues **Cases** (`Desk_Stage` ≈ Status). After this module
-exists, retarget Catalyst to `Service_Requests`. Do not dual-write Desk.
+Live Catalyst queues **Cases** with custom `Desk_Stage` (New / In progress /
+Waiting on carrier / Waiting on client / Done) and Request_Type **codes**
+(`coi`, `endorsement`, …). Do not copy those onto Service_Requests. Map them
+(`docs/zoho/cases_request_type_map.csv`, `catalyst_field_map.csv`). After this
+module exists, retarget Catalyst reads to `Service_Requests`. Do not dual-write
+Desk.
 
 ### 1f. Other Hermes vocab
 

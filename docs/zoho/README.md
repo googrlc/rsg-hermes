@@ -11,7 +11,8 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `fields_renewals.csv` | Custom module **Renewals** ← `project_85_renewals` |
 | `fields_ams_write_queue.csv` | Custom module **AMS_Write_Queue** ← `outbound_sync_queue` |
 | `fields_service_requests.csv` | Custom module **Service_Requests** — CRM service work (not Supabase, not Desk) |
-| `catalyst_field_map.csv` | Catalyst Cases → Service_Requests field map |
+| `catalyst_field_map.csv` | Live Catalyst Cases UI → Service_Requests field map (source map `main.d2e4dc07.js.map`) |
+| `cases_request_type_map.csv` | Live Cases Request_Type codes (`coi`, …) → Service_Requests labels |
 | `service_requests.md` | Operator pack: module, buttons, workflows, Catalyst retarget, Desk is not SoT |
 | `picklists_nowcerts_seed.csv` | Exact Hermes `nowcerts_picklist_options` seeds (labels + option_id UUIDs) |
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |

@@ -110,3 +110,5 @@ service_request_priority,3,High,Service_Requests.Priority,docs/zoho/service_requ
 service_request_team,1,Personal Lines,Service_Requests.Team,docs/zoho/service_requests.md
 service_request_team,2,Commercial,Service_Requests.Team,docs/zoho/service_requests.md
 service_request_team,3,Unassigned,Service_Requests.Team,docs/zoho/service_requests.md
+service_request_waiting_on,1,carrier,Service_Requests.Waiting_On,docs/zoho/service_requests.md
+service_request_waiting_on,2,client,Service_Requests.Waiting_On,docs/zoho/service_requests.md

@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_ZOHO = REPO_ROOT / "docs" / "zoho"
 FIELDS_CSV = DOCS_ZOHO / "fields_service_requests.csv"
 CATALYST_MAP_CSV = DOCS_ZOHO / "catalyst_field_map.csv"
+CASES_MAP_CSV = DOCS_ZOHO / "cases_request_type_map.csv"
 VOCAB_CSV = DOCS_ZOHO / "picklists_hermes_vocab.csv"
 
 MODULE_API_NAME = "Service_Requests"
@@ -48,12 +49,50 @@ REQUEST_TYPES: tuple[str, ...] = (
 )
 
 STATUSES: tuple[str, ...] = ("New", "In Progress", "Waiting", "Completed")
+WAITING_ON: tuple[str, ...] = ("carrier", "client")
 PRIORITIES: tuple[str, ...] = ("Low", "Standard", "High")
 TEAMS: tuple[str, ...] = ("Personal Lines", "Commercial", "Unassigned")
 
+# Live Cases Desk_Stage values the current Worklist dropdown still sends/shows.
+CATALYST_STAGES: tuple[str, ...] = (
+    "New",
+    "In progress",
+    "Waiting on carrier",
+    "Waiting on client",
+    "Done",
+)
+DISPOSITIONS: tuple[str, ...] = ("completed", "not_completed")
+DISPOSITION_LABELS: dict[str, str] = {
+    "completed": "Completed",
+    "not_completed": "Not completed",
+}
+
+# Live Cases Request_Type codes → Service_Requests labels. Do not store the codes.
+CASES_REQUEST_TYPE_MAP: dict[str, str] = {
+    "coi": "Certificate Request",
+    "endorsement": "Policy Change",
+    "id_cards": "ID Card Request",
+    "billing": "Billing Question",
+    "claim": "Claims Question",
+    "cancellation": "Cancellation",
+    "coverage_change": "Coverage Question",
+    "other": "Other",
+}
+CASES_REQUEST_TYPE_LABELS: dict[str, str] = {
+    "coi": "COI",
+    "endorsement": "Endorsement",
+    "id_cards": "ID cards",
+    "billing": "Billing",
+    "claim": "Claim",
+    "cancellation": "Cancellation",
+    "coverage_change": "Coverage change",
+    "other": "Other",
+}
+
 OPEN_STATUSES: frozenset[str] = frozenset({"New", "In Progress", "In progress"})
 WAITING_STATUSES: frozenset[str] = frozenset({"Waiting"})
-COMPLETED_STATUSES: frozenset[str] = frozenset({"Completed"})
+COMPLETED_STATUSES: frozenset[str] = frozenset({"Completed", "Done"})
+OPEN_VIEWS: frozenset[str] = frozenset({"worklist", "desk", "open", "overdue", ""})
 
 # Fields Zoho creates with the module — never POST these.
 SYSTEM_API_NAMES: frozenset[str] = frozenset(
@@ -396,12 +435,94 @@ def suggest_request_type(subject: str = "", body: str = "") -> str:
     return "Other"
 
 
-def status_to_desk_stage(status: str | None) -> str:
-    """Catalyst bundle compares Desk_Stage to 'In progress' (lowercase p)."""
+def load_cases_request_type_map(path: Path | None = None) -> dict[str, str]:
+    """Live Cases codes → Service_Requests.Request_Type labels."""
+    rows = load_csv(path or CASES_MAP_CSV)
+    mapped: dict[str, str] = {}
+    for row in rows:
+        code = (row.get("Live_Cases_Code") or "").strip().lower()
+        label = (row.get("Service_Requests_Request_Type") or "").strip()
+        if code and label:
+            mapped[code] = label
+    return mapped or dict(CASES_REQUEST_TYPE_MAP)
+
+
+def normalize_request_type(raw: str | None) -> str:
+    """Map live Cases codes/labels onto the user's Request_Type list."""
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    by_code = load_cases_request_type_map()
+    mapped = by_code.get(text.lower())
+    if mapped:
+        return mapped
+    lowered = {v.lower(): v for v in REQUEST_TYPES}
+    if text.lower() in lowered:
+        return lowered[text.lower()]
+    live_labels = {v.lower(): by_code[k] for k, v in CASES_REQUEST_TYPE_LABELS.items() if k in by_code}
+    if text.lower() in live_labels:
+        return live_labels[text.lower()]
+    return text
+
+
+def request_type_label(raw: str | None) -> str:
+    """UI Request_Type_Label: user label after normalize, else as-is."""
+    normalized = normalize_request_type(raw)
+    return normalized or (raw or "")
+
+
+def status_to_desk_stage(status: str | None, waiting_on: str | None = None) -> str:
+    """Project Service_Requests.Status (+ Waiting_On) to live Desk_Stage strings."""
     raw = (status or "").strip()
-    if raw.lower() == "in progress":
+    waiting = (waiting_on or "").strip().lower()
+    if raw in CATALYST_STAGES:
+        return raw
+    lower = raw.lower()
+    if lower in {"done", "completed"}:
+        return "Done"
+    if lower == "waiting on carrier":
+        return "Waiting on carrier"
+    if lower == "waiting on client":
+        return "Waiting on client"
+    if lower == "waiting":
+        if waiting == "carrier":
+            return "Waiting on carrier"
+        return "Waiting on client"
+    if lower == "in progress":
         return "In progress"
-    return raw or "New"
+    if lower == "new" or not raw:
+        return "New"
+    return raw
+
+
+def desk_stage_to_status(stage: str | None) -> tuple[str, str | None]:
+    """Inverse of status_to_desk_stage. Returns (Status, Waiting_On or None)."""
+    raw = (stage or "").strip()
+    lower = raw.lower()
+    if lower == "in progress":
+        return "In Progress", None
+    if lower == "waiting on carrier":
+        return "Waiting", "carrier"
+    if lower in {"waiting on client", "waiting"}:
+        return "Waiting", "client"
+    if lower in {"done", "completed"}:
+        return "Completed", None
+    if lower == "new":
+        return "New", None
+    if raw in STATUSES:
+        return raw, None
+    return raw or "New", None
+
+
+def catalyst_vocab() -> dict[str, Any]:
+    types = list(REQUEST_TYPES)
+    return {
+        "stages": list(CATALYST_STAGES),
+        "request_types": types,
+        "request_type_labels": {t: t for t in types},
+        "dispositions": list(DISPOSITIONS),
+        "disposition_labels": dict(DISPOSITION_LABELS),
+    }
 
 
 def _lookup_name(value: Any) -> str:
@@ -418,6 +539,12 @@ def _lookup_name(value: Any) -> str:
     return str(value)
 
 
+def lookup_id(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("id") or "")
+    return ""
+
+
 def record_get(record: dict[str, Any], *logical_names: str) -> Any:
     """Read a field from a Zoho record, allowing __c / __s suffixes."""
     for logical in logical_names:
@@ -431,7 +558,20 @@ def record_get(record: dict[str, Any], *logical_names: str) -> Any:
 
 def catalyst_row(record: dict[str, Any]) -> dict[str, Any]:
     """Shape a Service_Requests record the way the Catalyst worklist already reads Cases."""
-    status = record_get(record, "Status", "Desk_Stage") or "New"
+    waiting_on = record_get(record, "Waiting_On")
+    status_raw = record_get(record, "Status")
+    desk_raw = record_get(record, "Desk_Stage")
+    if status_raw:
+        status = str(status_raw)
+        desk = status_to_desk_stage(status, None if waiting_on is None else str(waiting_on))
+    elif desk_raw:
+        desk = status_to_desk_stage(str(desk_raw), None if waiting_on is None else str(waiting_on))
+        status, inferred_waiting = desk_stage_to_status(desk)
+        if waiting_on is None:
+            waiting_on = inferred_waiting
+    else:
+        status = "New"
+        desk = "New"
     owner = record_get(record, "Owner")
     account = record_get(record, "Account_Name")
     contact = record_get(record, "Contact_Name")
@@ -440,16 +580,20 @@ def catalyst_row(record: dict[str, Any]) -> dict[str, Any]:
     overdue = record_get(record, "Overdue")
     if isinstance(overdue, str):
         overdue = overdue.strip().lower() in {"true", "1", "yes"}
-    request_type = record_get(record, "Request_Type") or ""
+    request_type = normalize_request_type(str(record_get(record, "Request_Type") or ""))
+    request_number = record_get(record, "Request_Number", "Case_Number") or ""
     return {
         "id": str(record.get("id") or ""),
         "module": MODULE_API_NAME,
+        "Case_Number": request_number,
+        "Request_Number": request_number,
         "Subject": record_get(record, "Subject", "Name") or "",
         "Description": record_get(record, "Description") or "",
         "Request_Type": request_type,
-        "Request_Type_Label": request_type,
-        "Desk_Stage": status_to_desk_stage(str(status)),
-        "Status": str(status),
+        "Request_Type_Label": request_type_label(request_type),
+        "Desk_Stage": desk,
+        "Status": status,
+        "Waiting_On": (str(waiting_on).strip().lower() if waiting_on else None),
         "Priority": record_get(record, "Priority") or "Standard",
         "Policy_Number": record_get(record, "Policy_Number") or "",
         "Client_Name": client,
@@ -472,30 +616,36 @@ def catalyst_row(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def matches_view(row: dict[str, Any], *, view: str, stage: str = "", window_days: int | None = None) -> bool:
-    stage_val = (row.get("Desk_Stage") or row.get("Status") or "").strip()
-    status_l = stage_val.lower()
-    view_l = (view or "desk").strip().lower()
-    if view_l in {"waiting"}:
-        return status_l == "waiting"
-    if view_l in {"completed"}:
-        return status_l == "completed"
-    if view_l in {"overdue"}:
-        return bool(row.get("Overdue")) and status_l != "completed"
-    # default open worklist (desk / open / "")
+    """Bucket a Catalyst-shaped row. ``overdue`` is an Open alias (KPI click, not a filter)."""
+    del window_days  # window is applied by the router on completed / done_month
+    desk = (row.get("Desk_Stage") or "").strip()
+    status = (row.get("Status") or "").strip()
+    desk_l = desk.lower()
+    status_l = status.lower()
+    view_l = (view or "worklist").strip().lower()
+    if view_l == "waiting":
+        return status_l == "waiting" or desk_l.startswith("waiting")
+    if view_l == "completed":
+        return status_l == "completed" or desk_l == "done"
+    # worklist | desk | open | overdue (unfiltered Open — KpiStrip.js)
     if stage:
-        return status_to_desk_stage(stage_val).lower() == status_to_desk_stage(stage).lower()
-    return status_l in {"new", "in progress"}
+        want = status_to_desk_stage(stage).lower()
+        return desk_l == want or status_to_desk_stage(status).lower() == want
+    return status_l in {"new", "in progress"} or desk_l in {"new", "in progress"}
 
 
 def matches_query(row: dict[str, Any], q: str = "", type_filter: str = "") -> bool:
-    if type_filter and str(row.get("Request_Type") or "") != type_filter:
-        return False
+    if type_filter:
+        want = normalize_request_type(type_filter) or type_filter
+        got = normalize_request_type(str(row.get("Request_Type") or "")) or str(row.get("Request_Type") or "")
+        if got != want and str(row.get("Request_Type") or "") != type_filter:
+            return False
     needle = (q or "").strip().lower()
     if not needle:
         return True
     blob = " ".join(
         str(row.get(k) or "")
-        for k in ("Subject", "Client_Name", "Policy_Number", "Description", "Request_Type")
+        for k in ("Subject", "Client_Name", "Policy_Number", "Description", "Request_Type", "Request_Type_Label")
     ).lower()
     return needle in blob
 

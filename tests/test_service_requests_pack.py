@@ -28,19 +28,24 @@ from hermes.zoho.crm_buttons import (
 )
 from hermes.zoho.service_requests import (
     CASES_INSURANCE_FIELDS,
+    CATALYST_STAGES,
     CSV_HEADERS,
     FIELDS_CSV,
     MODULE_API_NAME,
     REQUEST_TYPES,
     STATUSES,
+    WAITING_ON,
     catalyst_row,
+    desk_stage_to_status,
     existing_field,
     field_create_payload,
+    load_cases_request_type_map,
     load_catalyst_map,
     load_field_pack,
     matches_query,
     matches_view,
     names_match,
+    normalize_request_type,
     plan_actions,
     suggest_request_type,
     status_to_desk_stage,
@@ -79,6 +84,7 @@ def test_modules_custom_and_checklist_name_the_module():
     assert "fields_service_requests.csv" in readme
     assert (DOCS / "service_requests.md").is_file()
     assert (DOCS / "catalyst_field_map.csv").is_file()
+    assert (DOCS / "cases_request_type_map.csv").is_file()
 
 
 def test_request_types_are_exact_and_do_not_import_endorsement_extras():
@@ -104,7 +110,16 @@ def test_request_types_are_exact_and_do_not_import_endorsement_extras():
     assert vocab == list(REQUEST_TYPES)
     assert ENDORSEMENT_EXTRAS.isdisjoint(set(REQUEST_TYPES))
     assert vocab_values("service_request_status") == list(STATUSES)
+    assert vocab_values("service_request_waiting_on") == list(WAITING_ON)
     assert vocab_values("service_request_priority") == ["Low", "Standard", "High"]
+    mapped = load_cases_request_type_map()
+    assert mapped["coi"] == "Certificate Request"
+    assert mapped["endorsement"] == "Policy Change"
+    assert mapped["id_cards"] == "ID Card Request"
+    assert mapped["claim"] == "Claims Question"
+    assert mapped["coverage_change"] == "Coverage Question"
+    assert normalize_request_type("coi") == "Certificate Request"
+    assert normalize_request_type("endorsement") == "Policy Change"
 
 
 def test_account_lookup_is_required_and_system_fields_are_not_posted():
@@ -115,6 +130,10 @@ def test_account_lookup_is_required_and_system_fields_are_not_posted():
     assert by_api["Contact_Name"]["Mandatory"] == "N"
     assert by_api["Policy"]["Data_Type"] == "Lookup (Policies)"
     assert by_api["Renewal"]["Data_Type"] == "Lookup (Renewals)"
+    assert by_api["Waiting_On"]["Data_Type"] == "Picklist"
+    assert by_api["Waiting_On"]["Mandatory"] == "N"
+    waiting = field_create_payload(by_api["Waiting_On"])
+    assert [item["display_value"] for item in waiting["pick_list_values"]] == list(WAITING_ON)
     assert field_create_payload(by_api["Owner"]) is None
     assert field_create_payload(by_api["Created_Time"]) is None
     payload = field_create_payload(by_api["Account_Name"])
@@ -195,10 +214,35 @@ def test_catalyst_row_projects_cases_shaped_fields():
     assert row["Request_Type_Label"] == "Certificate Request"
     assert row["Overdue"] is False
     assert status_to_desk_stage("In Progress") == "In progress"
+    assert status_to_desk_stage("Completed") == "Done"
+    assert status_to_desk_stage("Waiting", "carrier") == "Waiting on carrier"
+    assert status_to_desk_stage("Waiting", "client") == "Waiting on client"
+    assert status_to_desk_stage("Waiting", None) == "Waiting on client"
+    assert desk_stage_to_status("Waiting on carrier") == ("Waiting", "carrier")
+    assert desk_stage_to_status("Done") == ("Completed", None)
+    assert CATALYST_STAGES[-1] == "Done"
     assert matches_view(row, view="desk")
+    assert matches_view(row, view="worklist")
+    assert matches_view(row, view="overdue")  # KPI click = unfiltered Open
     assert not matches_view(row, view="waiting")
     assert matches_query(row, q="abc", type_filter="Certificate Request")
+    assert matches_query(row, type_filter="coi")
     assert not matches_query(row, type_filter="Add Vehicle")
+    waiting = catalyst_row(
+        {
+            "id": "2",
+            "Status": "Waiting",
+            "Waiting_On": "carrier",
+            "Request_Type": "endorsement",
+        }
+    )
+    assert waiting["Desk_Stage"] == "Waiting on carrier"
+    assert waiting["Request_Type"] == "Policy Change"
+    done = catalyst_row({"id": "3", "Status": "Completed", "Request_Type": "coi"})
+    assert done["Desk_Stage"] == "Done"
+    assert done["Case_Number"] == ""
+    assert matches_view(done, view="completed")
+    assert not matches_view(done, view="overdue")
 
 
 def test_suggest_request_type_uses_the_locked_labels():
@@ -319,7 +363,8 @@ def test_inspect_live_flags_cases_insurance_fields_but_still_plans_service_reque
 def test_catalyst_map_retargets_cases_to_service_requests():
     rows = load_catalyst_map()
     by_cat = {r["Catalyst_Field"]: r for r in rows}
-    assert by_cat["Desk_Stage"]["Service_Requests_Logical_API"] == "Status"
+    assert by_cat["Desk_Stage"]["Service_Requests_Logical_API"] == "Status + Waiting_On"
+    assert by_cat["Waiting_On"]["Service_Requests_Logical_API"] == "Waiting_On"
     assert by_cat["module"]["Transform"] == "constant"
     assert "Service_Requests" in by_cat["module"]["Notes"] or by_cat["module"]["Service_Requests_Logical_API"]
 
@@ -330,6 +375,9 @@ def test_operator_doc_says_desk_is_not_sot():
     assert "cf_crm_account_id" in text
     assert "do not dual-write" in text.lower() or "Do not dual-write" in text
     assert "--apply" in text
+    assert "Waiting_On" in text
+    assert "/case/i" in text
+    assert "Never Desk. Never NowCerts" in text or "never NowCerts" in text.lower()
 
 
 def test_no_service_desk_supabase_table_in_this_pack():
@@ -343,6 +391,46 @@ def test_no_service_desk_supabase_table_in_this_pack():
 
 
 # ── HTTP surface ──────────────────────────────────────────────────────────
+
+
+def _zoho_for(records: list[dict]):
+    """Route list/get/related calls so card fetches do not reuse the list body."""
+    store = {str(row["id"]): dict(row) for row in records}
+    client = MagicMock()
+
+    def _get(path, params=None):
+        text = str(path)
+        if text == MODULE_API_NAME:
+            return {"data": list(store.values())}
+        if "/Notes" in text or "/Tasks" in text:
+            return {"data": []}
+        if text.startswith(("Accounts/", "Policies/", "Contacts/")):
+            return {"data": []}
+        if text.startswith(f"{MODULE_API_NAME}/"):
+            rid = text.split("/")[1]
+            rec = store.get(rid)
+            return {"data": [rec] if rec else []}
+        return {"data": []}
+
+    def _put(path, payload):
+        rows = (payload or {}).get("data") or []
+        for row in rows:
+            rid = str(row.get("id") or "")
+            if rid in store:
+                store[rid].update({k: v for k, v in row.items() if k != "id"})
+        return {"data": rows}
+
+    def _post(path, payload):
+        subject = ""
+        rows = (payload or {}).get("data") or []
+        if rows and isinstance(rows[0], dict):
+            subject = str(rows[0].get("Subject") or "")
+        return {"data": [{"details": {"id": "task-1"}, "Subject": subject, "status": "success"}]}
+
+    client._get.side_effect = _get
+    client._put.side_effect = _put
+    client._post.side_effect = _post
+    return client, store
 
 
 @pytest.fixture
@@ -366,12 +454,18 @@ def test_desk_queue_reads_service_requests_not_desk(api_client, monkeypatch):
             "id": "sr-2",
             "Subject": "Waiting on carrier",
             "Status": "Waiting",
+            "Waiting_On": "carrier",
             "Request_Type": "Policy Change",
         },
+        {
+            "id": "sr-3",
+            "Subject": "Done COI",
+            "Status": "Completed",
+            "Request_Type": "coi",
+            "Closed_Date": "2026-08-01T00:00:00+00:00",
+        },
     ]
-    client = MagicMock()
-    client._get.return_value = {"data": records}
-
+    client, _store = _zoho_for(records)
     monkeypatch.setattr("hermes.routers.desk._zoho", lambda: client)
     resp = api_client.get("/api/desk", params={"view": "desk"})
     assert resp.status_code == 200
@@ -379,50 +473,131 @@ def test_desk_queue_reads_service_requests_not_desk(api_client, monkeypatch):
     assert body["module"] == MODULE_API_NAME
     assert body["not_desk"] is True
     assert body["source"] == "zoho_crm"
+    assert body["shown"] == 1
+    assert body["total"] == 1
+    assert set(body["kpis"]) == {"open", "waiting", "overdue", "done_month"}
+    assert body["kpis"]["open"] == 1
+    assert body["kpis"]["waiting"] == 1
     ids = [row["id"] for row in body["rows"]]
     assert ids == ["sr-1"]
     assert "Add Driver" in body["request_types"]
     waiting = api_client.get("/api/desk", params={"view": "waiting"}).json()
     assert [row["id"] for row in waiting["rows"]] == ["sr-2"]
+    assert waiting["rows"][0]["Desk_Stage"] == "Waiting on carrier"
+    worklist = api_client.get("/api/desk").json()
+    assert [row["id"] for row in worklist["rows"]] == ["sr-1"]
+    overdue = api_client.get("/api/desk", params={"view": "overdue"}).json()
+    assert [row["id"] for row in overdue["rows"]] == ["sr-1"]
 
 
 def test_desk_detail_and_email_do_not_open_desk(api_client, monkeypatch):
-    client = MagicMock()
-    client._get.return_value = {
-        "data": [{"id": "sr-9", "Subject": "COI", "Status": "New", "Request_Type": "Certificate Request"}]
-    }
+    monkeypatch.setenv("HERMES_API_TOKEN", "secret")
+    client, _store = _zoho_for(
+        [{"id": "sr-9", "Subject": "COI", "Status": "New", "Request_Type": "coi"}]
+    )
     monkeypatch.setattr("hermes.routers.desk._zoho", lambda: client)
     detail = api_client.get("/api/desk/cases/sr-9")
     assert detail.status_code == 200
-    assert detail.json()["case"]["Request_Type"] == "Certificate Request"
-    assert detail.json()["module"] == MODULE_API_NAME
-    email = api_client.post("/api/desk/cases/sr-9/email")
-    assert email.status_code == 501
-    assert "Desk" in email.json()["detail"]
+    card = detail.json()
+    assert card["case"]["Request_Type"] == "Certificate Request"
+    assert card["case"]["Desk_Stage"] == "New"
+    assert card["module"] == MODULE_API_NAME
+    assert card["vocab"]["stages"][-1] == "Done"
+    assert "related" in card
+    assert "tasks" in card
+    missing = api_client.get("/api/desk/cases/1")
+    assert missing.status_code == 404
+    assert missing.json() == {"error": f"{MODULE_API_NAME} 1 not found"}
+    unauth = api_client.post("/api/desk/cases/sr-9/email", json={"to_email": "a@b.c"})
+    assert unauth.status_code in {401, 403}
+    assert "error" in unauth.json()
+    email = api_client.post(
+        "/api/desk/cases/sr-9/email",
+        json={
+            "to_email": "patel@example.com",
+            "from_email": "gretchen@example.com",
+            "subject": "COI",
+            "content": "Attached.",
+        },
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert email.status_code == 200
+    sent = email.json()
+    assert sent["to"] == "patel@example.com"
+    assert "desk" not in json.dumps(client._post.call_args.args[1]).lower()
+    path = client._post.call_args.args[0]
+    assert "send_mail" in path
+    assert MODULE_API_NAME in path
 
 
 def test_desk_close_writes_service_requests(api_client, monkeypatch):
     monkeypatch.setenv("HERMES_API_TOKEN", "secret")
-    stored = {
-        "id": "sr-9",
-        "Subject": "COI",
-        "Status": "Completed",
-        "Request_Type": "Certificate Request",
-        "Closed_Date": "2026-08-21T12:00:00+00:00",
-    }
-    client = MagicMock()
-    client._put.return_value = {"data": [{"id": "sr-9"}]}
-    client._get.return_value = {"data": [stored]}
+    client, store = _zoho_for(
+        [
+            {
+                "id": "sr-9",
+                "Subject": "COI",
+                "Status": "In Progress",
+                "Request_Type": "Certificate Request",
+            }
+        ]
+    )
     monkeypatch.setattr("hermes.routers.desk._zoho", lambda: client)
     resp = api_client.post(
         "/api/desk/cases/sr-9/close",
-        json={"disposition": "done"},
+        json={"disposition": "completed"},
         headers={"Authorization": "Bearer secret"},
     )
     assert resp.status_code == 200
+    body = resp.json()
+    assert body["completed"] is True
+    assert body["case"]["Desk_Stage"] == "Done"
+    assert body["ams"]["manual_steps"]
+    assert body["tasks"]
     posted = client._put.call_args.args[1]["data"][0]
     assert posted["id"] == "sr-9"
     assert posted["Status"] == "Completed"
     blob = json.dumps(client._put.call_args.args[1])
-    assert "desk" not in blob.lower()
+    assert "nowcerts" not in blob.lower()
     assert "cf_crm" not in blob
+    assert store["sr-9"]["Status"] == "Completed"
+
+
+def test_desk_patch_maps_desk_stage_to_status_and_waiting_on(api_client, monkeypatch):
+    monkeypatch.setenv("HERMES_API_TOKEN", "secret")
+    client, store = _zoho_for(
+        [{"id": "sr-1", "Subject": "Endorsement", "Status": "New", "Request_Type": "endorsement"}]
+    )
+    monkeypatch.setattr("hermes.routers.desk._zoho", lambda: client)
+    resp = api_client.patch(
+        "/api/desk/cases/sr-1",
+        json={
+            "Desk_Stage": "Waiting on carrier",
+            "Request_Type": "coi",
+            "Policy_Number": "P-9",
+            "Subject": "COI hold",
+            "Description": "waiting on carrier wording",
+        },
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert resp.status_code == 200
+    assert store["sr-1"]["Status"] == "Waiting"
+    assert store["sr-1"]["Waiting_On"] == "carrier"
+    assert store["sr-1"]["Request_Type"] == "Certificate Request"
+    assert store["sr-1"]["Policy_Number"] == "P-9"
+    assert resp.json()["case"]["Desk_Stage"] == "Waiting on carrier"
+
+
+def test_desk_task_patch_is_crm_tasks(api_client, monkeypatch):
+    monkeypatch.setenv("HERMES_API_TOKEN", "secret")
+    client, _store = _zoho_for([])
+    monkeypatch.setattr("hermes.routers.desk._zoho", lambda: client)
+    resp = api_client.patch(
+        "/api/desk/tasks/t-1",
+        json={"Status": "Completed"},
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["module"] == "Tasks"
+    assert client._put.call_args.args[0] == "Tasks"
+    assert client._put.call_args.args[1]["data"][0]["Status"] == "Completed"
