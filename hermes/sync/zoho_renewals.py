@@ -1107,7 +1107,8 @@ def run_zoho_renewals_sync(
                 try:
                     _write_deal(zoho, backfill, existing=deal, dry_run=dry_run)
                     result.deals_pipeline_backfilled += 1
-                    deal["Pipeline"] = backfill["Pipeline"]
+                    if not dry_run:
+                        deal["Pipeline"] = backfill["Pipeline"]
                 except Exception as exc:  # noqa: BLE001
                     log.exception("Renewals pipeline backfill failed for deal %s", deal_id)
                     result.errors.append(f"deal {deal_id} pipeline: {exc}")
