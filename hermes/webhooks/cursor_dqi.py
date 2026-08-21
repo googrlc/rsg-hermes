@@ -17,8 +17,11 @@ class CursorDqiTriggerError(Exception):
 
 
 def _cursor_webhook_config() -> tuple[str, str]:
-    url = (os.environ.get("CURSOR_AUTOMATION_WEBHOOK_URL") or "").strip()
-    key = (os.environ.get("CURSOR_AUTOMATION_WEBHOOK_KEY") or "").strip()
+    url = (os.environ.get("CURSOR_AUTOMATION_WEBHOOK_URL") or "").strip().strip("'").strip('"')
+    key = (os.environ.get("CURSOR_AUTOMATION_WEBHOOK_KEY") or "").strip().strip("'").strip('"')
+    # Cursor UI "Generate auth header" copies "Bearer crsr_...". Hermes adds Bearer.
+    if key.lower().startswith("bearer "):
+        key = key[7:].strip()
     if not url or not key:
         raise CursorDqiTriggerError(
             "CURSOR_AUTOMATION_WEBHOOK_URL and CURSOR_AUTOMATION_WEBHOOK_KEY must be set on Hermes"

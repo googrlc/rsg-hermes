@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hermes.api import app
+from hermes.webhooks.cursor_dqi import _cursor_webhook_config
 from hermes.webhooks.zoho_dqi import build_cursor_payload
 
 
@@ -23,6 +24,16 @@ def _reset_singletons():
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+class TestCursorWebhookConfig:
+    def test_strips_bearer_prefix(self, monkeypatch):
+        monkeypatch.setenv("CURSOR_AUTOMATION_WEBHOOK_URL", "https://api2.cursor.sh/automations/webhook/abc")
+        monkeypatch.setenv("CURSOR_AUTOMATION_WEBHOOK_KEY", "Bearer crsr_testkey")
+        url, key = _cursor_webhook_config()
+        assert url.endswith("/abc")
+        assert key == "crsr_testkey"
+        assert not key.lower().startswith("bearer")
 
 
 class TestBuildCursorPayload:
