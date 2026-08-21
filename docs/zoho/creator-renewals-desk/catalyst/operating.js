@@ -22,10 +22,10 @@ export const OPERATING_STAGES = [
 export const OS_DISPOSITIONS = [
   { code: "renewed", label: "Renewed" },
   { code: "rewritten", label: "Rewritten" },
-  { code: "rewritten", label: "Marketed" },
-  { code: "do_not_renew", label: "Non-Renewed" },
-  { code: "do_not_renew", label: "Cancelled" },
-  { code: "lost_price", label: "Lost to Competitor" },
+  { code: "lost_price", label: "Lost — Price" },
+  { code: "lost_coverage", label: "Lost — Coverage" },
+  { code: "lost_no_response", label: "Lost — No response" },
+  { code: "do_not_renew", label: "Do not renew" },
 ];
 
 export const SCORECARD_RAILS = [

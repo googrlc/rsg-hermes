@@ -5,6 +5,16 @@
 
 const os = require("./operating");
 
+function lookupId(value) {
+  if (!value) return "";
+  if (typeof value === "object") return String(value.id || "");
+  return String(value);
+}
+
+function hasPipelineDeal(row) {
+  return Boolean(lookupId(row && (row.Deal_Id || row.Related_Deal)));
+}
+
 function attachOsToRenewal(renewal, tasks) {
   const stage = os.storedDeskStage(renewal || {});
   const states = os.statesFromTasks(tasks || []);
@@ -47,9 +57,24 @@ function completeCheckpointOnCard(card, key, body) {
   return result;
 }
 
+function attachOsToDeskPayload(payload) {
+  const rows = (payload.rows || []).map(attachOsToDeskRow);
+  const linked = rows.filter(hasPipelineDeal);
+  const leftovers = rows.length - linked.length;
+  return Object.assign({}, payload, {
+    rows: linked,
+    leftovers,
+    leftover_reason: leftovers
+      ? "Desk rows without a Renewals pipeline Deal (Deal_Id / Related_Deal) are hidden. Run hermes --sync-zoho-renewals."
+      : "",
+  });
+}
+
 module.exports = {
   attachOsToRenewal,
   attachOsToDeskRow,
   attachOsToCard,
+  attachOsToDeskPayload,
   completeCheckpointOnCard,
+  hasPipelineDeal,
 };

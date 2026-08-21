@@ -72,6 +72,15 @@ html, body, #root {
   padding: 10px 12px;
   text-decoration: none;
   color: var(--desk-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kpi.pressed,
+.kpi[aria-pressed="true"] {
+  outline: 2px solid var(--desk-text);
+  outline-offset: 1px;
 }
 
 .kpi .label {
@@ -377,6 +386,18 @@ html, body, #root {
 
 .os-side .blockers {
   color: var(--overdue-text);
+}
+
+.leftover-banner {
+  color: var(--overdue-text);
+}
+
+.download-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0;
+  font-size: 13px;
 }
 
 .activity li {

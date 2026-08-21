@@ -57,15 +57,26 @@ OPERATING_STAGES: tuple[dict[str, str], ...] = (
     {"stage": PIPELINE_STAGE_CLOSED, "label": "Close Renewal"},
 )
 
-# Close form: user-facing OS name → stored Disposition picklist value.
+# Live Catalyst close UI — keep these six labels. Do not fork a second picklist.
 OS_DISPOSITIONS: tuple[tuple[str, str], ...] = (
     ("renewed", "Renewed"),
     ("rewritten", "Rewritten"),
-    ("rewritten", "Marketed"),
-    ("do_not_renew", "Non-Renewed"),
-    ("do_not_renew", "Cancelled"),
-    ("lost_price", "Lost to Competitor"),
+    ("lost_price", "Lost — Price"),
+    ("lost_coverage", "Lost — Coverage"),
+    ("lost_no_response", "Lost — No response"),
+    ("do_not_renew", "Do not renew"),
 )
+
+# Names that must map onto the live six — never shown as extra close options.
+DISPOSITION_ALIASES: dict[str, str] = {
+    "marketed": "rewritten",
+    "cancelled": "do_not_renew",
+    "canceled": "do_not_renew",
+    "lost to competitor": "lost_price",
+    "non-renewed": "do_not_renew",
+    "non renewed": "do_not_renew",
+    "nonrenewed": "do_not_renew",
+}
 
 RAIL_ACCOUNT = "account_reviewed"
 RAIL_OUTREACH = "outreach_completed"
@@ -242,7 +253,7 @@ CHECKPOINTS: tuple[CheckpointDef, ...] = (
     CheckpointDef(
         "record_disposition", "Record disposition",
         PIPELINE_STAGE_CLOSED, True, "disposition",
-        detail="Required to close. Stored CRM codes, OS labels in the UI.",
+        detail="Required to close. Live labels: Renewed, Rewritten, Lost — Price/Coverage/No response, Do not renew.",
     ),
     CheckpointDef(
         "record_bound_carrier", "Record bound carrier",
@@ -281,6 +292,28 @@ def operating_label(stage: str | None) -> str:
         if row["stage"] == stored:
             return row["label"]
     return stored
+
+
+def _disposition_key(value: str) -> str:
+    return (
+        value.strip()
+        .lower()
+        .replace("_", " ")
+        .replace("—", "-")
+        .replace("–", "-")
+    )
+
+
+def normalize_disposition(value: str | None) -> str | None:
+    """Map live labels and leftover names onto the six stored codes."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    key = _disposition_key(raw)
+    for code, label in OS_DISPOSITIONS:
+        if raw == code or key == _disposition_key(code) or key == _disposition_key(label):
+            return code
+    return DISPOSITION_ALIASES.get(key)
 
 
 def normalize_checkpoint_status(value: Any) -> str:
@@ -644,6 +677,7 @@ def complete_checkpoint(
     if not on_current and not closing:
         result.scorecard = scorecard(stored, new_states)
         return result
+    disposition = normalize_disposition(disposition)
     if nxt == PIPELINE_STAGE_CLOSED and not disposition_ok(disposition):
         result.error = "Closed requires a Disposition"
         result.scorecard = scorecard(stored, new_states)

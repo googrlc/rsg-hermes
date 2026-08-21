@@ -25,7 +25,7 @@ def test_zia_paste_prompt_targets_existing_app_only():
         "Tasks",
     ):
         assert module in prompt
-    assert "Related_Deal is not empty" in prompt
+    assert "Related_Deal or Deal_Id is not empty" in prompt
     assert "Dismissed is false" in prompt
 
 
@@ -119,9 +119,18 @@ def test_catalyst_app_js_uses_desk_palette():
     assert "status-pill overdue" in app
     assert "NowCerts" in app
     assert "Related_Deal" in app
+    assert "Deal_Id" in app
     assert "scorecard" in app
     assert "checkpoints" in app
+    assert "Past due" in app
+    assert "CRITICAL" in app
+    assert "Needs verification" in app
+    assert "Failed AMS" in app
+    assert "Carrier download" in app
+    assert "Enter in NowCerts" in app
     assert "Account Reviewed" in (DESK / "catalyst" / "operating.js").read_text()
+    assert "Lost — Price" in (DESK / "catalyst" / "operating.js").read_text()
+    assert "Lost to Competitor" not in (DESK / "catalyst" / "operating.js").read_text()
     assert "Step 1 of 5" not in app
     assert "This desk only shows the next step" not in app
     assert "nowcerts.com" not in app.lower()

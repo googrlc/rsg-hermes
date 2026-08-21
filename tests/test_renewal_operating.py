@@ -146,6 +146,26 @@ def test_close_without_disposition_does_not_advance():
     assert all(r["state"] == "done" for r in close.scorecard["rails"])
 
 
+def test_live_close_labels_and_alias_mapping():
+    from hermes.renewals.operating import OS_DISPOSITIONS, normalize_disposition
+
+    labels = [label for _code, label in OS_DISPOSITIONS]
+    assert labels == [
+        "Renewed",
+        "Rewritten",
+        "Lost — Price",
+        "Lost — Coverage",
+        "Lost — No response",
+        "Do not renew",
+    ]
+    assert "Marketed" not in labels
+    assert "Lost to Competitor" not in labels
+    assert normalize_disposition("Marketed") == "rewritten"
+    assert normalize_disposition("Cancelled") == "do_not_renew"
+    assert normalize_disposition("Lost to Competitor") == "lost_price"
+    assert normalize_disposition("Lost — Coverage") == "lost_coverage"
+
+
 def test_remaining_required_lists_only_current_stage():
     left = remaining_required("Quote Requested", {})
     assert left == ["record_carrier_responses"]

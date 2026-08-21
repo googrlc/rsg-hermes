@@ -25,9 +25,13 @@ Then merge the function OS patch:
 
 If Hermes lives somewhere else, set `HERMES` to that path.
 
-Browser: `http://localhost:3000`. You should see a worklist of **renewals**
-(not tasks), a health % / scorecard, and in-place checkpoints on the card.
-Commercial is blue. Personal is sage. Completing a checkpoint does not skip
-remaining required items. Hermes is the only NowCerts writer.
+Browser: `http://localhost:3000`. You should see the live KPI tiles as
+**list filters** (90/60/30/Personal/Past due, CRITICAL/AT_RISK/SAFE, Needs
+verification, Pending/Failed AMS), a worklist of **renewals** (not tasks)
+with health % instead of a step chip, and in-place checkpoints on the card.
+Rows without `Deal_Id` / `Related_Deal` stay off the worklist until
+`hermes --sync-zoho-renewals` links them. Commercial is blue. Personal is
+sage. Completing a checkpoint does not skip remaining required items.
+Hermes is the only NowCerts writer.
 
 Do not run `npm run eject`. Do not `catalyst deploy` until Lamar asks.

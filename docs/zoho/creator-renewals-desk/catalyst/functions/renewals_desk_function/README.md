@@ -25,11 +25,14 @@ At the top of `index.js`:
 const osDesk = require("./os");
 ```
 
-1. After you build the GET `/api/desk` payload, map rows:
+1. After you build the GET `/api/desk` payload:
 
 ```js
-payload.rows = (payload.rows || []).map(osDesk.attachOsToDeskRow);
+payload = osDesk.attachOsToDeskPayload(payload);
 ```
+
+That attaches the scorecard **and** hides desk-only leftovers (no `Deal_Id` /
+`Related_Deal`). Do not leave unlinked rows on the worklist.
 
 2. After you build GET `/api/desk/renewals/:id` (the object with
    `renewal`, `tasks`, `next`), wrap it:
@@ -59,7 +62,12 @@ when Lamar asks.
 
 Rules that must stay true:
 
-- Related_Deal 1:1 with Opportunity_Type=Renewals
-- `actor=hermes` never advances Desk_Stage
+- `Deal_Id` / `Related_Deal` 1:1 with Opportunity_Type=Renewals
+- Worklist hides rows with no pipeline Deal
+- `actor=hermes` never advances Desk_Stage / Stage
 - No skipped stage
 - Completing a checkpoint while required items remain does **not** advance
+- Close UI keeps Renewed / Rewritten / Lost — Price / Lost — Coverage /
+  Lost — No response / Do not renew. Carrier download vs Enter in NowCerts
+  (`Is_Download`) for renewed/rewritten. Map Marketed/Cancelled/Lost to
+  Competitor onto those six — do not fork a second picklist.
