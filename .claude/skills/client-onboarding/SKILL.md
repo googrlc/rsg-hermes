@@ -141,19 +141,21 @@ cadence, escalate immediately. Do not mark onboarding complete.
 NextCloud is the file source of truth. Nothing lives on a desktop.
 
 ```
-RSG /
-  🏠 Personal (Gretchen)  |  🏢 Commercial (Lamar) /
-    [Client Name] /
-      2026 /
-        [LOB] /
-          Applications /
-          Policy Documents /
-          Correspondence /
+[Agency Documents/]Clients/{Client Name}/
+  Intake/
+  Quotes/
+  Proposals/
+  Policies/
+  COIs/
+  Claims/
+  Correspondence/
+  Renewal Reviews/
 ```
 
-One `[LOB]` folder per line of business the client actually has. Don't
-pre-build empty folders for coverage they don't own — empty folders
-make it look like something's missing.
+Hermes `ensure_client_folders` creates this tree. Document Registry upload
+does the same as a side effect — do not pre-build a second Commercial
+Lines/{name} tree. One `[category]` folder per type the client actually
+uses is enough; empty year/LOB trees are not required.
 
 ---
 

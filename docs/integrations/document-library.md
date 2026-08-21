@@ -87,6 +87,7 @@ Read side: `GET /api/documents/folders`, `GET /api/documents?space=&name=`.
 - ✅ **Producers** — proposal-builder, crm-note-structurer, renewal-review, and
   carrier-appetite each carry a "Save to the document library" step.
 - ❌ **Google Drive mirror** — **removed 2026-07-10.** Client files live in
-  Nextcloud (file source of truth); this library indexes Hermes-authored write-ups
+  Nextcloud `Clients/{name}/` (file source of truth); Zoho **Document Registry**
+  stores the `/f/{fileid}` permalink. This library indexes Hermes-authored write-ups
   only. `hermes/integrations/gdrive_client.py` and the `HERMES_DRIVE_*` config were
   deleted.

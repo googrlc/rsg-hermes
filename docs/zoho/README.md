@@ -10,13 +10,15 @@ Artifacts for recreating the Hermes CRM field model in Zoho CRM.
 | `fields_renewal_events.csv` | Custom module **Renewal_Events** ← `renewal_candidates` |
 | `fields_renewals.csv` | Custom module **Renewals** ← `project_85_renewals` |
 | `fields_ams_write_queue.csv` | Custom module **AMS_Write_Queue** ← `outbound_sync_queue` |
+| `fields_document_registry.csv` | Custom module **Document_Registry** — one CRM row per Nextcloud file; related list **Nextcloud Files** |
+| `DOCUMENT_REGISTRY.md` | Single-catalog decision, `Clients/{name}/` tree, CRM upload entry point |
 | `picklists_nowcerts_seed.csv` | Exact Hermes `nowcerts_picklist_options` seeds (labels + option_id UUIDs) |
 | `picklists_hermes_vocab.csv` | Additional Hermes vocab not in that seed table (types, likelihoods, statuses, queue enums) |
 | `FIELD_CREATE_CHECKLIST.md` | Ordered create steps + uniqueness / pipeline rules |
 
 ## How to use
 
-1. Create custom modules **Policies**, **Renewal_Events**, **Renewals**, **AMS_Write_Queue** (if not using Zoho Insurance vertical for Policies).
+1. Create custom modules **Policies**, **Renewal_Events**, **Renewals**, **AMS_Write_Queue**, **Document_Registry** (if not using Zoho Insurance vertical for Policies). Do **not** also create **Filed_Documents**.
 2. Create two Deal pipelines: **New Business** and **Renewals**, with stages copied from `picklists_nowcerts_seed.csv` (`pipeline_new_business` / `pipeline_renewal`).
 3. For each `fields_*.csv` row: create the field with the given **API_Name**, **Data_Type**, **Length**, and picklist values.
 4. Store NowCerts option UUIDs in the companion `*_Option_ID` fields (do not invent new UUIDs).

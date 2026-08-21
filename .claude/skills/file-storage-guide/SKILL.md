@@ -20,7 +20,7 @@ do I put this?" and "where is that file?"
 
 | What | Where |
 |---|---|
-| Client documents (policies, apps, quotes) | Nextcloud (the agency's file source of truth) — the client's folder under the Personal/Commercial lane |
+| Client documents (policies, apps, quotes) | Nextcloud `Clients/{Lead or Account name}/…` (file source of truth). Zoho **Document Registry** holds the `/f/{fileid}` link — not a second copy of the PDF. |
 | Internal SOPs | Nextcloud |
 | Templates (emails, forms, checklists) | Nextcloud |
 | Certificates of Insurance | NowCerts |
@@ -34,33 +34,40 @@ do I put this?" and "where is that file?"
 
 ## Client folder structure
 
+One tree. Hermes Document Registry files here. `NEXTCLOUD_BASE_PATH` (often
+`Agency Documents`) is only a mount prefix.
+
 ```
-RSG /
-  🏠 Personal (Gretchen)  or  🏢 Commercial (Lamar) /
-    [Client Name] /
-      [Year] /
-        [Line of Business] /
+[Agency Documents/]Clients/{Lead or Account display name}/
+  Intake/
+  Quotes/
+  Proposals/
+  Policies/
+  COIs/
+  Claims/
+  Correspondence/
+  Renewal Reviews/
 ```
 
-Examples:
-```
-RSG / 🏠 Personal (Gretchen) / Johnson Family / 2026 / Personal Auto /
-RSG / 🏠 Personal (Gretchen) / Johnson Family / 2026 / Home /
-RSG / 🏢 Commercial (Lamar) / ABC Plumbing LLC / 2026 / Commercial Auto /
-```
+File in **Zoho Document Registry** (drop the PDF, label the metadata). Do not
+go to Nextcloud first. Do not use Zoho Attachments as the library. Do not use
+a second `Filed_Documents` module if it exists.
+
+Leads use the same `Clients/{name}/` folder. Converting the lead later fills
+the Account lookup; the files stay put.
 
 ## Rules
 
-1. Every client should have a folder in Nextcloud (the agency's file
-   source of truth) under the Personal or Commercial lane.
-2. File placement in Nextcloud is manual (via WebDAV) — there is no
-   automatic mirror.
+1. Every client (and every lead that has a file) should have a folder in
+   Nextcloud under `Clients/{display name}/`. Hermes creates it on upload
+   if it is missing.
+2. Staff file through Zoho **Document Registry**. Hermes PUTs the bytes.
 3. COIs stay in NowCerts — do not duplicate to Nextcloud unless the
    client specifically requests a copy.
 4. CRM records (notes, tasks, opportunities) live in the CRM — do not
    create separate documents for them.
-5. If a document is referenced in an CRM note, include the file
-   location (folder path or link) in the note.
+5. If a document is referenced in a CRM note, include the Document
+   Registry row or the `/f/{fileid}` permalink.
 
 ## When to create a new folder
 

@@ -6,7 +6,7 @@ Use with the CSVs in this folder. Labels and UUIDs for seeded NowCerts picklists
 
 - [ ] Zoho CRM org with API access
 - [ ] Decide: custom module **Policies** vs Zoho Insurance Policy module
-- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`
+- [ ] Create custom modules: `Renewal_Events`, `Renewals`, `AMS_Write_Queue`, `Document_Registry`
 - [ ] Create Users matching `agency_crm_users` emails (for Deal Owner / Approved By)
 
 ## 1. Picklists & pipelines (do first)
@@ -92,6 +92,7 @@ Import values from `picklists_hermes_vocab.csv` for: Opportunity_Type, Prospect_
 | 4 | `fields_renewal_events.csv` | Renewal_Events | `Hermes_Candidate_ID` |
 | 5 | `fields_renewals.csv` | Renewals | `Hermes_Renewal_ID` |
 | 6 | `fields_ams_write_queue.csv` | AMS_Write_Queue | `Queue_ID` |
+| 7 | `fields_document_registry.csv` | Document_Registry | — |
 
 For each row: create field → set length → set picklist → mark mandatory/unique → set External ID where flagged.
 
@@ -112,6 +113,7 @@ For each row: create field → set length → set picklist → mark mandatory/un
 - [ ] Renewal_Events → Accounts, Policies
 - [ ] Renewals → Policies, Accounts, Renewal_Events (optional)
 - [ ] AMS_Write_Queue → Accounts / Deals / Policies / Renewals (optional convenience)
+- [ ] Document_Registry → Leads, Accounts (exactly one party per row); optional Policy, Deal, Renewal. Related list **Nextcloud Files** on each parent. Do **not** also create `Filed_Documents`.
 
 ## 4. Approval & AMS write rules (Zoho Blueprint / Approval)
 
@@ -153,3 +155,15 @@ For each row: create field → set length → set picklist → mark mandatory/un
 ## API name note
 
 Zoho appends org-specific suffixes (`__s`, `__c`) to custom fields. After create, export **Settings → Developer Space → APIs → API Names** and align integration code to the live API names. The CSVs use logical names without suffixes.
+
+## 8. Document Registry (one catalog)
+
+See `DOCUMENT_REGISTRY.md`. Ship the CSV + `scripts/zoho_document_registry_setup.py` even if OAuth cannot `--apply`.
+
+- [ ] Custom module `Document_Registry` (not `Filed_Documents`)
+- [ ] Lead lookup + optional Account lookup (party is exactly one)
+- [ ] Related list **Nextcloud Files** on Lead, Account, Policy, Deal, Renewal
+- [ ] Custom button **File in Nextcloud** → `{HERMES_PUBLIC_BASE_URL}/command-center/document-registry?...`
+- [ ] Optional workflow: on create with an attachment, POST `/api/document-registry/from-zoho`
+- [ ] Hide **Attachments** on those layouts (Setup → Related Lists — API cannot uncheck it)
+- [ ] If `Filed_Documents` already exists from a parallel experiment, hide it — do not file into both
